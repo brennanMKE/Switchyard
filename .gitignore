@@ -3,3 +3,4 @@ build/
 .build/
 xcuserdata/
 .switchyard-runs/
+spike/**/.build/
