@@ -3,10 +3,31 @@
 A SwiftUI macOS git client with an agent-facing CLI (`yard`). Successor in spirit to GitUp, built
 so a coding agent is a first-class user of the repository alongside a human.
 
-`switchyard-development-guide.md` is the design document — scope, architecture, CLI surface,
-milestones — and it is current. Read it before designing anything. This file is the working
-agreement: rules, commands, and traps. Settled decisions live in guide §11; if you make a new one,
-record it there rather than only here.
+Two design documents, both current, both in `docs/`:
+
+- **`docs/switchyard-development-guide.md`** — scope, architecture, CLI surface, milestones. Read it
+  before designing anything. Settled decisions live in its §11; record new ones there.
+- **`docs/switchyard-git-internals-and-undo.md`** — how the journal works against git's real
+  on-disk state, the hook layer, and worktrees. **Read this before touching the journal, the ref
+  layer, or any path resolution.** The guide says what to build; this says how git will make you.
+
+`issues/` holds the task breakdown. This file is the working agreement: rules, commands, and traps.
+
+## Implementation is delegated to OpenCode running a local model
+
+Implementation work goes to **OpenCode** driving **Ornith 1.0 35B-A3B** (8-bit MLX) locally via
+**LM Studio** on `127.0.0.1:1234`. Token cost is $0.00, so resolved issues record `$0.00` in their
+`## Work log` section — see `issues/Issues.md` for the format and for what is *not* delegated
+(clean-room work, signing, the M0 spikes, and moving an issue to `resolved`).
+
+**`AGENTS.md` is what OpenCode reads — it does not load this file.** Verified: asked for the GitUp
+licensing rule with only `CLAUDE.md` present, the model answered `UNKNOWN`; with `AGENTS.md` present
+it recited the rule. `AGENTS.md` therefore duplicates the licensing and code-signing rules inline
+rather than by reference.
+
+**This file stays canonical. Any edit to the licensing or signing rules must be mirrored into
+`AGENTS.md` in the same commit** — a delegate operating on a stale copy of the GPL rule is exactly
+the failure this project cannot absorb.
 
 ## Licensing — read before writing any code
 
@@ -113,6 +134,26 @@ connection is optional enrichment for `review`, `ask`, `resolve --interactive`, 
 `ServiceNames.swift` in `YardKit` is the single source of truth for the bundle identifier, Mach
 service name, agent plist name, URL scheme, and log subsystem. Nothing else hardcodes those strings.
 
+## Never read `$GIT_DIR` with `FileManager`
+
+Not the refs, not the index, not the reflog. Resolve every git path through
+`git rev-parse --git-path` or libgit2. No string concatenation onto `.git/` anywhere in the
+codebase. Three things break naive parsing today, independently:
+
+- **Reftable.** It becomes the default ref format for new repositories in Git 3.0. Anything reading
+  `.git/refs/**` or `packed-refs` returns nothing at all on such a repo — not an error, nothing.
+- **Index format variants.** v4 path compression, split index, untracked cache, fsmonitor.
+- **Worktrees.** `HEAD` lives in `$GIT_DIR`, `refs/heads/*` in `$GIT_COMMON_DIR`, and which applies
+  depends on the ref name. `refs/bisect`, `refs/worktree`, and `refs/rewritten` are the exceptions
+  that are per-worktree despite starting with `refs/`.
+
+The one exception: FSEvents paths used as a "something changed, re-read" signal, never as a source
+of truth. Ref changes come from the `reference-transaction` hook, which reports what actually
+changed and in what order.
+
+`WorktreeContext` — worktree path, `$GIT_DIR`, `$GIT_COMMON_DIR`, worktree id — is resolved once per
+invocation, and every path lookup goes through it. It exists from M1 for this reason.
+
 ## Gotchas that have already caused bugs elsewhere
 
 - **`SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`** is set on the app target (it already is, in
@@ -129,17 +170,30 @@ service name, agent plist name, URL scheme, and log subsystem. Nothing else hard
 - **Xcode rewrites `project.pbxproj` while it has the project open**, and has silently dropped
   hand-added build configurations mid-edit. Verify with `xcodebuild -showBuildSettings` rather than
   trusting the file you just wrote. New Swift files under synchronized groups need no pbxproj edit.
+- **`yard` never runs `git gc`.** Pruning deletes the journal's anchor ref and metadata entry;
+  the objects become unreachable and ordinary maintenance reclaims them on its own schedule.
+- **The `reference-transaction` hook fires on the journal's own ref writes.** Set an environment
+  marker in `yard` and have the hook skip its own transactions, or the journal records itself
+  recording itself. The hook must also return 0 immediately in the `preparing` and `prepared`
+  states — a non-zero exit there aborts the user's transaction. Do real work only on `committed`.
+- **`git write-tree` refuses an unmerged index.** When conflicts are present, snapshot the index
+  file itself as a blob and restore it byte-for-byte. That is the one place where reading a git file
+  directly is correct, because the file *is* the state.
 - **libgit2 does not run hooks.** Silently skipping a repo's hooks is a correctness bug, not a
   simplification. Shell out to `git` for hooks, network operations, and signing — every shell-out
   centralized in one `GitProcess` type so the boundary is visible and testable.
 
 ## Current state
 
-The repository is a stock SwiftUI macOS template plus the development guide. Nothing in the
-architecture above is built yet.
+The repository is a stock SwiftUI macOS template plus the documents in `docs/` and the tasks in
+`issues/`. Nothing in the architecture above is built yet.
 
-**Milestone 0 is the engine spike, and nothing else starts until it lands.** It answers three
+**Milestone 0 is the engine spike, and nothing else starts until it lands.** It answers four
 questions in `docs/engine-findings.md` — SSH-signed commits through libgit2, graph layout
-performance on a 50k-commit repo, and how libgit2 packages into SwiftPM in 2026 — then the spike
-code is deleted. Do not scaffold the app first. If the signing or performance question fails, stop
-and escalate; the project's premise depends on both.
+performance on a 50k-commit repo with and without `commit-graph`, how libgit2 packages into SwiftPM
+in 2026, and whether the chosen build can read a `--ref-format=reftable` repository — then the spike
+code is deleted. Do not scaffold the app first.
+
+If signing or performance fails, stop and escalate; the project's premise depends on both. A
+reftable failure does not stop the project but must be settled before M1, because it moves ref
+enumeration and graph traversal onto `git` plumbing, and that is not a retrofit.
