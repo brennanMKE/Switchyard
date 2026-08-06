@@ -13,6 +13,52 @@ Two design documents, both current, both in `docs/`:
 
 `issues/` holds the task breakdown. This file is the working agreement: rules, commands, and traps.
 
+## Autonomy: keep working through the queue
+
+**The default is to keep going.** Work through open issues in order without reporting back after
+each one. The tracker exists so work can proceed unattended; a check-in on something routine stalls
+a queue designed not to need one.
+
+**Proceed without asking** — these are pre-authorized, permanently:
+
+- Creating `issue/NNNN` branches, committing rounds to them, squash-merging to `main`, and pushing
+  `main` and issue branches to `origin`.
+- Any decision already settled in `docs/switchyard-development-guide.md` §11, or implied by the
+  issue's own Expected behavior.
+- Ordinary implementation choices: naming, file layout, test structure, which of two equivalent
+  approaches to take.
+- Installing developer tooling needed by an issue (Homebrew formulae, SwiftPM dependencies already
+  named in the plan).
+- Cloning public repositories as test fixtures.
+- Filing new issues when work reveals something the backlog missed.
+
+**Stop only for these** — the list is deliberately short:
+
+1. **Signing assets.** Anything in the Code signing section. Non-negotiable, always stop.
+2. **Outward-facing actions on Brennan's accounts.** Pushing to a GitHub repo other than this one,
+   registering an SSH signing key, publishing a release, anything that touches an external service
+   as him.
+3. **A decision that changes what gets built**, where two readings produce materially different
+   work — the UI hierarchy question was a real example. Not "which name is nicer".
+4. **A clean-room judgment call** — if it is unclear whether something is derived from GitUp.
+5. **An M0 spike answering negatively.** #0002 or #0003 failing is an escalation; the project's
+   premise depends on both.
+
+**When blocked, do not stop — reroute.** Move to the next unblocked issue and collect blockers into
+one batched question at the end of the session. One question with five items beats five
+interruptions.
+
+**Never fake progress to avoid stopping.** The verification rules still hold: tests must actually
+run, and an unverified issue stays open. Reporting an issue resolved to keep momentum is worse than
+any interruption.
+
+### Running unattended
+
+`/loop` is the harness mechanism for sustained work. `/loop work the next open issue` with no
+interval lets the model self-pace; with an interval it re-fires on a schedule. Between firings the
+issue tracker is the state — status rows and branches say what is done, so a fresh context resumes
+without needing the previous conversation.
+
 ## Implementation is delegated to OpenCode running a local model
 
 Implementation work goes to **OpenCode** driving **Ornith 1.0 35B-A3B** (8-bit MLX) locally via
