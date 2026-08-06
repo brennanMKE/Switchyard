@@ -117,9 +117,27 @@ public struct GitProcess: Sendable {
         process.arguments = argv
         process.environment = Self.environment(adding: extraEnvironment)
 
-        let outPipe = Pipe(), errPipe = Pipe()
+        // stdout comes back through a pipe; stderr goes to a temporary file.
+        //
+        // Draining two pipes needs either concurrent reads or a run loop, and
+        // blocking on a DispatchGroup starves Swift concurrency's cooperative
+        // thread pool — which deadlocks the whole suite once swift-testing runs
+        // tests in parallel. A file has no buffer limit, so one pipe plus one
+        // file removes the problem rather than managing it.
+        let outPipe = Pipe()
         process.standardOutput = outPipe
-        process.standardError = errPipe
+
+        let errURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("yard-stderr-\(UUID().uuidString)")
+        FileManager.default.createFile(atPath: errURL.path, contents: nil)
+        guard let errHandle = try? FileHandle(forWritingTo: errURL) else {
+            throw Failure.launchFailed("could not open a stderr buffer")
+        }
+        defer {
+            try? errHandle.close()
+            try? FileManager.default.removeItem(at: errURL)
+        }
+        process.standardError = errHandle
         process.standardInput = standardInput == nil ? FileHandle.nullDevice : Pipe()
 
         do {
@@ -133,29 +151,12 @@ public struct GitProcess: Sendable {
             inPipe.fileHandleForWriting.closeFile()
         }
 
-        // Read both pipes concurrently. Reading one to completion first
-        // deadlocks as soon as the other fills its buffer, which shows up only
-        // on large output — exactly the case a small test would miss.
-        var outData = Data()
-        var errData = Data()
-        let group = DispatchGroup()
-        let queue = DispatchQueue(label: "co.sstools.switchyard.gitprocess", attributes: .concurrent)
-        let lock = NSLock()
-
-        group.enter()
-        queue.async {
-            let d = outPipe.fileHandleForReading.readDataToEndOfFile()
-            lock.lock(); outData = d; lock.unlock()
-            group.leave()
-        }
-        group.enter()
-        queue.async {
-            let d = errPipe.fileHandleForReading.readDataToEndOfFile()
-            lock.lock(); errData = d; lock.unlock()
-            group.leave()
-        }
-        group.wait()
+        // Drain stdout to completion, then wait. stderr is already going to a
+        // file, so there is no second pipe to deadlock against and no thread
+        // to block.
+        let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
+        let errData = (try? Data(contentsOf: errURL)) ?? Data()
 
         return Output(
             standardOutput: outData,
