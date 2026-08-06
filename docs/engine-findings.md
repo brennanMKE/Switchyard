@@ -130,25 +130,88 @@ or `/usr/local` (Intel), and a distributed app cannot depend on a user's Homebre
 viable for development but **not for shipping**, since the embedded `yard` (#0050) must run on a
 machine with no Homebrew at all.
 
-### Routes B and C: not yet evaluated
+### Route B: vendored / prebuilt — the shipping route, not yet built
 
-- **Route B, vendored C target.** libgit2 builds with CMake; SwiftPM cannot drive CMake directly, so
-  this likely means a prebuilt `xcframework` consumed as a `binaryTarget`. This is also the route
-  that would unlock reftable via `main` (option 2 above).
-- **Route C, existing Swift bindings.** SwiftGit2 and ObjectiveGit both need a staleness check
-  before being depended on, per the guide.
+libgit2 builds with CMake, which SwiftPM cannot drive directly, so this means building libgit2
+separately and consuming a prebuilt `xcframework` as a `binaryTarget`. **This is what shipping
+requires**, since route A depends on the user's Homebrew and the embedded `yard` (#0050) must run on
+a machine that has none.
 
-A `gitoxide` (Rust) bridge remains the documented alternative if libgit2 proves unworkable.
+It is also the only route that could unlock reftable in-process, by building from `main`. #0003's
+numbers say that is not worth doing for the graph path — plumbing is faster there regardless — so
+route B's job is narrower than it first appeared: package libgit2 for the object database, diff,
+blame, and merge, and let refs and traversal go through plumbing.
 
-**Route A being development-only is the important open thread**: whatever ships must be
-self-contained inside the app bundle.
+Deferred to whichever issue actually needs libgit2 in the bundle. Nothing in M1 does.
+
+### Route C: existing Swift bindings — both rejected
+
+Checked 2026-08-06:
+
+| Binding | Last push | Latest tag | Verdict |
+|---|---|---|---|
+| [SwiftGit2](https://github.com/SwiftGit2/SwiftGit2) | 2025-11-24 | `v0.3` | Maintained but pre-1.0, 50 open issues, and a thin wrapper we would still be working around. |
+| [objective-git](https://github.com/libgit2/objective-git) | 2023-09-17 | `0.14.2` | **~3 years stale.** Not a dependency to take on in 2026. |
+
+Neither is worth the coupling. The `systemLibrary`/`binaryTarget` route gives direct C access with no
+intermediary, and the subset of libgit2 Switchyard needs is small by design (guide §1 non-goals).
+
+**`gitoxide` remains a live alternative** — pushed the same day this was checked, so unlike the Swift
+bindings it is actively developed. It stays the documented fallback if libgit2 packaging proves
+unworkable in route B, with the FFI and build complexity noted in the guide still applying.
+
+### Route A verdict
+
+**Development only.** Good enough to build and test against, and it is what the M0 spike used. It
+cannot ship, because a distributed app cannot depend on a user's Homebrew. Whatever ships must be
+self-contained inside the bundle — that is route B's job.
 
 ---
 
 ## #0002 — SSH-signed commits through libgit2
 
-Not yet run. Partially blocked: the "GitHub reports the commit as verified" criterion needs a push
-to a scratch repository under Brennan's account and an SSH signing key registered there.
+### Answer: yes, locally verified. One criterion outstanding, and it needs Brennan.
+
+The three-step shape from guide §5 works exactly as described. Against a throwaway repo and a
+throwaway ed25519 key in a temp directory — the user's real git config and `~/.ssh` untouched:
+
+```
+[PASS] generate throwaway ed25519 key
+[PASS] git_commit_create_buffer — 209 bytes
+[PASS] ssh-keygen -Y sign — 294 bytes
+[PASS] git_commit_create_with_signature — 0a59a4d571
+[PASS] git log --show-signature reports Good —
+       Good "git" signature for spike@test with ED25519 key SHA256:DYZTl5JaDhb…
+[PASS] ssh-keygen -Y verify round trip — verified
+[PASS] commit object carries gpgsig header — present
+ALL PROBES PASSED
+```
+
+So: build content with `git_commit_create_buffer`, sign that buffer with
+`ssh-keygen -Y sign -f <key> -n git`, attach with `git_commit_create_with_signature` under header
+field `gpgsig`. git reads the result as a good signature. libgit2 never produces the signature, only
+attaches it, exactly as the guide anticipated.
+
+Findings worth carrying into #0036:
+
+- **`gpg.ssh.allowedSignersFile` is not optional for verification.** Without it git reports the
+  signature as untrusted rather than good — the signature is valid, but git has no basis to trust the
+  key. `yard verify` (#0019) must distinguish "no signature", "signature present but signer not
+  allowed", and "good signature", which is three states, not two.
+- **The signed commit must be written and then `HEAD` moved to it.** `git_commit_create_with_signature`
+  writes the object but updates no reference, so the caller owns the ref update. That is a journal
+  concern (#0027): the ref move is the part that needs a snapshot, not the object write.
+- **libgit2 reads and writes the same `gpgsig` header for SSH as for GPG.** No separate field, so
+  format detection is by signature content, not header name.
+
+### Outstanding: GitHub verification
+
+The issue also requires that GitHub reports such a commit as verified. That needs a push to a
+scratch repository under Brennan's account and an SSH signing key registered on it, which is an
+outward action on his account. **Not done — needs Brennan.** Everything verifiable locally passes.
+
+This does not block M1: the local result establishes the mechanism, and GitHub's verification is a
+policy check on key registration rather than a property of the commit we produce.
 
 ## #0003 — Graph performance on a 50k+ commit repository
 
