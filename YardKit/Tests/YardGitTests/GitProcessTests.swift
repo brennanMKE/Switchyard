@@ -166,7 +166,11 @@ struct GitProcessTests {
         var offenders: [String] = []
         for file in files {
             let source = try String(contentsOf: file, encoding: .utf8)
-            if source.contains("Process(") { offenders.append(file.lastPathComponent) }
+            // "GitProcess(" is the whole point — match only a bare Process().
+            let constructsProcess = source
+                .replacingOccurrences(of: "GitProcess(", with: "")
+                .contains("Process(")
+            if constructsProcess { offenders.append(file.lastPathComponent) }
         }
         #expect(offenders.isEmpty, "Process constructed outside GitProcess: \(offenders)")
     }
