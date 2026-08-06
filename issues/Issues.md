@@ -77,24 +77,35 @@ git check-ignore -q issues/                        # exit 0 = ignored, 1 = track
 - **Not a git repo, or `issues/` is ignored**: edit files only; never commit. The Mac app still tracks changes from the working copy.
 - **`issues/` is tracked**: each lifecycle event below produces its own commit.
 
-When tracked:
+`issues/` **is tracked** in this project. Note that this project also uses a branch per issue — read
+"Branching and merging" below before committing anything, because where a commit lands matters as
+much as what it says.
 
-| Event | What's committed | Commit message |
-|---|---|---|
-| Initial setup | `project.json` + `Issues.md` together | `Add issue tracker setup` (or bundle with the first `#NNNN` commit) |
-| File a new issue | the new `NNNN.md` (and `project.json` / `Issues.md` if newly created) | `#NNNN <issue title>` |
-| Edit project config | `project.json` only | `Update project config` (or e.g. `Update project URL`) |
-| Resolve — code commit | code changes only | `#NNNN <verb> <title>` |
-| Resolve — resolution commit | markdown update (status + Closed + Commit + summary) | `#NNNN Resolve: <title>` |
-| Bail with notes | markdown only | `#NNNN Notes: <brief>` |
-| User-confirmed close | markdown only | `#NNNN Close` |
-| Won't fix | markdown only | `#NNNN Won't fix` |
+| Event | Where | What's committed | Commit message |
+|---|---|---|---|
+| File a new issue | `main` | the new `NNNN.md` | `#NNNN <issue title>` |
+| Edit project config | `main` | `project.json` only | `Update project config` |
+| Round of implementation work | `issue/NNNN` | that round's code changes | `#NNNN round N: <what it did>` |
+| Resolve — mark it done | `issue/NNNN` | markdown update (status, Closed, Commit, Branch, summary, work log) | `#NNNN Resolve: <title>` |
+| Land it | `main` | everything, squashed | `#NNNN <issue title>` |
+| Bail with notes | `issue/NNNN` | markdown only | `#NNNN Notes: <brief>` |
+| User-confirmed close | `main` | markdown only | `#NNNN Close` |
+| Won't fix | `main` | markdown only | `#NNNN Won't fix` |
+
+Filing a batch of issues at once — seeding a backlog — is one commit, not one per issue. The
+per-issue commit convention exists to record a lifecycle, and a backlog authored in a single pass
+does not have one yet.
 
 **Working-copy-only changes (no commit):**
 
-- Setting status to `in-progress` at the start of work — transient; the resolve commits supersede it. Committing every status flip would create noise.
+- Setting status to `in-progress` at the start of work — transient; the resolve commit supersedes it.
 
-**Why two commits to resolve, not one:** the **Commit** metadata row records the hash of the code-fix commit, and that hash isn't known until *after* the code commit lands. Splitting resolution into a code commit and a resolution commit keeps each commit single-purpose ("fix the code", "document the fix") and lets the resolution commit reference the hash cleanly.
+**Which hash goes in the `**Commit**` row.** Under squash-merging, the work lands on `main` as a
+single new commit whose hash cannot exist until after the merge — so it cannot be written into the
+markdown that the merge is squashing. The row therefore records **the last code commit on
+`issue/NNNN`**, and a `**Branch**` row records the branch. That hash is durable precisely because
+**the branch is never deleted**. `main` answers "what changed for this issue"; the branch answers
+"how did it go", and the metadata rows point at both.
 
 ## Issue file format
 
@@ -160,18 +171,23 @@ Every resolved issue ends with a `## Work log` section recording who did the wor
 
 | | |
 |---|---|
-| **Agent** | OpenCode |
-| **Model** | ornith-1.0-35b-mlx-oq8 (local, LM Studio) |
+| **Implementer** | OpenCode / ornith-1.0-35b-mlx-oq8 (local, LM Studio) |
+| **Rounds** | 2 |
 | **Token cost** | $0.00 (local inference) |
 | **Wall time** | 14m |
+| **Authored / reviewed by** | Opus |
 ```
 
-Local models cost **$0.00** — that is the point of running them, and recording it makes the saving
-visible rather than assumed. Wall time is still recorded, because local inference trades money for
-time and the trade is only worth evaluating if both numbers exist.
+Local inference costs **$0.00** — that is the point of running it, and recording it makes the saving
+visible rather than assumed. Wall time is recorded because local inference trades money for time,
+and the trade can only be evaluated if both numbers exist.
 
-When a hosted model does the work, record its name and actual token cost instead. When work is split
-— a local model implements, a hosted model reviews — record both rows so the split is legible.
+**Rounds** is the number of dispatches it took to converge. It is the most useful number in the
+table: an issue that took three rounds was underspecified when it was authored, and that is feedback
+about the authoring, not about the model.
+
+Record the authoring and reviewing model separately, since those are hosted and do carry cost. If a
+round was taken over by hand, say so rather than attributing it to the local model.
 
 ### Format details that matter
 
@@ -180,7 +196,7 @@ When a hosted model does the work, record its name and actual token cost instead
 - **Dates** are `YYYY-MM-DD`.
 - **Module** can list multiple modules separated by ` / ` (e.g. `BlueskyFeed / BlueskyDataStore`).
 - **Platform** is `iOS`, `macOS`, `iPadOS`, `All`, or any other string. `All` is treated as matching every platform filter.
-- When status moves to `resolved` or `closed`, add a `**Closed**` row with today's date. When the move to `resolved` is the result of a fix commit, also add a `**Commit**` row with the short hash (`git rev-parse --short HEAD`).
+- When status moves to `resolved` or `closed`, add a `**Closed**` row with today's date. When the move to `resolved` is the result of a fix commit, also add a `**Commit**` row with the short hash of the last code commit on the issue branch, and a `**Branch**` row naming it (`issue/NNNN`). See "Which hash goes in the Commit row" above.
 - Steps / Expected / Actual / Attachments / Notes are conventional but not all required — for design-refinement or feature-gap issues, Description alone is fine.
 
 ## Filing a new issue
@@ -199,19 +215,104 @@ Edit the file in place. The Mac app picks up changes automatically — no follow
 
 When status moves to `resolved` or `closed`, add a `**Closed**` row with the date. When the move to `resolved` was driven by a fix commit, also add a `**Commit**` row with the short hash. For any move toward `resolved`, `closed`, or `wontfix`, the "Critical rule" near the top of this file applies — those transitions require explicit user confirmation, not inference.
 
-## Implementation is delegated to OpenCode running a local model
+## The implementation workflow: author → dispatch → review → re-dispatch
 
-Implementation work on this project is handed to **OpenCode** driving **Ornith 1.0 35B-A3B** (8-bit
-MLX) locally through **LM Studio**. Token cost is $0.00; the cost is wall time and the ceiling is the
-model's capability. Configuration lives in `~/.config/opencode/opencode.json`, pointed at
-`http://127.0.0.1:1234/v1`.
+Implementation is delegated to **OpenCode** driving **Ornith 1.0 35B-A3B** (8-bit MLX) locally
+through **LM Studio**. Token cost is $0.00. The cost is wall time.
 
-Dispatch one issue per run, from the repo root:
+**Why this model.** Ornith is a Gemma 4 model tuned using Qwen. It scores nearly as well as the Qwen
+model while being an MoE without thinking, where Qwen is dense and thinking and therefore much
+slower. Fast and non-thinking is the right trade for implementation work that has already been
+thought through — which is exactly what this workflow produces: the thinking happens when the issue
+is authored, not when it is implemented. **Ornith replaces Sonnet in this project**; a hosted
+mid-tier model is no longer in the loop.
+
+This is also a deliberate experiment in running local AI alongside Claude Code, so treat friction as
+a finding worth recording rather than an annoyance to route around.
+
+### The four roles
+
+| Role | Who | Does |
+|---|---|---|
+| **Author** | Opus or Fable | Writes the issue with enough detail that implementation needs no further judgment: exact files, exact approach, exact verification command, exact done-criteria. |
+| **Dispatcher** | A Claude Code **subagent** | Runs `scripts/dispatch-issue.sh` and returns only the outcome. |
+| **Implementer** | Ornith, via OpenCode | Implements one issue. Does not commit. Does not set status. |
+| **Reviewer** | Opus | Reads the diff and the verification output, then either accepts, or writes a `## Review` section into the issue and re-dispatches. |
+
+**Dispatch through a subagent, not from the main loop.** An OpenCode run produces a long transcript
+that is worthless once the outcome is known. A subagent absorbs it and returns a short verdict, which
+is what keeps the main context window small enough to keep authoring and reviewing well. This is the
+main reason the workflow is shaped this way.
+
+### The loop
+
+1. **Branch**: `git switch -c issue/NNNN` from an up-to-date `main`.
+2. **Author** the issue, or update it with review feedback in a `## Review` section.
+3. **Dispatch**: a subagent runs `scripts/dispatch-issue.sh NNNN --round N`.
+4. **Review** the diff and the pasted verification output — not the model's summary of them.
+5. **Commit the round to the branch.** Every round that produced something worth reading becomes a
+   commit, including rounds that were later corrected. That history is the artifact.
+6. **Accept** and merge (below) **or** write `## Review` feedback and go to step 3 with `--round N+1`.
+7. **Escalate** at round 4. The cap is not a suggestion.
 
 ```sh
-opencode run "Work issue 0012. Follow issues/Issues.md and AGENTS.md. Stop and report if blocked."
-lms ps   # confirm the model is loaded before dispatching
+git switch -c issue/0012                # once, at the start
+lms ps                                  # confirm the model is loaded
+scripts/dispatch-issue.sh 0012          # round 1
+git add -A && git commit -m "#0012 round 1: <what it did>"
+scripts/dispatch-issue.sh 0012 --round 2
 ```
+
+### Branching and merging
+
+**One branch per issue: `issue/NNNN`. `main` is never worked on directly.**
+
+The branch accumulates a commit per round, and **those commits are kept**. They are the record of
+how the work actually went — what the model tried, what review sent back, what finally worked — and
+that record is worth more later than a tidy history is now. Do not rebase them away.
+
+**Merge back to `main` as a single squashed commit per issue:**
+
+```sh
+git switch main
+git merge --squash issue/0012
+git commit -m "#0012 <issue title>"     # one commit on main, per issue
+git push origin main
+git push origin issue/0012              # keep the branch — it is the artifact
+```
+
+So `main` reads as one commit per issue, while `issue/NNNN` preserves the rounds behind it. **Do not
+delete the branch after merging**, locally or on the remote. `git merge --squash` leaves no merge
+ancestry, so the branch is the only place that history survives.
+
+Reference the issue number in both the branch name and the squashed commit subject, so the three
+records — `main`, the branch, and `issues/NNNN.md` — can always be lined up.
+
+### Loop protection
+
+The model has gotten stuck in loops, so this is enforced by the script rather than by instruction:
+
+- **Wall-clock timeout**, default 1800s, killed hard. There is no `timeout` binary on this Mac, so
+  the script runs a watchdog itself.
+- **Round cap of 3.** A fourth round requires `--force` and a reason. Three failed rounds means the
+  issue is underspecified or too large — fix the issue, do not spend another round.
+- **Clean-tree precondition**, so each round's diff is attributable to that round.
+- **No-progress detection.** A run that exits successfully and changes nothing exits 7 and is a
+  failed round. Never re-dispatch an unchanged prompt after a no-op — it will do the same thing.
+- **The model is told to stop rather than retry** a failing action, and that a clear stop is a good
+  outcome. Rewarding the report is how you avoid thrashing.
+
+Logs land in `.switchyard-runs/NNNN-roundN.log`, which is gitignored.
+
+### Why the implementer does not commit, branch, or resolve
+
+Ornith leaves changes in the working tree on a branch someone else created. Review decides what
+happens to them: commit the round to the branch as an artifact, or discard it with `git checkout .`
+when it produced nothing worth keeping. A no-op round is discarded, not committed.
+
+This keeps the critical rule at the top of this file intact — status moves are never inferred from a
+code change — and it means the implementer cannot accidentally land work on `main`, squash away the
+round history, or mark its own work done.
 
 ### AGENTS.md is what OpenCode actually reads
 
@@ -241,31 +342,36 @@ Some work stays with a human or a hosted model, because the cost of getting it w
 Good delegation targets are the opposite: self-contained, precisely specified, with done-criteria
 that a test can settle. Most of M1's read commands qualify once #0006 lands.
 
-## Resolving an issue (the standard workflow)
+## Resolving an issue: the mechanics
 
-Each open issue is handled by a fresh subagent. The orchestrator picks the issue; the subagent does the work in isolation and returns when done.
+This is the detail behind steps 4–7 of "The loop" above. The roles there apply: Ornith implements,
+the reviewer owns everything below.
 
 ### Orchestrator: pick and dispatch
 
-1. List `issues/*.md` (skip `Issues.md`). Pick the lowest-numbered file whose status is `open`.
-2. Spawn a fresh subagent with the issue id and instructions to follow the resolve workflow below.
-3. When the subagent returns, move on to the next open issue (or stop if only one was requested).
+1. List `issues/*.md` (skip `Issues.md`). Pick the lowest-numbered file whose status is `open` and
+   whose blockers (`Blocked by #NNNN` in its Notes) are resolved.
+2. `git switch -c issue/NNNN` from an up-to-date `main`.
+3. Spawn a fresh **dispatcher subagent** that runs `scripts/dispatch-issue.sh NNNN --round N` and
+   returns only the outcome — the diff summary, the verification output, and whether it converged.
+   The subagent exists to absorb the OpenCode transcript so it never reaches the reviewing context.
+4. Review, then either land it or re-dispatch with feedback. Move to the next issue when done.
 
-If the user names a specific issue ("fix 0046"), dispatch to that id directly.
+If the user names a specific issue ("fix 0046"), skip the picking step.
 
-### Subagent: claim → fix → build → commit → resolve
-
-A subagent starts with fresh context, so its first job is loading the project's conventions before touching anything.
+### Reviewer: verify → commit → resolve → land
 
 1. **Orient in the project.** Read these in order, every time:
    - **`issues/Issues.md`** (this file) — status vocabulary, module conventions, build/verify command, commit conventions, project-specific rules. **Authoritative for issue-tracking workflow.**
-   - **`CLAUDE.md`** at the repo root, if it exists — project-wide guidance, code conventions, restricted areas, build/test commands. **Treat its instructions as binding.**
-   - **`issues/NNNN.md`** — the issue you're working on, in full, including attachments in `issues/NNNN/`.
+   - **`CLAUDE.md`** at the repo root — project-wide guidance, code conventions, restricted areas, build/test commands. **Treat its instructions as binding.**
+   - **`issues/NNNN.md`** — the issue in full, including attachments in `issues/NNNN/`.
 
    If the two project guides disagree, prefer `CLAUDE.md` for code/repo conventions and this file for issue-tracking specifics.
 
-2. **Set status to `in-progress`** in the markdown — working copy only, no commit. The Mac app picks it up immediately.
-3. **Make the code changes** required to fix the bug.
+2. **Set status to `in-progress`** in the markdown — working copy only, no commit.
+3. **Review the round's changes.** Read the diff and the verification output the run actually
+   printed, not its summary of them. A run that reports success while `git diff` is empty, or that
+   describes tests it cannot show output for, failed — send it back or take it over.
 4. **Build *and* run the project's verification command, and confirm tests actually executed and passed.** This step is mandatory and cannot be shortcutted.
 
    - **Compilation is not verification.** "It builds" / "it compiles" / "no type errors" does not count. Tests must actually run — unit tests execute, UI tests run on a simulator, the app launches, whatever the project defines as proof. A green build with zero tests run is a failure of this step.
@@ -274,23 +380,31 @@ A subagent starts with fresh context, so its first job is loading the project's 
    - **If verification cannot be run in your environment** (no simulator, missing credentials, hardware required, sandbox), you have not verified the fix. Do not mark the issue `resolved` — bail per "When the subagent can't finish" below, naming the verification step you couldn't run.
    - **If the build was already failing before you started**, note it on the issue and bail — don't fix unrelated breakage.
 
-5. **Make the code commit.** Stage *only the code changes* (not the issue markdown yet). The message starts with `#NNNN` and a short, declarative title — pick the verb that actually fits (`Fix`, `Add`, `Refactor`, `Update`, `Remove`, etc.); not every issue is a bug fix. Leave a blank line after the title, then add a paragraph of details. Example:
+5. **Commit the round to `issue/NNNN`.** Stage *only the code changes* (not the issue markdown yet).
+   The message starts with `#NNNN` and a short, declarative title — pick the verb that actually fits
+   (`Fix`, `Add`, `Refactor`, `Update`, `Remove`); not every issue is a bug fix. For an intermediate
+   round, say which round it was. Leave a blank line after the title, then a paragraph of details:
 
    ```
-   #0046 Add navigation from avatar tap to profile
+   #0046 round 2: wire avatar tap to profile navigation
 
-   The avatar tap on PostCardView was not wired to any NavigationLink.
-   Threaded the author DID through the cell and connected onTapGesture
-   to push ProfileView.
+   Round 1 threaded the DID through the cell but never connected the
+   gesture. This adds the NavigationLink and the onTapGesture binding.
    ```
 
-6. **Capture the commit hash** with `git rev-parse --short HEAD`.
+   These per-round commits stay on the branch permanently. Do not rebase or amend them tidy — the
+   sequence is the record of how the work went, which is the whole reason the branch is kept.
+
+6. **Capture the commit hash** with `git rev-parse --short HEAD`. This is the last code commit on the
+   branch, and it is what the `**Commit**` row records — not a hash on `main`, which will not exist
+   until after the squash.
 
 7. **Update the issue markdown** to mark it resolved. **Precondition:** step 4 actually executed and passed. If it didn't, bail — don't resolve.
 
    - Change Status to `resolved`.
    - Add a `**Closed**` row with today's date.
    - Add a `**Commit**` row with the short hash from step 6.
+   - Add a `**Branch**` row naming `issue/NNNN`.
 
    Then add a structured summary in this order so the issue becomes a primary-source record:
 
@@ -301,7 +415,22 @@ A subagent starts with fresh context, so its first job is loading the project's 
    - **`## Gotchas`** *(optional)* — surprises, dead ends, non-obvious behavior, or anything a future engineer working on similar code should know. Skip if nothing is notable. Be specific — these notes accumulate across issues and feed future "common pitfalls" docs.
    - **`## Work log`** — agent, model, token cost, wall time. See "Work log" above. Local runs record `$0.00`.
 
-8. **If `issues/` is tracked by git, make the resolution commit.** Stage `issues/NNNN.md` and commit with message `#NNNN Resolve: <title>`. Body briefly notes which code commit it pairs with (the hash from step 6). If `issues/` is ignored or there's no repo, skip — the markdown change from step 7 is the entire record.
+8. **Make the resolution commit, still on `issue/NNNN`.** Stage `issues/NNNN.md` and commit with
+   message `#NNNN Resolve: <title>`. The body notes which code commit it pairs with (the hash from
+   step 6).
+
+9. **Land it on `main` as one squashed commit**, then push both:
+
+   ```sh
+   git switch main
+   git merge --squash issue/0046
+   git commit -m "#0046 <issue title>"
+   git push origin main
+   git push origin issue/0046      # keep the branch — it is the artifact
+   ```
+
+   **Never delete the branch.** `git merge --squash` records no merge ancestry, so once the branch is
+   gone the round history is unrecoverable and the `**Commit**` row points at nothing.
 
 Status flow: `open` → `in-progress` → `resolved`. **Never set `closed`** — the user does that after verifying the fix.
 
@@ -337,15 +466,24 @@ Project-specific verification rules:
 - **XPC work cannot be verified by unit tests alone.** Use the manual verification script (#0054)
   and say in `## Verification` which scenarios were exercised.
 
-### When the subagent can't finish
+### When an issue can't be finished
 
-If the bug is unreproducible, out of scope, or the build won't pass after reasonable effort:
+If the work is out of scope, the build won't pass after reasonable effort, or three rounds have not
+converged:
 
-1. **Discard or stash any partial code changes** so the bail doesn't accidentally include half-done work.
-2. **Revert status to `open`** in the issue markdown so the issue goes back into the queue.
-3. **Add a `## Notes` section** describing what was tried, why work stopped, and what you'd try next. Be specific.
-4. **If `issues/` is tracked by git**, commit the markdown change with message `#NNNN Notes: <one-line bail summary>`. If ignored, skip.
-5. Return with a one-line summary of why work stalled.
+1. **Commit whatever is worth keeping to `issue/NNNN`**, or discard it if it is not. Do not leave
+   half-done work uncommitted in the tree — the next dispatch will refuse to start on a dirty tree.
+2. **Revert status to `open`** so the issue goes back into the queue.
+3. **Add a `## Notes` section** describing what was tried, why work stopped, and what you'd try next.
+   Be specific: which rounds, what failed each time, what the next author should change about the
+   issue itself.
+4. **Commit the markdown** on the branch with message `#NNNN Notes: <one-line bail summary>`.
+5. **Leave the branch in place, unmerged.** It is the record of the attempt, and it is where the next
+   attempt starts.
+
+Three failed rounds is information about the issue, not just about the model. Rewrite it with more
+specific guidance or split it before dispatching again — re-dispatching an unchanged issue produces
+an unchanged result.
 
 Never use `wontfix` or `closed` to escape a stuck issue.
 

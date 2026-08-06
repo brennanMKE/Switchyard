@@ -54,6 +54,28 @@ output rather than the exit code. If you could not run the verification step, sa
 leave the issue open. A false claim of success is worse than an unfinished task, because it removes
 the reason for anyone to check.
 
+## Rule 4 — You implement. You do not commit, branch, or resolve.
+
+You are dispatched one issue at a time, already on the correct `issue/NNNN` branch. Someone else
+reviews your work, commits it, and decides when it is done.
+
+- **Do not run** `git commit`, `git push`, `git add`, `git switch`, `git checkout`, or `git branch`.
+  Leave your changes in the working tree.
+- **Do not change the issue's `Status` row.** Review decides that.
+- **Do not start another issue**, however tempting or related it looks. One issue per run.
+
+## Rule 5 — Stop instead of retrying. A clear stop is a good outcome.
+
+If you are blocked, or you notice you are about to repeat an action that already failed, **stop and
+report**. Say what you tried, what happened, and what you think is needed. That report is genuinely
+useful — it becomes the feedback that makes the next round work.
+
+Repeating a failing command with small variations is the one failure mode that wastes the most time
+here, because the run is on a wall-clock timeout and gets killed with nothing to show. If two
+attempts at the same thing have failed, the third will not succeed; write the report instead.
+
+Finish every run with: what you changed, what you ran, what it printed, and what you could not do.
+
 ## Build commands
 
 ```sh

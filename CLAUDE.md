@@ -16,9 +16,30 @@ Two design documents, both current, both in `docs/`:
 ## Implementation is delegated to OpenCode running a local model
 
 Implementation work goes to **OpenCode** driving **Ornith 1.0 35B-A3B** (8-bit MLX) locally via
-**LM Studio** on `127.0.0.1:1234`. Token cost is $0.00, so resolved issues record `$0.00` in their
-`## Work log` section — see `issues/Issues.md` for the format and for what is *not* delegated
-(clean-room work, signing, the M0 spikes, and moving an issue to `resolved`).
+**LM Studio** on `127.0.0.1:1234`. Ornith is a Gemma 4 model tuned using Qwen — an MoE without
+thinking, so it is much faster than the dense thinking Qwen it scores close to. That trade suits
+implementation work whose thinking already happened when the issue was authored. **It replaces
+Sonnet here.** Token cost is $0.00.
+
+**The loop is: Opus or Fable authors the issue in enough detail that implementation needs no further
+judgment → a subagent dispatches it → Opus reviews the diff and the real verification output →
+accept, or write a `## Review` section into the issue and re-dispatch.** Full workflow, roles, and
+loop protection are in `issues/Issues.md`.
+
+Two rules that bind this file specifically:
+
+- **Dispatch through a subagent, never from the main loop.** An OpenCode transcript is long and
+  worthless once the outcome is known; a subagent absorbs it and returns a verdict. Keeping the main
+  context small is what makes authoring and reviewing good, which is what makes the local model
+  work at all.
+- **Branch per issue, squash to `main`.** `git switch -c issue/NNNN`, one commit per round on the
+  branch, then `git merge --squash` into a single commit on `main`. **Never delete the branch** —
+  squash-merging records no ancestry, so the branch is the only surviving record of how the work
+  went, and the issue's `**Commit**` row points into it.
+
+Run dispatches through `scripts/dispatch-issue.sh NNNN --round N`, which enforces a wall-clock
+timeout, a 3-round cap, a clean tree, and the correct branch. It has looped before; the guards are
+the mechanism, not the prose.
 
 **`AGENTS.md` is what OpenCode reads — it does not load this file.** Verified: asked for the GitUp
 licensing rule with only `CLAUDE.md` present, the model answered `UNKNOWN`; with `AGENTS.md` present
