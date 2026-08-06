@@ -58,6 +58,13 @@ covering everything.
 run, and an unverified issue stays open. Reporting an issue resolved to keep momentum is worse than
 any interruption.
 
+### Test repositories
+
+Durable test and fixture repositories go in `/Users/brennan/Developer/brennanMKE/Git` — the same
+directory that holds Switchyard, GitUp, and the `git/git` performance fixture. Create them there
+rather than in the scratchpad when they are worth keeping between sessions. Programmatic fixtures
+built by the test harness (#0024) still go in temp directories and are cleaned up.
+
 ### Running unattended
 
 `/loop` is the harness mechanism for sustained work. `/loop work the next open issue` with no
