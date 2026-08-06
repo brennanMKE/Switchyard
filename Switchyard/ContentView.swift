@@ -1,9 +1,4 @@
-//
-//  ContentView.swift
-//  Switchyard
-//
-//  Created by Brennan Stehling on 8/6/26.
-//
+// ContentView.swift
 
 import SwiftUI
 

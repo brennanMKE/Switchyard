@@ -1,9 +1,4 @@
-//
-//  SwitchyardApp.swift
-//  Switchyard
-//
-//  Created by Brennan Stehling on 8/6/26.
-//
+// SwitchyardApp.swift
 
 import SwiftUI
 

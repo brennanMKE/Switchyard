@@ -1,9 +1,4 @@
-//
-//  SwitchyardUITestsLaunchTests.swift
-//  SwitchyardUITests
-//
-//  Created by Brennan Stehling on 8/6/26.
-//
+// SwitchyardUITestsLaunchTests.swift
 
 import XCTest
 

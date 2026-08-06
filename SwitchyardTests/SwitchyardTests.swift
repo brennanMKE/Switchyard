@@ -1,9 +1,4 @@
-//
-//  SwitchyardTests.swift
-//  SwitchyardTests
-//
-//  Created by Brennan Stehling on 8/6/26.
-//
+// SwitchyardTests.swift
 
 import Testing
 
