@@ -299,10 +299,18 @@ Use libgit2 for the object database, DAG traversal, index, diff, blame, and merg
 Every shell-out is centralized in one `GitProcess` type in `YardGit` so the boundary is visible
 and testable. No `Process` invocations scattered through the codebase.
 
-**This boundary is provisional until M0 answers the reftable question.** If the chosen libgit2
-build cannot read a `--ref-format=reftable` repository, ref enumeration and graph traversal move
-onto `git for-each-ref` and `git rev-list`, and the boundary shifts substantially toward the CLI.
-See [git internals](switchyard-git-internals-and-undo.md#1-the-rule-that-governs-everything-below).
+**M0 answered the reftable question, and the boundary moved.** libgit2 1.9.6 — the latest release —
+cannot open a `--ref-format=reftable` repository at all, and `git` plumbing with a commit-graph is
+also ~5× faster than libgit2 on the graph path. So the split above is revised:
+
+| Concern | Goes through |
+| --- | --- |
+| Ref enumeration, `HEAD`, reflog, DAG traversal | **`git` plumbing** — `for-each-ref`, `rev-list`, `symbolic-ref`, `update-ref` |
+| Object database, diff, blame, merge | libgit2 (reftable and commit-graph do not apply) |
+| Network, hooks, signing, worktrees, sparse checkout | `git`, as before |
+
+Switchyard keeps a `commit-graph` fresh in the background, since that is what makes the plumbing
+path interactive. Full numbers and method in [engine-findings.md](engine-findings.md).
 
 **Never read `$GIT_DIR` with `FileManager`.** Not refs, not the index, not the reflog. Reftable,
 index format variants, and worktrees each break naive parsing on their own. Everything resolves
