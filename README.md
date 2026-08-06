@@ -6,10 +6,11 @@ coding agent is a first-class user of the repository alongside a human.
 The name is a railyard: commits are cars, and the app's job is shunting them into a different order
 safely. **Every mutating operation is reversible.**
 
-> **Status: pre-alpha.** The repository currently holds a stock SwiftUI template and the development
-> guide. Nothing described below is built yet. Work starts at
-> [Milestone 0](switchyard-development-guide.md#9-milestones), an engine spike that settles libgit2
-> packaging, commit signing, and graph performance before any app code is written.
+> **Status: pre-alpha.** The repository currently holds a stock SwiftUI template, the design
+> documents in `docs/`, and the task breakdown in `issues/`. Nothing described below is built yet.
+> Work starts at [Milestone 0](docs/switchyard-development-guide.md#9-milestones), an engine spike
+> that settles libgit2 packaging, commit signing, graph performance, and reftable compatibility
+> before any app code is written.
 
 ## Two products, one engine
 
@@ -90,20 +91,32 @@ designed so an MCP wrapper would be a thin dispatch layer if that changes.
 
 ## The command set
 
-Full detail in the [development guide](switchyard-development-guide.md#6-the-yard-cli). In brief:
+Full detail in the [development guide](docs/switchyard-development-guide.md#6-the-yard-cli). In brief:
 
 | Group | Commands |
 | --- | --- |
 | **Read** | `whereami`, `graph`, `log`, `status`, `hunks`, `conflicts`, `blame`, `verify` |
 | **Rewrite** | `commit`, `fixup`, `absorb`, `split`, `reword`, `reorder`, `drop`, `stage`, `unstage` |
 | **Undo** | `checkpoint`, `undo`, `redo`, `journal`, `restore` |
+| **Worktrees** | `wt list`, `wt new`, `wt rm`, `wt where`, `wt gc`, `wt repair` |
+| **Hooks** | `hooks install`, `hooks uninstall`, `hooks status` |
 | **Human-in-the-loop** *(needs the app)* | `review --wait`, `ask`, `resolve --interactive`, `watch` |
 
-Two worth calling out. **`yard hunks`** returns stable hunk IDs, which is what makes precise
+Three worth calling out. **`yard hunks`** returns stable hunk IDs, which is what makes precise
 agent-driven staging possible without `git add -p` — the interactive command agents cannot use.
 **`yard absorb`** distributes staged hunks into the correct prior commits by matching each hunk
 against the commit that last touched those lines; it is the highest-leverage way to clean up an
-agent's messy branch.
+agent's messy branch. And **`yard wt new --agent <id>`** creates an isolated worktree for an agent
+session, populated from a repo-level template — because a fresh worktree has the tracked files and
+nothing else, and an agent whose first command dies on a missing `node_modules` starts improvising.
+
+### Worktrees as the unit of agent isolation
+
+One agent, one worktree, one branch, one checkout. Git already enforces that two worktrees cannot
+have the same branch checked out, which makes it free mutual exclusion between agents rather than
+an obstacle to work around. Switchyard treats worktrees as a primary object in both the app and the
+CLI, tracks which agent session holds which worktree, and can tell you what a sibling agent is
+working on without leaving your own checkout.
 
 ## Relationship to GitUp
 
@@ -159,9 +172,10 @@ built app carries no `com.apple.quarantine` attribute, so Gatekeeper never evalu
 
 | Document | Covers |
 | --- | --- |
-| [switchyard-development-guide.md](switchyard-development-guide.md) | Scope, architecture, the full CLI surface, the journal design, milestones, settled decisions and open questions |
+| [docs/switchyard-development-guide.md](docs/switchyard-development-guide.md) | Scope, architecture, the full CLI surface, the journal model, milestones, settled decisions and open questions |
+| [docs/switchyard-git-internals-and-undo.md](docs/switchyard-git-internals-and-undo.md) | How the journal works against git's on-disk state, the hook layer, and worktree support in detail |
 | [CLAUDE.md](CLAUDE.md) | Working agreements for coding agents: licensing rules, signing safety, build commands, known traps |
-| `docs/` | Design notes, including clean-room notes on GitUp concepts *(not yet created)* |
+| `issues/` | Task breakdown, `NNNN.md` per task |
 
 ## License
 

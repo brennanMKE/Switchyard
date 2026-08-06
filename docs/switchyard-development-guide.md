@@ -4,7 +4,13 @@ A SwiftUI Mac git client with an agent-facing CLI. Successor in spirit to GitUp,
 world where a coding agent is a first-class user of the repository alongside a human.
 
 This document is the development guide. It defines scope, architecture, naming, and the CLI
-surface. It is not a task list. Work is sequenced in [Milestones](#9-milestones).
+surface. It is not a task list. Work is sequenced in [Milestones](#9-milestones), and broken into
+tasks in `issues/`.
+
+Its companion, [switchyard-git-internals-and-undo.md](switchyard-git-internals-and-undo.md),
+defines how the journal works against git's actual on-disk state and how worktrees are supported.
+**Read it before implementing anything in the journal, the ref layer, or worktrees** — this document
+says what to build and why, that one says how git will make you do it.
 
 ---
 
@@ -101,9 +107,18 @@ Follow the RemoteControl conventions exactly, substituting the new name.
 | Shared package | `YardKit` |
 | Broker executable | `BrokerAgent` |
 | Log subsystem | `co.sstools.Switchyard` |
+| State directory | `$XDG_STATE_HOME/switchyard/`, falling back to `~/.local/state/switchyard/` |
+| Per-repo journal metadata | `.git/switchyard/journal.json` |
+| Journal anchor refs | `refs/switchyard/journal/<entry-id>` |
 
 `ServiceNames.swift` in `YardKit` is the single source of truth for all of the above. Nothing
 else hardcodes any of these strings.
+
+The state directory holds what is not repo-specific: the repository registry, cross-repo recent
+operations, agent session records, and UI state. `~/.local/state` beats `~/Library/Application
+Support` here because `yard` runs in shells, CI, and agent sandboxes where the Library path is
+awkward or absent. The app uses the same path, which is only true while the app stays unsandboxed —
+see [Section 11](#11-decisions-and-open-questions).
 
 ---
 
@@ -125,7 +140,9 @@ Switchyard.xcodeproj
 ├── skills/yard/         SKILL.md (generated) + hand-written workflow prose, and the
 │                        per-client packaging for Claude Code and OpenCode
 ├── scripts/             make-release.sh, generate-skill.sh
-└── docs/                design notes, including clean-room notes on GitUp concepts
+├── docs/                this guide, the git-internals companion, and design notes —
+│                        including clean-room notes on GitUp concepts
+└── issues/              NNNN.md task tracker
 ```
 
 ### The layering rule
@@ -217,22 +234,41 @@ Use libgit2 for the object database, DAG traversal, index, diff, blame, and merg
 Every shell-out is centralized in one `GitProcess` type in `YardGit` so the boundary is visible
 and testable. No `Process` invocations scattered through the codebase.
 
+**This boundary is provisional until M0 answers the reftable question.** If the chosen libgit2
+build cannot read a `--ref-format=reftable` repository, ref enumeration and graph traversal move
+onto `git for-each-ref` and `git rev-list`, and the boundary shifts substantially toward the CLI.
+See [git internals](switchyard-git-internals-and-undo.md#1-the-rule-that-governs-everything-below).
+
+**Never read `$GIT_DIR` with `FileManager`.** Not refs, not the index, not the reflog. Reftable,
+index format variants, and worktrees each break naive parsing on their own. Everything resolves
+through `git rev-parse --git-path` or libgit2. This rule is absolute and the companion document
+opens with it.
+
 ### Milestone 0 spike
 
-Throwaway code. Answer three questions, write the answers into `docs/engine-findings.md`, then
+Throwaway code. Answer four questions, write the answers into `docs/engine-findings.md`, then
 delete the spike.
 
 1. Can we produce an SSH-signed commit through libgit2 that `git log --show-signature` and
    GitHub both report as verified?
 2. Can we load a large repository (use one with 50k+ commits) and compute lane assignments for
-   the visible window fast enough for a live UI? Record actual numbers.
+   the visible window fast enough for a live UI? Record actual numbers, **with and without a
+   `commit-graph` file present** — `git commit-graph write --reachable` is cheap and Switchyard can
+   keep it fresh in the background, so measuring without it measures the wrong thing.
 3. How does libgit2 get into a SwiftPM package cleanly in 2026? Evaluate: a system library target
    plus Homebrew, a vendored C target, and the current state of the Swift bindings. Note that
    SwiftGit2 and ObjectiveGit are both worth checking for staleness before depending on either.
    A Rust `gitoxide` bridge is a legitimate alternative worth a paragraph of comparison, but the
    FFI and build complexity is real. Default to libgit2 unless the spike finds a blocker.
+4. **Does the chosen libgit2 build work against a reftable repository?** Create one with
+   `git init --ref-format=reftable`, then confirm it can enumerate refs, resolve `HEAD`, and read
+   the reflog. Reftable becomes the default format for new repositories in Git 3.0, and libgit2
+   support landing upstream is not the same as being in a tagged release you can build on macOS.
+   Zed dropped libgit2 for the git CLI in June 2026 partly over this.
 
-If question 1 or 2 fails, stop and escalate. The project's premise depends on both.
+If question 1 or 2 fails, stop and escalate — the project's premise depends on both. A negative
+answer to question 4 does not stop the project, but it must be settled before M1 starts, because it
+relocates the entire ref and graph path onto `git` plumbing and that is not a retrofit.
 
 ---
 
@@ -289,6 +325,34 @@ Codes 2 through 5 match RemoteControl exactly. Do not renumber them.
 | `yard blame <path> [--range A:B]` | Structured blame, range-limited. |
 | `yard verify <rev>` | Signature verification result. |
 
+`yard whereami` includes a `worktree` object, so an agent's first call tells it which worktree it is
+in and whether a sibling worktree holds the same branch.
+
+#### Worktrees: agent isolation
+
+Worktrees are the natural unit of agent isolation — one agent, one worktree, one branch, one
+checkout, no interference — so they are a primary object in both the app and the CLI rather than an
+advanced feature in a menu. Design detail is in
+[git internals §5](switchyard-git-internals-and-undo.md#5-worktrees).
+
+| Command | Purpose |
+| --- | --- |
+| `yard wt list` | Structured superset of `git worktree list --porcelain -z`, plus dirty state, ahead/behind, in-progress operation, attached agent session, and journal depth. |
+| `yard wt new <name>` | Create a worktree. `--branch`, `--from`, `--detach`, `--agent <id>` (locks with a machine-readable session reason), `--template <name>`, `--sparse <paths>`. |
+| `yard wt rm <name>` | Remove, releasing the lock and the agent session. Refuses when unclean without `--force`, matching git. |
+| `yard wt where` | Resolve the current context: worktree id, path, `$GIT_DIR`, `$GIT_COMMON_DIR`, main worktree path. |
+| `yard wt gc` | `git worktree prune` plus reporting of prunable and abandoned-session worktrees. |
+| `yard wt repair [<path>...]` | Wraps `git worktree repair` for the moved-directory case. |
+
+Two things carry disproportionate weight. **`WorktreeContext`** — worktree path, `$GIT_DIR`,
+`$GIT_COMMON_DIR`, worktree id — is resolved once per invocation and every path lookup goes through
+it; this is why worktrees are M1 and not later, since retrofitting means auditing every call site.
+**Worktree templates** are the highest-value feature here and nothing does them well: a fresh
+worktree has tracked files and nothing else, so the agent's first command fails on a missing
+`node_modules` or `.env` and it starts improvising. A repo-level config listing untracked paths to
+copy, symlink, or regenerate on `yard wt new`, plus post-create commands, fixes that for the whole
+team and every agent at once.
+
 #### Mutate: history rewriting
 
 These are the GitUp powers, exposed non-interactively. Interactive rebase is where agents fail
@@ -317,7 +381,24 @@ Every one of these writes a journal entry.
 | `yard journal` | List journaled operations with what each touched and whether it is still undoable. |
 | `yard restore <checkpoint>` | Jump to a specific checkpoint. |
 
-See [Section 7](#7-the-journal) for the design.
+See [Section 7](#7-the-journal) for the model and
+[git internals §3](switchyard-git-internals-and-undo.md#3-journal-design) for the mechanics.
+
+#### Hooks: observing what `yard` did not do
+
+An agent runs `git` directly between two `yard` commands constantly. Without these, the app's view
+goes stale and the journal's cross-tool guard fires with no explanation attached.
+
+| Command | Purpose |
+| --- | --- |
+| `yard hooks install` / `yard hooks uninstall` | Install the observer hooks. Detects existing hooks and `core.hooksPath`, chains rather than clobbers, and is reversible. Never silent — repositories often already have hooks. |
+| `yard hook ref-txn` | The `reference-transaction` handler. Every ref change from any tool, batched by transaction, with old and new values. |
+| `yard hooks status --json` | What is installed, what is chained, what is missing. |
+
+Everything degrades to polling if hooks are declined. `post-rewrite` supplies the old→new commit
+mapping that nothing else provides, which is what lets the app say "these four commits became this
+one" instead of showing two unrelated graphs. Details and the abort-state trap are in
+[git internals §4](switchyard-git-internals-and-undo.md#4-observing-changes-made-outside-switchyard).
 
 #### Human-in-the-loop: requires the app
 
@@ -356,15 +437,29 @@ meaningfully stronger claim than an unsigned one. No existing client offers this
 
 The journal is what makes Switchyard safe for unsupervised agent use. Design it properly, early.
 
+**This section is the model. [git internals §3](switchyard-git-internals-and-undo.md#3-journal-design)
+is the mechanics** — which git primitives build a snapshot, exactly what state has to be captured,
+and where each piece lives. Implement from that document; this one says why.
+
 **Model.** A journal entry captures repository state before a semantic operation, not a diff of
 what changed. Following GitUp's approach: snapshot the full ref set, `HEAD`, the index, and any
 worktree state the operation will disturb. Undo restores the snapshot rather than computing an
 inverse operation, which is why it works for rebases and merges where an inverse is ill-defined.
 
-**Storage.** Journal entries live under `.git/switchyard/journal/`. Snapshotted objects are real
-git objects in the ODB, kept alive by refs under `refs/switchyard/journal/`, so garbage
-collection does not eat them and nothing lives outside the repository. Do not invent a
-side-database.
+**Storage, in three places, split by what the data is.** Snapshot objects are ordinary git objects
+in the ODB, anchored by refs under `refs/switchyard/journal/<entry-id>` so `gc` cannot reclaim them.
+Per-entry metadata lives in `.git/switchyard/journal.json`. Cross-repo state — the repository
+registry, agent sessions, UI state — lives in the state directory from
+[Section 3](#3-naming-and-identifiers). Do not invent a side-database for anything git can hold.
+
+**The repository is always authoritative.** The state directory is an index and a convenience. If
+it is deleted, `yard journal` rebuilds from `refs/switchyard/journal/*` alone with reduced metadata.
+Write that rebuild path early and test it — it is what keeps the design honest about which store is
+the source of truth, and it is exactly the kind of path that rots unnoticed if it is written late.
+
+**Snapshots outlive the process.** This is the concrete advantage over GitUp, and it falls out of
+using real objects rather than in-memory state: a Switchyard snapshot survives a quit, a reboot, a
+clone onto another machine, and `yard` running with the app closed.
 
 **What is snapshotted.** Refs and index are cheap. Uncommitted worktree changes are not always
 cheap. Decide the policy explicitly and document it: the reasonable default is to snapshot the
@@ -372,12 +467,21 @@ worktree only for operations that would disturb it, and to record in the entry w
 captured so `undo` can report honestly what it can and cannot restore.
 
 **Pruning.** Entries expire. Default to a count limit plus an age limit, both configurable.
-`yard journal --prune` cleans up, and the refs go with the entries.
+`yard journal --prune` deletes the anchor ref and the metadata entry together; the objects become
+unreachable and ordinary `gc` reclaims them. **`yard` never calls `git gc` itself.**
 
 **Cross-tool safety.** If the repository changed outside Switchyard since a journal entry was
-written, `undo` must detect that and refuse rather than clobber. Compare recorded ref states
-against current ones and fail with exit 4 and a clear explanation. This will happen constantly in
-practice, since an agent will be running `git` directly alongside `yard`.
+written, `undo` must detect that and refuse rather than clobber. Every entry records a `guard` map
+of ref names to expected OIDs; before restoring, compare each against its current value and on
+mismatch fail with exit 4 naming the ref, the expected value, and the actual one. Offer `--force`
+to a human, never to a scripted caller. This will fire constantly in practice, since an agent
+running `git` directly alongside `yard` is the normal case rather than the exception.
+
+**Worktree awareness is part of correctness, not a refinement.** `HEAD` and the index are
+per-worktree; `refs/heads/*` are shared. So restoring `HEAD` affects only the worktree the
+operation happened in, while restoring a branch ref affects every worktree that has it checked
+out. An entry records which worktree it came from, restore refuses to run from a different one
+without `--worktree`, and `undo` warns by name when it will disturb a sibling.
 
 **Concurrency.** Two `yard` processes in the same repo must not interleave journal writes. Use a
 lock file under `.git/switchyard/` with a timeout, and fail cleanly rather than blocking forever.
@@ -434,16 +538,24 @@ stays thin dispatch over the same library — but let nothing else depend on tha
 
 Ship in this order. Each milestone is independently useful and independently abandonable.
 
-**M0 — Engine spike.** Settle libgit2 packaging, signing, and graph performance. Output is
-`docs/engine-findings.md` and a delete of the spike code. Nothing else starts until this lands.
+**M0 — Engine spike.** Settle libgit2 packaging, signing, graph performance with `commit-graph`,
+and **reftable compatibility**. Output is `docs/engine-findings.md` and a delete of the spike code.
+Nothing else starts until this lands.
 
-**M1 — `yard` read commands, standalone.** `whereami`, `graph`, `status`, `hunks`, `conflicts`,
-`log`, `verify`. No app, no XPC. JSON schemas fixed and documented. This alone is useful to an
-agent on day one and validates the engine.
+**M1 — `yard` read commands and worktrees, standalone.** `whereami`, `graph`, `status`, `hunks`,
+`conflicts`, `log`, `verify`, plus the `yard wt` group. No app, no XPC. JSON schemas fixed and
+documented. This alone is useful to an agent on day one and validates the engine.
 
-**M2 — Journal and safe mutation.** `checkpoint`, `undo`, `redo`, `journal`, plus `commit`,
-`fixup`, `stage`, `unstage`. Signing lands here. Heavy test coverage on undo across every
-mutating path.
+Worktrees are in M1 deliberately. `WorktreeContext` has to exist before any path resolution is
+written; adding it later means auditing every call site that touched a git path, which is the
+definition of a retrofit nobody finishes.
+
+**M2 — Journal, hooks, and safe mutation.** `checkpoint`, `undo`, `redo`, `journal`, plus `commit`,
+`fixup`, `stage`, `unstage`. Signing lands here. **The hook layer lands here too** —
+`yard hooks install`, the `reference-transaction` handler, and the `post-rewrite` mapping — because
+the journal is not trustworthy without it: an agent running `git` directly is the normal case, and a
+guard that fires without being able to say what moved the ref is a dead end for whoever hits it.
+Heavy test coverage on undo across every mutating path.
 
 **M3 — Switchyard.app with the graph view.** SwiftUI app rendering the graph from `YardGit`.
 Read-only at first. Port the RemoteControl XPC pattern in the same milestone so the app is
@@ -457,6 +569,15 @@ and are the highest-effort, so they come after the thing that makes the project 
 
 **The `yard` skill ships continuously from M1**, regenerated whenever the command surface changes.
 It is not a milestone of its own. See [Section 8](#8-the-agent-skill-and-why-there-is-no-mcp-server).
+
+**Candidates for M5+, not committed.**
+[git internals §6](switchyard-git-internals-and-undo.md#6-further-features-these-docs-surface)
+develops these; two are worth naming here because they are unusually cheap relative to their value.
+`yard rewrite-diff` uses `git range-diff` plus the `post-rewrite` mapping to answer "what changed in
+the changes" after a rewrite — it is what makes the journal feel trustworthy rather than merely
+present, since a reviewer who can see the delta accepts a rewrite instead of undoing it
+defensively. And `rerere` means a human resolves a conflict once in the three-way UI and every
+subsequent rebase replays it, which pairs directly with `resolve --interactive`.
 
 **Explicitly deferred:** an MCP server (decided against, see Section 8), notarization and Developer
 ID, Sparkle updates, an installer, hosting provider integrations, a sandboxed variant.
@@ -479,6 +600,18 @@ a feature at any milestone on the grounds that GitUp had it.
 - **Graph layout tests use fixture files**, the way GitUp's do. A text notation for a DAG plus
   its expected lane assignment, one file per case. Write the notation yourself; do not copy
   GitUp's fixtures, they are GPL.
+- **Undo fixtures cover the states that actually break it**, not just a clean tree: an unmerged
+  index (which `git write-tree` refuses, so the index file is snapshotted as a blob instead), a
+  mid-rebase sequencer state, a detached `HEAD`, and untracked files.
+- **Every repository fixture is built twice**, once with the default ref format and once with
+  `git init --ref-format=reftable`, and the suite runs against both. Reftable becomes the default
+  in Git 3.0; discovering the engine cannot read it should happen in CI, not on a user's repo.
+- **Worktree tests use a real linked worktree**, not a simulated one. Assert the shared-versus-
+  per-worktree ref split directly: restoring `HEAD` must not move a sibling, restoring
+  `refs/heads/*` must be detected as affecting one.
+- **The state-directory rebuild path is tested by deleting it.** Blow away
+  `~/.local/state/switchyard/` and assert `yard journal` still reconstructs from
+  `refs/switchyard/journal/*`. An untested fallback is a fallback that does not work.
 - **Signing tests** generate a throwaway SSH key in a temp dir and verify round-trip through
   `ssh-keygen -Y verify`. Skip GPG tests when `gpg` is absent rather than failing.
 - **UI tests will not run under CLI-driven `xcodebuild` in this environment.** RemoteControl hit
@@ -512,16 +645,25 @@ Decide these with Brennan, do not decide them in code.
    when it did not capture everything.
 3. **Rebase engine scope.** GitUp wrote its own. How much of one does M5 actually require, and
    can `absorb` and `split` be built on narrower primitives?
-4. **Distribution.** Mac App Store or direct. Affects sandboxing, which affects the Mach service
-   naming scheme, which is baked in early. (MIT settles whether the source is open; it does not
-   settle how the app is delivered.)
+4. **Distribution.** Mac App Store or direct. Affects sandboxing, which is baked in early and now
+   has **two** concrete consequences, not one: the Mach service name must be prefixed with an
+   app-group identifier, *and* the state directory diverges — `~/.local/state/switchyard/` from a
+   sandboxed app resolves to
+   `~/Library/Containers/co.sstools.Switchyard/Data/.local/state/switchyard/`, silently disagreeing
+   with what `yard` sees from a shell. Two processes reading different journals while both believe
+   they are reading the same one is a bug that would take a long day to find. (MIT settles whether
+   the source is open; it does not settle how the app is delivered.)
 
 ---
 
 ## Reference material
 
+Paths below are relative to the **repository root**, not to this file.
+
+- `docs/switchyard-git-internals-and-undo.md` — the companion: journal mechanics, hooks, worktrees
 - `CLAUDE.md` — working agreements for agents: licensing rules, signing safety, build commands, traps
 - `README.md` — the public description of the project
+- `issues/` — the task breakdown for the milestones in [Section 9](#9-milestones)
 - `../../RemoteControl/docs/README.md` — the XPC pattern, written to be reused in another app
 - `../../RemoteControl/FINDINGS.md` — whether XPC was worth it, and why
 - `../../RemoteControl/docs/cli-embedding-and-install.md` — embedding and installing the CLI binary
