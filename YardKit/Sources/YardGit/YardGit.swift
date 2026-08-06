@@ -33,4 +33,3 @@ public enum YardGit {
         Int(git_libgit2_shutdown())
     }
 }
-
