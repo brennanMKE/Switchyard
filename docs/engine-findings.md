@@ -152,6 +152,61 @@ to a scratch repository under Brennan's account and an SSH signing key registere
 
 ## #0003 — Graph performance on a 50k+ commit repository
 
-Not yet run. Fixture is cloned and ready: `../git` (relative to the repo root), **81,873 commits**,
-1,018 refs, 376 MB, `files` ref format, **no `commit-graph` file present** — so the with/without
-comparison the issue requires can be measured from a clean baseline.
+### Answer: fast enough, but only on the plumbing path with a commit-graph.
+
+**Fixture:** `../git` (the git/git repository), 81,873 commits, 1,018 refs, 376 MB, `files` ref
+format. Release build, Apple Silicon. Times are load (walk commits collecting oid + parents) and
+lanes (assign lanes over those nodes) separately.
+
+**Without a commit-graph file:**
+
+| Window | libgit2 load | plumbing load | lanes |
+|---|---|---|---|
+| 100 | 451 ms | 391 ms | 0.1 ms |
+| 200 | 446 ms | 396 ms | 0.4 ms |
+| 1,000 | 574 ms | 397 ms | 7 ms |
+| 5,000 | 451 ms | 415 ms | 142 ms |
+| 20,000 | 461 ms | 463 ms | 2,142 ms |
+
+**With a commit-graph file** (`git commit-graph write --reachable`: **0.39 s**, 5.1 MB):
+
+| Window | libgit2 load | plumbing load | lanes |
+|---|---|---|---|
+| 100 | 456 ms | **79 ms** | 0.1 ms |
+| 200 | 440 ms | **77 ms** | 0.4 ms |
+| 1,000 | 450 ms | **86 ms** | 7 ms |
+| 5,000 | 449 ms | **101 ms** | 148 ms |
+| 20,000 | 457 ms | **150 ms** | 2,155 ms |
+
+### Three findings, in order of how much they change the design
+
+**1. `git` plumbing uses the commit-graph. libgit2 1.9.6, as measured, does not.** Plumbing drops
+from 391 ms to 79 ms for a 100-commit window — roughly 5×. libgit2 does not move at all: 451 ms
+before, 456 ms after. Caveat worth stating plainly: this is an observation about a default-configured
+libgit2, not proof it cannot use a commit-graph. But nothing had to be configured to get the win on
+the plumbing side, and that asymmetry is the point.
+
+**2. Topological order costs a full history traversal regardless of window size.** A 100-commit
+window costs the same as a 20,000-commit window on the load side — 451 ms vs 461 ms without a
+commit-graph. "Windowed loading" is therefore not free: `--topo-order` must see the whole DAG before
+it can emit the first row correctly. The commit-graph is what makes this affordable, because its
+generation numbers let the sort skip work. **#0015 must not assume a window bounds the load cost.**
+
+**3. Lane assignment, not loading, is the scaling problem beyond a few thousand rows.** 2.1 s at
+20,000 commits. That number is the *spike's naive algorithm* — O(n × lanes) linear scans, and it
+leaks lanes badly (4,145 open lanes for 20,000 commits, which a real implementation would compact).
+It is not evidence about the shipping algorithm, only that #0015's algorithm choice matters more
+than its data source. Treat 2.1 s as an upper bound to beat, not a prediction.
+
+### Consequence
+
+For a live UI the relevant number is the visible window — on the order of 100 rows — which is
+**79 ms via plumbing with a commit-graph**. That is comfortably interactive, and it is the
+configuration the app should always be in: Switchyard keeps the commit-graph fresh in the
+background, as the guide already proposed.
+
+**This settles the #0004 architecture fork in favour of option 1.** Plumbing was already required
+for reftable correctness; it is also 5× faster on the graph path. Option 2 (vendoring libgit2 from
+`main`) would buy reftable support and still be ~5× slower here unless it also gained commit-graph
+use, so the packaging cost buys nothing on this path. libgit2 stays a candidate only for the object
+database, diff, blame, and merge — where neither reftable nor the commit-graph applies.

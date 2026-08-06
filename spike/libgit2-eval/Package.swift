@@ -20,5 +20,10 @@ let package = Package(
             dependencies: ["Clibgit2"],
             path: "Sources/eval"
         ),
+        .executableTarget(
+            name: "perf",
+            dependencies: ["Clibgit2"],
+            path: "Sources/perf"
+        ),
     ]
 )
