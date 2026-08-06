@@ -24,6 +24,32 @@ app to run**. All reads and all non-interactive mutations happen in-process, so 
 over SSH, and in headless agent runs. The app is required only for the commands that put a human in
 the loop.
 
+## The app
+
+**Window → Tabs → Git View.** Tabs are the default navigation model, built on
+[SlidingTabs](https://github.com/brennanMKE/SlidingTabs), and multiple windows are supported from
+the start — each window holds its own set of repository tabs.
+
+```
+┌────────────────────────────────────────────────────────┐
+│ [Switchyard ●] [Batty] [RemoteControl]            [+]  │
+├────────────┬─────────────────────┬─────────────────────┤
+│ Branches   │   ● main            │  diff of the        │
+│  main      │   │╲                │  selected commit    │
+│  feature/x │   ● ●               │                     │
+│            │   │╱                │  + hunks            │
+│ Worktrees  │   ●                 │  - lines            │
+│  agent-a   │   │                 │                     │
+│ Stashes    │   ●                 │                     │
+└────────────┴─────────────────────┴─────────────────────┘
+   Sidebar          Graph                 Detail
+```
+
+**One tab per repository, identified by `$GIT_COMMON_DIR`.** Opening a repository that is already
+open focuses its tab rather than duplicating it, and opening a linked worktree focuses its parent
+repository's tab and selects that worktree in the sidebar — so a project is always exactly one tab,
+however you arrive at it.
+
 ## What it is for
 
 Three things, in order of how much they matter:

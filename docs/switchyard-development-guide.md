@@ -128,7 +128,9 @@ see [Section 11](#11-decisions-and-open-questions).
 Switchyard.xcodeproj
 ├── Switchyard/          macOS app target (SwiftUI)
 │   ├── AppXPCServer, URLSchemeHandler, AgentRegistrar
-│   ├── Graph view, diff/merge UI, review sheets
+│   ├── SwitchyardApp    WindowGroup(for: WindowID.self), Settings, commands
+│   ├── WindowView       tab bar (SlidingTabs) + the active repo's Git View
+│   ├── GitView          the three panes: Sidebar, Graph, Detail
 │   └── CLIInstallActions (File menu wiring)
 ├── BrokerAgent/         launch agent executable, bootstrap broker only
 ├── YardKit/             Swift package
@@ -144,6 +146,69 @@ Switchyard.xcodeproj
 │                        including clean-room notes on GitUp concepts
 └── issues/              NNNN.md task tracker
 ```
+
+### The UI hierarchy
+
+**Window → Tabs → Git View (three panes).** Tabs are the default and only navigation model; there is
+no single-window mode to also maintain.
+
+```
+┌────────────────────────────────────────────────────────┐
+│ [Switchyard ●] [Batty] [RemoteControl]            [+]  │  ← SlidingTabs, one tab per repository
+├────────────┬─────────────────────┬─────────────────────┤
+│ Branches   │   ● main            │  diff of the        │
+│  main      │   │╲                │  selected commit    │
+│  feature/x │   ● ●               │                     │
+│            │   │╱                │  + hunks            │
+│ Worktrees  │   ●                 │  - lines            │
+│  agent-a   │   │                 │                     │
+│            │   ●                 │                     │
+│ Stashes    │                     │                     │
+└────────────┴─────────────────────┴─────────────────────┘
+   Sidebar          Graph                 Detail
+```
+
+**A tab is a repository**, and its identity is `$GIT_COMMON_DIR` — not the path the user opened.
+That single choice settles several behaviors at once:
+
+- **Opening an already-open repository focuses its tab rather than duplicating it.** Resolve the
+  requested path to its common dir, look for a tab, focus it if found.
+- **Opening a linked worktree focuses the parent repository's tab** and selects that worktree inside
+  it, because a worktree shares the common dir. Worktrees are a sidebar section, not peer tabs — one
+  tab per project, and switching worktrees happens in-tab.
+- **The rule is one rule.** "Same repo" and "same path" do not need separate answers, and the
+  dedup logic has one input.
+
+Resolve with `git rev-parse --git-common-dir` through `WorktreeContext`, then canonicalize
+(`realpath`) so symlinked paths and `/tmp` vs `/private/tmp` do not produce two tabs for one
+repository.
+
+The three panes are **Sidebar / Graph / Detail**: refs, worktrees, and stashes on the left; the
+commit graph in the middle; the selected commit's diff — later the three-way merge and review
+surfaces — on the right.
+
+**Tab chrome comes from [SlidingTabs](https://github.com/brennanMKE/SlidingTabs)**, MIT by the same
+author, depended on by tag (`from: "1.0.0"`) rather than by local path, so a public clone of this
+repository builds without also cloning SlidingTabs. `SlidingTabBar` is generic over `Identifiable`
+and takes a chip `ViewBuilder`, so reordering and the "+" affordance come with it.
+
+### Multiple windows
+
+Multiple windows are supported from the start, as in Batty: `WindowGroup(for: WindowID.self)` with a
+`WindowID` value type, each window holding its own set of repository tabs.
+
+Two traps here are already documented by Batty's `BattyApp.swift`, both from Batty issue 0251, and
+**Switchyard is more exposed to the second than Batty is** because it has a URL scheme *and* XPC
+waking the app:
+
+- **The phantom second window.** `WindowGroup(for:)` needs a `defaultValue` that returns a
+  `WindowID` already seeded in app state. Without it, SwiftUI's first content window creates a second
+  runtime, and CLI-delivered work lands in the invisible one while the visible window sits empty.
+- **External events spawning stray windows.** `.handlesExternalEvents(matching: Set())` must be on
+  **every** scene, not just the main one. When the content group declines a `switchyard://` open,
+  SwiftUI falls back to the next scene that accepts external events — including a Help window — and
+  opens *that* instead. URL opens should be handled only by the app delegate, which routes them to
+  the focus-or-open rule above.
 
 ### The layering rule
 
@@ -557,9 +622,15 @@ the journal is not trustworthy without it: an agent running `git` directly is th
 guard that fires without being able to say what moved the ref is a dead end for whoever hits it.
 Heavy test coverage on undo across every mutating path.
 
-**M3 — Switchyard.app with the graph view.** SwiftUI app rendering the graph from `YardGit`.
+**M3 — Switchyard.app: window, tabs, and the graph view.** The full shell — multiple windows,
+repository tabs on SlidingTabs, and the three-pane Git View — rendering the graph from `YardGit`.
 Read-only at first. Port the RemoteControl XPC pattern in the same milestone so the app is
 reachable.
+
+The shell is not a later polish pass. Tab identity keyed on `$GIT_COMMON_DIR` is what makes
+"open this repo" idempotent, and the window model is what the XPC and URL entry points deliver
+into — building either of those before the shell means routing work into a structure that does not
+exist yet.
 
 **M4 — Human-in-the-loop.** `review --wait`, `ask`, `resolve --interactive`, `watch`. This is the
 differentiator. Everything before it is table stakes.
