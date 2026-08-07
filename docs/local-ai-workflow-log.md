@@ -949,3 +949,65 @@ Not workflow problems, but each was a silent failure worth remembering.
   authoring reduces round count is not yet measured — the `Rounds` column exists to answer this.
 - **No automated check that a round's tests assert the spec** rather than the implementation. Caught
   by human review twice; both times it was nearly missed.
+
+### 5.2 Probing the tool before authoring changed what got built, twice in one night
+
+#0096 and #0097 both carried a Givens block probed on 2026-08-06. Re-probing the same commands on
+2026-08-07 — because both issues were about to be dispatched and the checklist says to name
+affordances rather than requirements — turned up three things the earlier probe had not asked about.
+
+- **`git worktree list --porcelain` already reports `prunable <reason>`.** #0096's Expected behavior
+  said "reports prunable worktrees with git's own stated reason", which reads like a discovery
+  routine to write. There is nothing to write; it is a field in output the code already parses.
+- **A locked worktree whose directory is gone is never reported prunable and is never reaped.** So
+  #0096's headline criterion — *never removes a worktree still locked by a live agent session* — is
+  git's guarantee, not code. An implementation that "adds" it would be adding a second, weaker copy
+  of a guarantee already in place. What actually remains is the *report*, because git will never
+  clean those entries up on its own.
+- **Both `prune -v` and `repair` write to stderr.** `GitProcess.Output.text` and `.lines` are stdout
+  only, so a round parsing them reports "nothing to prune" and "nothing repaired" for every
+  repository, in code that looks entirely correct and passes any test whose fixture has nothing to
+  prune. That is a rejection in both issues, and neither issue mentioned it.
+
+Then the finding that reversed a design decision: **`git worktree prune` cannot tell a moved worktree
+from a deleted one, and reaping a moved one is unrecoverable.** Move a worktree, and the porcelain
+reports its old path as `prunable gitdir file points to non-existent location` — byte-identical to a
+deleted one. Prune reaps it, the directory stays on disk full of the user's work, and
+`git worktree repair <newpath>` now exits 1 with *"unable to locate repository"*. Before the prune,
+that repair would have succeeded.
+
+So `wt gc` reports by default and prunes only under an explicit `--prune`, rather than pruning by
+default with `--dry-run` available. That is not a preference; it is the probe.
+
+**The general form:** §3.6d said verifying the tool beats transcribing its `--help`. This is the
+stronger version — verifying the tool beats *transcribing a previous verification*. The 2026-08-06
+probe was accurate about everything it asked. It just did not ask whether git already solved the
+problem, and that is the question that changes the issue.
+
+### 1.15 I overwrote a resolved issue with a shell redirect
+
+`cat > issues/0113.md` to file a new issue. #0113 already existed — *Parse git status porcelain v2
+into per-file entries*, resolved hours earlier — and the redirect clobbered it silently. Recovered
+from `bb97107` and verified byte-identical; the new issue became #0114.
+
+Two mistakes, and the second is the interesting one:
+
+1. I picked the next number from the **open** issue list, which by construction cannot contain
+   resolved issues. The number has to come from every `NNNN.md` on disk.
+2. I used a tool that overwrites. `>` has no opinion about whether the target exists.
+
+Nothing in the harness caught it. I noticed only because this log happens to mention "#0113 round 1"
+in a paragraph about timeouts, and that did not match the issue I had just written — a coincidence,
+not a check.
+
+`scripts/new-issue.sh` now allocates the number over all files below 8000 (so the reserved 8888/9999
+test issues do not drag allocation up) and refuses to write to a path that exists. Both directions are
+controlled: it allocated past a resolved #0113 and an open #0114 to land on #0115, and the guard fires
+when pointed at an existing path.
+
+Writing it turned up a second thing worth recording: **`cat` and `date` are not reliably available to
+a script the sandbox runs**, even when the calling shell has both. `ls`, `sed`, `grep`, `awk`, `sort`
+and `tail` all worked in the same script; `cat` and `date` failed with *command not found*. The fixes
+are zsh builtins — `$(</dev/stdin)` and `zmodload zsh/datetime; strftime` — which are better anyway.
+Any script in `scripts/` that shells out to `cat` or `date` should be assumed broken until run.
+
