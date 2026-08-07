@@ -108,7 +108,9 @@ a figure derived from it appears.
 | 2026-08-07 | #0124 | Dispatch round 3 (REJECTED, no tests; cap spent) | 61,388 | $0.49 |
 | 2026-08-07 | #0108 | Fable planning update to code level | 93,698 | $0.75 |
 | 2026-08-07 | #0108 | Dispatch round 1 (ACCEPTED, no hand finish) | 65,164 | $0.52 |
-| | | **Total measured** | **4,942,685** | **$39.53** |
+| 2026-08-07 | #0109 | Fable planning update to code level | 94,382 | $0.75 |
+| 2026-08-07 | #0109 | Dispatch round 1 + hand finish (accepted) | 72,666 | $0.58 |
+| | | **Total measured** | **5,109,733** | **$40.86** |
 
 ## What this total does and does not cover
 
