@@ -1,40 +1,67 @@
+// WorktreeStatus.swift
+
 import Foundation
-import YardKit
 
-// MARK: - Status Entry
-
-struct WorktreeStatusEntry {
+/// A per-file snapshot from `git status --porcelain=v2 -z`.
+///
+/// Each field is the index/staged state and the worktree (disk) state of a single path.
+/// Paths with spaces are preserved — `--porcelain=v2` emits one NUL-terminated record per
+/// file and a fixed number of leading space-separated tokens before the path.
+public struct WorktreeStatusEntry {
+    /// Path relative to the repository root (one of many names git uses for it).
     var path: String = ""
-    var staged: State = .unmodified
-    var worktree: State = .unmodified
-}
 
-extension WorktreeStatusEntry {
+    /// The state of the index side — what would be committed next.
+    var staged: State = .unmodified
+
+    /// The state of the worktree — what is on disk.
+    var worktree: State = .unmodified
+
+    /// One of the two porcelain-character meanings for a single field.
     enum State: String, CaseIterable {
         case unmodified = "."
         case added = "A"
         case deleted = "D"
         case modified = "M"
         case untracked = "?"
-        case conflicted = "u"  // In git index (3-party), represents conflict
-        
+        case ignored = "!"
+        case conflicted = "u"
+
+        /// Path is tracked in the index (`A`-`M`) — not `untracked`.
         init?(char: Character) {
             switch char {
             case ".": self = .unmodified
             case "A", "+": self = .added
             case "D", "-": self = .deleted
             case "M": self = .modified
-            case "?": self = .untracked
-            case "u", "!": self = .conflicted  // '!' is also used for conflicts in some contexts
             default: return nil
+            }
+        }
+
+        /// One of: `untracked`, `ignored`, or `conflicted`.
+        static func special(char: Character) -> State {
+            switch char {
+            case "?": return .untracked
+            case "!": return .ignored
+            case "u": return .conflicted
+            default:  return .unmodified
+            }
+        }
+
+        /// Char-parsed fallback for the worktree side (Y): handles `?`, `!`, and `u`.
+        init?(ychar: Character) {
+            switch ychar {
+            case "?": self = .untracked
+            case "!": self = .ignored
+            case "u": self = .conflicted
+            default:  return nil
             }
         }
     }
 }
 
-// MARK: - Worktree Status
-
-struct WorktreeStatus {
+/// The full status of a worktree. Value type, no printing, no side effects.
+public struct WorktreeStatus {
     let entries: [WorktreeStatusEntry]
 
     init(entries: [WorktreeStatusEntry]) {
@@ -43,156 +70,83 @@ struct WorktreeStatus {
 }
 
 extension WorktreeStatus: ExpressibleByArrayLiteral {
-    init(arrayLiteral elements: WorktreeStatusEntry...) {
+    public init(arrayLiteral elements: WorktreeStatusEntry...) {
         self.entries = elements
     }
 }
 
 // MARK: - Parser
 
-class WorktreeStatusParser {
-    var status: String? = nil
-    var entries: [WorktreeStatusEntry] = []
+/// Parses NUL-terminated porcelain v2 bytes into a `WorktreeStatus`.
+///
+/// Pure function on data — no `Process` construction, no filesystem access. The
+/// thin wrapper in the `YardGit` module that runs it through `git` is kept in
+/// its own call site.
+public struct WorktreeStatusParser {
 
-    init() {}
+    /// Number of leading tokens before the path, keyed on record type.
+    private static let fieldCount: [String: Int] = [
+        "1": 8,   // XY sub mH mI mW hH hI
+        "2": 9,   // XY sub m1 m2 m3 h1 h2 h3
+        "u": 9,   // XY sub m1 m2 m3 h1 h2 h3 — unmerged/conflict variant
+        "?": 0,   // bare "?" token
+        "!": 0,   // bare "!" token — ignored records (need --ignored)
+    ]
 
-    func parse(data: Data) throws -> WorktreeStatus {
-        entries = []
-        
-        guard let stringData = String(data: data, encoding: .utf8) else {
+    func parse(_ data: Data) throws -> WorktreeStatus {
+        guard let text = String(data: data, encoding: .utf8) else {
             return WorktreeStatus(entries: [])
         }
 
-        // Porcelain v2 format with -z uses NUL as record separator,
-        // newlines within records are literal in paths (rare but possible)
-        let rawRecords = stringData.split(separator: "\0").filter { !$0.isEmpty }
-        
-        for record in rawRecords {
-            // Check for branch header: "## branch name" or "## (no branch)"
-            if record.hasPrefix("## ") {
-                let parts = record.split(separator: " ", maxSplits: 2)
-                if parts.count >= 2, parts[1] != "no branch." {
-                    status = String(parts[1])
-                }
+        var entries: [WorktreeStatusEntry] = []
+        let records = text.split(separator: "\0").filter { !$0.isEmpty }
+
+        for record in records {
+            let spaceIndex = record.firstIndex(of: " ") ?? record.endIndex
+            let leading = String(record[record.startIndex..<spaceIndex])
+
+            guard let expectedFields = Self.fieldCount[leading] else { continue }
+            // drop the leading token itself
+            let fieldsBeforePath = expectedFields + 1
+
+            guard record.split(separator: " ", omittingEmptySubsequences: false).count >= fieldsBeforePath else {
+                continue
             }
-            
-            // Parse file records - format: "<n> <status_codes> [<hashes>] <path>"
-            // where n is 1 (two-party) or 2 (three-party for conflicts)
-            guard record.hasPrefix("1 ") || record.hasPrefix("2 ") else { continue }
-            
-            // Split by whitespace, but we need to handle paths with spaces
-            let parts = record.split(separator: " ", omittingEmptySubsequences: false)
-            
-            guard parts.count >= 2 else { continue }
-            
-            let recordType = parts[0]  // "1" or "2"
-            let statusStr = String(parts[1])
-            
-            // Extract path - it's everything after the known status fields
-            var filePath: String? = nil
-            
-            if recordType == "1" {
-                // Two-party format: 1 <status> [<hash1> <hash2> <hash3>] <path>
-                if parts.count == 2 {
-                    // Just status and path: "1 XY <path>"
-                    filePath = String(parts[2...].joined(separator: " "))
-                } else if parts.count == 3 {
-                    // Status and path (no hashes): "1 XY <path>"  
-                    filePath = String(parts[2])
-                } else if parts.count >= 5 {
-                    // With optional hashes: "1 XY [<hash>] <path>" or "1 XY <hash> <hash> <hash> <path>"
-                    // The path is everything after the status and optional hash fields
-                    var pathParts = parts.dropFirst(2)
-                    
-                    // Skip up to 3 hash fields (40-char hex strings) if present
-                    for _ in 0..<3 {
-                        guard let first = pathParts.first,
-                              first.count == 40,
-                              first.allSatisfy({ $0.isHexDigit }) else { break }
-                        pathParts = pathParts.dropFirst()
-                    }
-                    
-                    filePath = String(pathParts.joined(separator: " "))
-                } else {
-                    // Skip ambiguous cases
-                    continue
-                }
-                
-            } else if recordType == "2" {
-                // Three-party format: 2 <status> [<hash1> <hash2> <hash3>] [u] <path>
-                // The 'u' indicates unmerged (conflict) state
-                
-                if parts.count >= 5 {
-                    // With hashes and possibly 'u' flag
-                    var pathParts = parts.dropFirst(2)
-                    
-                    // Skip up to 3 hash fields if present (they have 'u' or '-' in third column)
-                    for _ in 0..<3 {
-                        guard let first = pathParts.first,
-                              (first.count == 40 || first.count < 10),
-                              first.allSatisfy({ $0.isHexDigit || $0 == "u" || $0 == "-" }) else { break }
-                        pathParts = pathParts.dropFirst()
-                    }
-                    
-                    // Remove the 'u' flag if present (third column indicator for conflict)
-                    var finalParts = pathParts.dropFirst() // Skip the path itself
-                    if !finalParts.isEmpty, finalParts.first == "u" {
-                        finalParts = finalParts.dropFirst()
-                    }
-                    
-                    filePath = String(finalParts.joined(separator: " "))
-                } else {
-                    // Minimal format without all hashes
-                    filePath = String(parts.dropFirst(2).joined(separator: " "))
-                }
-            }
-            
-            guard let path = filePath else { continue }
-            
-            var entry = WorktreeStatusEntry()
-            
-            // Parse staged state (first character of status code)
-            if let firstChar = statusStr.first {
-                entry.staged = WorktreeStatusEntry.State(char: firstChar) ?? .unmodified
-                
-            // Parse worktree state (second character of status code)
-            } else if let secondChar = statusStr.dropFirst().first {
-                entry.worktree = WorktreeStatusEntry.State(char: secondChar) ?? .unmodified
-                
-            // For two-party format (1 XY), both are in one code
-                } else {
-                // No status characters means unmodified for both (rare)
-            }
-            
-            entry.path = path
-            
-            // Check if this is a conflict (3-party format with 'u' flag)
-            let isThreeParty = record.hasPrefix("2 ")
-            
-            if isThreeParty {
-                // In 3-party format, check for 'u' in the status area
-                if record.contains(" u ") || record.contains(" u\t") {
-                    // This indicates an unmerged file (conflict)
-                    entry.staged = .conflicted
-                } else if statusStr.first == "u" {
-                    entry.staged = .conflicted
-                } else if record.contains(" u ") {
-                    entry.staged = .conflicted
-                    // The worktree might still show modification
-                }
+
+            let allTokens = record.split(separator: " ", omittingEmptySubsequences: false)
+            guard allTokens.count >= fieldsBeforePath else { continue }
+
+            let path = String(allTokens[fieldsBeforePath...].joined(separator: " "))
+            guard !path.isEmpty else { continue }
+
+            var entry = WorktreeStatusEntry(path: path)
+            let statusStr = String(allTokens[1])
+
+            if expectedFields == 0 {
+                // A bare "?": untracked; "!" ignored. Worktree state mirrors staged.
+                entry.staged = .unmodified
+                let parsedChar: WorktreeStatusEntry.State =
+                    WorktreeStatusEntry.State(char: statusStr.first ?? ".") ?? .unmodified
+                entry.worktree = parsedChar
             } else {
-                // For two-party format, check if status is "??", "!?" or "?!" for untracked
-                if statusStr == "??" {
-                    entry.staged = .untracked
-                    entry.worktree = .modified // untracked files are "present" in worktree
-                
-                } else if statusStr == "!?" || statusStr == "?!" {
-                    // Conflicted file tracked in index but not in worktree or vice versa
-                    entry.staged = .conflicted
-                    entry.worktree = .modified
+                let staged: WorktreeStatusEntry.State =
+                    WorktreeStatusEntry.State(char: statusStr.first ?? ".") ?? .unmodified
+                let workChar: WorktreeStatusEntry.State =
+                    statusStr.dropFirst().first.map {
+                        WorktreeStatusEntry.State(char: $0) ?? .unmodified
+                    } ?? .unmodified
+                entry.staged = staged
+                entry.worktree = workChar
+
+                // Conflict is reported in X (staged): the file has two `u` entries in the index.
+                // For conflict records (`u`) that also carry "AA" or similar, the worktree side
+                // can be "." (unmerged file never written to disk). Marking staged as .conflicted
+                // reflects the data model: "there is a conflict here".
+                if statusStr.first == "u" {
+                    entry.staged = WorktreeStatusEntry.State.special(char: "u")
                 }
             }
-            
+
             entries.append(entry)
         }
 
@@ -200,10 +154,21 @@ class WorktreeStatusParser {
     }
 }
 
-// MARK: - Helper extensions for String/Character
-  
-extension Character {
-    var isHexDigit: Bool {
-        ("0"..."9").contains(self) || ("a"..."f").contains(self.lowercased())
-    }
+/// Runs `git status --porcelain=v2 -z` against a repository and parses the result.
+///
+/// `includeIgnored` controls whether ignored files are reported via `--ignored`.
+public func gitStatus(
+    at repositoryPath: String,
+    includeIgnored: Bool = false,
+    git: GitProcess = GitProcess()
+) throws -> WorktreeStatus {
+    var args: [String] = ["status", "--porcelain=v2", "-z"]
+    if includeIgnored { args.append("--ignored") }
+
+    let output = try git.run(
+        args,
+        workingDirectory: repositoryPath
+    )
+
+    return try WorktreeStatusParser().parse(output.standardOutput)
 }

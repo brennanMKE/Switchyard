@@ -28,7 +28,7 @@ struct WorktreeStatusTests {
         )
         
         let parser = WorktreeStatusParser()
-        let status = try parser.parse(data: output.standardOutput)
+        let status = try parser.parse(output.standardOutput)
         
         // Find entries by path  
         let modifiedEntry = status.entries.first { $0.path == "modified.txt" }
@@ -69,15 +69,15 @@ struct WorktreeStatusTests {
         )
         
         let parser = WorktreeStatusParser()
-        let status = try parser.parse(data: output.standardOutput)
+        let status = try parser.parse(output.standardOutput)
         
         // Find base.txt entry - it should be staged as modified, worktree clean
         let baseEntry = status.entries.first { $0.path == "base.txt" }
         #expect(baseEntry != nil, "should find base file")
         
         let base = try #require(baseEntry)
-        #expect(base.staged == .modified, "file should be staged as modified after staging")
-        #expect(base.worktree == .unmodified, "worktree should be clean after staging")
+        #expect(base.staged == WorktreeStatusEntry.State.modified, "file should be staged as modified after staging")
+        #expect(base.worktree == WorktreeStatusEntry.State.unmodified, "worktree should be clean after staging")
     }
     
     // MARK: - Test 3: Untracked files detection
@@ -97,14 +97,14 @@ struct WorktreeStatusTests {
         )
         
         let parser = WorktreeStatusParser()
-        let status = try parser.parse(data: output.standardOutput)
+        let status = try parser.parse(output.standardOutput)
         
         // Find untracked entry  
         let untrackedEntry = status.entries.first { $0.path == "untracked.txt" }
         #expect(untrackedEntry != nil, "should find untracked file")
         
         let entry = try #require(untrackedEntry)
-        #expect(entry.staged == .untracked, "file should be marked as untracked")
+        #expect(entry.staged == WorktreeStatusEntry.State.untracked, "file should be marked as untracked")
         #expect(entry.worktree == .modified || entry.worktree == .unmodified, "worktree state may vary")
     }
     
@@ -127,7 +127,7 @@ struct WorktreeStatusTests {
         
         do {
             let parser = WorktreeStatusParser()
-            let status = try parser.parse(data: data)
+            let status = try parser.parse(data)
             
             // Should have 2 entries  
             #expect(status.entries.count == 2, "parser should recognize both file statuses")
@@ -135,16 +135,16 @@ struct WorktreeStatusTests {
             // Verify each entry's state
             let modifiedEntry = status.entries.first { $0.path == "modified.txt" }
             if let entry = modifiedEntry {
-                #expect(entry.staged == .unmodified, "staged should be unmodified for unstaged change")
-                #expect(entry.worktree == .modified, "worktree should be modified")
+                #expect(entry.staged == WorktreeStatusEntry.State.unmodified, "staged should be unmodified for unstaged change")
+                #expect(entry.worktree == WorktreeStatusEntry.State.modified, "worktree should be modified")
             } else {
                 Issue.record("Should find modified.txt entry")
             }
             
             let addedEntry = status.entries.first { $0.path == "added.txt" }
             if let entry = addedEntry {
-                #expect(entry.staged == .added, "staged should be added for new file in index")
-                #expect(entry.worktree == .unmodified, "worktree should be unchanged")
+                #expect(entry.staged == WorktreeStatusEntry.State.added, "staged should be added for new file in index")
+                #expect(entry.worktree == WorktreeStatusEntry.State.unmodified, "worktree should be unchanged")
             } else {
                 Issue.record("Should find added.txt entry")
             }
