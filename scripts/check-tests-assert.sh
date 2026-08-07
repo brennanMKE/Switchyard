@@ -69,8 +69,17 @@ NARROW=$(grep -rn -A2 --include='*.swift' -E '^[[:space:]]*for +[A-Za-z_(].* in 
 #
 # Bare `return` only: a closure returning a value uses `return x`, so this
 # stays quiet on the common legitimate case.
-SKIPSHAPE=$(grep -rn --include='*.swift' -E '^[[:space:]]*(return|.*else \{ return \})[[:space:]]*$' $TARGETS 2>/dev/null \
-  | sed 's/^/  SKIPSHAPE  /' || true)
+SKIPSHAPE=$(find $TARGETS -name '*.swift' -type f 2>/dev/null | while read -r f; do
+  awk -v FNAME="$f" '
+    # A return preceded by Issue.record is a LOUD failure then exit — correct,
+    # not a skip. Only an unannounced return is the defect.
+    { prev2 = prev1; prev1 = cur; cur = $0 }
+    /^[[:space:]]*return[[:space:]]*$/ || /else \{ return \}[[:space:]]*$/ {
+      if (prev1 !~ /Issue\.record/ && prev2 !~ /Issue\.record/ && $0 !~ /Issue\.record/)
+        printf "  SKIPSHAPE  %s:%d:%s\n", FNAME, FNR, $0
+    }
+  ' "$f"
+done || true)
 
 # --- TAUTOLOGY: an assertion whose operands are literals --------------------
 # #expect(true) passes no matter what the code does. Found in a round that had
