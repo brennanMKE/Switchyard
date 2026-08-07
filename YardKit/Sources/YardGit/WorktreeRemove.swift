@@ -225,5 +225,8 @@ private func extractDirtyPaths(
 /// Canonicalize a path the same way `WorktreeContext` does, so /private/var paths
 /// compare correctly against gitDir/commonDir, which are canonicalized.
 private func canonicalize(_ path: String) -> String {
-    URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
+    // One implementation, in WorktreeContext. Two copies disagreed once already:
+    // this one used `resolvingSymlinksInPath()`, which strips a leading
+    // `/private`, while the other resolves with `realpath(3)` and keeps it.
+    WorktreeContext.canonicalize(path)
 }
