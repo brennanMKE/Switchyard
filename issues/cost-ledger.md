@@ -61,7 +61,9 @@ a figure derived from it appears.
 | 2026-08-07 | #0113 | Dispatch round 1 (sandbox rejection, no output) | 41,137 | $0.33 |
 | 2026-08-07 | #0113 | Dispatch round 2 (REJECTED, red suite) | 51,226 | $0.41 |
 | 2026-08-07 | #0014 | Round 3 dispatch blocked by unmerged review | 44,255 | $0.35 |
-| | | **Total measured** | **2,407,263** | **$19.26** |
+| 2026-08-07 | #0113 | Dispatch round 3 + hand finish (accepted) | 52,198 | $0.42 |
+| 2026-08-07 | #0014 | Dispatch round 3 (REJECTED, review defect) | 59,498 | $0.48 |
+| | | **Total measured** | **2,518,959** | **$20.15** |
 
 ## What this total does and does not cover
 
