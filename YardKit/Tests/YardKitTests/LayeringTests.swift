@@ -29,7 +29,7 @@ struct LayeringTests {
             for line in source.split(separator: "\n") {
                 let trimmed = String(line).trimmingCharacters(in: .whitespaces)
                 guard !trimmed.isEmpty, !trimmed.hasPrefix("//") else { continue }
-                let marker = stripImportAttributes(from: trimmed)
+                guard let marker = stripImportAttributes(from: trimmed) else { continue }
                 #expect(
                     !marker.hasPrefix("YardKit"),
                     "\(file.lastPathComponent) imports YardKit — the engine must not depend on the XPC layer"
@@ -57,7 +57,7 @@ struct LayeringTests {
             for line in source.split(separator: "\n") {
                 let trimmed = String(line).trimmingCharacters(in: .whitespaces)
                 guard !trimmed.isEmpty, !trimmed.hasPrefix("//") else { continue }
-                let marker = stripImportAttributes(from: trimmed)
+                guard let marker = stripImportAttributes(from: trimmed) else { continue }
                 #expect(
                     !marker.hasPrefix("YardGit"),
                     "\(file.lastPathComponent) imports YardGit — the CLI must not depend on the engine"
@@ -78,13 +78,14 @@ struct LayeringTests {
 
             while let url = enumerator.nextObject() as? URL {
                 if let isDir = try? url.resourceValues(forKeys: [URLResourceKey.isDirectoryKey]).isDirectory {
-                    if isDir {
+                    if isDir, url.lastPathComponent.hasPrefix(".") {
                         enumerator.skipDescendants()
-                    } else if url.pathExtension == "swift", !url.lastPathComponent.hasPrefix(".") {
+                    } else if !isDir, url.pathExtension == "swift" {
                         results.append(url)
                     }
-                } else if url.pathExtension == "swift", !url.lastPathComponent.hasPrefix(".") {
-                    // If we can't determine if it's a directory, treat as file.
+                } else if url.pathExtension == "swift" {
+                    // If we can't determine the type, treat as a file and check
+                    // it is not hidden.
                     results.append(url)
                 }
             }
@@ -106,17 +107,24 @@ struct LayeringTests {
     /// Strip `@testable`, `internal`, and `public` attributes from the start of
     /// a Swift import line so that guarded imports (`@testable import X`,
     /// `internal import Y`) are matched the same as an unqualified `import Z`.
-    /// Returns `line` unchanged if it does not start with the `import` keyword —
-    /// callers rely on that signal to skip non-import lines.
-    private func stripImportAttributes(from line: String) -> String {
-        let attributes = ["@testable ", "internal ", "public "]
+    /// Removes the leading `import` keyword so callers can test for a bare
+    /// module name with `.hasPrefix("Name")`.
+    ///
+    /// Returns `nil` for a line that is not an import. The previous version
+    /// returned the line unchanged and its comment claimed callers used that as
+    /// a skip signal — neither caller did, so a source line beginning at column
+    /// zero with a module name, e.g. `YardKit.version`, was a false positive.
+    /// Returning an Optional makes the signal one the compiler enforces.
+    private func stripImportAttributes(from line: String) -> String? {
+        var result = line
 
-        for attr in attributes {
-            if line.hasPrefix(attr) {
-                return String(line.dropFirst(attr.count))
+        for attr in ["@testable ", "internal ", "public "] {
+            if result.hasPrefix(attr) {
+                result = String(result.dropFirst(attr.count))
             }
         }
 
-        return line
+        guard result.hasPrefix("import ") else { return nil }
+        return String(result.dropFirst("import ".count))
     }
 }
