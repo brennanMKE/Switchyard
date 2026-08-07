@@ -95,7 +95,8 @@ a figure derived from it appears.
 | 2026-08-07 | #0121 | Dispatch round 2 (FAILED, compaction fabricated history) | 50,014 | $0.40 |
 | 2026-08-07 | #0116 | Dispatch round 1 (REJECTED, timeout, signatures not supplied) | 59,663 | $0.48 |
 | 2026-08-07 | #0118 | Dispatch round 1 (accepted, no hand finish) | 58,213 | $0.47 |
-| | | **Total measured** | **4,221,337** | **$33.76** |
+| 2026-08-07 | #0116 | Dispatch round 2 + hand finish (accepted) | 67,812 | $0.54 |
+| | | **Total measured** | **4,289,149** | **$34.30** |
 
 ## What this total does and does not cover
 
