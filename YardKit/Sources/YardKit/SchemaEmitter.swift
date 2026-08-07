@@ -7,7 +7,7 @@ import Foundation
 /// Pure function: no I/O, no printing. Given a spec it returns pretty-printed JSON with sorted
 /// keys so the output is byte-stable across runs — callers can diff it, commit it alongside
 /// docs/contracts/, and assert on its shape.
-public nonisolated func renderSchema(for spec: CommandSpec) -> String {
+public nonisolated func renderSchema(for spec: CommandSpec) throws -> String {
     let payload: [String: Any] = [
         "command": spec.name,
         "exitCodes": spec.exitCodes.sorted(by: { $0.code < $1.code }).map { exitCode in
@@ -15,7 +15,7 @@ public nonisolated func renderSchema(for spec: CommandSpec) -> String {
         },
         "flags": spec.flags.sorted(by: { $0.long < $1.long }).map { flag in
             var f: [String: Any] = [
-                "argument": flag.argument as Any,
+                "argument": flag.argument.map { $0 as Any } ?? NSNull(),
                 "help": flag.help,
                 "long": flag.long,
             ]
@@ -31,6 +31,11 @@ public nonisolated func renderSchema(for spec: CommandSpec) -> String {
         "summary": spec.summary,
     ]
 
-    let data = try! JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
-    return String(data: data, encoding: .utf8)!
+    let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
+    guard let text = String(data: data, encoding: .utf8) else {
+        throw SchemaError.encodingFailed
+    }
+    return text
 }
+
+private enum SchemaError: Error { case encodingFailed }
