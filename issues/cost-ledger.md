@@ -69,3 +69,49 @@ to watch.
 
 **Write a measurement down in the same turn it is reported.** A number held only in conversation
 context is already lost.
+
+## Ornith — what the local model has processed
+
+Regenerate with `./scripts/ornith-tally.sh` (add `--markdown` for this table). The numbers come from
+OpenCode's own SQLite database at `~/.local/share/opencode/opencode.db`, which records
+`tokens_input` and `tokens_output` per session. **The dispatch logs carry no token counts at all**,
+and LM Studio exposes no historical usage endpoint — this database is the only durable record, and
+unlike a dispatcher's `subagent_tokens` it survives the session that produced it. Issues are
+attributed by the session's working directory, since a dispatch runs in `../switchyard-NNNN`.
+
+| Issue | Sessions | Input tokens | Output tokens | Total | Hosted equivalent |
+|---|---|---|---|---|---|
+| (main) | 6 | 3,090,068 | 17,302 | 3,107,370 | $9.53 |
+| #0010 | 1 | 3,599,879 | 24,832 | 3,624,711 | $11.17 |
+| #0011 | 1 | 2,409,020 | 22,566 | 2,431,586 | $7.57 |
+| #0070 | 3 | 830,633 | 6,347 | 836,980 | $2.59 |
+| #0085 | 1 | 429,505 | 3,543 | 433,048 | $1.34 |
+| #0086 | 2 | 701,247 | 5,498 | 706,745 | $2.19 |
+| #0087 | 3 | 2,789,837 | 41,131 | 2,830,968 | $8.99 |
+| #0090 | 2 | 1,961,394 | 35,115 | 1,996,509 | $6.41 |
+| #0091 | 1 | 952,760 | 8,181 | 960,941 | $2.98 |
+| #0092 | 1 | 1,605,158 | 8,955 | 1,614,113 | $4.95 |
+| #0093 | 1 | 3,588,422 | 27,867 | 3,616,289 | $11.18 |
+| #0098 | 2 | 423,236 | 2,340 | 425,576 | $1.30 |
+| #0102 | 1 | 3,031,848 | 12,401 | 3,044,249 | $9.28 |
+| **Total** | **25** | **25,413,007** | **216,078** | **25,629,085** | **$79.48** |
+
+Actual cost: **$0.00**. Ornith runs locally in LM Studio; the hosted column is what the
+same traffic would have cost on Sonnet 5 at list price ($3/MTok in, $15/MTok out), which is
+the model CLAUDE.md says it replaces.
+
+### What the numbers say
+
+**Input outweighs output by roughly 118 to 1.** That is the shape of an agentic loop, not a
+peculiarity of this model: every turn resends the accumulated context, so a thirty-minute round
+re-reads its own transcript hundreds of times. It is the single strongest argument for running the
+implementer locally — on a hosted model this ratio is the whole bill, and here it is free.
+
+**The most expensive rounds are the ones that failed.** #0093 processed 3.6M tokens and was killed at
+the timeout having produced nothing usable; #0010 processed 3.6M before being split for being
+oversized; #0087 spent 2.8M across three sessions, two of them chasing a test that asserted nothing.
+Roughly **13.7M of the 25.6M — over half — went on rounds that were rejected or abandoned.** That is
+the cost of authoring defects, and it is invisible in the dollar column precisely because it is free.
+
+**`(main)` is 3.1M tokens of sessions that predate the worktree rule.** They ran in the primary
+checkout, which is exactly what `CLAUDE.md` now forbids.
