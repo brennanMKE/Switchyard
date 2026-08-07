@@ -319,6 +319,26 @@ Flaky and inert at the same time.
 assert the exact expected value, not a property the wrong answer might also satisfy. If the correct
 output is a specific string, compare the whole string.
 
+### A fixture path and the path git reports back are not the same string.
+
+`NSTemporaryDirectory()` returns `/var/folders/…`. `/var` is a symlink to `/private/var`, and **every
+path git prints is the resolved form** — `/private/var/folders/…`. So this never matches:
+
+```swift
+let entry = entries.first { $0.path == repo.url.path }   // always nil
+```
+
+A round lost itself to this: its `try #require` on that lookup aborted every test before the
+assertions it cared about could run, and the assertions therefore could not evaluate true for **any**
+input.
+
+`FixtureRepository.url` is now resolved at construction, so comparing against it works. If you build a
+path yourself, resolve it the same way — with `realpath(3)`.
+
+**Not with `resolvingSymlinksInPath()`.** That method is documented to *strip* a leading `/private`,
+which normalises in the opposite direction. It looks like the right call and silently does nothing
+useful here.
+
 ## Rule 10 — `swift build` does not compile the tests. Only `swift test` does.
 
 `swift build` builds the library and executable targets. It does **not** build test targets. A test

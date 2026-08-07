@@ -39,6 +39,14 @@ public struct FixtureRepository {
         }
     }
 
+    /// `realpath(3)`. Foundation's `resolvingSymlinksInPath()` strips a leading
+    /// `/private` instead of adding it, which is the opposite of what git reports.
+    static func realPath(_ path: String) -> String {
+        guard let resolved = realpath(path, nil) else { return path }
+        defer { free(resolved) }
+        return String(cString: resolved)
+    }
+
     /// A commit to create, named so later commits can refer to it.
     public struct Commit: Sendable {
         public let name: String
@@ -72,7 +80,17 @@ public struct FixtureRepository {
                 git: GitProcess = GitProcess()) throws {
         self.git = git
         self.refFormat = refFormat
-        self.url = URL(fileURLWithPath: NSTemporaryDirectory())
+        // `NSTemporaryDirectory()` returns `/var/folders/...`, but `/var` is a
+        // symlink to `/private/var` and every path git reports back is the
+        // resolved form. A fixture that hands git the unresolved path and then
+        // compares its own `url.path` against git's output never matches --
+        // which cost #0097 a round, with an assertion that could not evaluate
+        // true for any input.
+        //
+        // `resolvingSymlinksInPath()` does NOT do this: it is documented to
+        // *strip* a leading `/private`, i.e. it normalises the wrong way. Only
+        // `realpath(3)` gives the form git uses.
+        self.url = URL(fileURLWithPath: Self.realPath(NSTemporaryDirectory()))
             .appendingPathComponent("yard-fixture-\(UUID().uuidString)")
 
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
