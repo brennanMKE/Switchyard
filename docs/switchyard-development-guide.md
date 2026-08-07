@@ -217,24 +217,35 @@ embedding, `SMAppService` registration, and the presentation of results. Anythin
 worth testing goes in `YardKit` and has unit tests. This is the BattyKit and BridgeKit principle
 carried forward.
 
-### The critical constraint: `yard` must work without the app
+### The CLI is a companion to the app
 
-This is the single most important architectural decision in the project.
+`switchyard` ships inside the app bundle and drives Switchyard.app over XPC. **The app owns the
+engine.**
 
-If `yard` requires Switchyard.app to be running, the CLI is useless in CI, over SSH, and in
-headless agent runs. That is most of the addressable use.
+- **`YardGit` and libgit2 live in the app.** The CLI does not link them and never opens a repository
+  itself. It marshals arguments over XPC and prints the reply.
+- **The CLI is literally a remote control.** The reference project is named for this. The app has all
+  of the functionality; the CLI is the surface that drives it. **Duplicating the engine into the CLI
+  would be bad design** — it is a second implementation of the same behaviour, and two
+  implementations of git state eventually disagree. The human's window and the agent's command must
+  see the same repository, the same journal, and the same watchers, and the only reliable way to
+  guarantee that is for there to be one of each.
+- **If the app is not running, the CLI launches it** and polls the broker for an endpoint. Bound the
+  wait and exit 3 when it expires. This is RemoteControl's pattern; see
+  `../../RemoteControl/docs/xpc-cli-architecture.md`.
+- **Degradation is explicit.** A command that cannot reach the app fails with exit code 3 naming what
+  is missing. It never silently falls back, because an agent told to obtain human approval must not
+  proceed without it.
 
-Therefore:
+> **Corrected 2026-08-06.** This section previously read "the critical constraint: `yard` must work
+> without the app", justified by CI, SSH and headless agent runs. **That requirement was never set by
+> Brennan** — it was generated, recorded as settled, and then propagated into `CLAUDE.md`, the README
+> and `Package.swift`, where the CLI target still declares a dependency on `YardGit`. There is no CI
+> or SSH requirement. The CLI is a companion tool, exactly as in RemoteControl.
 
-- **`YardGit` is a standalone library.** All read commands and all non-interactive mutations run
-  entirely in-process in the CLI. No app, no XPC, no launch agent.
-- **The XPC connection is optional enrichment.** It is required only by the interactive commands
-  (`review`, `ask`, `resolve --interactive`) and by `watch`.
-- **Degradation is explicit.** An interactive command with no app running fails with exit code 3
-  and a message naming what is missing. It does not silently fall back to a non-interactive path,
-  because an agent would then proceed without the human approval it was told to obtain.
-- Add `yard --require-app` to fail fast, and `yard <cmd> --no-launch` matching RemoteControl's
-  existing flag, for callers that must not spawn a GUI app.
+- Add `switchyard <cmd> --no-launch`, matching RemoteControl's existing flag, for callers that must
+  not spawn a GUI app. There is no `--require-app` — the app is always required, so a flag asserting
+  it would mean nothing.
 
 ### XPC transport
 
@@ -594,8 +605,10 @@ the per-session cost of a large server is no longer what it was.
 
 It has not inverted, for reasons that are not about token counts:
 
-- A shell command works in every agent, including ones with no MCP support, and in plain scripts,
-  CI, and over SSH. An MCP tool works only inside an MCP client.
+- A shell command works in every agent, including ones with no MCP support, and in plain scripts.
+  An MCP tool works only inside an MCP client. (This bullet previously also claimed CI and SSH; that
+  was part of the standalone-CLI premise corrected in §4 and does not apply — `switchyard` needs the
+  app either way. The argument stands without it.)
 - An MCP server is a process with a lifecycle, a transport, and a failure mode that looks like the
   tool silently not existing. `yard` is a binary that either runs or prints an error.
 - Agents already know how to run CLI tools. The skill teaches flags, not a new calling convention.

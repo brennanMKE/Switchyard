@@ -19,10 +19,11 @@ safely. **Every mutating operation is reversible.**
 | **Switchyard.app** | SwiftUI macOS app. Interactive commit graph, three-way merge, review UI. |
 | **`yard`** | CLI. Structured, non-interactive git operations for humans and agents. |
 
-`yard` ships inside the app bundle and symlinks into `/usr/local/bin`, but **it does not need the
-app to run**. All reads and all non-interactive mutations happen in-process, so the CLI works in CI,
-over SSH, and in headless agent runs. The app is required only for the commands that put a human in
-the loop.
+`switchyard` ships inside the app bundle and symlinks into `/usr/local/bin`. It is a **companion to
+the app, not a replacement for it**: the app owns the git engine, and the CLI drives it over XPC. If
+the app is not running, the CLI launches it and waits, so the first command after a reboot still
+works. What the CLI gives an agent is a structured, scriptable surface onto the same engine the human
+is looking at — not a second implementation that can drift from it.
 
 ## The app
 

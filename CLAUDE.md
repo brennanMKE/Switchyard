@@ -293,11 +293,21 @@ cd YardKit && swift build && swift test
 embedding, `SMAppService` registration, and presentation of results. Anything with logic worth
 testing goes in `YardKit` and has unit tests.
 
-**`yard` must work without the app running.** This is the most important architectural constraint in
-the project. If the CLI needs Switchyard.app, it is useless in CI, over SSH, and in headless agent
-runs — which is most of the addressable use. `YardGit` is standalone; all reads and all
-non-interactive mutations run in-process in the CLI with no app, no XPC, no launch agent. The XPC
-connection is optional enrichment for `review`, `ask`, `resolve --interactive`, and `watch`.
+**`switchyard` is a companion tool, not a standalone one.** It ships inside the app bundle, is
+symlinked into `/usr/local/bin`, and drives Switchyard.app over XPC. **The app owns the engine.**
+
+- **`YardGit` and libgit2 live in the app only.** The CLI does not link them, and does not open a
+  repository itself.
+- **The CLI marshals arguments over XPC and prints the reply.** It stays small.
+- **If the app is not running, the CLI launches it** and polls the broker for an endpoint, bounded,
+  exiting 3 when that expires. This is RemoteControl's model — see
+  `../../RemoteControl/docs/xpc-cli-architecture.md`, which is the prototype this pattern comes from.
+
+**There is no CI or SSH requirement.** An earlier version of this file called "works without the app"
+the most important constraint in the project, and cited CI, SSH and headless agent runs. **That was
+never a requirement Brennan set** — it was invented and then treated as settled, which is how it
+reached the guide, the README, and the shape of `Package.swift`. Corrected 2026-08-06. Do not
+reintroduce it, and be suspicious of any issue whose rationale depends on it.
 
 `ServiceNames.swift` in `YardKit` is the single source of truth for the bundle identifier, Mach
 service name, agent plist name, URL scheme, and log subsystem. Nothing else hardcodes those strings.
