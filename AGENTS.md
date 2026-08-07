@@ -211,6 +211,26 @@ If something is genuinely ambiguous:
 An unanswered question at the end of a finished round is useful. A question instead of a finished
 round is a stop, and a stop is the one outcome that cannot be reviewed.
 
+## Rule 10 — `swift build` does not compile the tests. Only `swift test` does.
+
+`swift build` builds the library and executable targets. It does **not** build test targets. A test
+file with a syntax error, a missing import, or a variable used out of scope compiles nowhere, and
+`swift build` still prints `Build complete!` — in under a second, because there was nothing new to do.
+
+A round once read that, concluded the suite was green, and shipped a test file containing
+`cannot find 'fm' in scope`. Every mutation the issue required was unrunnable. The whole round was
+lost.
+
+**Verification is `swift test`. Always.** And:
+
+**A `swift test` run with no `Test run with N tests` line is a failure.** Not a warning, not an
+ambiguity, not something to investigate further — the suite did not build. If you grep the output for
+that line and get nothing, *that is the answer*: the run failed. Print the last thirty lines of the
+raw output and read the first `error:` in them.
+
+Do not treat an empty grep as inconclusive. An expected line that is absent is a finding, not a
+missing view of one.
+
 ## Build commands
 
 ```sh
