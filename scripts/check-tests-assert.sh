@@ -92,6 +92,11 @@ done || true)
 # #expect(true) passes no matter what the code does. Found in a round that had
 # already been graded "no inert tests" — the body does contain an assertion
 # macro, so the INERT scan above cannot see it.
+# Also catches `#expect(x == x)` -- a constant compared to itself. #0114 shipped
+# `#expect(encodingFailureEnvelope == encodingFailureEnvelope)`, which the
+# literal-operand pattern below could never see.
+TAUT_SELF=$(grep -rnE --include='*.swift' '#(expect|require)\(([A-Za-z_][A-Za-z0-9_.]*) *== *\2( *,|\))' $TARGETS 2>/dev/null \
+  | sed 's/^/  TAUTOLOGY  /' || true)
 TAUT=$(grep -rn --include='*.swift' -E '#(expect|require)\((true|false|1 == 1|0 == 0)\)' $TARGETS 2>/dev/null \
   | sed 's/^/  TAUTOLOGY  /' || true)
 
@@ -217,7 +222,7 @@ STDOUTCAPTURE=$(grep -rn --include='*.swift' -E '\bdup2\b' $TARGETS 2>/dev/null 
 HAND=$(grep -rn -E 'static +(var|let) +allCases' Sources YardKit/Sources --include='*.swift' 2>/dev/null \
   | sed 's/^/  HANDROLLED /' || true)
 
-for block in "$INERT" "$NARROW" "$TAUT" "$ORPHAN" "$EMPTYELSE" "$EXPECTBANG" "$HAND"; do
+for block in "$INERT" "$NARROW" "$TAUT" "$TAUT_SELF" "$ORPHAN" "$EMPTYELSE" "$EXPECTBANG" "$HAND"; do
   if [[ -n "${block//[[:space:]]/}" ]]; then print -r -- "$block"; FOUND=1; fi
 done
 
