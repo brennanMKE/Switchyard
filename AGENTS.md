@@ -241,6 +241,26 @@ The same applies to two shapes nearby:
 `scripts/check-tests-assert.sh` now flags the comment-only `else`. It cannot see the other two — those
 are yours to avoid.
 
+### `#expect(x != nil)` then `x!` destroys the whole run
+
+`#expect` **records an issue and keeps going.** It does not stop the test. So this:
+
+```swift
+#expect(entry != nil, "the entry should be there")
+let path = entry!.path                       // ← traps when it isn't
+```
+
+does not fail one test — it kills the test **process**. swift-testing emits no
+`Test run with N tests` line at all, and every other test's result is lost with it. A round died
+exactly this way, having written the pattern three times in one file.
+
+```swift
+let entry = try #require(entries.first { … })   // stops the test if absent
+let path = entry.path
+```
+
+`#require` is `#expect`'s stopping sibling. Use it for every optional you are about to unwrap.
+
 ## Rule 10 — `swift build` does not compile the tests. Only `swift test` does.
 
 `swift build` builds the library and executable targets. It does **not** build test targets. A test

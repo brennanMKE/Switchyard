@@ -80,7 +80,8 @@ a figure derived from it appears.
 | 2026-08-07 | #0088 | Dispatch round 1 (REJECTED, two assertions absent, scope violation) | 62,839 | $0.50 |
 | 2026-08-07 | #0096 | Dispatch round 2 (REJECTED, test file does not compile) | 64,158 | $0.51 |
 | 2026-08-07 | #0088 | Dispatch round 2 + hand finish (accepted) | 65,420 | $0.52 |
-| | | **Total measured** | **3,383,519** | **$27.06** |
+| 2026-08-07 | #0096 | Dispatch round 3 (REJECTED, timeout; cap spent, split to #0120) | 53,429 | $0.43 |
+| | | **Total measured** | **3,436,948** | **$27.50** |
 
 ## What this total does and does not cover
 
