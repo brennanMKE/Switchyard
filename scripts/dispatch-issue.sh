@@ -144,6 +144,15 @@ Rules for this run, which override anything in the issue that disagrees:
      approach; do not retry it. If the write tool fails twice on one file,
      create it with a shell heredoc instead: cat > path/File.swift <<'SWIFT'
      ... SWIFT. Never end your turn by describing steps you have not run.
+  8. Do NOT spawn a subagent — no Explore, no Task, no delegation of any kind.
+     The issue names every file, type and signature you need. Four of the last
+     five failed rounds hung on that handoff and produced nothing at all.
+  9. Read the files the issue names, then START EDITING. Do not survey the
+     repository first. One round read twelve files without writing a line,
+     filled its context to 49k, was compacted, and died -- it had treated a
+     fully-specified issue as a research task. If you find yourself reading a
+     file the issue did not name, stop and ask whether you already have what
+     you need.
 
 Finish with a short report: what you changed, what you ran, what it printed,
 and anything you could not do.
