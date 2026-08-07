@@ -206,8 +206,9 @@ public func whereAmI(
     // We count lines after stripping trailing empty ones, which matches what
     // a caller would see in the status bar.
     let untrackedCount: Int = {
-        let out = try! git.capture(
-            ["ls-files", "-o", "--exclude-standard"], workingDirectory: path)
+        guard let out = try? git.capture(
+            ["ls-files", "-o", "--exclude-standard"], workingDirectory: path),
+              out.exitCode == 0 else { return 0 }
         let text = out.text.split(separator: "\n", omittingEmptySubsequences: true)
         return text.count
     }()
@@ -215,16 +216,18 @@ public func whereAmI(
     // Unstaged: `diff-index HEAD --name-status` lists entries with unstaged
     // changes, one per line. Each line is a file in modified state.
     let unstagedCount: Int = {
-        let out = try! git.capture(
-            ["diff-index", "--name-status", "HEAD"], workingDirectory: path)
+        guard let out = try? git.capture(
+            ["diff-index", "--name-status", "HEAD"], workingDirectory: path),
+              out.exitCode == 0 else { return 0 }
         let text = out.text.split(separator: "\n", omittingEmptySubsequences: true)
         return text.count
     }()
 
     // Staged: `diff-index --cached HEAD` lists entries with staged changes.
     let stagedCount: Int = {
-        let out = try! git.capture(
-            ["diff-index", "--name-status", "--cached", "HEAD"], workingDirectory: path)
+        guard let out = try? git.capture(
+            ["diff-index", "--name-status", "--cached", "HEAD"], workingDirectory: path),
+              out.exitCode == 0 else { return 0 }
         let text = out.text.split(separator: "\n", omittingEmptySubsequences: true)
         return text.count
     }()

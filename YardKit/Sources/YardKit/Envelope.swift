@@ -238,9 +238,16 @@ public struct EnvelopeFail: Sendable, Encodable {
             FileHandle.standardError.write(data)
         }
 
-        let data = try! JSONEncoder().encode(self)
-        FileHandle.standardOutput.write(data)
-        fflush(stdout)
+        do {
+            let data = try JSONEncoder().encode(self)
+            FileHandle.standardOutput.write(data)
+            fflush(stdout)
+        } catch {
+            let literal = #"{"schemaVersion":1,"ok":false,"error":{"code":"request_failed","message":"Failed to encode the response."}}"#
+            if let data = literal.data(using: .utf8) {
+                FileHandle.standardOutput.write(data)
+            }
+        }
     }
 
     /// Writes a failure envelope to stdout and exits with the matching exit code.
