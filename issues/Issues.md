@@ -162,6 +162,27 @@ Most issues in this project are implementation tasks rather than bug reports, so
 
 Real bugs found later use the standard bug shape with all sections.
 
+### Sizing an issue for delegation
+
+Two rules, both learned by watching #0010 and #0011 fail twice each while #0070 converged:
+
+1. **Name the file.** An issue must say which file to create or edit, by path, in its first
+   done-criterion. Every issue that converged named exactly one; every issue that failed named none.
+   "Implement `yard status`" leaves the model to invent a file layout mid-round; "create
+   `YardKit/Sources/yard/StatusCommand.swift`" does not.
+2. **One deliverable per issue.** If the Expected behavior asks for a type *and* a renderer *and* a
+   wiring step *and* a test harness, it is four issues. The failure signature is distinctive: the
+   model gets partway into each piece and the watchdog fires, or it silently skips the same
+   sub-criteria every round.
+
+A useful check before dispatching: **could one person finish this in a single sitting without
+deciding where anything goes?** If not, split it.
+
+Prefer pure functions returning values over anything that prints — a function returning `String` can
+be asserted against; one that writes to stdout needs a subprocess test, which is a separate issue.
+
+
+
 ### Work log
 
 Every resolved issue ends with a `## Work log` section recording who did the work and what it cost:
