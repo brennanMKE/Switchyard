@@ -24,10 +24,11 @@ a figure derived from it appears.
 | 2026-08-06 | #0011 | Dispatch round 1 (rejected — exit codes swapped) | 50,281 | $0.40 |
 | 2026-08-06 | #0011 | Dispatch round 2 (rejected — stdout contract still broken) | 44,269 | $0.35 |
 | 2026-08-06 | #0010 | Dispatch round 1 (timed out, broken build) | 49,698 | $0.40 |
+| 2026-08-06 | #0085 | Dispatch round 1 (correct code, spec defect found) | 45,326 | $0.36 |
 | 2026-08-06 | #0001–#0005 | Work-log format conversion | 28,417 | $0.23 |
 | 2026-08-06 | #0006–#0009 | Work-log format conversion | 25,992 | $0.21 |
 | 2026-08-06 | #0024 | Work-log format conversion | 19,096 | $0.15 |
-| | | **Total measured** | **390,175** | **$3.12** |
+| | | **Total measured** | **435,501** | **$3.48** |
 
 ## What this total does and does not cover
 
@@ -41,7 +42,7 @@ figure above** — it is simply not measurable from inside a session. #0089 trac
 
 ## The economics so far, stated honestly
 
-**$3.12 measured on dispatch and review. $0.00 on implementation — for one issue.** #0070 is the only
+**$3.48 measured on dispatch and review. $0.00 on implementation — for one issue.** #0070 is the only
 issue Ornith has implemented end to end, and it took three rounds, of which one produced nothing.
 #0010 and #0011 were rejected and re-dispatched.
 
