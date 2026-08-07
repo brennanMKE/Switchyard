@@ -35,7 +35,8 @@ a figure derived from it appears.
 | 2026-08-06 | #0090 | Failure post-mortem subagent | 77,282 | $0.62 |
 | 2026-08-06 | — | Cross-cutting post-mortem over all failed rounds | 134,166 | $1.07 |
 | 2026-08-06 | #0086 | Dispatch round 1 (REJECTED, 125s) | 47,974 | $0.38 |
-| | | **Total measured** | **893,673** | **$7.15** |
+| 2026-08-06 | #0086 | Dispatch round 2 (accepted, 302s) | 60,608 | $0.48 |
+| | | **Total measured** | **954,281** | **$7.63** |
 
 ## What this total does and does not cover
 
