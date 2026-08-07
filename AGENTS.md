@@ -122,6 +122,20 @@ next case someone adds is silently untested and nothing fails. If the name says 
 Before you finish, re-read each test you wrote and ask what change to the production code would make
 it fail. If the honest answer is "none", the test is not done.
 
+## Rule 3b — Run the test suite before you stop, even if you are out of time.
+
+A round has shipped a **red** suite: two of its own tests failed, and it never ran them. The budget
+went into a debug loop printing per-character output. One `swift test` would have shown both
+failures.
+
+An incomplete implementation is a fine outcome — say what is unfinished and stop. A **finished-looking
+implementation with failing tests is worse**, because it reads as done and the failure is only found
+later by someone else.
+
+So: run the verification command as your last action, always. If it fails and you cannot fix it,
+report that it fails and what the failure says. Never end a round without knowing the state of the
+suite.
+
 ## Rule 8 — Tests use swift-testing, not XCTest.
 
 Every test file in this package uses `import Testing`, `@Test`, and `#expect`. Match it.
