@@ -90,7 +90,8 @@ a figure derived from it appears.
 | 2026-08-07 | #0114 | Dispatch round 1 (REJECTED, deadlocking test, unbuildable criteria) | 67,757 | $0.54 |
 | 2026-08-07 | #0119 | Dispatch round 1 (REJECTED, red suite reported as green) | 59,665 | $0.48 |
 | 2026-08-07 | #0114 | Dispatch round 2 + hand finish (accepted) | 59,241 | $0.47 |
-| | | **Total measured** | **3,946,010** | **$31.56** |
+| 2026-08-07 | #0119 | Dispatch round 2 + hand finish (accepted) | 60,583 | $0.48 |
+| | | **Total measured** | **4,006,593** | **$32.04** |
 
 ## What this total does and does not cover
 
