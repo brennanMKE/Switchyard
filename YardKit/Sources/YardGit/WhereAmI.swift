@@ -58,8 +58,7 @@ public struct WhereAmI: Sendable, Equatable {
 
     /// The raw form of HEAD, for debugging. Always a SHA or empty (the code
     /// runs `git rev-parse HEAD`), never the symbolic `"ref: refs/heads/main"`
-    /// form — that only appears when `symbolic-ref` is called, which this
-    /// property does not do. Empty on a fresh repository with no commits yet.
+    /// form. Empty on a fresh repository with no commits yet.
     public let rawHead: String
 
     public init(
@@ -105,9 +104,9 @@ public func whereAmI(
     git: GitProcess = GitProcess()
 ) throws -> WhereAmI {
 
-    // HEAD's raw form: a full SHA or empty. An empty repository has no HEAD yet, so fall back to "";
-    // callers can still check the branch via `symbolic-ref -q` (which also
-    // returns non-zero with no commits).
+    // HEAD's raw form: a full SHA or empty. An empty repository has no HEAD
+    // yet, so fall back to ""; callers can still check the branch via
+    // `symbolic-ref -q`, whose exit code is checked below.
     let rawHead: String = {
         guard let out = try? git.run(
             ["rev-parse", "HEAD"], workingDirectory: path) else { return "" }
