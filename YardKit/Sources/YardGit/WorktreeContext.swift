@@ -90,11 +90,41 @@ public struct WorktreeContext: Sendable, Equatable {
         )
     }
 
-    /// Resolves symlinks and standardizes, so `/tmp` and `/private/tmp` — and a
-    /// symlinked checkout — do not produce two identities for one repository.
-    /// The app depends on this for tab de-duplication (#0079).
+    /// Resolves symlinks while **preserving** a leading `/private`.
+    ///
+    /// `resolvingSymlinksInPath()` is the obvious call and the wrong one: it is
+    /// documented to *strip* a leading `/private`, so `/private/var/...` and
+    /// `/var/...` become two identities for one path. Git always reports the
+    /// resolved form, and `FixtureRepository.url` is `realpath(3)`-resolved for
+    /// the same reason, so this must agree with both.
+    ///
+    /// `realpath(3)` returns nil for a path that does not exist. The fallback
+    /// therefore resolves the deepest existing ancestor and re-appends the rest,
+    /// so a not-yet-created path still canonicalizes consistently with a created
+    /// one — a plain `standardizedFileURL` would silently leave `/tmp/x` as
+    /// `/tmp/x` while `/tmp` alone resolved to `/private/tmp`.
     static func canonicalize(_ path: String) -> String {
-        URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
+        if let resolved = realpath(path, nil) {
+            defer { free(resolved) }
+            return String(validatingCString: resolved) ?? path
+        }
+
+        // Walk up to the deepest ancestor that exists, resolve that, and put the
+        // missing tail back on.
+        var url = URL(fileURLWithPath: path).standardizedFileURL
+        var tail: [String] = []
+        while url.path != "/" {
+            if let resolved = realpath(url.path, nil) {
+                defer { free(resolved) }
+                let base = String(validatingCString: resolved) ?? url.path
+                return tail.reversed().reduce(URL(fileURLWithPath: base)) {
+                    $0.appendingPathComponent($1)
+                }.path
+            }
+            tail.append(url.lastPathComponent)
+            url = url.deletingLastPathComponent()
+        }
+        return URL(fileURLWithPath: path).standardizedFileURL.path
     }
 
     // MARK: - Path lookup
