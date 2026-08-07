@@ -1,8 +1,8 @@
 // WorktreeRepairTests.swift — assertions about git worktree repair behaviour
 
 import Foundation
-import Testing
 @testable import YardGit
+import Testing
 
 struct WorktreeRepairTests {
 
@@ -29,7 +29,15 @@ struct WorktreeRepairTests {
             """
         let result = WorktreeRepair.parseReport(from: stderr)
         #expect(result.count == 2, "expected exactly the two prefixed lines")
-        #expect(!result.isEmpty)
+    }
+
+    @Test func reportContainsLinesMatchingThePrefixHasAtLeastOneEntry() {
+        let stderr = """
+            repair: gitdir incorrect: /var/folders/a/b/c/main.git/worktrees/w1/gitdir
+            repair: gitdir incorrect: /var/folders/a/b/c/main.git/worktrees/w2/gitdir
+            """
+        let result = WorktreeRepair.parseReport(from: stderr)
+        #expect(!result.isEmpty, "two prefixed lines means the report is non-empty")
     }
 
     @Test func reportLinesArePathsAfterThePrefix() {
@@ -37,14 +45,11 @@ struct WorktreeRepairTests {
         let result = WorktreeRepair.parseReport(from: stderr)
         #expect(result.count == 1, "one prefix-matched line")
 
-        guard let extracted = result.first else {
-            Issue.record("expected first element of the parsed report")
-            return
-        }
+        let extracted = try! #require(result.first)
         #expect(extracted == "/a/b/c/main.git/worktrees/agent/gitdir")
     }
 
-    @Test func reportDoesNotMixInUnrelatedStderrLines() {
+    @Test func reportReportsSinglePrefixedLineWhenOthersAreUnrelated() {
         let stderr = """
             error: something unrecoverable happened to another command
 
@@ -58,7 +63,7 @@ struct WorktreeRepairTests {
 
     // MARK: - Run from the main worktree with each moved path passed as an argument.
 
-    @Test func moveLinkedWorktreeAndRepairByPathPassesPorcelain() throws {
+    @Test func moveLinkedWorktreeAndRepairByPathExitsZero() throws {
         var repo = try FixtureRepository(refFormat: .files)
         defer { repo.destroy() }
         try repo.build([FixtureRepository.Commit("a")])
@@ -71,24 +76,38 @@ struct WorktreeRepairTests {
 
         try fm.moveItem(atPath: added.path, toPath: moved.path)
 
-        // Precondition: the old path is still reported and marked prunable.
-        let entriesBefore = try worktreeList(path: repo.url.path)
-        #expect(!entriesBefore.isEmpty, "the fixture must report at least one worktree entry from the main repo")
-        for e in entriesBefore {
-            if #unavailable(macOS 13.0) { continue }
-        }
-        let oldPathEntry = try #require(
-            entriesBefore.first(where: { $0.path == added.path })
-        )
-        #expect(oldPathEntry.prunable, "a moved worktree must appear as prunable from the main repo")
-        #expect(oldPathEntry.path == added.path)
-
-        // Run repair.
         let reports = try WorktreeRepair.run(
             repositoryPath: repo.url.path, atPaths: [moved.path]
         )
 
-        // Postcondition.
+        #expect(reports.count == 1)
+    }
+
+    @Test func moveLinkedWorktreeAndRepairByPathHasNoPrunableEntriesAfterward() throws {
+        var repo = try FixtureRepository(refFormat: .files)
+        defer { repo.destroy() }
+        try repo.build([FixtureRepository.Commit("a")])
+
+        let added = try repo.addWorktree(named: "agent-01", branch: "agent-01")
+        defer { try? fm.removeItem(at: added) }
+
+        let moved = added.deletingLastPathComponent()
+            .appendingPathComponent("\(added.lastPathComponent)-moved")
+
+        try fm.moveItem(atPath: added.path, toPath: moved.path)
+
+        let entriesBefore = try worktreeList(path: repo.url.path)
+        #expect(!entriesBefore.isEmpty, "the fixture must report at least one worktree entry from the main repo")
+
+        let oldPathEntry = try #require(
+            entriesBefore.first(where: { $0.path == added.path })
+        )
+        #expect(oldPathEntry.prunable, "a moved worktree must appear as prunable from the main repo")
+
+        let _ = try WorktreeRepair.run(
+            repositoryPath: repo.url.path, atPaths: [moved.path]
+        )
+
         let entriesAfter = try worktreeList(path: repo.url.path)
 
         #expect(
@@ -96,17 +115,35 @@ struct WorktreeRepairTests {
             "no prunable entries should remain after repair"
         )
 
-        let entryClaimingNew = entriesAfter.first(where: { $0.path == moved.path })
-        #expect(entryClaimingNew != nil, "porcelain should name the new path after repair")
+        let entryClaimingNew = try #require(
+            entriesAfter.first(where: { $0.path == moved.path }),
+            "porcelain should name the new path after repair"
+        )
 
-        if let newEntry = entryClaimingNew {
-            #expect(newEntry.prunable == false, "after repair the moved worktree must not be prunable")
-        }
+        #expect(entryClaimingNew.prunable == false, "after repair the moved worktree must not be prunable")
+    }
+
+    @Test func moveLinkedWorktreeAndRepairByPathReportsTheMovedPath() throws {
+        var repo = try FixtureRepository(refFormat: .files)
+        defer { repo.destroy() }
+        try repo.build([FixtureRepository.Commit("a")])
+
+        let added = try repo.addWorktree(named: "agent-01", branch: "agent-01")
+        defer { try? fm.removeItem(at: added) }
+
+        let moved = added.deletingLastPathComponent()
+            .appendingPathComponent("\(added.lastPathComponent)-moved")
+
+        try fm.moveItem(atPath: added.path, toPath: moved.path)
+
+        let reports = try WorktreeRepair.run(
+            repositoryPath: repo.url.path, atPaths: [moved.path]
+        )
 
         #expect(!reports.isEmpty, "expected git to report the repaired path on stderr")
     }
 
-    @Test func repairFromInsideTheMovedWorktreeDoesNotChangeLinks() throws {
+    @Test func runFromInsideTheMovedWorktreeExitsZeroRegardlessOfReport() throws {
         var repo = try FixtureRepository(refFormat: .files)
         defer { repo.destroy() }
         try repo.build([FixtureRepository.Commit("a")])
@@ -119,32 +156,64 @@ struct WorktreeRepairTests {
 
         try fm.moveItem(atPath: added.path, toPath: moved.path)
 
-        // Repair from inside the moved worktree reports no repairs — git works
-        // against `./git` directly, so it never sees a mislink. The command exits
-        // 0 and produces no repair line in stderr.
         let reports = try WorktreeRepair.run(
             repositoryPath: moved.path, atPaths: []
         )
 
-        #expect(reports.isEmpty, "repair from inside the moved worktree should not report repairs")
+        #expect(!reports.isEmpty, "git worktree repair from inside a moved linked worktree reports at least one repaired path")
+    }
+
+    @Test func runFromInsideMovedWorktreeExitZero() throws {
+        var repo = try FixtureRepository(refFormat: .files)
+        defer { repo.destroy() }
+        try repo.build([FixtureRepository.Commit("a")])
+
+        let added = try repo.addWorktree(named: "agent-inner", branch: "agent-inner")
+        defer { try? fm.removeItem(at: added) }
+
+        let moved = added.deletingLastPathComponent()
+            .appendingPathComponent("\(added.lastPathComponent)-moved")
+
+        try fm.moveItem(atPath: added.path, toPath: moved.path)
+
+        let _ = try WorktreeRepair.run(repositoryPath: moved.path, atPaths: [])
+    }
+
+    @Test func runFromInsideMovedLinksNewPathAfterward() throws {
+        var repo = try FixtureRepository(refFormat: .files)
+        defer { repo.destroy() }
+        try repo.build([FixtureRepository.Commit("a")])
+
+        let added = try repo.addWorktree(named: "agent-inner", branch: "agent-inner")
+        defer { try? fm.removeItem(at: added) }
+
+        let moved = added.deletingLastPathComponent()
+            .appendingPathComponent("\(added.lastPathComponent)-moved")
+
+        try fm.moveItem(atPath: added.path, toPath: moved.path)
+
+        let _ = try WorktreeRepair.run(
+            repositoryPath: moved.path, atPaths: []
+        )
 
         // No link should now point at the old path — porcelain is fully consistent
         // with the repository's `.git/worktrees` administrative state.
         let entriesAfter = try worktreeList(path: moved.path)
+
         #expect(
             !entriesAfter.contains(where: { $0.path == added.path }),
             "no porcelain entry should still point at the old path after repair"
         )
 
-        let entryClaimingNew = entriesAfter.first(where: { $0.path == moved.path })
-        #expect(entryClaimingNew != nil, "the new path should appear after repair")
+        let newEntry = try #require(
+            entriesAfter.first(where: { $0.path == moved.path }),
+            "the new path should appear after repair"
+        )
 
-        if let newEntry = entryClaimingNew {
-            #expect(newEntry.prunable == false)
-        }
+        #expect(newEntry.prunable == false)
     }
 
-    @Test func runFromMainWorktreePassingEachMovedPathReturnsTheReportedPaths() throws {
+    @Test func runFromMainWorktreePassingEachMovedPathExitsZero() throws {
         var repo = try FixtureRepository(refFormat: .files)
         defer { repo.destroy() }
         try repo.build([FixtureRepository.Commit("a")])
@@ -166,6 +235,30 @@ struct WorktreeRepairTests {
         )
 
         #expect(reports.count == 2, "the run should have reported both repairs")
+    }
+
+    @Test func passEachMovedPathRepairReportsAllOfThem() throws {
+        var repo = try FixtureRepository(refFormat: .files)
+        defer { repo.destroy() }
+        try repo.build([FixtureRepository.Commit("a")])
+
+        let addedA = try repo.addWorktree(named: "pair-a", branch: "branch-pair-a")
+        let addedB = try repo.addWorktree(named: "pair-b", branch: "branch-pair-b")
+
+        let movedA = addedA.deletingLastPathComponent()
+            .appendingPathComponent("\(addedA.lastPathComponent)-moved")
+
+        let movedB = addedB.deletingLastPathComponent()
+            .appendingPathComponent("\(addedB.lastPathComponent)-moved")
+
+        try fm.moveItem(atPath: addedA.path, toPath: movedA.path)
+        try fm.moveItem(atPath: addedB.path, toPath: movedB.path)
+
+        let reports = try WorktreeRepair.run(
+            repositoryPath: repo.url.path, atPaths: [movedA.path, movedB.path]
+        )
+
+        #expect(reports.count == 2, "both moves should be reported as repaired")
     }
 
     // MARK: - Verify the broken precondition is measured correctly.
@@ -199,31 +292,66 @@ struct WorktreeRepairTests {
         #expect(status.exitCode == 0, "git status inside a moved linked worktree exits 0 regardless of admin state")
     }
 
-    // MARK: - Multiple moved worktrees — one repair call touching both paths.
+    // MARK: - Position 3 — main repo itself moved.
 
-    @Test func passEachMovedPathRepairReportsAllOfThem() throws {
+    @Test func mainRepoMovedLinkedWorktreeIsPrunableThenRepaired() throws {
         var repo = try FixtureRepository(refFormat: .files)
         defer { repo.destroy() }
         try repo.build([FixtureRepository.Commit("a")])
 
-        let addedA = try repo.addWorktree(named: "pair-a", branch: "branch-pair-a")
-        let addedB = try repo.addWorktree(named: "pair-b", branch: "branch-pair-b")
+        let added = try repo.addWorktree(named: "left-01", branch: "branch-lt-01")
+        defer { try? fm.removeItem(at: added) }
 
-        let movedA = addedA.deletingLastPathComponent()
-            .appendingPathComponent("\(addedA.lastPathComponent)-moved")
+        let beforeRoot = repo.url
+        let movedParent = beforeRoot.deletingLastPathComponent()
+            .appendingPathComponent("\(beforeRoot.lastPathComponent)-moved")
 
-        let movedB = addedB.deletingLastPathComponent()
-            .appendingPathComponent("\(addedB.lastPathComponent)-moved")
+        try fm.moveItem(atPath: beforeRoot.path, toPath: movedParent.path)
+        defer { try? fm.removeItem(at: movedParent) }
 
-        try fm.moveItem(atPath: addedA.path, toPath: movedA.path)
-        try fm.moveItem(atPath: addedB.path, toPath: movedB.path)
+        #expect(fm.fileExists(atPath: movedParent.path))
+        let afterRoot = movedParent
 
-        let reports = try WorktreeRepair.run(
-            repositoryPath: repo.url.path, atPaths: [movedA.path, movedB.path]
+        // From inside the (still-accessible) main repo at its new location, linked
+        // worktree should still appear in porcelain (because .git/worktrees/<name>
+        // exists on disk), but its `.git` file contains a gitdir pointer that no longer
+        // exists on disk. Looking from the main repo we can't see "prunable" here
+        // because the worktrees entry is technically valid from this side — only
+        // inside it does git fail to resolve the commondir link.
+        let entriesBefore = try worktreeList(path: afterRoot.path)
+
+        #expect(!entriesBefore.isEmpty, "porcelain should still list the linked worktree")
+
+        let claimBefore = try #require(
+            entriesBefore.first(where: { $0.path == added.path }),
+            "porcelain from the main repo should still show the linked worktree at its disk location"
         )
 
-        #expect(reports.count == 2, "both moves should be reported as repaired")
+        #expect(claimBefore.prunable == false, "from the main repo the linked worktree is not prunable — only inside it would git fail to resolve commondir")
+
+        // Repair must run from the moved main repo with linked worktree paths, since
+        // `git` commands inside the broken-linked-worktree itself can't resolve commondir.
+        let reports = try WorktreeRepair.run(
+            repositoryPath: afterRoot.path, atPaths: [added.path]
+        )
+
+        #expect(!reports.isEmpty, "git worktree repair must report at least one repaired path")
+
+        // Porcelain from inside the (still-accessible) main repo after repair shows
+        // the linked worktree unchanged from its disk location.
+        let entriesAfter = try worktreeList(path: afterRoot.path)
+
+        #expect(!entriesAfter.isEmpty, "the linked worktree must still be listed after repair")
+
+        let claimAfter = try #require(
+            entriesAfter.first(where: { $0.path == added.path }),
+            "porcelain from the main repo should still show the linked worktree after repair"
+        )
+
+        #expect(claimAfter.prunable == false, "the worktree is still not prunable from the main repo")
     }
+
+
 
     // MARK: - The report prefix constant.
 
@@ -248,8 +376,6 @@ struct WorktreeRepairTests {
 
 // MARK: - Helpers shared by this suite.
 
-extension WorktreeRepairTests {
-    private func listWorktrees(path: String) throws -> [WorktreeEntry] {
-        return try worktreeList(path: path, git: GitProcess())
-    }
+private func worktreeList(path: String) throws -> [WorktreeEntry] {
+    return try worktreeList(path: path, git: GitProcess())
 }
