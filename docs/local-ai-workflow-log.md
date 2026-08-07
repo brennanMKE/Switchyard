@@ -845,6 +845,15 @@ in `~/.config/opencode/opencode.json` — untried, because the schema was not to
 permission config on someone else's machine at 3am is a worse idea than pasting bytes into an issue.
 It remains the right fix if this keeps happening.
 
+**It kept happening.** #0107 — a three-minute deletion that converged first try — still reached for
+`/tmp`, to redirect the CLI's streams while verifying. That is the **fourth** round, and the first
+where the purpose was something as ordinary as capturing stdout rather than building a fixture. It
+was harmless there because the edit and the tests were already done, but it makes the pattern
+unambiguous: **this model reaches for `/tmp` whenever it wants a scratch file, and no amount of
+instruction changes that.** Four rounds, three escalations, one config change still untried.
+
+The next person to hit this should make the permission change rather than write another rule.
+
 ### 3.7 Review feedback can make the next round impossible
 
 Round 2 of #0070 was killed by the sandbox because *my feedback* told it to verify git behaviour,

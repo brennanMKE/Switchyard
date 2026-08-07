@@ -63,7 +63,8 @@ a figure derived from it appears.
 | 2026-08-07 | #0014 | Round 3 dispatch blocked by unmerged review | 44,255 | $0.35 |
 | 2026-08-07 | #0113 | Dispatch round 3 + hand finish (accepted) | 52,198 | $0.42 |
 | 2026-08-07 | #0014 | Dispatch round 3 (REJECTED, review defect) | 59,498 | $0.48 |
-| | | **Total measured** | **2,518,959** | **$20.15** |
+| 2026-08-07 | #0107 | Dispatch round 1 (accepted, 176s) | 37,723 | $0.30 |
+| | | **Total measured** | **2,556,682** | **$20.45** |
 
 ## What this total does and does not cover
 
