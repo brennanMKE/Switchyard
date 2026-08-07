@@ -106,6 +106,29 @@ three factual errors about git. **Fluency reads as correctness.**
 **Fix:** re-run every factual claim about tool behaviour in a throwaway fixture. Prefer an
 adversarial pass — instruct the reviewer to *disprove* the claims.
 
+### 1.9 "hosted" is a placeholder, not a cost
+
+After splitting the work log into three phases, I filled the authoring and review rows with the word
+`hosted`. That is not a cost — it names a billing category and stops. The whole reason the table
+exists is to compare what delegation saves against what it still spends, and `hosted` makes the
+spending side unreadable: an issue that cost pennies and one that cost dollars look identical.
+
+**The underlying gap is real, though.** This harness exposes no per-turn token usage for the main
+loop, and there is no API key or `ant` CLI available to call `count_tokens`, so authoring and review
+genuinely cannot be metered per issue from inside a session. What *is* measurable and was being
+thrown away: every dispatcher subagent reports `subagent_tokens` on completion.
+
+**Fix:** record the rate ($5/$25 per MTok for Opus 5), price the measured subagent tokens, keep
+$0.00 for local rounds, and record unmetered phases as `not separately metered` — with the gap filed
+as an issue rather than papered over. `subagent_tokens` has no input/output split, so cost is
+computed at a stated 85/15 assumption ($8.00 per MTok combined) and **the assumption is written
+inline at every use** — a number whose derivation is invisible is indistinguishable from an invented
+one.
+
+**Lesson for the next project: decide how cost will be measured before the first delegated round**,
+not after a dozen. Retrofitting cost data onto completed work recovers only what the harness happened
+to report along the way.
+
 ### 1.8 Work log did not separate cost by phase
 
 One `Token cost` row made an Opus-implemented issue and an Ornith-implemented one look identical,
