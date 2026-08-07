@@ -125,10 +125,89 @@ Findings worth recording:
   target already sets `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` and will hit the same class of
   error.
 
+### Confirmed by direct experiment, 2026-08-06
+
+Prompted by Brennan noticing that `Switchyard.xcodeproj` referenced nothing from `YardKit`, the
+integration was tested on a scratchpad **copy** of the project — the real one was open in Xcode, and
+Xcode rewrites `project.pbxproj` underneath edits.
+
+`YardKit` and `YardGit` were added as an `XCLocalSwiftPackageReference` with both products as
+`XCSwiftPackageProductDependency`, and `ContentView` was made to reference a real symbol from each so
+that linking was exercised rather than merely declared.
+
+**Result: `** BUILD SUCCEEDED **`, and the integration is genuinely real.** Verified on the built
+product rather than trusting the build result — note that under Xcode 26 the app's `MacOS/Switchyard`
+is a thin stub and the code lives in `Switchyard.debug.dylib`, so checking the wrong file shows
+nothing:
+
+```
+otool -L Switchyard.debug.dylib
+    /opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib (current version 1.9.6)
+nm -u  → _git_libgit2_init, _git_libgit2_shutdown, _git_libgit2_version
+nm     → YardKit, YardGit symbols present
+```
+
+**So an Xcode app target does build and link against a SwiftPM package whose chain includes a
+`systemLibrary` target resolved by Homebrew `pkgConfig`.** That was an open assumption underneath
+every issue written so far, and it holds.
+
+**And it fails to ship, exactly as predicted, now with the mechanism visible.** The load command is
+the absolute path `/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib`. An app distributed with that
+load command runs only on a machine with Homebrew libgit2 installed at that precise path — which is
+no user's machine. It is not a link-time failure that CI would catch; it is a launch-time failure on
+someone else's Mac.
+
+This affects the **app target as well as the embedded CLI**. #0050 covers embedding `switchyard` in
+the bundle; nothing yet covers replacing the Homebrew `systemLibrary` with a vendored binary for the
+app itself. Filed as #0103.
+
 **Unresolved for route A:** Homebrew installs per-architecture into `/opt/homebrew` (Apple Silicon)
 or `/usr/local` (Intel), and a distributed app cannot depend on a user's Homebrew. This route is
 viable for development but **not for shipping**, since the embedded `yard` (#0050) must run on a
 machine with no Homebrew at all.
+
+### libgit2 needs no transport at all — measured 2026-08-06
+
+`git_libgit2_features()` on the current Homebrew build reports `HTTPS yes, SSH yes`. Those two
+options are the entire reason the dependency tree includes OpenSSL and libssh2; with
+`-DUSE_SSH=OFF -DUSE_HTTPS=OFF` the vendoring problem collapses from five libraries to one.
+
+Nothing is lost, because network operations were never going to use libgit2. `CLAUDE.md` already
+requires shelling out to `git` for hooks, network operations, and signing, centralised in
+`GitProcess`. That is the stronger choice on its own merits: `git` already resolves the user's SSH
+agent, `credential.helper`, Keychain, `.netrc`, `insteadOf` rewrites, proxies and 2FA tokens.
+libgit2's transport would mean implementing credential callbacks that reproduce a *subset* of that,
+and any divergence appears to the user as "works in my terminal, fails in the app".
+
+libgit2 keeps every local operation — objects, refs, index, diff, merge, traversal — which is where
+per-query process spawning would be unaffordable and where the commit-graph measurements above apply.
+The `git_remote_*` family becomes unusable; note that ahead/behind for `yard whereami` reads
+`refs/remotes/` locally and needs no network, so the highest-traffic command is unaffected.
+
+Acceptance for the vendored build is the probe, not the build log: HTTPS off, SSH off, THREADS on.
+
+### Route B has a known-good shape — GitUp's, checked 2026-08-06
+
+GitUp vendors **static** libraries inside universal `.xcframework`s, built from source with CMake by
+`rebuild-*.sh` scripts, with the built artefacts committed:
+`GitUpKit/Third-Party/libgit2.xcframework/macos-arm64_x86_64/libgit2.a`, plus the same treatment for
+`libssh2`, `libssl`, `libcrypto` and `libsqlite3`, tracked against a maintained fork.
+
+Static is the important part. A static `.a` cannot fail at launch on a machine that lacks a dylib,
+because there is no dylib — the failure mode disappears rather than being relocated into
+`Contents/Frameworks/` where it needs embedding, `@rpath` handling and separate signing.
+
+That GitUp also vendors libssh2 and OpenSSL confirms the transitive problem measured here: Homebrew's
+`libgit2.1.9.dylib` is itself linked against `/opt/homebrew/opt/llhttp/…` and
+`/opt/homebrew/opt/libssh2/…` by absolute path, so "copy the dylib into the bundle" is really "copy a
+dependency tree and rewrite every load command in it".
+
+**Licensing:** libgit2 is GPLv2 **with a linking exception** granting unlimited permission to link the
+compiled library into other programs and distribute the combination without restriction. MIT
+Switchyard may link and ship it. Modifying libgit2 itself would put those changes under GPLv2, so pin
+unmodified upstream. This is separate from the GitUp clean-room rule — GitUp's own source is off
+limits; libgit2 is a third-party dependency both projects consume. Their rebuild scripts are GPLv3;
+read them for shape, write ours.
 
 ### Route B: vendored / prebuilt — the shipping route, not yet built
 

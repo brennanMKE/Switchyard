@@ -1,6 +1,6 @@
 # Switchyard
 
-A SwiftUI macOS git client with an agent-facing CLI (`switchyard`). Successor in spirit to GitUp, built
+A SwiftUI macOS git client with an agent-facing CLI (`yard`). Successor in spirit to GitUp, built
 so a coding agent is a first-class user of the repository alongside a human.
 
 Two design documents, both current, both in `docs/`:
@@ -236,7 +236,7 @@ The CLI is the product for agents. Three rules make it usable by one:
 **There is no MCP server** — decided, with the reasoning and the conditions for revisiting in guide
 §8. Do not add one, and do not let anything depend on one existing.
 
-The skill teaching agents to drive `switchyard` lives in `skills/yard/SKILL.md` and is **generated from
+The skill teaching agents to drive `yard` lives in `skills/yard/SKILL.md` and is **generated from
 the same command metadata that builds `--help`**, so it cannot drift from the binary. Hand-written
 prose that restates flags will go stale within a milestone. Package it per client (Claude Code
 plugin, OpenCode) on top of that one source; do not maintain parallel copies. A command lands with
@@ -293,11 +293,21 @@ cd YardKit && swift build && swift test
 embedding, `SMAppService` registration, and presentation of results. Anything with logic worth
 testing goes in `YardKit` and has unit tests.
 
-**`switchyard` must work without the app running.** This is the most important architectural constraint in
-the project. If the CLI needs Switchyard.app, it is useless in CI, over SSH, and in headless agent
-runs — which is most of the addressable use. `YardGit` is standalone; all reads and all
-non-interactive mutations run in-process in the CLI with no app, no XPC, no launch agent. The XPC
-connection is optional enrichment for `review`, `ask`, `resolve --interactive`, and `watch`.
+**`switchyard` is a companion tool, not a standalone one.** It ships inside the app bundle, is
+symlinked into `/usr/local/bin`, and drives Switchyard.app over XPC. **The app owns the engine.**
+
+- **`YardGit` and libgit2 live in the app only.** The CLI does not link them, and does not open a
+  repository itself.
+- **The CLI marshals arguments over XPC and prints the reply.** It stays small.
+- **If the app is not running, the CLI launches it** and polls the broker for an endpoint, bounded,
+  exiting 3 when that expires. This is RemoteControl's model — see
+  `../../RemoteControl/docs/xpc-cli-architecture.md`, which is the prototype this pattern comes from.
+
+**There is no CI or SSH requirement.** An earlier version of this file called "works without the app"
+the most important constraint in the project, and cited CI, SSH and headless agent runs. **That was
+never a requirement Brennan set** — it was invented and then treated as settled, which is how it
+reached the guide, the README, and the shape of `Package.swift`. Corrected 2026-08-06. Do not
+reintroduce it, and be suspicious of any issue whose rationale depends on it.
 
 `ServiceNames.swift` in `YardKit` is the single source of truth for the bundle identifier, Mach
 service name, agent plist name, URL scheme, and log subsystem. Nothing else hardcodes those strings.
@@ -338,10 +348,10 @@ invocation, and every path lookup goes through it. It exists from M1 for this re
 - **Xcode rewrites `project.pbxproj` while it has the project open**, and has silently dropped
   hand-added build configurations mid-edit. Verify with `xcodebuild -showBuildSettings` rather than
   trusting the file you just wrote. New Swift files under synchronized groups need no pbxproj edit.
-- **`switchyard` never runs `git gc`.** Pruning deletes the journal's anchor ref and metadata entry;
+- **`yard` never runs `git gc`.** Pruning deletes the journal's anchor ref and metadata entry;
   the objects become unreachable and ordinary maintenance reclaims them on its own schedule.
 - **The `reference-transaction` hook fires on the journal's own ref writes.** Set an environment
-  marker in `switchyard` and have the hook skip its own transactions, or the journal records itself
+  marker in `yard` and have the hook skip its own transactions, or the journal records itself
   recording itself. The hook must also return 0 immediately in the `preparing` and `prepared`
   states — a non-zero exit there aborts the user's transaction. Do real work only on `committed`.
 - **`git write-tree` refuses an unmerged index.** When conflicts are present, snapshot the index
