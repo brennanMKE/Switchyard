@@ -1071,3 +1071,62 @@ verify a boundary defined by privilege.** Anywhere the tests get a capability th
 `@testable`, a friend class, a test-only export, a mock that bypasses an interface — the boundary
 needs its own check compiled at the caller's level.
 
+### 3.14 A round that ends with a question is a stop, and nothing had said so
+
+#0096 round 1 wrote `WorktreePrune.swift` correctly — it read `standardError` rather than `.text`,
+which is the defect the issue warned about hardest, and against a real fixture it classified an
+agent-locked deleted worktree as an abandoned session, reported the unlocked one with git's verbatim
+reason, and left the locked one alone.
+
+Then it stopped. **4,251 output tokens**, one file, and a final log line:
+
+> *"Would you like me to proceed with step 1 (write tests) and the rest of the verification
+> workflow?"*
+
+It had just enumerated its own four remaining steps. It knew exactly what was left. No test
+references `WorktreePrune`, so all four required mutations were unrunnable and each left the suite
+green at exactly the 225 baseline — the round verified nothing at all.
+
+**This was not disobedience.** `AGENTS.md` had nine hundred words on what a round must verify and
+nothing saying it must not stop to ask. The model is running unattended; whatever it asks goes into a
+log nobody reads until after it has stopped. Now Rule 9: do every unambiguous part first, take the
+most literal reading of the criteria, and state the assumption at the end after the suite has run. An
+unanswered question at the end of a finished round is useful; a question instead of a finished round
+is the one outcome that cannot be reviewed.
+
+Two of the issue's own defects contributed, and both are now checklist items:
+
+- **Expected behavior named only a file.** "Reporting is the default, pruning is opt-in" had no
+  signature to attach to, so the round produced `report(...)` and `runPrune(...)` as two unrelated
+  statics with nothing choosing between them. A default needs a parameter, and a parameter needs a
+  signature — write it into the issue (item 22).
+- **The stated baseline was stale**: 216, when `main` was 225 after three merges. A stale baseline
+  hides a small increase, which is precisely what the criterion exists to catch. `docs/test-baseline.txt`
+  now records the real count and preflight check 4b compares it. Controlled both ways.
+
+Writing check 4b produced its own small lesson: the first version read `$SPEC` as if it held the spec
+text, when it is a **temp file path**. The check silently never fired and printed nothing — the same
+shape as §3.6c's guard that could not fail. It was caught only because the negative control was run.
+**Every new check gets both controls, every time.** That rule has now paid for itself twice.
+
+### 1.16 A dispatcher subagent refused three ways around a guard, and was right
+
+#0013's re-dispatch was blocked: `dispatch-issue.sh` requires a `## Review` section for any round
+after the first, and round 1 had been killed at the timeout months of context ago, producing nothing
+to review. The dispatcher tried `--force`, was denied by the permission layer, and then **stopped
+rather than route around it** — explicitly rejecting three workarounds it had already identified:
+dispatching as `--round 1` (which would overwrite round 1's log and misattribute the cost), renaming
+the previous round's log (deleting the guard's input to defeat the guard), and writing the `## Review`
+section itself (a spec edit, which is not the dispatcher's to make).
+
+That is the behaviour the guards are for, and it is worth recording as a success rather than only
+logging failures. The fix was one minute of authoring: say under the heading that round 1 produced
+nothing and what has changed since. **"Nothing to review" is itself the review**, and the model needs
+to read it. The guard's message now says so, so the next person does not reach for `--force`.
+
+One thing that did go wrong: I first placed that section *before* the Givens, and preflight reads
+everything above the first `## Review` as the spec — so the Givens, the Expected behavior and the
+verification command all fell outside it and two hard checks failed. Reviews go at the end of the
+file. The check caught it in three seconds, which is the entire argument for running preflight rather
+than trusting a read-through.
+
