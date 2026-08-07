@@ -76,6 +76,22 @@ attempts at the same thing have failed, the third will not succeed; write the re
 
 Finish every run with: what you changed, what you ran, what it printed, and what you could not do.
 
+## Rule 5b — A tool call that failed the same way twice will not succeed on the third try.
+
+Rule 5 covers shell commands. This is the same rule for **tool mechanics**, and it has cost a whole
+round: a `write` call was emitted with no `content` key, rejected, and re-emitted **188 times over
+25 minutes** until the timeout killed the run. Nothing was produced. The reasoning behind it was
+correct and was lost with it.
+
+- **Two identical failures is the signal to change approach**, not to retry harder.
+- **If `write` fails twice on the same file, use a shell heredoc**: `cat > path/File.swift <<'EOF'`
+  … `EOF`. It does not go through the same schema and it works.
+- **Prefer building a large new file incrementally.** Declare the types, run `swift build`, then add
+  the methods. A partial file that compiles can be finished; a 300-line write that never lands leaves
+  nothing behind.
+- If neither path works, **stop and say which tool failed and how**. That is a useful round. Twenty
+  minutes of identical retries is not.
+
 ## Rule 6 — Every scratch file goes in `build/`, inside the worktree.
 
 Your sandbox auto-rejects writes to `/tmp`, `/var/tmp`, and anything outside the working directory.

@@ -130,6 +130,13 @@ already happened once, with seven finished branches sitting unpushed while `main
 Concurrency ceiling: LM Studio is configured `PARALLEL 2`, so a third simultaneous dispatch queues
 rather than running. Two rounds at a time is the real limit until that is raised.
 
+**Output ceiling:** `~/.config/opencode/opencode.json` sets the model's `limit.output`. It was `8192`,
+which silently truncated any `write` tool call carrying a large file — the `content` key never
+arrives and the schema rejects it, which reads as flakiness rather than as a ceiling. Two rounds were
+lost to it before the cause was found. Raised to `16384` on 2026-08-07; the previous file is backed up
+beside it. If a round dies emitting `SchemaError(Missing key at ["content"])` repeatedly, this is the
+first thing to check.
+
 Two rules that bind this file specifically:
 
 - **Dispatch through a subagent, never from the main loop.** An OpenCode transcript is long and

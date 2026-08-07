@@ -385,6 +385,46 @@ someone tries to get through it. This applies to every validation added to this 
 mode of a guard is not "misses a bad case", it is "blocks the good ones", and only a negative control
 finds it.
 
+### 2.5 The output token cap was silently truncating tool calls
+
+Two rounds died on the same night, both at the full 1800s cap, both producing **nothing at all**:
+
+```
+✗ Write failed
+Error: The write tool was called with invalid arguments: SchemaError(Missing key at ["content"]).
+```
+
+#0014 emitted that **188 times over 25 minutes** without recovering. #0013 hit it four times, three
+consecutively, then stalled until the watchdog killed it.
+
+**The cause is configuration, not the model.** `~/.config/opencode/opencode.json` capped this model at
+`"output": 8192`. That budget has to hold the model's reasoning **and** the entire file, JSON-escaped,
+inside a single `write` tool call. A ~550-line deliverable — #0020 shipped 191 source + 362 test lines
+and is the closest completed analogue — does not fit. The generation is cut off mid-call, the
+`content` key never arrives, and the schema rejects it.
+
+**It is intermittent in exactly the way that hides the cause.** Grepping every round log: 188
+occurrences in #0014, 20 in #0012 round 2, 16 in #0010 round 1, 1 in #0090, zero in the other 20+.
+Small edits fit and succeed; large greenfield files do not. So it reads as flakiness rather than as a
+ceiling, and **both rounds that ever hit the timeout were writing a large new file from scratch.**
+
+**Fixed** by raising the cap to `16384`, with the previous config backed up beside it. Input budget
+falls from 57,344 to 49,152 within the same 65,536 loaded context, which is the real trade — rounds
+already compact, and more frequent compaction is cheaper than a round that emits nothing.
+
+**Two lessons worth separating.**
+
+The first is about diagnosis: *a symptom that looks like model incompetence can be a numeric limit.*
+The #0014 round's reasoning was correct and complete — it had independently derived the delimited
+`%x01` format this issue turns on, and named every type it intended to create. All of it was lost to
+a truncated JSON payload. Reading only the outcome would have concluded the model could not do the
+task.
+
+The second is about retries: the model re-emitted the identical failing call 188 times. `AGENTS.md`
+Rule 5 already said a clear stop beats a third attempt; it now has **Rule 5b** saying the same about
+tool mechanics, with a heredoc fallback for when `write` fails twice. A ceiling is not something a
+retry can clear.
+
 ### 2.4b The sandbox denial recurred because I fixed the instance, not the class
 
 #0070 round 2 died when OpenCode auto-rejected a write to `/tmp`. I logged it, fixed that issue, and
