@@ -121,7 +121,17 @@ fi
 # only evidence. #0011 r1 was accepted and later rejected for exactly this.
 if (( IS_CODE )); then
   if grep -qE 'swift test|xcodebuild [^|]*test|Test run with' "$SPEC"; then
-    pass "names a verification command"
+    # A count with no baseline is not evidence. A round once added eight
+    # XCTest cases to a swift-testing package: the reported count was
+    # identical with the new file deleted, and the criterion still "passed".
+    if grep -qiE 'greater than|more than|must (be )?(exceed|increase)|higher than' "$SPEC"; then
+      pass "names a verification command with a baseline count"
+    else
+      warn "names a verification command but no baseline count" \
+"State what N must exceed, e.g. \"N must be greater than 83, the count on main
+before this change\". Without it, tests that never join the run still pass the
+criterion. See review-failures #0086 r1."
+    fi
   else
     fail "names no verification command" \
 "State the exact command and the exact line its output must contain, e.g.

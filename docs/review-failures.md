@@ -25,6 +25,7 @@ otherwise.**
 | #0070 | 2 | Exit 0 after 233s having changed nothing; caught only by the no-progress guard (exit 7) | My round-1 feedback told the model to *verify* git behaviour, which needs a scratch repo the sandbox denies. **The feedback itself made the round unrunnable.** | `review-defect` (+ `environment`) |
 | #0085 | 1 | Correct code and 54 passing tests, but time burned on `ld: symbol(s) not found`, and the model edited `issues/0085.md` to match its own deviation | The issue named `YardKit/Sources/yard/CommandSpec.swift`; `yard` is an `executableTarget`, so `@testable import yard` does not link. The path was unbuildable. Four more issues carried the identical defect. | `spec-defect` (+ `model-behaviour`) |
 | #0090 | 1 | Exit 0 after 1289s, rejected on review: 2 of 5 criteria failed. `Envelope.swift` rewritten from scratch — `EnvelopeFail`, `EnvelopeSchema`, `StandardStream`, `write()`, `terminate()` and `ExitCode.swift` all lost. Wire strings changed (`usage` → `usage_error`). A test named `allCasesRoundTripThroughJson` iterates `allCases` then `guard case .ok = code else { continue }` — it tests one case while appearing to test all. | The issue said "start from `issue/0011`, which has the enum", but the worktree was cut from `main`, which does not contain that branch's `Envelope.swift`. **`git merge-base --is-ancestor issue/0011 issue/0090` is false.** The model could not carry forward what was not there, so a one-field type change became a from-scratch reimplementation. The issue also named zero source paths. | `spec-defect` (+ `environment`) |
+| #0086 | 1 | Exit 0 after 125s, both files at the right paths, no scope violations — rejected on two counts. `<argument>` was dropped for any flag that also had a short name (`-o, --output` instead of `-o, --output <PATH>`), and the eight new tests were XCTest in a swift-testing package, so `Test run with 54 tests` was **identical with both new files deleted**. | (a) The model read "flags render as `--long` or `-s, --long`, with `<argument>` appended" as three mutually exclusive forms rather than two prefixes plus an independent suffix, and wrote an if/else-if chain. Its tests were split so no test ever built a flag with *both* a short name and an argument — each half passed alone, and their conjunction, the only case that exposes the bug, was untested. (b) The issue never named the test framework. | `model-behaviour` (+ `spec-defect`, thin) |
 | #0098 | 1 | Exit 7, 81s, nothing produced | The issue never said where the scratch image should go, so the model chose `/var/tmp`, which the sandbox auto-rejects. It then wrote "Now I have a clear picture. Let me execute the steps" and ended its turn having executed none of them. | `environment` (+ `spec-defect`, `model-behaviour`) |
 | #0010, #0011, #0022 | — | Repeatedly failed to converge before being split | Each bundled four deliverables. No multi-deliverable issue has converged in this project; every converged issue named exactly one file. | `sizing` |
 
@@ -49,12 +50,17 @@ Checks read the **spec only** — everything above the first `## Review`, `## Wo
 | 6 | Does it ask the implementer to *discover* a fact rather than applying one? | warn | #0070 r2 |
 | 7 | Are two dispatches already running? LM Studio is `PARALLEL 2`; a third queues silently. | warn | tooling |
 | 8 | Round > 1 with an issue file unchanged since the last round, or with no `## Review` section. | hard (in `dispatch-issue.sh`) | #0070 r2 |
+| 9 | Does the verification criterion state a baseline the count must exceed? | warn | #0086 r1 |
 
 Check 3 is the strongest signal in the log: **every code round that failed named zero source paths;
 every round that converged first try named exactly one.**
 
 Check 5 skips lines that tell the implementer *not* to use a branch — guidance, not a base
 requirement.
+
+A green count is not evidence unless it *moved*. Check 4 now warns when an issue asks for
+`Test run with N tests` without saying what N must exceed — #0086 satisfied the criterion literally
+while its tests contributed nothing to the number.
 
 ### Judgment — read the issue and answer honestly
 
@@ -74,7 +80,11 @@ requirement.
     #0011 wrote a test named `envelopeFailWriteEmitsJsonToStdout` that never calls `write()`. If the
     criterion is about what a *caller* observes — stdout bytes, exit status, a hook firing — say
     explicitly that a test which does not spawn a process cannot satisfy it.
-14. **Do the new tests actually assert?** The recurring inert-test pattern: a loop over `allCases`
+14. **Do the tests exercise the *conjunction* of the criteria, or only each half?** #0086's tests
+    covered "flag with a short name" and "flag with an argument" separately and never both at once —
+    which is exactly the case its code got wrong. When a criterion has two independent dimensions,
+    ask for the test that crosses them.
+15. **Do the new tests actually assert?** The recurring inert-test pattern: a loop over `allCases`
     whose body `continue`s past everything but one case, and test functions containing zero
     `#expect`. Both look like coverage. Grep the diff for `#expect` per test function.
 

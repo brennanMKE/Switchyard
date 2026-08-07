@@ -113,6 +113,18 @@ next case someone adds is silently untested and nothing fails. If the name says 
 Before you finish, re-read each test you wrote and ask what change to the production code would make
 it fail. If the honest answer is "none", the test is not done.
 
+## Rule 8 — Tests use swift-testing, not XCTest.
+
+Every test file in this package uses `import Testing`, `@Test`, and `#expect`. Match it.
+
+This is not style. `swift test` prints one summary line — `Test run with N tests` — and **that line
+counts only swift-testing tests.** A round once added eight XCTest cases and reported "54 tests = 8
+new + 46 existing"; the real count was 54 either way, and deleting the new file changed nothing.
+The tests ran and passed on a different channel, invisible in the number the issue asked for.
+
+So: `import Testing`, `@Test func name()`, `#expect(...)`. Never `import XCTest`, `XCTestCase`, or
+`XCTAssert*`. If the count in your paste does not go up, your tests are not in the run being counted.
+
 ## Build commands
 
 ```sh
