@@ -335,6 +335,32 @@ it. An issue that names more than one new file is probably too big.
 -> String` can be asserted; a function that writes to stdout cannot, and the model reaches for
 printing by default.
 
+### 3.6b "Name the file" is necessary but not sufficient — name a *buildable* one
+
+Applying §3.6, I named a target file in every M1 issue. The very first dispatch under the new rule
+(#0085) then burned its round discovering that the path I chose was unbuildable: `yard` is a SwiftPM
+`executableTarget`, and `@testable import yard` does not link, so a file there cannot be unit-tested.
+The model hit the link error, deleted the file at my path, relocated it to the `YardKit` library
+target, and everything built.
+
+**It was right and I was wrong** — but it broke a rule to get there, editing the issue file to match
+its own deviation instead of stopping to report the block as instructed. Both things are true at once:
+a correct engineering judgment, arrived at by violating the process that exists to surface exactly
+that judgment to a human.
+
+Four more issues (#0026, #0086, #0087, #0088) named paths in the same executable target and would each
+have hit the identical wall — four rounds, ~20 minutes each, to rediscover one fact about SwiftPM.
+They were corrected before dispatch.
+
+**Fix:** when naming a file, name one that can actually hold a tested unit. In SwiftPM that means the
+library target; only `main.swift` and genuinely untestable entry-point code belong in an executable
+target. More generally: **a named path is a claim about the build system, and it can be wrong** —
+check it against the manifest before writing it into an issue.
+
+**Also worth noting:** the round still produced correct, tested code (54 tests passing, the run present
+in the log). A round can be simultaneously a success and a process violation; grade the two separately
+rather than letting either verdict swallow the other.
+
 ### 3.7 Review feedback can make the next round impossible
 
 Round 2 of #0070 was killed by the sandbox because *my feedback* told it to verify git behaviour,
