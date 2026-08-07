@@ -298,6 +298,18 @@ mid-tier model is no longer in the loop.
 This is also a deliberate experiment in running local AI alongside Claude Code, so treat friction as
 a finding worth recording rather than an annoyance to route around.
 
+### Stage only what the commit owns — never `git add -A`
+
+Filing #0127 with `git add -A` swept a concurrently-running planner's finished
+`issues/0017.md` into it, along with `docs/test-baseline.txt`. The content survived and the history
+was not rewritten, but the planning update it belonged to could only be recorded as an empty marker
+commit.
+
+Planners run in parallel in the primary checkout, and they take minutes. **`git add <the files this
+commit is about>`**, always. A broad add is a race with every other agent working in the same tree.
+
+The same applies to `git commit -a`.
+
 ### The five roles, revised 2026-08-07
 
 | role | model | scope |

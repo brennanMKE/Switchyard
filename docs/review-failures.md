@@ -261,7 +261,11 @@ while its tests contributed nothing to the number.
     snake_case JSON keys and got a passing grep because the round removed the `CodingKeys` enum
     entirely and fell back to synthesis. Phrase it as a presence — *"an explicit `CodingKeys` enum
     exists AND its cases are …"* — or the absence-check rewards deletion.
-39. **Does the issue name the collaborators, not just the output file?** "Name the file" fixed
+39. **Did the commit stage only what it owns?** Filing #0127 with `git add -A` swept a concurrent
+    planner's finished `issues/0017.md` into an unrelated commit. Planners run in parallel in the
+    primary checkout and take minutes; a broad add is a race with every one of them. Stage the files
+    the commit is about, by name.
+40. **Does the issue name the collaborators, not just the output file?** "Name the file" fixed
     convergence months of rounds ago, and it is necessary but not sufficient: a file name says where
     code goes and nothing about what it may call. If the work must use an existing type, **quote its
     real surface in the issue** — #0012 lost a full 30-minute cap to a model inventing
