@@ -99,7 +99,8 @@ a figure derived from it appears.
 | 2026-08-07 | #0122 | Dispatch round 1 + hand finish (accepted) | 56,208 | $0.45 |
 | 2026-08-07 | #0097 | Dispatch round 1 (REJECTED, fixture path never matched git's) | 67,185 | $0.54 |
 | 2026-08-07 | #0097 | Dispatch round 2 (REJECTED, found a real production defect) | 65,428 | $0.52 |
-| | | **Total measured** | **4,477,970** | **$35.81** |
+| 2026-08-07 | #0097 | Dispatch round 3 + hand finish (accepted) | 49,704 | $0.40 |
+| | | **Total measured** | **4,527,674** | **$36.21** |
 
 ## What this total does and does not cover
 
