@@ -1,9 +1,10 @@
 // HelpRendererTests.swift
 
-import XCTest
+import Testing
 @testable import YardKit
 
-final class HelpRendererTests: XCTestCase {
+@Suite("HelpRenderer")
+struct HelpRendererTests {
 
     /// A small spec that exercises every rendering path.
     private static let sampleSpec = CommandSpec(
@@ -24,36 +25,34 @@ final class HelpRendererTests: XCTestCase {
 
     // MARK: - Every flag long name and exit code number appears in the rendered output.
 
+    @Test("Every flag long name and every exit code number from a hand-built spec appears in the rendered text")
     func testRenderHelpContainsFlagsAndExitCodes() {
         let rendered = renderHelp(for: Self.sampleSpec)
 
+        #expect(Self.sampleSpec.flags.count >= 3, "loop must iterate real cases")
         for flag in Self.sampleSpec.flags {
-            XCTAssertTrue(
-                rendered.contains("--\(flag.long)"),
-                "Expected flag --\(flag.long) to appear in rendered help:\n\(rendered)"
-            )
+            #expect(rendered.contains("--\(flag.long)"), "Expected flag --\(flag.long) to appear in rendered help:\n\(rendered)")
         }
 
         for exitCode in Self.sampleSpec.exitCodes {
-            XCTAssertTrue(
-                rendered.contains("\(exitCode.code)"),
-                "Expected exit code \(exitCode.code) to appear in rendered help:\n\(rendered)"
-            )
+            #expect(rendered.contains("\(exitCode.code)"), "Expected exit code \(exitCode.code) to appear in rendered help:\n\(rendered)")
         }
     }
 
     // MARK: - Deterministic output.
 
+    @Test("Rendering the same spec twice produces identical strings")
     func testRenderHelpIsDeterministic() {
         let a = renderHelp(for: Self.sampleSpec)
         let b = renderHelp(for: Self.sampleSpec)
 
-        XCTAssertEqual(a, b, "Rendering the same spec twice must produce identical output")
+        #expect(a == b, "Rendering the same spec twice must produce identical output")
     }
 
-    // MARK: - Flag formatting.
+    // MARK: - Flag formatting (all four combinations).
 
-    func testRenderHelpShortLongFlag() {
+    @Test("Flag with only a long name renders as --long")
+    func testRenderHelpLongOnly() {
         let spec = CommandSpec(
             name: "git", summary: "",
             flags: [FlagSpec(long: "version", short: nil, argument: nil, help: "Show version")],
@@ -61,10 +60,11 @@ final class HelpRendererTests: XCTestCase {
             schemaName: ""
         )
         let rendered = renderHelp(for: spec)
-        XCTAssertTrue(rendered.contains("--version"))
+        #expect(rendered.contains("--version"))
     }
 
-    func testRenderHelpShortAndLongFlag() {
+    @Test("Flag with short and long name but no argument renders as -s, --long")
+    func testRenderHelpShortAndLong() {
         let spec = CommandSpec(
             name: "git", summary: "",
             flags: [FlagSpec(long: "verbose", short: "v", argument: nil, help: "Be verbose")],
@@ -72,10 +72,11 @@ final class HelpRendererTests: XCTestCase {
             schemaName: ""
         )
         let rendered = renderHelp(for: spec)
-        XCTAssertTrue(rendered.contains("-v, --verbose"))
+        #expect(rendered.contains("-v, --verbose"))
     }
 
-    func testRenderHelpFlagWithArgument() {
+    @Test("Flag with long name and argument but no short name renders as --long <ARG>")
+    func testRenderHelpLongAndArgument() {
         let spec = CommandSpec(
             name: "git", summary: "",
             flags: [FlagSpec(long: "target", short: nil, argument: "PATH", help: "Output destination")],
@@ -83,37 +84,50 @@ final class HelpRendererTests: XCTestCase {
             schemaName: ""
         )
         let rendered = renderHelp(for: spec)
-        XCTAssertTrue(rendered.contains("--target <PATH>"))
+        #expect(rendered.contains("--target <PATH>"))
+    }
+
+    @Test("Flag with short name, long name, and argument renders as -s, --long <ARG>")
+    func testRenderHelpShortAndLongAndArgument() {
+        let spec = CommandSpec(
+            name: "git", summary: "",
+            flags: [FlagSpec(long: "output", short: "o", argument: "PATH", help: "Output destination")],
+            exitCodes: [],
+            schemaName: ""
+        )
+        let rendered = renderHelp(for: spec)
+        #expect(rendered.contains("-o, --output <PATH>"))
     }
 
     // MARK: - Header and exit-code sections.
 
+    @Test("Header includes command name, summary, Options: section, and Exit codes: section")
     func testRenderHelpHeaderAndExitCodes() {
         let rendered = renderHelp(for: Self.sampleSpec)
 
-        XCTAssertTrue(rendered.contains("status"))
-        XCTAssertTrue(rendered.contains("Show the working tree status"))
-        XCTAssertTrue(rendered.contains("Options:"))
-        XCTAssertTrue(rendered.contains("Exit codes:"))
+        #expect(rendered.contains("status"))
+        #expect(rendered.contains("Show the working tree status"))
+        #expect(rendered.contains("Options:"))
+        #expect(rendered.contains("Exit codes:"))
     }
 
+    @Test("Empty spec renders the command name without Options or Exit codes sections")
     func testRenderHelpEmptySpec() {
         let spec = CommandSpec(
             name: "noop", summary: "", flags: [], exitCodes: [], schemaName: ""
         )
         let rendered = renderHelp(for: spec)
 
-        XCTAssertTrue(rendered.hasPrefix("noop"))
-        XCTAssertFalse(rendered.contains("Options:"))
-        XCTAssertFalse(rendered.contains("Exit codes:"))
+        #expect(rendered.hasPrefix("noop"))
+        #expect(!rendered.contains("Options:"))
+        #expect(!rendered.contains("Exit codes:"))
     }
 
     // MARK: - Pure function behaviour.
 
+    @Test("renderHelp is callable without awaiting (nonisolated)")
     func testRenderHelpIsNonisolated() {
-        // This call site verifies that `renderHelp(for:)` is callable without
-        // awaiting — i.e. it really is declared nonisolated, as the issue requires.
         let result = renderHelp(for: Self.sampleSpec)
-        XCTAssertTrue(!result.isEmpty)
+        #expect(!result.isEmpty)
     }
 }

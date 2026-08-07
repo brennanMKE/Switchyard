@@ -48,11 +48,17 @@ public nonisolated func renderHelp(for spec: CommandSpec) -> String {
 // MARK: - Private helpers
 
 private func renderFlagLine(_ flag: FlagSpec) -> String {
+    var result = ""
+
     if let short = flag.short {
-        return "-\(short), --\(flag.long)"
-    } else if let argument = flag.argument {
-        return "--\(flag.long) <\(argument)>"
-    } else {
-        return "--\(flag.long)"
+        result += "-\(short), "
     }
+
+    if let argument = flag.argument {
+        result += "--\(flag.long) <\(argument)>"
+    } else {
+        result += "--\(flag.long)"
+    }
+
+    return result
 }
