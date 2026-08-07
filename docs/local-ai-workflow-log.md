@@ -701,6 +701,48 @@ test suite in one round. Even had the API been right, the budget was thin. Signi
 became #0108 and the sibling worktree #0109 — neither is needed to answer "where am I", and both are
 independently useful. Splitting after a failure is cheap; the work was never started.
 
+### 1.14 `/loop` is the heartbeat that makes stopping recoverable
+
+The single most persistent failure in this project has one mechanical cause: **a turn ends when a
+response contains no tool calls.** Background work re-invokes the session when it finishes; nothing
+else does. So a turn that ends with prose and nothing running stops the queue silently, and stays
+stopped until a human notices.
+
+It has happened at every level:
+
+- **§1.4** — a progress report between issues ends the turn, however it is phrased.
+- **§1.11** — a dispatcher subagent writing *"waiting for the dispatch to exit"* and stopping, twice,
+  the second time with an instruction in its prompt telling it not to.
+- **And again on 2026-08-07**, by me: I said "I'll keep two rounds in flight through the night",
+  dispatched nothing, and said goodnight. Brennan's next message was *"why did you stop working?"*.
+  Prose about future intent is not a scheduled action.
+
+**The fix is `/loop <interval> <prompt>`.** It arms a wakeup that re-invokes the session on a timer
+**regardless of whether anything is running** — which is precisely the case no notification can cover,
+because there is nothing to notify about.
+
+**Use it as a fallback, not as the primary signal.** Harness-tracked background work already
+re-invokes on completion, and that is far more responsive than any interval; polling for it just
+burns wakeups. The heartbeat exists for what notifications structurally cannot catch:
+
+- a round that hangs and never completes,
+- a notification that is missed,
+- and the real one — **both dispatch slots idle because the previous turn ended without dispatching.**
+
+**Pick the cadence from the failure, not from the work.** An hour is right here: a stalled queue then
+costs at most an hour, which is the actual damage being bounded. A five-minute heartbeat would not
+make rounds finish sooner — rounds take ten to thirty minutes and announce themselves — it would only
+add wakeups.
+
+**What each firing should do,** in order: confirm both slots are busy; merge anything that finished
+and set its status; dispatch from the ready queue until both slots are full again. If the queue is
+genuinely empty or blocked, that is when the loop should stop rather than tick.
+
+**The general shape worth carrying to other projects:** when a failure mode is *"the agent stops
+without meaning to"*, no instruction fixes it — §1.11 proves that directly, since the second stop
+happened with the instruction present. Recovery has to come from outside the turn. `/loop` is that
+outside.
+
 ### 3.7 Review feedback can make the next round impossible
 
 Round 2 of #0070 was killed by the sandbox because *my feedback* told it to verify git behaviour,

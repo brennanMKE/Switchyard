@@ -67,10 +67,27 @@ built by the test harness (#0024) still go in temp directories and are cleaned u
 
 ### Running unattended
 
-`/loop` is the harness mechanism for sustained work. `/loop work the next open issue` with no
-interval lets the model self-pace; with an interval it re-fires on a schedule. Between firings the
-issue tracker is the state — status rows and branches say what is done, so a fresh context resumes
-without needing the previous conversation.
+`/loop` is the harness mechanism for sustained work, and its real job is to be a **heartbeat that
+makes stopping recoverable**. A turn ends when a response contains no tool calls; background work
+re-invokes the session when it finishes, and nothing else does. So a turn that ends with prose and
+nothing running stops the queue silently — which has happened repeatedly, including once after
+promising to keep two rounds in flight overnight.
+
+`/loop <interval> <prompt>` re-invokes the session on a timer **whether or not anything is running**,
+which is the one case no notification can cover.
+
+**Treat it as a fallback, not the primary signal.** Dispatch completions already wake the session and
+do it sooner; polling for them wastes wakeups. The heartbeat catches what notifications cannot: a hung
+round, a missed notification, and both slots idle because the last turn ended without dispatching.
+Pick the interval from the failure being bounded — an hour means a stalled queue costs at most an
+hour — not from how long a round takes.
+
+**On each firing:** confirm both slots are busy, merge anything that finished and set its status, then
+dispatch from the ready queue until both slots are full. Stop the loop when the queue is genuinely
+empty or blocked rather than letting it tick.
+
+Between firings the issue tracker is the state — status rows and branches say what is done, so a fresh
+context resumes without needing the previous conversation.
 
 ## Implementation is delegated to OpenCode running a local model
 
