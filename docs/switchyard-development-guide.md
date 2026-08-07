@@ -716,24 +716,34 @@ a feature at any milestone on the grounds that GitUp had it.
    [journal-capture-policy.md](journal-capture-policy.md). Under-capturing loses the user's work
    silently; over-capturing costs objects `gc` reclaims. Excluding ignored files is what keeps
    "always" affordable.
+4. **The CLI binary is `switchyard`, not `yard`.** Decided 2026-08-06. `yard` is taken by the Ruby
+   YARD documentation tool, which declares `yard`, `yardoc` and `yri` as executables, has over 230
+   million RubyGems downloads, and installs into `/usr/local/bin` — the exact path
+   [Section 3](#3-naming-and-identifiers) specifies for ours. The collision is invisible until a user
+   who has the gem installs Switchyard, at which point one shadows the other depending on `PATH`
+   order. Findings in [name-availability.md](name-availability.md). The library targets `YardKit` and
+   `YardGit` keep their names — they are module names, not commands, and collide with nothing.
+5. **Distribution: direct, unsandboxed, Developer ID signed and notarized.** Decided 2026-08-06. Not
+   the Mac App Store. A sandboxed build cannot install a CLI to `/usr/local/bin`, cannot publish a
+   Mach service an external process can reach, and runs hooks outside its container's grants — which
+   removes the entire agent-facing half of the product. Reasoning in
+   [distribution.md](distribution.md). This settles that `machServiceName` keeps its unprefixed form
+   and that `stateDirectory()` is genuinely shared between app and CLI.
+6. **stdout is JSON on every command except `--help` and `--version`.** Decided 2026-08-06. Those two
+   exist for humans and print plain text; everything an agent actually calls emits a JSON envelope
+   unconditionally, with no `--json` flag needed. This keeps one output path for every real command —
+   no class of bug where a command's human and JSON renderings disagree — while `switchyard --help`
+   stays readable in a terminal. A `--json` flag on `--help` may later return the structured spec;
+   nothing depends on it yet.
 
 ### Still open
 
 Decide these with Brennan, do not decide them in code.
 
-1. **Name availability.** Domain, Homebrew formula name, npm, and the App Store name have not
-   been checked. `yard` as a binary name in `/usr/local/bin` should be checked against anything
-   already installed. Do this before the identifiers above are baked in.
-2. **Rebase engine scope.** GitUp wrote its own. How much of one does M5 actually require, and
+1. **Rebase engine scope.** GitUp wrote its own. How much of one does M5 actually require, and
    can `absorb` and `split` be built on narrower primitives?
-3. **Distribution.** Mac App Store or direct. Affects sandboxing, which is baked in early and now
-   has **two** concrete consequences, not one: the Mach service name must be prefixed with an
-   app-group identifier, *and* the state directory diverges — `~/.local/state/switchyard/` from a
-   sandboxed app resolves to
-   `~/Library/Containers/co.sstools.Switchyard/Data/.local/state/switchyard/`, silently disagreeing
-   with what `yard` sees from a shell. Two processes reading different journals while both believe
-   they are reading the same one is a bug that would take a long day to find. (MIT settles whether
-   the source is open; it does not settle how the app is delivered.)
+2. **Domain and App Store name.** Not checked. The App Store name no longer
+   matters given the distribution decision above; the domain still does, for the docs site.
 
 ---
 
