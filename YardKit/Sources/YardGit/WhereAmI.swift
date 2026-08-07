@@ -40,11 +40,14 @@ public struct WhereAmI: Sendable, Equatable {
     public let untrackedCount: Int
 
     /// Number of files with unstaged changes, as returned by
-    /// `git diff --name-status`.
+    /// `git diff-index --name-status HEAD`. The code splits stdout on `\n` and
+    /// counts non-empty lines; a non-zero exit on a fresh repository (no HEAD)
+    /// is treated as zero files.
     public let unstagedCount: Int
 
     /// Number of files with staged changes, as returned by
-    /// `git diff --cached --name-status`.
+    /// `git diff-index --name-status --cached HEAD`. The code splits stdout on
+    /// `\n` and counts non-empty lines.
     public let stagedCount: Int
 
     /// True when the index contains unmerged (conflicted) entries.
@@ -53,8 +56,9 @@ public struct WhereAmI: Sendable, Equatable {
     /// The short form of HEAD's object id, e.g. `"a1b2c3d"`.
     public let headOID: String
 
-    /// The raw form of HEAD, for debugging. e.g. `"ref: refs/heads/main"`
-    /// or the full SHA when detached.
+    /// The raw form of HEAD, for debugging. Always a SHA or empty (the code
+    /// runs `git rev-parse HEAD`), never the symbolic `"ref: refs/heads/main"`
+    /// form. Empty on a fresh repository with no commits yet.
     public let rawHead: String
 
     public init(
@@ -100,10 +104,9 @@ public func whereAmI(
     git: GitProcess = GitProcess()
 ) throws -> WhereAmI {
 
-    // HEAD's raw form: `ref: refs/heads/main` or a full SHA when detached.
-    // An empty repository has no HEAD yet, so fall back to a sentinel string;
-    // callers can still check the branch via `symbolic-ref -q` (which also
-    // returns non-zero with no commits).
+    // HEAD's raw form: a full SHA or empty. An empty repository has no HEAD
+    // yet, so fall back to ""; callers can still check the branch via
+    // `symbolic-ref -q`, whose exit code is checked below.
     let rawHead: String = {
         guard let out = try? git.run(
             ["rev-parse", "HEAD"], workingDirectory: path) else { return "" }
