@@ -1130,3 +1130,43 @@ verification command all fell outside it and two hard checks failed. Reviews go 
 file. The check caught it in three seconds, which is the entire argument for running preflight rather
 than trusting a read-through.
 
+### 5.5 What the probing pass covered, and what came back clean
+
+§5.3's technique was applied to every public surface in the package on 2026-08-07, so the result is
+worth recording in full — a clean probe is only useful if nobody repeats it.
+
+**Defects found, each now an issue with measured before-counts:**
+
+| surface | defect | issue |
+|---|---|---|
+| `WorktreeStatusParser` | renames dropped by an off-by-one; one non-UTF-8 byte erases the entire status; submodule state flattened | #0013 |
+| `CommitLog.parse` | a body containing the `\u{01}` field delimiter is truncated at that byte, losing the trailers with it | #0117 |
+| `WorktreeContext.resolveRef` | returns `nil` for every shared ref, indistinguishable from "does not exist" | #0119 |
+| `gitStatus` | returns a `public` type whose members are internal — unusable from outside the module, invisible to `@testable` tests | #0116 |
+| `WorktreeRemoveTests`, `WorktreeStatusTests` | never parameterised over reftable, unlike the other seven test files | #0118 |
+
+**Probed and correct — do not re-check these:**
+
+- **`GitProcess`.** Pointed at a non-existent executable, both `capture` and `run` throw
+  `could not launch git`. `capture` does **not** throw on a non-zero exit (`git config --get` of a
+  missing key returns `exitCode == 1` quietly); `run` does, as `Failure.exited`, carrying stderr. A
+  non-existent working directory is not a launch failure — `capture` returns 128 with
+  `fatal: cannot change to …`, so it cannot be used to provoke a throw.
+- **`EnvelopeErrorCode` → `ExitCode`.** All ten cases map one-to-one to 0–9 with matching
+  `codeLabel`s, and every one round-trips through the JSON envelope with `schemaVersion: 1` and
+  `ok: false`.
+- **`worktreeList`.** Correct against worktree paths containing spaces and double quotes, and lock
+  reasons containing spaces.
+- **`WorktreeContext.resolve` inside a git submodule**, where `.git` is a *file* pointing into the
+  superproject's `modules/` directory: `gitDir` and `commonDir` both resolve to
+  `…/super/.git/modules/sub`, `topLevel` is the submodule directory, `path(for: "HEAD")` resolves,
+  and it is correctly reported as neither linked nor bare.
+- **`gitStatus` and `worktreeRemove` under `--ref-format=reftable`.** Both behave identically to
+  `files`. #0118 is a coverage gap, not a bug — a round that "fixes" either implementation is wrong.
+- **`CommitLog`** on multi-paragraph bodies, blank lines, CJK, accented Latin, emoji, merge parents,
+  trailer blocks, and `-1`/range arguments. All round-trip.
+
+Five real defects in about ninety minutes, in code that was already reviewed, already tested, and
+already merged. None of them were visible from reading; every one showed up the moment real input went
+in and the output was printed.
+
