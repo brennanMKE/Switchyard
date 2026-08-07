@@ -106,6 +106,15 @@ Also: **the name must match what the body does.** A test called
 `envelopeFailWriteEmitsJsonToStdout` that never calls `write()` is a false claim in the test report,
 and it survived review once precisely because the name was read instead of the body.
 
+**If a test extracts something before asserting on it, assert the extraction is non-empty first.**
+A helper that silently returns an empty collection turns every following assertion into `[] == []`,
+which passes unconditionally. This has happened: a key-order test whose extractor assumed a 4-space
+indent against 2-space output returned nothing, and both its assertions passed while testing nothing.
+`#expect(!extracted.isEmpty)` first, then compare.
+
+**Never write `#expect(true)`**, or any assertion whose operands are literals. It passes no matter
+what the code does.
+
 **Enumerate cases with `CaseIterable`, never a hand-written array.** A hand-written list means the
 next case someone adds is silently untested and nothing fails. If the name says *all*, *every*, or
 *each*, assert the collection's count first so the loop cannot silently run zero times.
