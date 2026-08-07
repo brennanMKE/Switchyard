@@ -122,9 +122,21 @@ failing to bind — it reads as advice about *tone* when it is really a fact abo
 response must also contain the next tool call. Answer the user's question in the same response that
 dispatches the next issue.
 
+**The cost is idle wall-clock, and it is the largest number in this project.** Brennan went AFK for
+an hour expecting continuous work. I stopped early in that window and the machine sat idle until he
+returned — roughly an hour of local inference time, on a model that costs $0.00 per token and is
+bounded only by wall clock. Six dispatched rounds at ~20 minutes each would have fit in that window.
+
+That reframes the whole entry. Measured spend so far is $3.12; the stopping wasted something worth
+more, and it does not appear in any ledger. **For an unattended local-inference workflow, idle time
+is the dominant cost** — the model is free per token but slow per round, so throughput is set almost
+entirely by whether rounds are in flight. A stop during an unattended window is not a small process
+foul; it is the single most expensive thing that can happen.
+
 **For the next project:** treat "keep working" not as a discipline problem to be solved with a
-stronger reminder, but as a structural one. The reminder is worth writing once; after that, look for
-the mechanism.
+stronger reminder, but as a structural one — and size the failure by idle wall-clock, not by tokens.
+Before any pause, check whether a dispatch could be running instead. The reminder is worth writing
+once; after that, look for the mechanism.
 
 ### 1.7 Reviewed by reading instead of re-running
 
