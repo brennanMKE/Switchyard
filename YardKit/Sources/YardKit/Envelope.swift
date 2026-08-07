@@ -55,6 +55,15 @@ public struct Envelope: Encodable {
         case ok = "ok"
         case result = "result"
     }
+
+    /// Writes a success envelope to stdout. Matches `EnvelopeFail.write()` in
+    /// the contract: exactly one JSON object on stdout, nothing else. No human
+    /// line — a success envelope has no complaint to surface.
+    public func write() {
+        let data = try! JSONEncoder().encode(self)
+        FileHandle.standardOutput.write(data)
+        fflush(stdout)
+    }
 }
 
 /// A wrapper that makes any `Encodable` value `Sendable`.
