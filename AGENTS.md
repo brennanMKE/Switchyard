@@ -76,6 +76,19 @@ attempts at the same thing have failed, the third will not succeed; write the re
 
 Finish every run with: what you changed, what you ran, what it printed, and what you could not do.
 
+## Rule 6 — Every scratch file goes in `build/`, inside the worktree.
+
+Your sandbox auto-rejects writes to `/tmp`, `/var/tmp`, and anything outside the working directory.
+This is not negotiable and there is no permission to request — a run that tries it gets a hard
+rejection and produces nothing.
+
+Intermediates, downscaled images, generated trees, scratch output: all of it goes under `build/` in
+the worktree. It is already in `.gitignore`, so it will not pollute the diff. Create it if it is not
+there.
+
+Two separate runs have now died on this. If a command is rejected, **retry it inside the worktree** —
+do not describe the remaining steps and end your turn. A plan is not an outcome.
+
 ## Build commands
 
 ```sh

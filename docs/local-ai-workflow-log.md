@@ -385,6 +385,49 @@ someone tries to get through it. This applies to every validation added to this 
 mode of a guard is not "misses a bad case", it is "blocks the good ones", and only a negative control
 finds it.
 
+### 2.4b The sandbox denial recurred because I fixed the instance, not the class
+
+#0070 round 2 died when OpenCode auto-rejected a write to `/tmp`. I logged it, fixed that issue, and
+moved on. Three issues later I wrote #0098, which needed a scratch image, and the obvious place to
+put a scratch image is `/var/tmp`. Round 1 died the same way, at exit 7, having produced nothing.
+
+The model's reconnaissance was correct — it checked the source dimensions, read `icongen -h`, read
+the existing catalog — and then it hit `permission requested: external_directory (/var/tmp/*);
+auto-rejecting`, wrote *"Now I have a clear picture. Let me execute the steps"*, and ended its turn
+without executing any of them. Two faults compound: a hard environmental block, and announcing a plan
+in place of doing the work.
+
+**The failure was mine.** I knew the sandbox rule, wrote it into a log nobody reads at authoring time,
+and then authored an issue that violated it. A lesson recorded only in a retrospective does not reach
+the next dispatch.
+
+**Fix:** the rule now lives in `AGENTS.md` as Rule 6 — *every scratch file goes in `build/`, inside
+the worktree* — which is the file the model actually loads on every run, with an explicit
+"retry inside the worktree, do not narrate a plan and stop." The retrospective records *why*;
+`AGENTS.md` is what changes behaviour.
+
+**The general form:** when a round fails on an environmental constraint, the fix belongs in the file
+the model reads, not in the issue you happen to be holding. Otherwise you will rediscover it at
+roughly one wasted round per issue that happens to need scratch space.
+
+### 3.6d Verifying the tool beats transcribing its `--help`
+
+#0098's first draft told the model to run `icongen -h` "rather than trusting this transcription."
+Sound instinct, wrong target: the help text is accurate and says nothing about the one fact that
+decides the task. **`icongen -p macOS` emits `AppIcon-macOS.appiconset`, not `AppIcon.appiconset`** —
+while the Xcode build setting `ASSETCATALOG_COMPILER_APPICON_NAME` is `AppIcon`. A model following the
+help text faithfully would have produced a correctly generated icon set that Xcode ignores entirely.
+
+I found this by *running* `icongen` into a scratch directory and listing the output, which took under
+a minute. The rewritten issue states all of it as given facts — output directory name, the exact
+eleven filenames, that no catalog-root `Contents.json` is produced, and that `AccentColor.colorset`
+must survive.
+
+**The rule:** for any issue whose task is "run this tool and integrate the result," run the tool
+yourself first and write down what it actually produced. `--help` documents the interface; only
+execution reveals the output shape, and the output shape is what the integration depends on.
+This pairs with §3.7 — state verified facts as givens rather than asking the model to verify them.
+
 ### 3.7 Review feedback can make the next round impossible
 
 Round 2 of #0070 was killed by the sandbox because *my feedback* told it to verify git behaviour,
