@@ -793,3 +793,23 @@ Paths below are relative to the **repository root**, not to this file.
    whose directory no longer exists is an **abandoned session**: git never reports it as `prunable`
    and never reaps it, so nothing cleans it up but us, and we report it rather than remove it. A lock
    reason without the prefix belongs to the user and is reported as an ordinary lock.
+
+10. **All SwiftUI views live in a `YardUI` package target, not in the Xcode project.** Decided
+    2026-08-07 by Brennan. `YardUI` depends on `YardKit` and `YardGit`; the arrows point one way and
+    nothing in the engine imports it.
+
+    **The Xcode project keeps only what cannot live in a package**: the `@main` `App` type, the
+    asset catalog, `Info.plist`, entitlements, `SMAppService` registration, and the embedded
+    `switchyard` binary. Everything else — every `View`, every view model, every piece of formatting
+    or state — is package code.
+
+    The reason is testability. A view in the app target can only be exercised by a UI test, and UI
+    tests **cannot run under CLI-driven `xcodebuild` on this machine** — the runner times out
+    enabling automation mode without Accessibility rights. The same view in a package target is
+    reachable from `swift test`, which runs unattended in seconds. This is the difference between UI
+    logic that is covered and UI logic that is not.
+
+    `YardUI` must set `.defaultIsolation(MainActor.self)` in its `swiftSettings`. The app target has
+    `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`; a package target does **not** inherit it, and views
+    moved across the boundary would silently change isolation. Verified available in this toolchain
+    (swift-tools-version 6.3).

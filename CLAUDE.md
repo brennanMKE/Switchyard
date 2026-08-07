@@ -340,9 +340,19 @@ cd YardKit && swift build && swift test
 
 ## Layering
 
-**Everything shareable lives in the package.** The app target owns only SwiftUI views, agent
-embedding, `SMAppService` registration, and presentation of results. Anything with logic worth
-testing goes in `YardKit` and has unit tests.
+**Everything lives in the package, including the views.** `YardUI` holds every SwiftUI view and
+everything around them; it depends on `YardKit` and `YardGit`, and nothing in the engine imports it.
+The Xcode project keeps only what cannot live in a package — the `@main` `App` type, the asset
+catalog, `Info.plist`, entitlements, `SMAppService` registration, and the embedded `switchyard`
+binary.
+
+The reason is testability, not tidiness: **UI tests cannot run under CLI-driven `xcodebuild` here**,
+so a view in the app target is a view nothing can exercise unattended. The same view in a package
+target is reachable from `swift test`. Guide §11 decision 10.
+
+`YardUI` sets `.defaultIsolation(MainActor.self)`. A package target does not inherit the app's
+`SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, and a view moved across that boundary silently changes
+isolation.
 
 **`switchyard` is a companion tool, not a standalone one.** It ships inside the app bundle, is
 symlinked into `/usr/local/bin`, and drives Switchyard.app over XPC. **The app owns the engine.**
