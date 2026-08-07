@@ -205,6 +205,32 @@ if [[ -z "$(git status --porcelain)" ]]; then
   print "NO CHANGES. The run produced nothing — count it as a failed round, do not re-dispatch unchanged."
   exit 7
 fi
+
+# Ground truth for the suite, recorded next to whatever the round claimed.
+#
+# Two rounds have now closed by asserting a passing test count they never
+# measured -- #0013 round 2 invented "216 + 4 new + 15 existing = 235", and
+# #0119 round 1 wrote "all 261 tests pass, zero failures" while four failed.
+# The reviewer catches it by re-running, but that is one round late. Printing
+# the real line into the round's own log puts the claim and the fact in the
+# same artifact.
+if [[ -d YardKit ]]; then
+  print "\n--- swift test, run by the harness (not by the model) ---"
+  ( cd YardKit && swift test 2>&1 ) > "$LOG_DIR/$ISSUE-round$ROUND-suite.txt" 2>&1 &
+  SUITE_PID=$!
+  ( sleep 300; kill -KILL "$SUITE_PID" 2>/dev/null ) &
+  SUITE_DOG=$!
+  wait "$SUITE_PID" 2>/dev/null || true
+  kill "$SUITE_DOG" 2>/dev/null || true
+  SUITE_LINE=$(grep -E 'Test run with [0-9]+ tests' "$LOG_DIR/$ISSUE-round$ROUND-suite.txt" | tail -1 || true)
+  if [[ -n "$SUITE_LINE" ]]; then
+    print -r -- "$SUITE_LINE"
+  else
+    print "NO 'Test run with N tests' LINE. The suite did not build, or a test is blocking."
+    print "First error:"
+    grep -m1 -E '^/.*error:' "$LOG_DIR/$ISSUE-round$ROUND-suite.txt" || print "  (none found — see $LOG_DIR/$ISSUE-round$ROUND-suite.txt)"
+  fi
+fi
 git status --short
 print ""
 git diff --stat
