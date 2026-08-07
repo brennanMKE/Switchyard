@@ -11,15 +11,24 @@ struct WorktreeStatusTests {
         var repo = try FixtureRepository.linear()
         defer { repo.destroy() }
         
-        // Modify a committed file in worktree (unstaged)
+        let repoGit = GitProcess()
+
+        // modified.txt must be TRACKED before an edit reads as `.M`. Commit it
+        // first — an uncommitted new file is `?`, not a modification, and the
+        // original version of this test staged everything with `add -A` and then
+        // asserted the file was unstaged.
         let modifiedPath = repo.url.appendingPathComponent("modified.txt")
+        try "original".write(to: modifiedPath, atomically: true, encoding: .utf8)
+        try repoGit.run(["add", "modified.txt"], workingDirectory: repo.url.path)
+        try repoGit.run(["commit", "-m", "track modified.txt"], workingDirectory: repo.url.path)
+
+        // Now edit it WITHOUT staging — this is the `.M` case.
         try "new content".write(to: modifiedPath, atomically: true, encoding: .utf8)
-        
-        // Stage a new file (added to index)  
+
+        // And stage a genuinely new file — the `A.` case.
         let addedPath = repo.url.appendingPathComponent("added.txt")
         try "newly added".write(to: addedPath, atomically: true, encoding: .utf8)
-        let repoGit = GitProcess()  // Create separate instance since 'git' is private
-        try repoGit.run(["add", "-A"], workingDirectory: repo.url.path)  // Stage everything including new file
+        try repoGit.run(["add", "added.txt"], workingDirectory: repo.url.path)
         
         // Run git status in the repo's main worktree
         let output = try git.capture(
@@ -52,15 +61,21 @@ struct WorktreeStatusTests {
         var repo = try FixtureRepository.linear()
         defer { repo.destroy() }
         
-        // Modify a committed file in worktree first (unstaged)
-        let basePath = repo.url.appendingPathComponent("base.txt")
-        var content = try String(contentsOf: basePath, encoding: .utf8)
-        content += "\nmodified line"
-        try content.write(to: basePath, atomically: true, encoding: .utf8)
-        
-        // Stage it using git command directly (git is private in FixtureRepository)
         let repoGit = GitProcess()
-        try repoGit.run(["add", "-A"], workingDirectory: repo.url.path)
+
+        // FixtureRepository.linear() does NOT create base.txt. Reading it threw
+        // NSCocoaErrorDomain 260 and aborted the test rather than failing an
+        // assertion — create and commit the file this test needs.
+        let basePath = repo.url.appendingPathComponent("base.txt")
+        try "original\n".write(to: basePath, atomically: true, encoding: .utf8)
+        try repoGit.run(["add", "base.txt"], workingDirectory: repo.url.path)
+        try repoGit.run(["commit", "-m", "add base.txt"], workingDirectory: repo.url.path)
+
+        // Modify it, then stage the modification — this is the `M.` case.
+        var content = try String(contentsOf: basePath, encoding: .utf8)
+        content += "modified line\n"
+        try content.write(to: basePath, atomically: true, encoding: .utf8)
+        try repoGit.run(["add", "base.txt"], workingDirectory: repo.url.path)
         
         // Capture status after staging
         let output = try git.capture(
@@ -104,52 +119,77 @@ struct WorktreeStatusTests {
         #expect(untrackedEntry != nil, "should find untracked file")
         
         let entry = try #require(untrackedEntry)
-        #expect(entry.staged == WorktreeStatusEntry.State.untracked, "file should be marked as untracked")
-        #expect(entry.worktree == .modified || entry.worktree == .unmodified, "worktree state may vary")
+        // Untracked is a worktree-side fact: the file is absent from the index,
+        // so `.untracked` belongs on `worktree` and `staged` stays `.unmodified`.
+        // Reporting `.untracked` on the staged side would describe the index as
+        // holding something it does not have.
+        #expect(entry.worktree == WorktreeStatusEntry.State.untracked, "untracked belongs to the worktree side")
+        #expect(entry.staged == .unmodified, "an untracked file is not in the index at all")
     }
     
-    // MARK: - Unit test on hand-crafted NUL-terminated data
-    
-    @Test func parserAcceptsHandCraftedPorcelainBytes() {
-        // Construct a minimal -z buffer with known status codes
-        var buf: [UInt8] = []
-        
-        func append(_ s: String) { buf.append(contentsOf: Array(s.utf8)) }
-        func nl()   { buf.append(0x00) }  // NUL terminator
-        
-        append("1 M. N..."); nl()
-        append("modified.txt"); nl()  // Modified in worktree, staged unchanged
-        
-        append("1 A. N..."); nl()
-        append("added.txt"); nl()  // Added to index, worktree unchanged
-        
-        let data = Data(buf)
-        
-        do {
-            let parser = WorktreeStatusParser()
-            let status = try parser.parse(data)
-            
-            // Should have 2 entries  
-            #expect(status.entries.count == 2, "parser should recognize both file statuses")
-            
-            // Verify each entry's state
-            let modifiedEntry = status.entries.first { $0.path == "modified.txt" }
-            if let entry = modifiedEntry {
-                #expect(entry.staged == WorktreeStatusEntry.State.unmodified, "staged should be unmodified for unstaged change")
-                #expect(entry.worktree == WorktreeStatusEntry.State.modified, "worktree should be modified")
-            } else {
-                Issue.record("Should find modified.txt entry")
-            }
-            
-            let addedEntry = status.entries.first { $0.path == "added.txt" }
-            if let entry = addedEntry {
-                #expect(entry.staged == WorktreeStatusEntry.State.added, "staged should be added for new file in index")
-                #expect(entry.worktree == WorktreeStatusEntry.State.unmodified, "worktree should be unchanged")
-            } else {
-                Issue.record("Should find added.txt entry")
-            }
-        } catch {
-            Issue.record("Failed to parse hand-crafted data: \(error)")
+    // MARK: - The five real record types
+
+    /// Captured verbatim from `git status --porcelain=v2 -z --ignored` against a
+    /// repository holding all five states at once. Each element is one complete
+    /// NUL-terminated record — the path is part of the record, not a separate one.
+    /// Two earlier rounds wrote a parser against an invented two-chunk shape and
+    /// passed their own tests while failing on anything git actually emits.
+    private static let realRecords: [String] = [
+        "1 .M N... 100644 100644 100644 df967b96a579e45a18b8251732d16804b2e56a55 df967b96a579e45a18b8251732d16804b2e56a55 base.txt",
+        "1 A. N... 000000 100644 100644 0000000000000000000000000000000000000000 19d9cc8584ac2c7dcf57d2680375e80f099dc481 staged.txt",
+        "u AA N... 000000 100644 100644 100644 0000000000000000000000000000000000000000 ba2906d0666cf726c7eaadd2cd3db615dedfdf3a 2299c37978265a95cbe835a4b0f0bbf15aad5549 conflict.txt",
+        "? untracked.txt",
+        "! ignored.txt",
+    ]
+
+    private static func realBuffer() -> Data {
+        var bytes: [UInt8] = []
+        for record in realRecords {
+            bytes.append(contentsOf: Array(record.utf8))
+            bytes.append(0x00)
+        }
+        return Data(bytes)
+    }
+
+    @Test("all five porcelain v2 record types are parsed with exact paths")
+    func parsesEveryRealRecordType() throws {
+        let status = try WorktreeStatusParser().parse(Self.realBuffer())
+
+        #expect(status.entries.count == 5,
+                "expected one entry per record, got \(status.entries.map(\.path))")
+
+        func entry(_ path: String) throws -> WorktreeStatusEntry {
+            try #require(status.entries.first { $0.path == path },
+                         "no entry for \(path); paths were \(status.entries.map(\.path))")
+        }
+
+        // Paths must be exactly the filename — no `N...`, no mode fields. An
+        // earlier round returned "N... 100644 100644 100644 df967b... staged.txt".
+        let unstaged = try entry("base.txt")
+        #expect(unstaged.staged == .unmodified)
+        #expect(unstaged.worktree == .modified)
+
+        let staged = try entry("staged.txt")
+        #expect(staged.staged == .added)
+        #expect(staged.worktree == .unmodified)
+
+        let conflicted = try entry("conflict.txt")
+        #expect(conflicted.staged == .conflicted,
+                "a `u` record is conflicted; the leading token carries that, not the XY field")
+
+        let untracked = try entry("untracked.txt")
+        #expect(untracked.worktree == .untracked)
+
+        let ignored = try entry("ignored.txt")
+        #expect(ignored.worktree == .ignored)
+    }
+
+    @Test("a record type dropped by the parser is caught, not silently ignored")
+    func everyRecordTypeIsAccountedFor() throws {
+        let status = try WorktreeStatusParser().parse(Self.realBuffer())
+        let paths = Set(status.entries.map(\.path))
+        for expected in ["base.txt", "staged.txt", "conflict.txt", "untracked.txt", "ignored.txt"] {
+            #expect(paths.contains(expected), "\(expected) was dropped by the parser")
         }
     }
 }

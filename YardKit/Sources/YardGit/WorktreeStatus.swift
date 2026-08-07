@@ -86,7 +86,7 @@ public struct WorktreeStatusParser {
 
     /// Number of leading tokens before the path, keyed on record type.
     private static let fieldCount: [String: Int] = [
-        "1": 8,   // XY sub mH mI mW hH hI
+        "1": 7,   // XY sub mH mI mW hH hI — 9 tokens total, path at index 8
         "2": 9,   // XY sub m1 m2 m3 h1 h2 h3
         "u": 9,   // XY sub m1 m2 m3 h1 h2 h3 — unmerged/conflict variant
         "?": 0,   // bare "?" token
@@ -120,15 +120,15 @@ public struct WorktreeStatusParser {
             guard !path.isEmpty else { continue }
 
             var entry = WorktreeStatusEntry(path: path)
-            let statusStr = String(allTokens[1])
 
             if expectedFields == 0 {
-                // A bare "?": untracked; "!" ignored. Worktree state mirrors staged.
+                // `? path` and `! path` carry no XY field — the leading token IS
+                // the status, and allTokens[1] is the path itself.
                 entry.staged = .unmodified
-                let parsedChar: WorktreeStatusEntry.State =
-                    WorktreeStatusEntry.State(char: statusStr.first ?? ".") ?? .unmodified
-                entry.worktree = parsedChar
+                entry.worktree = WorktreeStatusEntry.State.special(char: leading.first ?? ".")
             } else {
+                // `1`, `2` and `u` all carry XY as the second token.
+                let statusStr = String(allTokens[1])
                 let staged: WorktreeStatusEntry.State =
                     WorktreeStatusEntry.State(char: statusStr.first ?? ".") ?? .unmodified
                 let workChar: WorktreeStatusEntry.State =
@@ -142,7 +142,9 @@ public struct WorktreeStatusParser {
                 // For conflict records (`u`) that also carry "AA" or similar, the worktree side
                 // can be "." (unmerged file never written to disk). Marking staged as .conflicted
                 // reflects the data model: "there is a conflict here".
-                if statusStr.first == "u" {
+                // Conflict is signalled by the LEADING token being `u`, never by
+                // the XY field — on a `u` record XY is e.g. "AA".
+                if leading == "u" {
                     entry.staged = WorktreeStatusEntry.State.special(char: "u")
                 }
             }
