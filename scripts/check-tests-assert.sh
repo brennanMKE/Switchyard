@@ -16,6 +16,7 @@
 #   NARROWING a loop over cases whose body discards all but one via
 #             `guard case ... else { continue }`
 #   TAUTOLOGY an assertion over literals, e.g. #expect(true)
+#   ORPHANTEST a test file outside every declared target — never compiled
 #   SKIPSHAPE a bare `return` in a @Test body — a quiet skip that reports success
 #   HANDROLLED a hand-written `allCases`, which makes "every case" mean
 #             "every case someone remembered"
@@ -88,11 +89,32 @@ done || true)
 TAUT=$(grep -rn --include='*.swift' -E '#(expect|require)\((true|false|1 == 1|0 == 0)\)' $TARGETS 2>/dev/null \
   | sed 's/^/  TAUTOLOGY  /' || true)
 
+# --- ORPHANTEST: a test file outside every declared target path ------------
+# SwiftPM silently ignores a test file that is not under a declared target, so
+# the suite stays green and the count does not move — and a round can report
+# "216 tests passed" as proof of work while its tests were never compiled.
+# #0095 lost a round to exactly this.
+ORPHAN=""
+if [[ -f YardKit/Package.swift ]]; then
+  DECLARED=(${(f)"$(sed -n 's/.*path: \"\(Tests\/[A-Za-z0-9_]*\)\".*/\1/p' YardKit/Package.swift || true)"})
+  if (( ${#DECLARED} )); then
+    while IFS= read -r f; do
+      [[ -n "$f" ]] || continue
+      rel="${f#YardKit/}"
+      ok=0
+      for d in $DECLARED; do
+        [[ "$rel" == "$d"/* ]] && ok=1 && break
+      done
+      (( ok )) || ORPHAN+="  ORPHANTEST $f"$'\n'
+    done < <(find YardKit/Tests -name '*.swift' -type f 2>/dev/null || true)
+  fi
+fi
+
 # --- HANDROLLED: a hand-written allCases in production code ----------------
 HAND=$(grep -rn -E 'static +(var|let) +allCases' Sources YardKit/Sources --include='*.swift' 2>/dev/null \
   | sed 's/^/  HANDROLLED /' || true)
 
-for block in "$INERT" "$NARROW" "$TAUT" "$HAND"; do
+for block in "$INERT" "$NARROW" "$TAUT" "$ORPHAN" "$HAND"; do
   if [[ -n "${block//[[:space:]]/}" ]]; then print -r -- "$block"; FOUND=1; fi
 done
 
