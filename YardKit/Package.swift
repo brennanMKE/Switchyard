@@ -12,7 +12,7 @@ let package = Package(
         .library(name: "YardGit", targets: ["YardGit"]),
         // Everything shared between the app, the broker, and the CLI.
         .library(name: "YardKit", targets: ["YardKit"]),
-        .executable(name: "yard", targets: ["yard"]),
+        .executable(name: "switchyard", targets: ["switchyard"]),
     ],
     targets: [
         // libgit2 comes in through a system library target for development.
@@ -36,9 +36,9 @@ let package = Package(
             path: "Sources/YardKit"
         ),
         .executableTarget(
-            name: "yard",
+            name: "switchyard",
             dependencies: ["YardGit", "YardKit"],
-            path: "Sources/yard"
+            path: "Sources/switchyard"
         ),
         .testTarget(
             name: "YardGitTests",

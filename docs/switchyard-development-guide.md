@@ -21,8 +21,8 @@ Two products and a skill, one engine:
 | Product | What it is |
 | --- | --- |
 | **Switchyard.app** | SwiftUI macOS app. Interactive commit graph, three-way merge, review UI. |
-| **`yard`** | CLI. Structured, non-interactive git operations for humans and agents. |
-| **The `yard` skill** | Generated markdown teaching an agent the command set, packaged per client. |
+| **`switchyard`** | CLI. Structured, non-interactive git operations for humans and agents. |
+| **The `switchyard` skill** | Generated markdown teaching an agent the command set, packaged per client. |
 
 The name is a railyard: commits are cars, and the app's job is shunting them into a different
 order safely. Every mutating operation is reversible.
@@ -102,8 +102,8 @@ Follow the RemoteControl conventions exactly, substituting the new name.
 | Mach service name | `co.sstools.Switchyard.broker` |
 | Launch agent plist | `co.sstools.Switchyard.broker.plist` |
 | URL scheme | `switchyard://` |
-| CLI binary | `yard` |
-| Install location | `/usr/local/bin/yard` (symlink into the bundle) |
+| CLI binary        | `switchyard` |
+| Install location  | `/usr/local/bin/switchyard` (symlink into the bundle) |
 | Shared package | `YardKit` |
 | Broker executable | `BrokerAgent` |
 | Log subsystem | `co.sstools.Switchyard` |
@@ -116,7 +116,7 @@ else hardcodes any of these strings.
 
 The state directory holds what is not repo-specific: the repository registry, cross-repo recent
 operations, agent session records, and UI state. `~/.local/state` beats `~/Library/Application
-Support` here because `yard` runs in shells, CI, and agent sandboxes where the Library path is
+Support` here because `switchyard` runs in shells, CI, and agent sandboxes where the Library path is
 awkward or absent. The app uses the same path, which is only true while the app stays unsandboxed —
 see [Section 11](#11-decisions-and-open-questions).
 
@@ -136,7 +136,7 @@ Switchyard.xcodeproj
 ├── YardKit/             Swift package
 │   ├── YardGit          the engine: object model, DAG, index, diff, journal
 │   ├── YardKit          XPC protocols, message types, ServiceNames, CLIInstaller
-│   ├── yard             CLI executable
+│   ├── switchyard       CLI executable
 │   └── Tests
 ├── Support/             Info.plist, entitlements, agent launchd plist
 ├── skills/yard/         SKILL.md (generated) + hand-written workflow prose, and the
@@ -237,7 +237,7 @@ engine.**
   is missing. It never silently falls back, because an agent told to obtain human approval must not
   proceed without it.
 
-> **Corrected 2026-08-06.** This section previously read "the critical constraint: `yard` must work
+> **Corrected 2026-08-06.** This section previously read "the critical constraint: `switchyard` must work
 > without the app", justified by CI, SSH and headless agent runs. **That requirement was never set by
 > Brennan** — it was generated, recorded as settled, and then propagated into `CLAUDE.md`, the README
 > and `Package.swift`, where the CLI target still declares a dependency on `YardGit`. There is no CI
@@ -255,7 +255,7 @@ exactly this. See `RemoteControl/docs/README.md` and `FINDINGS.md` in that repo.
 Summary of the shape, so it is not relearned: a plain double-clicked app cannot publish a named
 Mach service, because `NSXPCListener(machServiceName:)` only works when launchd owns the name.
 So a small launch agent embedded in the bundle declares the name and acts as a bootstrap broker.
-The app registers its anonymous listener endpoint with the broker; `yard` connects to the broker
+The app registers its anonymous listener endpoint with the broker; `switchyard` connects to the broker
 by Mach service name, receives the endpoint, then connects directly to the app. After that
 handoff the broker is out of the data path, and restarting it does not disturb an attached
 session.
@@ -295,7 +295,7 @@ So the plan is:
 - **GPG signing**: invoke `gpg --detach-sign --armor`. There is no way around shelling out here,
   so no library choice avoids it.
 - Respect `commit.gpgsign`, `gpg.format`, `user.signingKey`, and `gpg.ssh.allowedSignersFile`.
-- Verification (`yard verify`) uses `ssh-keygen -Y verify` or `gpg --verify` correspondingly.
+- Verification (`switchyard verify`) uses `ssh-keygen -Y verify` or `gpg --verify` correspondingly.
 
 ### The hybrid boundary
 
@@ -356,7 +356,7 @@ relocates the entire ref and graph path onto `git` plumbing and that is not a re
 
 ---
 
-## 6. The `yard` CLI
+## 6. The `switchyard` CLI
 
 ### Design principles
 
@@ -368,7 +368,7 @@ relocates the entire ref and graph path onto `git` plumbing and that is not a re
   prompt. `GIT_EDITOR` is never invoked.
 - **Exit codes are meaningful**, and carry forward RemoteControl's assignments so the two tools
   agree.
-- **Every mutating command auto-checkpoints** before it runs, so `yard undo` works without the
+- **Every mutating command auto-checkpoints** before it runs, so `switchyard undo` works without the
   caller having remembered to ask for it.
 - **Errors are structured too.** A failure in `--json` mode emits
   `{"schemaVersion":1,"ok":false,"error":{"code":"...","message":"...","hint":"..."}}` on stdout,
@@ -400,16 +400,16 @@ Codes 2 through 5 match RemoteControl exactly. Do not renumber them.
 
 | Command | Purpose |
 | --- | --- |
-| `yard whereami` | Branch, upstream, ahead/behind, in-progress rebase/merge/cherry-pick, stash count, dirty paths, conflict count, signing config. One object. This replaces the five-call preamble every agent runs. |
-| `yard graph [--limit N] [--refs ...]` | The commit DAG with topology and lane assignment. The GitUp map view as data. |
-| `yard log <range>` | Commits in a range with parents, refs, signature status, and trailers. |
-| `yard status` | Worktree state, per-file, with staged and unstaged distinguished at the hunk level. |
-| `yard hunks [<path>]` | Unstaged and staged hunks with **stable hunk IDs**. This is what makes precise agent-driven staging possible without `git add -p`. |
-| `yard conflicts` | Per-file, per-hunk conflicts with ours, base, and theirs blob IDs. |
-| `yard blame <path> [--range A:B]` | Structured blame, range-limited. |
-| `yard verify <rev>` | Signature verification result. |
+| `switchyard whereami` | Branch, upstream, ahead/behind, in-progress rebase/merge/cherry-pick, stash count, dirty paths, conflict count, signing config. One object. This replaces the five-call preamble every agent runs. |
+| `switchyard graph [--limit N] [--refs ...]` | The commit DAG with topology and lane assignment. The GitUp map view as data. |
+| `switchyard log <range>` | Commits in a range with parents, refs, signature status, and trailers. |
+| `switchyard status` | Worktree state, per-file, with staged and unstaged distinguished at the hunk level. |
+| `switchyard hunks [<path>]` | Unstaged and staged hunks with **stable hunk IDs**. This is what makes precise agent-driven staging possible without `git add -p`. |
+| `switchyard conflicts` | Per-file, per-hunk conflicts with ours, base, and theirs blob IDs. |
+| `switchyard blame <path> [--range A:B]` | Structured blame, range-limited. |
+| `switchyard verify <rev>` | Signature verification result. |
 
-`yard whereami` includes a `worktree` object, so an agent's first call tells it which worktree it is
+`switchyard whereami` includes a `worktree` object, so an agent's first call tells it which worktree it is
 in and whether a sibling worktree holds the same branch.
 
 #### Worktrees: agent isolation
@@ -421,12 +421,12 @@ advanced feature in a menu. Design detail is in
 
 | Command | Purpose |
 | --- | --- |
-| `yard wt list` | Structured superset of `git worktree list --porcelain -z`, plus dirty state, ahead/behind, in-progress operation, attached agent session, and journal depth. |
-| `yard wt new <name>` | Create a worktree. `--branch`, `--from`, `--detach`, `--agent <id>` (locks with a machine-readable session reason), `--template <name>`, `--sparse <paths>`. |
-| `yard wt rm <name>` | Remove, releasing the lock and the agent session. Refuses when unclean without `--force`, matching git. |
-| `yard wt where` | Resolve the current context: worktree id, path, `$GIT_DIR`, `$GIT_COMMON_DIR`, main worktree path. |
-| `yard wt gc` | `git worktree prune` plus reporting of prunable and abandoned-session worktrees. |
-| `yard wt repair [<path>...]` | Wraps `git worktree repair` for the moved-directory case. |
+| `switchyard wt list` | Structured superset of `git worktree list --porcelain -z`, plus dirty state, ahead/behind, in-progress operation, attached agent session, and journal depth. |
+| `switchyard wt new <name>` | Create a worktree. `--branch`, `--from`, `--detach`, `--agent <id>` (locks with a machine-readable session reason), `--template <name>`, `--sparse <paths>`. |
+| `switchyard wt rm <name>` | Remove, releasing the lock and the agent session. Refuses when unclean without `--force`, matching git. |
+| `switchyard wt where` | Resolve the current context: worktree id, path, `$GIT_DIR`, `$GIT_COMMON_DIR`, main worktree path. |
+| `switchyard wt gc` | `git worktree prune` plus reporting of prunable and abandoned-session worktrees. |
+| `switchyard wt repair [<path>...]` | Wraps `git worktree repair` for the moved-directory case. |
 
 Two things carry disproportionate weight. **`WorktreeContext`** — worktree path, `$GIT_DIR`,
 `$GIT_COMMON_DIR`, worktree id — is resolved once per invocation and every path lookup goes through
@@ -434,7 +434,7 @@ it; this is why worktrees are M1 and not later, since retrofitting means auditin
 **Worktree templates** are the highest-value feature here and nothing does them well: a fresh
 worktree has tracked files and nothing else, so the agent's first command fails on a missing
 `node_modules` or `.env` and it starts improvising. A repo-level config listing untracked paths to
-copy, symlink, or regenerate on `yard wt new`, plus post-create commands, fixes that for the whole
+copy, symlink, or regenerate on `switchyard wt new`, plus post-create commands, fixes that for the whole
 team and every agent at once.
 
 #### Mutate: history rewriting
@@ -444,14 +444,14 @@ today, because it wants an editor.
 
 | Command | Purpose |
 | --- | --- |
-| `yard commit [-m] [--sign] [--hunk ID...]` | Commit, optionally from a specific hunk set, optionally signed. |
-| `yard fixup <target>` | Squash staged changes (or `HEAD`) into `<target>` and autosquash in one step. GitUp's flagship operation. |
-| `yard absorb` | Distribute staged hunks into the correct prior commits automatically, by matching each hunk against the commit that last touched those lines. The highest-leverage command for cleaning up an agent's messy branch. |
-| `yard split <commit>` | Split a commit into two along a hunk boundary. |
-| `yard reword <commit> -m <msg>` | Non-interactive message rewrite. |
-| `yard reorder <commit> --before\|--after <ref>` | Move a commit within the branch. |
-| `yard drop <commit>` | Remove a commit. |
-| `yard stage --hunk <id>...` / `yard unstage --hunk <id>...` | Hunk-level staging by stable ID. |
+| `switchyard commit [-m] [--sign] [--hunk ID...]` | Commit, optionally from a specific hunk set, optionally signed. |
+| `switchyard fixup <target>` | Squash staged changes (or `HEAD`) into `<target>` and autosquash in one step. GitUp's flagship operation. |
+| `switchyard absorb` | Distribute staged hunks into the correct prior commits automatically, by matching each hunk against the commit that last touched those lines. The highest-leverage command for cleaning up an agent's messy branch. |
+| `switchyard split <commit>` | Split a commit into two along a hunk boundary. |
+| `switchyard reword <commit> -m <msg>` | Non-interactive message rewrite. |
+| `switchyard reorder <commit> --before\|--after <ref>` | Move a commit within the branch. |
+| `switchyard drop <commit>` | Remove a commit. |
+| `switchyard stage --hunk <id>...` / `switchyard unstage --hunk <id>...` | Hunk-level staging by stable ID. |
 
 Every one of these writes a journal entry.
 
@@ -459,25 +459,25 @@ Every one of these writes a journal entry.
 
 | Command | Purpose |
 | --- | --- |
-| `yard checkpoint [label]` | Explicit snapshot. Returns a checkpoint ID. |
-| `yard undo [--steps N]` | Reverse the last N journaled operations. |
-| `yard redo [--steps N]` | Replay. |
-| `yard journal` | List journaled operations with what each touched and whether it is still undoable. |
-| `yard restore <checkpoint>` | Jump to a specific checkpoint. |
+| `switchyard checkpoint [label]` | Explicit snapshot. Returns a checkpoint ID. |
+| `switchyard undo [--steps N]` | Reverse the last N journaled operations. |
+| `switchyard redo [--steps N]` | Replay. |
+| `switchyard journal` | List journaled operations with what each touched and whether it is still undoable. |
+| `switchyard restore <checkpoint>` | Jump to a specific checkpoint. |
 
 See [Section 7](#7-the-journal) for the model and
 [git internals §3](switchyard-git-internals-and-undo.md#3-journal-design) for the mechanics.
 
-#### Hooks: observing what `yard` did not do
+#### Hooks: observing what `switchyard` did not do
 
-An agent runs `git` directly between two `yard` commands constantly. Without these, the app's view
+An agent runs `git` directly between two `switchyard` commands constantly. Without these, the app's view
 goes stale and the journal's cross-tool guard fires with no explanation attached.
 
 | Command | Purpose |
 | --- | --- |
-| `yard hooks install` / `yard hooks uninstall` | Install the observer hooks. Detects existing hooks and `core.hooksPath`, chains rather than clobbers, and is reversible. Never silent — repositories often already have hooks. |
-| `yard hook ref-txn` | The `reference-transaction` handler. Every ref change from any tool, batched by transaction, with old and new values. |
-| `yard hooks status --json` | What is installed, what is chained, what is missing. |
+| `switchyard hooks install` / `switchyard hooks uninstall` | Install the observer hooks. Detects existing hooks and `core.hooksPath`, chains rather than clobbers, and is reversible. Never silent — repositories often already have hooks. |
+| `switchyard hook ref-txn` | The `reference-transaction` handler. Every ref change from any tool, batched by transaction, with old and new values. |
+| `switchyard hooks status --json` | What is installed, what is chained, what is missing. |
 
 Everything degrades to polling if hooks are declined. `post-rewrite` supplies the old→new commit
 mapping that nothing else provides, which is what lets the app say "these four commits became this
@@ -488,10 +488,10 @@ one" instead of showing two unrelated graphs. Details and the abort-state trap a
 
 | Command | Purpose |
 | --- | --- |
-| `yard review <range\|--staged> --wait` | Push a diff into Switchyard, block, return `{"decision":"approve"\|"reject"\|"amend", "comments":[...], "editedPatch":"..."}`. Exit 0 on approve, 7 on reject. |
-| `yard ask "<question>" --options a,b,c [--timeout N]` | Surface a decision in the app UI, block on the answer. |
-| `yard resolve <path> --interactive` | Open the three-way merge UI, block, return the resolution. |
-| `yard watch` | Stream repository and app events to the caller. Already proven in RemoteControl. |
+| `switchyard review <range\|--staged> --wait` | Push a diff into Switchyard, block, return `{"decision":"approve"\|"reject"\|"amend", "comments":[...], "editedPatch":"..."}`. Exit 0 on approve, 7 on reject. |
+| `switchyard ask "<question>" --options a,b,c [--timeout N]` | Surface a decision in the app UI, block on the answer. |
+| `switchyard resolve <path> --interactive` | Open the three-way merge UI, block, return the resolution. |
+| `switchyard watch` | Stream repository and app events to the caller. Already proven in RemoteControl. |
 
 `review --wait` is the command that makes this project worth building. Treat it as the
 centerpiece, not a nice-to-have.
@@ -500,8 +500,8 @@ centerpiece, not a nice-to-have.
 
 | Command | Purpose |
 | --- | --- |
-| `yard commit --agent <name> --model <id> --session <id>` | Record provenance trailers on the commit. |
-| `yard log --agent-only` | Filter to agent-authored commits. |
+| `switchyard commit --agent <name> --model <id> --session <id>` | Record provenance trailers on the commit. |
+| `switchyard log --agent-only` | Filter to agent-authored commits. |
 
 Document the settled format in `docs/provenance.md`. The shape, following the `Co-authored-by`
 convention so existing tooling ignores it gracefully:
@@ -537,13 +537,13 @@ registry, agent sessions, UI state — lives in the state directory from
 [Section 3](#3-naming-and-identifiers). Do not invent a side-database for anything git can hold.
 
 **The repository is always authoritative.** The state directory is an index and a convenience. If
-it is deleted, `yard journal` rebuilds from `refs/switchyard/journal/*` alone with reduced metadata.
+it is deleted, `switchyard journal` rebuilds from `refs/switchyard/journal/*` alone with reduced metadata.
 Write that rebuild path early and test it — it is what keeps the design honest about which store is
 the source of truth, and it is exactly the kind of path that rots unnoticed if it is written late.
 
 **Snapshots outlive the process.** This is the concrete advantage over GitUp, and it falls out of
 using real objects rather than in-memory state: a Switchyard snapshot survives a quit, a reboot, a
-clone onto another machine, and `yard` running with the app closed.
+clone onto another machine, and `switchyard` running with the app closed.
 
 **What is snapshotted.** Refs and index are cheap. Uncommitted worktree changes are not always
 cheap. Decide the policy explicitly and document it: the reasonable default is to snapshot the
@@ -551,15 +551,15 @@ worktree only for operations that would disturb it, and to record in the entry w
 captured so `undo` can report honestly what it can and cannot restore.
 
 **Pruning.** Entries expire. Default to a count limit plus an age limit, both configurable.
-`yard journal --prune` deletes the anchor ref and the metadata entry together; the objects become
-unreachable and ordinary `gc` reclaims them. **`yard` never calls `git gc` itself.**
+`switchyard journal --prune` deletes the anchor ref and the metadata entry together; the objects become
+unreachable and ordinary `gc` reclaims them. **`switchyard` never calls `git gc` itself.**
 
 **Cross-tool safety.** If the repository changed outside Switchyard since a journal entry was
 written, `undo` must detect that and refuse rather than clobber. Every entry records a `guard` map
 of ref names to expected OIDs; before restoring, compare each against its current value and on
 mismatch fail with exit 4 naming the ref, the expected value, and the actual one. Offer `--force`
 to a human, never to a scripted caller. This will fire constantly in practice, since an agent
-running `git` directly alongside `yard` is the normal case rather than the exception.
+running `git` directly alongside `switchyard` is the normal case rather than the exception.
 
 **Worktree awareness is part of correctness, not a refinement.** `HEAD` and the index are
 per-worktree; `refs/heads/*` are shared. So restoring `HEAD` affects only the worktree the
@@ -567,14 +567,14 @@ operation happened in, while restoring a branch ref affects every worktree that 
 out. An entry records which worktree it came from, restore refuses to run from a different one
 without `--worktree`, and `undo` warns by name when it will disturb a sibling.
 
-**Concurrency.** Two `yard` processes in the same repo must not interleave journal writes. Use a
+**Concurrency.** Two `switchyard` processes in the same repo must not interleave journal writes. Use a
 lock file under `.git/switchyard/` with a timeout, and fail cleanly rather than blocking forever.
 
 ---
 
 ## 8. The agent skill, and why there is no MCP server
 
-An agent needs two things: a tool it can call, and a document telling it when and how. `yard` is the
+An agent needs two things: a tool it can call, and a document telling it when and how. `switchyard` is the
 tool. The skill is the document.
 
 ### The skill
@@ -590,7 +590,7 @@ tool. The skill is the document.
   an OpenCode package wrap it. Never maintain parallel copies of the content.
 - **Ship it from M1 onward.** The skill is not a milestone; it is a deliverable of every milestone
   that changes the command surface. A command lands with its documentation or it does not land.
-- **`yard skill` prints the canonical markdown to stdout**, so an agent with only the binary can
+- **`switchyard skill` prints the canonical markdown to stdout**, so an agent with only the binary can
   read its own instructions and no install step is strictly required.
 
 ### Why no MCP server
@@ -610,11 +610,11 @@ It has not inverted, for reasons that are not about token counts:
   was part of the standalone-CLI premise corrected in §4 and does not apply — `switchyard` needs the
   app either way. The argument stands without it.)
 - An MCP server is a process with a lifecycle, a transport, and a failure mode that looks like the
-  tool silently not existing. `yard` is a binary that either runs or prints an error.
+  tool silently not existing. `switchyard` is a binary that either runs or prints an error.
 - Agents already know how to run CLI tools. The skill teaches flags, not a new calling convention.
 
 **Revisit only on evidence**, meaning a measurement showing an MCP surface is cheaper in context
-than `yard --help` plus the skill for a realistic session, or a client that agents actually use
+than `switchyard --help` plus the skill for a realistic session, or a client that agents actually use
 where shelling out is not available. Until then, keep the JSON contract shaped so an MCP wrapper
 stays thin dispatch over the same library — but let nothing else depend on that wrapper existing.
 
@@ -628,8 +628,8 @@ Ship in this order. Each milestone is independently useful and independently aba
 and **reftable compatibility**. Output is `docs/engine-findings.md` and a delete of the spike code.
 Nothing else starts until this lands.
 
-**M1 — `yard` read commands and worktrees, standalone.** `whereami`, `graph`, `status`, `hunks`,
-`conflicts`, `log`, `verify`, plus the `yard wt` group. No app, no XPC. JSON schemas fixed and
+**M1 — `switchyard` read commands and worktrees, standalone.** `whereami`, `graph`, `status`, `hunks`,
+`conflicts`, `log`, `verify`, plus the `switchyard wt` group. No app, no XPC. JSON schemas fixed and
 documented. This alone is useful to an agent on day one and validates the engine.
 
 Worktrees are in M1 deliberately. `WorktreeContext` has to exist before any path resolution is
@@ -638,7 +638,7 @@ definition of a retrofit nobody finishes.
 
 **M2 — Journal, hooks, and safe mutation.** `checkpoint`, `undo`, `redo`, `journal`, plus `commit`,
 `fixup`, `stage`, `unstage`. Signing lands here. **The hook layer lands here too** —
-`yard hooks install`, the `reference-transaction` handler, and the `post-rewrite` mapping — because
+`switchyard hooks install`, the `reference-transaction` handler, and the `post-rewrite` mapping — because
 the journal is not trustworthy without it: an agent running `git` directly is the normal case, and a
 guard that fires without being able to say what moved the ref is a dead end for whoever hits it.
 Heavy test coverage on undo across every mutating path.
@@ -659,13 +659,13 @@ differentiator. Everything before it is table stakes.
 **M5 — Advanced rewriting.** `absorb`, `split`, `reorder`, `drop`. These need the rebase engine
 and are the highest-effort, so they come after the thing that makes the project distinctive.
 
-**The `yard` skill ships continuously from M1**, regenerated whenever the command surface changes.
+**The `switchyard` skill ships continuously from M1**, regenerated whenever the command surface changes.
 It is not a milestone of its own. See [Section 8](#8-the-agent-skill-and-why-there-is-no-mcp-server).
 
 **Candidates for M5+, not committed.**
 [git internals §6](switchyard-git-internals-and-undo.md#6-further-features-these-docs-surface)
 develops these; two are worth naming here because they are unusually cheap relative to their value.
-`yard rewrite-diff` uses `git range-diff` plus the `post-rewrite` mapping to answer "what changed in
+`switchyard rewrite-diff` uses `git range-diff` plus the `post-rewrite` mapping to answer "what changed in
 the changes" after a rewrite — it is what makes the journal feel trustworthy rather than merely
 present, since a reviewer who can see the delta accepts a rewrite instead of undoing it
 defensively. And `rerere` means a human resolves a conflict once in the three-way UI and every
@@ -702,7 +702,7 @@ a feature at any milestone on the grounds that GitUp had it.
   per-worktree ref split directly: restoring `HEAD` must not move a sibling, restoring
   `refs/heads/*` must be detected as affecting one.
 - **The state-directory rebuild path is tested by deleting it.** Blow away
-  `~/.local/state/switchyard/` and assert `yard journal` still reconstructs from
+  `~/.local/state/switchyard/` and assert `switchyard journal` still reconstructs from
   `refs/switchyard/journal/*`. An untested fallback is a fallback that does not work.
 - **Signing tests** generate a throwaway SSH key in a temp dir and verify round-trip through
   `ssh-keygen -Y verify`. Skip GPG tests when `gpg` is absent rather than failing.

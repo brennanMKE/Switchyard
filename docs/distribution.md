@@ -27,7 +27,7 @@ the same code resolves to:
 ~/Library/Containers/co.sstools.Switchyard/Data/.local/state/switchyard/
 ```
 
-while `yard`, running unsandboxed from a shell, resolves to the real
+while `switchyard`, running unsandboxed from a shell, resolves to the real
 `~/.local/state/switchyard/`.
 
 Nothing fails. Both processes create their directory, write their registry, and read back exactly
@@ -40,7 +40,7 @@ unsandboxed at the same time.
 
 - **The CLI cannot be installed from a sandboxed app.** `/usr/local/bin` is outside the container,
   and the privilege escalation #0051 uses is not available. The App Store version would ship without
-  a working `yard` install path — which removes the entire agent-facing half of the product.
+  a working `switchyard` install path — which removes the entire agent-facing half of the product.
 - **The launch agent.** `SMAppService` registration of an embedded login item is possible, but the
   broker exists to publish a Mach service that an *external* process connects to. A sandboxed
   service name is reachable only by processes in the same app group, and a CLI installed to

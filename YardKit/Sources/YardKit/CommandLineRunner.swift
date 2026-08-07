@@ -4,15 +4,15 @@ import Foundation
 import YardGit
 
 /// Pure, testable entry-point logic. Takes the argument array *after* the
-/// executable name and returns what `yard` would write to stdout plus the exit
-/// code — no I/O of its own. That is what makes it testable: `main.swift`
+/// executable name and returns what `switchyard` would write to stdout plus the
+/// exit code — no I/O of its own. That is what makes it testable: `main.swift`
 /// cannot be `@testable import`ed because SwiftPM does not allow that on an
 /// executable target.
 public func runYard(arguments: [String]) -> (stdout: String, exitCode: ExitCode) {
 
     guard !arguments.isEmpty else {
         let version = YardGit.libgit2Version
-        let summary = "yard \(YardKit.version) (libgit2 \(version.major).\(version.minor).\(version.revision))"
+        let summary = "\(ServiceNames.cliName) \(YardKit.version) (libgit2 \(version.major).\(version.minor).\(version.revision))"
         let env = Envelope(result: EncodableResult(summary))
         return (stdout: jsonString(env), exitCode: .success)
     }

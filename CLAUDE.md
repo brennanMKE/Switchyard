@@ -1,6 +1,6 @@
 # Switchyard
 
-A SwiftUI macOS git client with an agent-facing CLI (`yard`). Successor in spirit to GitUp, built
+A SwiftUI macOS git client with an agent-facing CLI (`switchyard`). Successor in spirit to GitUp, built
 so a coding agent is a first-class user of the repository alongside a human.
 
 Two design documents, both current, both in `docs/`:
@@ -263,7 +263,7 @@ The CLI is the product for agents. Three rules make it usable by one:
 **There is no MCP server** — decided, with the reasoning and the conditions for revisiting in guide
 §8. Do not add one, and do not let anything depend on one existing.
 
-The skill teaching agents to drive `yard` lives in `skills/yard/SKILL.md` and is **generated from
+The skill teaching agents to drive `switchyard` lives in `skills/yard/SKILL.md` and is **generated from
 the same command metadata that builds `--help`**, so it cannot drift from the binary. Hand-written
 prose that restates flags will go stale within a milestone. Package it per client (Claude Code
 plugin, OpenCode) on top of that one source; do not maintain parallel copies. A command lands with
@@ -375,10 +375,10 @@ invocation, and every path lookup goes through it. It exists from M1 for this re
 - **Xcode rewrites `project.pbxproj` while it has the project open**, and has silently dropped
   hand-added build configurations mid-edit. Verify with `xcodebuild -showBuildSettings` rather than
   trusting the file you just wrote. New Swift files under synchronized groups need no pbxproj edit.
-- **`yard` never runs `git gc`.** Pruning deletes the journal's anchor ref and metadata entry;
+- **`switchyard` never runs `git gc`.** Pruning deletes the journal's anchor ref and metadata entry;
   the objects become unreachable and ordinary maintenance reclaims them on its own schedule.
 - **The `reference-transaction` hook fires on the journal's own ref writes.** Set an environment
-  marker in `yard` and have the hook skip its own transactions, or the journal records itself
+  marker in `switchyard` and have the hook skip its own transactions, or the journal records itself
   recording itself. The hook must also return 0 immediately in the `preparing` and `prepared`
   states — a non-zero exit there aborts the user's transaction. Do real work only on `committed`.
 - **`git write-tree` refuses an unmerged index.** When conflicts are present, snapshot the index

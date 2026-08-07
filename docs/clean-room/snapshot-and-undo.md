@@ -56,11 +56,11 @@ is never pushed by a default refspec.
 
 **Snapshots persist.** GitUp's are in memory and cannot outlive the process. Switchyard's are real
 objects in the object database, so they survive a quit, a reboot, a clone onto another machine, and
-`yard` running with the app closed. This falls out of using git objects rather than being a feature
+`switchyard` running with the app closed. This falls out of using git objects rather than being a feature
 added on top — and it is what makes undo usable by an agent running headless.
 
 **A cross-tool guard.** GitUp could assume it was the only writer. Switchyard cannot: an agent runs
-`git` directly between two `yard` commands as the normal case. Every entry records the ref values it
+`git` directly between two `switchyard` commands as the normal case. Every entry records the ref values it
 expects, and restore refuses — naming the ref, the expected value, and the actual one — rather than
 clobbering work it did not know about.
 

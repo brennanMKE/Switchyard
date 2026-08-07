@@ -3,7 +3,7 @@
 A commit in this project can be produced by an agent. That fact is part of the commit's identity —
 it has to be, because a signed commit carrying provenance trailers is a meaningfully stronger claim
 than one without it, and no existing client offers the combination. This file is that contract: the
-trailer keys, their value formats, and how parsers (specifically `yard log --agent-only`) interpret
+trailer keys, their value formats, and how parsers (specifically `switchyard log --agent-only`) interpret
 them. Change it only on a new block, and be prepared to walk every existing commit back through the
 answer.
 
@@ -25,7 +25,7 @@ Agent-Session: 01J8X...
 | `Agent-Session` | A session or run identifier supplied by the runtime. Opaque to git; meant for correlation with external logs. | Yes | `01J8X...` |
 
 The trailers must appear in the order shown above. A commit carrying them out of order is well-formed
-but `yard log --agent-only` will not group consecutive agent trailers against the same session; it
+but `switchyard log --agent-only` will not group consecutive agent trailers against the same session; it
 will treat each as a separate entry.
 
 ## Value constraints
@@ -37,7 +37,7 @@ will treat each as a separate entry.
 - `Agent-Name` and `Agent-Model` are **written** with canonical casing
   (`Agent-Name: claude-code`, `Agent-Model: claude-opus-5`), but git matches trailer keys
   case-insensitively on read. A commit whose trailer reads `agent-name: Ornith` is still returned by
-  `%(trailers:key=Agent-Name,valueonly)`. `yard log --agent-only` must therefore accept any
+  `%(trailers:key=Agent-Name,valueonly)`. `switchyard log --agent-only` must therefore accept any
   casing on read while writing the canonical form.
 - `Agent-Session` is opaque; it may contain any characters except newlines and control characters.
 
@@ -55,13 +55,13 @@ together a meaningful act. The convention is:
   not affect `--agent-only` matching and a human consumer should read them as "this commit also
   had input from…" rather than as an assertion of joint responsibility.
 
-## Parsing rules for `yard log --agent-only`
+## Parsing rules for `switchyard log --agent-only`
 
 - A commit is agent-authored if its trailer block contains at least one `Agent-Name:` line.
 - The first `Agent-Name:` trailer is the *primary* agent for matching purposes. Subsequent
   `Agent-Name:` trailers are recorded in the output but do not affect inclusion.
 - If a commit carries an `Agent-Name:` line with no matching `Agent-Model:` or `Agent-Session:`,
-  treat the commit as agent-authored but leave the missing fields blank in `yard log` output and
+  treat the commit as agent-authored but leave the missing fields blank in `switchyard log` output and
   record a warning on stderr. Do not drop the commit — that would hide an incomplete provenance
   record, which is a more useful signal than silence.
 - If a commit carries an `Agent-Model:` or `Agent-Session:` without any preceding `Agent-Name:`,
