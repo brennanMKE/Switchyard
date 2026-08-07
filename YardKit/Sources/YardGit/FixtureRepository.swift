@@ -148,9 +148,21 @@ public struct FixtureRepository {
     // MARK: - Operations tests need
 
     public mutating func branch(_ name: String, at commit: String? = nil) throws {
-        var args = ["branch", "-f", name]
-        if let commit, let oid = oids[commit] { args.append(oid) }
-        try git.run(args, workingDirectory: url.path)
+        // `git branch -f` refuses when the branch is checked out in a linked
+        // worktree: "cannot force update the branch 'lb' used by worktree at ...",
+        // exit 128. Any fixture with a linked worktree hits that. `update-ref`
+        // has no such restriction, so use it directly rather than attempting the
+        // branch call and discarding its error.
+        //
+        // `update-ref` requires an explicit oid, so resolve HEAD when none is
+        // named. (`git branch` defaults to HEAD on its own; `update-ref` does not.)
+        let oid: String
+        if let commit, let known = oids[commit] {
+            oid = known
+        } else {
+            oid = try revParse("HEAD")
+        }
+        try git.run(["update-ref", "refs/heads/\(name)", oid], workingDirectory: url.path)
     }
 
     public func checkout(_ ref: String) throws {
