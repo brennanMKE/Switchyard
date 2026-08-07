@@ -54,6 +54,23 @@ die() { print -u2 "dispatch: $1"; exit "${2:-1}" }
 planning update, then dispatch. Do not dispatch an issue already known to be
 defective — the round will only rediscover it." 9
 
+# Re-dispatching an unchanged prompt produces an unchanged result. issues/Issues.md
+# has said so since #0070 round 2; nothing enforced it. #0098 round 2 only
+# converged because the issue was genuinely rewritten first.
+if (( ROUND > 1 && ! FORCE )); then
+  PREV_LOG=".switchyard-runs/$ISSUE-round$((ROUND-1)).log"
+  if [[ -f "$PREV_LOG" ]]; then
+    [[ "issues/$ISSUE.md" -nt "$PREV_LOG" ]] || die \
+"issues/$ISSUE.md has not changed since round $((ROUND-1)) ran.
+Re-dispatching an unchanged prompt re-runs a prompt already proven not to work.
+Write a '## Review' section explaining what to do differently, or split the
+issue. See docs/review-failures.md." 10
+    grep -q '^## Review' "issues/$ISSUE.md" || die \
+"round $ROUND, but issues/$ISSUE.md has no '## Review' section.
+The model has no way to know what went wrong last round." 10
+  fi
+fi
+
 if (( ROUND > MAX_ROUNDS && ! FORCE )); then
   die "round $ROUND exceeds the cap of $MAX_ROUNDS. The task is not converging.
 Rewrite the issue with more specific guidance, split it, or take it back.
