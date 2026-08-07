@@ -211,6 +211,36 @@ If something is genuinely ambiguous:
 An unanswered question at the end of a finished round is useful. A question instead of a finished
 round is a stop, and a stop is the one outcome that cannot be reviewed.
 
+## Rule 7b — Bind with `try #require`, never with `if let`, in a test.
+
+```swift
+if let entry = entries.first(where: { $0.path == wanted }) {
+    #expect(entry.locked == false)          // ← skipped entirely when the entry is absent
+}
+```
+
+When the lookup fails, the block does not run, the test asserts nothing, and it **passes**. That is
+the failure it was written to catch, reported as success. An `else` branch containing only a comment
+is the same bug with more characters.
+
+```swift
+let entry = try #require(entries.first(where: { $0.path == wanted }))
+#expect(entry.locked == false)              // ← now a missing entry fails the test
+```
+
+`#require` fails the test when the value is absent, which is the whole point of looking it up. One
+round shipped five of these in a single file.
+
+The same applies to two shapes nearby:
+
+- **`#expect(a || b)`** passes when either half holds, so neither is actually being tested. Assert
+  them separately.
+- **`_ = result.something`** asserts nothing at all. If it is worth reading, it is worth asserting on;
+  if it is not, delete it.
+
+`scripts/check-tests-assert.sh` now flags the comment-only `else`. It cannot see the other two — those
+are yours to avoid.
+
 ## Rule 10 — `swift build` does not compile the tests. Only `swift test` does.
 
 `swift build` builds the library and executable targets. It does **not** build test targets. A test
