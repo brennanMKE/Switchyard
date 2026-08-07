@@ -226,6 +226,11 @@ it is a real limitation, not an excuse to guess.
 **Never invent a number.** An estimate is acceptable only with its method and inputs stated beside
 it; a figure with no derivation is not.
 
+**Write measurements down in the turn they are reported.** `subagent_tokens` arrives once, in a
+completion notification, and is unrecoverable afterwards. The running total lives in
+`issues/cost-ledger.md` — append to it as figures arrive, then copy the per-issue number into the
+work log. A measurement held only in conversation context is already lost.
+
 **Rounds** is how many dispatches it took to converge, and it is the most useful number here: an
 issue that took three rounds was underspecified when it was authored, which is feedback about the
 authoring rather than about the model. **Wall time** matters because local inference trades money for

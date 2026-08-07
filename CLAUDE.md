@@ -90,6 +90,13 @@ where merged work becomes visible. Never switch it to an issue branch and never 
 that pins `main`, so every finished issue queues behind whatever round is running while the repo
 reads as idle. Issue work happens only in `../switchyard-NNNN` worktrees; merges happen here.
 
+**Record every measurement in the turn it is reported.** A dispatcher subagent reports
+`subagent_tokens` exactly once, in a completion notification that exists nowhere else — not in git,
+not in a log, not in any API. When the session ends it is gone. Write it into
+`issues/cost-ledger.md` and the issue's `## Work log` immediately; do not hold it in conversation
+context intending to write it up later. The same applies to wall times, round counts, and any number
+the harness surfaces once.
+
 **Push immediately and merge immediately.** Push the branch when it is created and after every
 round; squash-merge and push `main` the moment an issue resolves. Do not batch. Work that is
 committed but unpushed is invisible, and invisible work is indistinguishable from no work — this has
