@@ -9,31 +9,31 @@ import Foundation
 /// file and a fixed number of leading space-separated tokens before the path.
 public struct WorktreeStatusEntry {
     /// Path relative to the repository root (one of many names git uses for it).
-    var path: String
+    public var path: String
 
     /// Raw bytes of the path, losslessly preserved. For display use `path`
     /// (which decodes lossy via UTF-8) or reconstruct from `pathBytes`.
-    var pathBytes: [UInt8]
+    public var pathBytes: [UInt8]
 
     /// The state of the index side — what would be committed next.
-    var staged: State = .unmodified
+    public var staged: State = .unmodified
 
     /// The state of the worktree — what is on disk.
-    var worktree: State = .unmodified
+    public var worktree: State = .unmodified
 
     /// For a rename (`R` in staged), the pre-rename path. `nil` for every other
     /// change type. Emits from the second NUL-terminated field of a `2` record.
-    var originalPath: String?
+    public var originalPath: String?
 
     /// Raw bytes of the original path, if present.
-    var originalPathBytes: [UInt8]?
+    public var originalPathBytes: [UInt8]?
 
     /// Submodule state, parsed from the `S<c><m><u>` token in the third field.
     /// `nil` when git reports `N...`.
-    var submodule: SubmoduleState?
+    public var submodule: SubmoduleState?
 
     /// One of the two porcelain-character meanings for a single field.
-    enum State: String, CaseIterable {
+    public enum State: String, CaseIterable {
         case unmodified = "."
         case added = "A"
         case deleted = "D"
@@ -55,7 +55,7 @@ public struct WorktreeStatusEntry {
         }
 
         /// Path is untracked, ignored, or conflicted.
-        static func special(char: Character) -> State {
+        public static func special(char: Character) -> State {
             switch char {
             case "?": return .untracked
             case "!": return .ignored
@@ -127,9 +127,9 @@ public struct WorktreeStatusEntry {
 
 /// The full status of a worktree. Value type, no printing, no side effects.
 public struct WorktreeStatus {
-    let entries: [WorktreeStatusEntry]
+    public let entries: [WorktreeStatusEntry]
 
-    init(entries: [WorktreeStatusEntry]) {
+    public init(entries: [WorktreeStatusEntry]) {
         self.entries = entries
     }
 }
@@ -148,6 +148,7 @@ extension WorktreeStatus: ExpressibleByArrayLiteral {
 /// thin wrapper in the `YardGit` module that runs it through `git` is kept in
 /// its own call site.
 public struct WorktreeStatusParser {
+    public init() {}
 
     /// Number of space-separated tokens before the path, keyed on record type.
     /// Tokens are zero-indexed into `tokens[]` after splitting the raw record, so a
@@ -224,7 +225,7 @@ public struct WorktreeStatusParser {
         return parts
     }
 
-    func parse(_ data: Data) throws -> WorktreeStatus {
+    public func parse(_ data: Data) throws -> WorktreeStatus {
         let records = Self.splitRecords(data)
 
         var entries: [WorktreeStatusEntry] = []
