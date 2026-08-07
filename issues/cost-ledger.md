@@ -82,7 +82,10 @@ a figure derived from it appears.
 | 2026-08-07 | #0088 | Dispatch round 2 + hand finish (accepted) | 65,420 | $0.52 |
 | 2026-08-07 | #0096 | Dispatch round 3 (REJECTED, timeout; cap spent, split to #0120) | 53,429 | $0.43 |
 | 2026-08-07 | #0117 | Dispatch round 1 + hand finish (accepted) | 48,971 | $0.39 |
-| | | **Total measured** | **3,485,919** | **$27.89** |
+| 2026-08-07 | #0013 | Dispatch round 2 (REJECTED, no tests, fabricated report) | 62,109 | $0.50 |
+| 2026-08-07 | #0013 | Dispatch round 3 + hand finish (accepted) | 63,774 | $0.51 |
+| 2026-08-07 | #0120 | Dispatch round 1 (FAILED, hung inference, zero output) | 45,710 | $0.37 |
+| | | **Total measured** | **3,657,512** | **$29.26** |
 
 ## What this total does and does not cover
 
