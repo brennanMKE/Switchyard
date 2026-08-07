@@ -118,18 +118,43 @@ public enum WorktreePrune {
     }
 
     /// Runs `git worktree prune -v` against the repository at `path` and
-    /// returns its stderr output. The prune operation only removes entries that
-    /// are `prunable` in git's eyes — never a locked worktree, which is
-    /// preserved by design. Abandoned sessions are reported separately via
-    /// `report(entries:)` and must never be touched by prune.
+    /// returns its stderr output, with trailing empty lines removed. The prune
+    /// operation only removes entries that are `prunable` in git's eyes — never
+    /// a locked worktree, which is preserved by design. Abandoned sessions are
+    /// reported separately via `report(entries:)` and must never be touched by
+    /// prune.
     @discardableResult
     public static func runPrune(repositoryPath: String, git: GitProcess = GitProcess()) throws -> [String] {
         let output = try git.run(
             ["worktree", "prune", "-v"],
             workingDirectory: repositoryPath
         )
-        return output.standardError.split(separator: "\n", omittingEmptySubsequences: false)
+        let lines = output.standardError.split(separator: "\n", omittingEmptySubsequences: false)
             .map(String.init)
+        var idx = lines.endIndex
+        while idx > lines.startIndex, lines[idx - 1].isEmpty { idx = idx - 1 }
+        return Array(lines[lines.startIndex..<idx])
+    }
+
+    /// Top-level entry point for `yard wt gc`.
+    ///
+    /// Reports all prunable and abandoned-session worktrees, then — only when
+    /// `prune` is true — runs `git worktree prune -v`. Pruning defaults to
+    /// `false` because reporting is the safe default: a moved worktree looks
+    /// identical to a deleted one in porcelain, and git's prune reaps it.
+    public static func gc(
+        repositoryPath: String,
+        prune: Bool = false,
+        git: GitProcess = GitProcess()
+    ) throws -> (reports: [Report], pruned: [String]) {
+        let reports = try report(from: repositoryPath, git: git)
+
+        if prune {
+            let pruned = try runPrune(repositoryPath: repositoryPath, git: git)
+            return (reports, pruned)
+        } else {
+            return (reports, [])
+        }
     }
 
     // MARK: - Filtering
