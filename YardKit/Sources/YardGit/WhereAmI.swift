@@ -40,11 +40,17 @@ public struct WhereAmI: Sendable, Equatable {
     public let untrackedCount: Int
 
     /// Number of files with unstaged changes, as returned by
-    /// `git diff --name-status`.
+    /// `git diff-index --name-status HEAD` (with no index cache). The code passes
+    /// the index bytes it built from `ls-files` instead of relying on the
+    /// on-disk index, so `-z` is preferred for correctness against paths with
+    /// whitespace or newlines. A non-zero exit on a fresh repository (no HEAD)
+    /// is treated as zero files.
     public let unstagedCount: Int
 
     /// Number of files with staged changes, as returned by
-    /// `git diff --cached --name-status`.
+    /// `git diff-index --name-status --cached HEAD`. The code only counts the
+    /// lines after stripping trailing empties — there is no index cache, so
+    /// the two numbers should match in practice.
     public let stagedCount: Int
 
     /// True when the index contains unmerged (conflicted) entries.
@@ -53,8 +59,12 @@ public struct WhereAmI: Sendable, Equatable {
     /// The short form of HEAD's object id, e.g. `"a1b2c3d"`.
     public let headOID: String
 
-    /// The raw form of HEAD, for debugging. e.g. `"ref: refs/heads/main"`
-    /// or the full SHA when detached.
+    /// The raw form of HEAD, for debugging. Always a SHA or empty (the code
+    /// runs `git rev-parse HEAD`), never the symbolic `"ref: refs/heads/main"`
+    /// form — that only appears when `symbolic-ref` is called, which this
+    /// property does not do. Empty on a fresh repository with no commits yet;
+    /// callers should treat a SHA length of less than 7 as "unborn" rather
+    /// than relying on this property.
     public let rawHead: String
 
     public init(
