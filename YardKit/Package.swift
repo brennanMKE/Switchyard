@@ -50,5 +50,15 @@ let package = Package(
             dependencies: ["YardKit"],
             path: "Tests/YardKitTests"
         ),
+        // NOTE — tests in this target import YardGit WITHOUT @testable so that
+        // any member which silently drops back to internal is caught at
+        // compile-time rather than passing in `@testable`-masked code. If this
+        // target doesn't build, the public API contract is broken — see issue
+        // #0116.
+        .testTarget(
+            name: "YardGitPublicAPITests",
+            dependencies: ["YardGit"],
+            path: "Tests/YardGitPublicAPITests"
+        ),
     ]
 )
