@@ -46,7 +46,9 @@ a figure derived from it appears.
 | 2026-08-06 | #0102 | Dispatch round 3 (95%, finished by hand) | 58,121 | $0.46 |
 | 2026-08-06 | #0093 | Dispatch round 2 (accepted, 686s) | 50,650 | $0.41 |
 | 2026-08-06 | #0104 | Dispatch round 1 (accepted, 648s) | 47,260 | $0.38 |
-| | | **Total measured** | **1,661,003** | **$13.29** |
+| 2026-08-06 | #0099 | Dispatch round 1 (accepted, 1044s) | 41,981 | $0.34 |
+| 2026-08-06 | #0100 | Dispatch round 1 (accepted, 471s) | 42,344 | $0.34 |
+| | | **Total measured** | **1,745,328** | **$13.96** |
 
 ## What this total does and does not cover
 
