@@ -121,6 +121,11 @@ public struct WorktreeContext: Sendable, Equatable {
     /// Names the per-worktree ref of another worktree, using git's special
     /// `main-worktree/` and `worktrees/<name>/` prefixes.
     ///
+    /// The prefix addresses **per-worktree** refs only — `HEAD`, and anything
+    /// under `refs/bisect/`, `refs/worktree/`, or `refs/rewritten/`. Everything
+    /// else is shared and resolves under its plain name; prefixing it returns
+    /// nothing.
+    ///
     /// `git rev-parse worktrees/agent-a/HEAD` is the supported way to answer
     /// "what is agent A on right now" — no path games required.
     public static func refName(_ ref: String, inWorktree worktree: String?) -> String {
@@ -128,14 +133,30 @@ public struct WorktreeContext: Sendable, Equatable {
         return "worktrees/\(worktree)/\(ref)"
     }
 
-    /// Resolves another worktree's per-worktree ref to an object id.
+    /// Returns true when the ref lives in a worktree's private ref namespace,
+    /// i.e. `HEAD` or anything under `refs/bisect/`, `refs/worktree/`, or
+    /// `refs/rewritten/`. Everything else is shared and visible from every
+    /// worktree under its plain name.
+    public static func isPerWorktree(_ ref: String) -> Bool {
+        if ref == "HEAD" { return true }
+        let prefixes = ["refs/bisect/", "refs/worktree/", "refs/rewritten/"]
+        return prefixes.contains(where: { ref.hasPrefix($0) })
+    }
+
+    /// Resolves a ref from another worktree (per-worktree refs use the
+    /// `main-worktree/` or `worktrees/<name>/` prefix) to an object id.
     /// Returns nil when the ref does not exist.
     public func resolveRef(
         _ ref: String,
         inWorktree worktree: String?,
         git: GitProcess = GitProcess()
     ) throws -> String? {
-        let name = Self.refName(ref, inWorktree: worktree)
+        let name: String
+        if Self.isPerWorktree(ref) {
+            name = Self.refName(ref, inWorktree: worktree)
+        } else {
+            name = ref
+        }
         let base = topLevel ?? gitDir
         let out = try git.capture(["rev-parse", "--verify", "--quiet", name],
                                   workingDirectory: base)
