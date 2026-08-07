@@ -74,7 +74,8 @@ a figure derived from it appears.
 | 2026-08-07 | #0095 | Dispatch round 1 (REJECTED, tests never compiled) | 57,216 | $0.46 |
 | 2026-08-07 | #0095 | Dispatch round 2 + hand finish (accepted) | 55,081 | $0.44 |
 | 2026-08-07 | #0112 | Dispatch round 2 (REJECTED, cherry-pick fixture untouched) | 53,571 | $0.43 |
-| | | **Total measured** | **3,032,290** | **$24.26** |
+| 2026-08-07 | #0110 | Dispatch round 1 (accepted) | 53,310 | $0.43 |
+| | | **Total measured** | **3,085,600** | **$24.69** |
 
 ## What this total does and does not cover
 
