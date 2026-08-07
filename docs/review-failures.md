@@ -239,6 +239,21 @@ The one thing to carry forward: **the check found #0012 through #0020 all claimi
 ("tested against both ref formats via the fixture harness") **without naming a command whose output
 could be pasted.** That phrasing reads as rigour and grades as nothing.
 
+## If a round produced no diff, write its `## Review` section in the same turn
+
+`dispatch-issue.sh` refuses any round after the first unless the issue has a `^## Review` heading. That
+is right — re-dispatching an unchanged prompt re-runs a prompt already proven not to work. But a round
+killed at the timeout with an empty tree has **no diff to review**, so the heading is easy to skip, and
+the next dispatch then bounces two seconds in.
+
+This has now happened twice, to #0013 and #0120. Both times a dispatcher subagent hit the guard,
+correctly refused to route around it, and stopped — costing a full round-trip each time.
+
+**"Nothing to review" is itself the review.** Under the heading, say what the round did before it
+died, and what has changed since so this one will not repeat it. Write it in the same turn as the
+failure row and the cost-ledger entry, for the same reason those are written immediately: the turn
+that has the facts is the turn that should record them.
+
 ## The guards have fired — what they caught, after being written
 
 Recorded because a guard nobody can point to a catch for is superstition, and should be deleted.
