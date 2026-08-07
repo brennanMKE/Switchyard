@@ -217,7 +217,7 @@ STDOUTCAPTURE=$(grep -rn --include='*.swift' -E '\bdup2\b' $TARGETS 2>/dev/null 
 HAND=$(grep -rn -E 'static +(var|let) +allCases' Sources YardKit/Sources --include='*.swift' 2>/dev/null \
   | sed 's/^/  HANDROLLED /' || true)
 
-for block in "$INERT" "$NARROW" "$TAUT" "$ORPHAN" "$EMPTYELSE" "$EXPECTBANG" "$STDOUTCAPTURE" "$HAND"; do
+for block in "$INERT" "$NARROW" "$TAUT" "$ORPHAN" "$EMPTYELSE" "$EXPECTBANG" "$HAND"; do
   if [[ -n "${block//[[:space:]]/}" ]]; then print -r -- "$block"; FOUND=1; fi
 done
 
@@ -226,6 +226,21 @@ done
 # review report a defect unrelated to its own round, and a detector that is
 # always red is a detector nobody reads. Promote it to a hard failure once
 # #0105 lands.
+# STDOUTCAPTURE is advisory until #0114 lands. One instance exists on main --
+# JsonEnvelopeTests dup2s stdout to test EnvelopeFail.write() -- and it happens
+# to terminate, so failing the exit code on it would make every dispatch red
+# for a hazard that has not yet fired there. #0114 replaces it.
+if [[ -n "${STDOUTCAPTURE//[[:space:]]/}" ]]; then
+  print -r -- "$STDOUTCAPTURE"
+  print ""
+  print "STDOUTCAPTURE is advisory until #0114 lands. dup2 on your own STDOUT_FILENO"
+  print "redirects the TEST RUNNER's output, so a suite can finish with no"
+  print "'Test run with N tests' line at all -- every result lost, not just that"
+  print "test's. And a Pipe read to EOF never returns, because the write end"
+  print "stays open. Test the value, not the writing."
+  print ""
+fi
+
 if [[ -n "${SKIPSHAPE//[[:space:]]/}" ]]; then
   print -r -- "$SKIPSHAPE"
   print ""
