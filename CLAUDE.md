@@ -124,6 +124,22 @@ consistent:
 So: **smaller issues, with the code in them, and a different model for the work the local one cannot
 do.**
 
+### Every existing issue is re-authored before it is dispatched
+
+The backlog was written before this standard existed. **An issue authored under the old approach is
+not ready** — most name no source path at all, which is preflight check 3, and the ones that do name
+paths get details wrong.
+
+So the first step for any issue is a **Fable planning update**, even when the issue looks complete.
+The first two passes proved the point: #0109's Givens said `GitProcess.run(_:at:)` when the label is
+`workingDirectory:` — the exact wrong-label class that cost #0116 its clock — and claimed a detached
+worktree merely omits `branch`, when it also carries an explicit `detached` line. #0108's criterion
+was **unimplementable as written**, because `FixtureRepository` presets `commit.gpgsign=false` and so
+a fresh fixture is never in the unset state the issue asked about.
+
+Four corrections across two issues, every one a fact the author had written from memory and believed.
+That is the case for the planning role, and it applies to the backlog as much as to new work.
+
 ### What "enough detail" means now
 
 An issue is ready when an implementer could follow it without a judgement call. In practice:
@@ -139,6 +155,23 @@ An issue is ready when an implementer could follow it without a judgement call. 
 The counter-risk is real and has cost rounds: **a code sample written from memory propagates silently**
 (#0093, #0114). Everything pasted into an issue must have been run, and the issue must say so.
 
+### The `swift-guidance` skill is used in all three roles
+
+`~/.claude/skills/swift-guidance` encodes Brennan's expectations for Swift code and project
+structure — concurrency and actor isolation, logging, SwiftUI and Observation rules, dark mode,
+performance, multiplatform, and build-setting configuration. **Load it, do not work from memory.**
+
+- **Planning** loads it before writing any Swift into an issue. A code block in an issue is
+  copied almost verbatim by the implementer, so an anti-pattern there propagates to every round that
+  follows. Its `references/project-configuration.md` covers `MainActor` default isolation and strict
+  concurrency — the exact ground #0126 turned on.
+- **Implementation** loads it before writing the file. It is named in the dispatch prompt.
+- **Review** loads it when reading the diff, and reports what it finds as ordinary review findings.
+
+It has a deliberate stopping rule — one or two high-impact issues per area, then stop, no style
+nitpicking. Respect that. A review that returns twenty findings is not more thorough, it is unusable,
+and it will bury the one finding that mattered.
+
 ### Milestone review
 
 When every issue in a milestone is `resolved`, a **Fable** subagent reviews the milestone as a whole
@@ -148,6 +181,13 @@ does and cannot substitute for.
 It exists because per-issue review is structurally blind to the gaps *between* issues. #0115 is the
 proof: forty-two M1 issues passed review individually while the milestone's actual criterion — working
 commands — went unmet, and no single issue's review could have seen it.
+
+**Exit criteria live in guide §9, one checklist per milestone — not in an umbrella issue.** An
+umbrella issue is a different tool: it breaks *one feature* into several small implementation tasks,
+which is how work is sized for a small model. A milestone criterion is a property of the whole
+milestone, often spanning features, and frequently satisfied by no single issue. **Opus reviews
+umbrella issues** — the parent, once its children resolve — because that is per-feature review and
+belongs with the rest of issue review.
 
 Rules that keep it from becoming an open-ended quality pass:
 

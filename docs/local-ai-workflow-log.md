@@ -1170,3 +1170,132 @@ Five real defects in about ninety minutes, in code that was already reviewed, al
 already merged. None of them were visible from reading; every one showed up the moment real input went
 in and the output was printed.
 
+## Part 6 — The workflow revision of 2026-08-07
+
+### 6.1 What fifty rounds actually measured
+
+One day, one model, fifty dispatched rounds. The numbers are the argument for everything below.
+
+| | |
+|---|---|
+| Rounds dispatched | **50** |
+| Accepted | 24 |
+| Rejected | 22 |
+| Failed outright — hung, timed out, no code | 3 |
+| Guard refusal, no round spent | 1 |
+| **Accepted that needed a hand finish** | **16 of 24** |
+| **Accepted clean** | **2** |
+
+23 issues resolved, $23.62 in Opus tokens, ~131 million Ornith tokens at $0.00. So the local model
+produced complete, acceptable work **twice in fifty rounds**, and roughly half of all rounds produced
+nothing usable.
+
+And the outcome that matters more than any of it: after 23 resolved issues and 311 tests,
+`switchyard whereami` still answered `Unknown subcommand`. **Nothing shipped.** The engine was
+excellent and the product was zero.
+
+### 6.2 The correlation that drove the redesign
+
+Sorted by how the issue was written, the pattern is not subtle:
+
+- **Issues carrying measured code converged in one round.** #0117 (a one-line parser fix with the
+  `od -c` bytes in the issue), #0110 (a conflict count with both candidate commands measured against
+  a real repository), #0118 (a coverage gap with the trap — a parameterised `@Test` counts as one —
+  stated up front, plus two substitute proofs).
+- **Issues describing the work in prose did not.** #0124 spent three rounds and never wrote a test.
+  #0096 spent three and never got a working fixture. #0013 took three plus a hand finish.
+- **The cleanest single experiment:** #0116 round 1 timed out at 1800s having rewritten its test file
+  **26 times**, discovering signatures by compile error. Pasting five declarations into the issue took
+  round 2 to **17 edits, finished inside the clock**. Nothing else changed.
+
+Alongside that, two structural facts. **Every timeout was a round creating a large new file**; every
+round scoped as a repair converged. And **Ornith fails on `Package.swift` and the Xcode project**
+specifically, while landing single-file Swift repairs first time.
+
+### 6.3 The five roles
+
+| role | model | scope |
+|---|---|---|
+| Planning | **Fable 5** | Authors down to the code: exact paths, pasted signatures, literal lines, measured before-and-after values |
+| Implementation, pure code | **Ornith**, local, $0.00 | Ordinary Swift against a target the issue already measured |
+| Implementation, structural | **Sonnet 5**, billed | `Package.swift`, the Xcode project, build settings, the environment, the harness |
+| Issue review | **Opus 5** | Re-runs verification, runs mutations, reads every test. Also reviews umbrella issues once their children resolve |
+| Milestone review | **Fable 5** | Runs when a milestone's issues are all `resolved`; checks guide §9 exit criteria only |
+
+`scripts/dispatch-issue.sh` takes `--model ornith|sonnet`, defaults to local, and says plainly when a
+round is billed.
+
+**A hand finish is expected, not a failure.** Sixteen of twenty-four accepts needed one. Pretending
+otherwise costs a full round of latency on most issues. Review, finish the last small thing by hand,
+re-dispatch only when the *shape* is wrong.
+
+### 6.4 The counter-risk, which has already cost rounds
+
+Colour-by-numbers is only safe if the numbers were measured. **A code sample written from memory
+propagates silently** — #0093 shipped a `Bundle.allBundles` snippet reasoned from adjacent facts and
+labelled verified, costing a full round; #0114's decisive test vector was unsatisfiable because
+`GitProcess` was measured and `whereAmI` was assumed. The rule is now explicit: everything pasted into
+an issue must have been run, and the issue must say so.
+
+### 6.5 The first two planning passes, and what they caught
+
+Both re-authored existing issues, and **each found a defect in text I had written and believed**:
+
+| issue | the correction |
+|---|---|
+| #0109 | Givens said `GitProcess.run(_:at:)`. The label is `workingDirectory:` — the same wrong-label class that cost #0116 its clock |
+| #0109 | Said a detached worktree merely omits `branch`. Measured, it also carries an explicit `detached` line, and `WorktreeList.swift` already parses both |
+| #0108 | Its "absent config" criterion was **unimplementable**: `FixtureRepository` presets `commit.gpgsign=false`, so a fresh fixture is never unset |
+| #0108 | The `gpg.ssh` subsection is case-sensitive — `gpg.SSH.…` returns nothing |
+
+Four corrections, two issues, all verified independently before dispatch. #0109 grew 50 → 267 lines,
+#0108 53 → 395.
+
+**The backlog is therefore re-authored, not just new issues.** Most existing issues name no source
+path at all, which preflight check 3 rejects outright.
+
+### 6.6 Milestone exit criteria, and why not umbrella issues
+
+Every milestone in guide §9 now states its exit criteria as a checklist, and the Fable review reads
+those and only those. Two bounds make it terminate: it may file issues **only** against a stated
+criterion, and **two consecutive clean reviews close the milestone**.
+
+The distinction Brennan drew is worth keeping straight. An **umbrella issue** breaks *one feature*
+into several small implementation tasks — that is how work is sized for a small model, and Opus
+reviews the parent once the children resolve. A **milestone criterion** is a property of the whole
+milestone, often spanning features, and frequently satisfied by no single issue.
+
+#0115 is why the distinction matters: forty-two M1 issues passed review individually while "the
+commands run" went unmet, and **no single issue's review could have seen it**. Per-issue review is
+structurally blind to the gaps between issues.
+
+M1's criteria carry the line that names the failure directly: *"Built" is not "engine function
+exists."*
+
+### 6.7 The `swift-guidance` skill belongs in all three roles
+
+`~/.claude/skills/swift-guidance` encodes the project's expectations for Swift — concurrency and actor
+isolation, logging, SwiftUI and Observation, dark mode, performance, multiplatform, and build
+configuration. It is now named in planning, in the dispatch prompt, and in review.
+
+Planning is the important one and the least obvious. A Swift block in an issue is copied close to
+verbatim by the implementer, so an anti-pattern written into an issue propagates to every round that
+follows it. Its `references/project-configuration.md` covers `MainActor` default isolation and strict
+concurrency — precisely the ground #0126 turned on, where a package target does not inherit the app's
+`SWIFT_DEFAULT_ACTOR_ISOLATION` and every moved view would silently change isolation.
+
+Its stopping rule — one or two high-impact findings per area, then stop — is respected rather than
+worked around. A review returning twenty findings buries the one that mattered.
+
+### 6.8 What is being measured tomorrow
+
+The hypothesis is narrow and falsifiable: **issues authored to code level should raise the
+first-round accept rate and cut the hand-finish rate.** Today's baseline is 2 clean accepts and 16
+hand finishes out of 24. If tomorrow looks the same, the planning change is not the lever and the
+constraint is the implementer.
+
+Secondary numbers worth watching: rounds lost to environment rather than code — today two hung
+inferences, two mistyped-absolute-path sandbox rejections, roughly six `/tmp` rejections, one
+output-cap truncation — and whether routing structural work to Sonnet removes the failures Ornith
+could not clear in three attempts.
+

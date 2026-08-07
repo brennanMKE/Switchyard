@@ -624,9 +624,25 @@ stays thin dispatch over the same library — but let nothing else depend on tha
 
 Ship in this order. Each milestone is independently useful and independently abandonable.
 
+**Every milestone below states its exit criteria as a checklist.** The Fable milestone review reads
+those and *only* those — it may file issues against a stated criterion and nothing else. That bound is
+what makes the review terminate: without it, "is this good enough" has no answer and a milestone never
+closes. Two consecutive reviews with no findings close the milestone.
+
+Exit criteria are deliberately **not** umbrella issues. An umbrella issue is a way to break one
+feature into several implementation tasks for a small model; a milestone criterion is a property of
+the whole milestone, often spanning features, and frequently satisfied by no single issue. #0115 is
+the example — forty-two M1 issues passed review individually while "the commands run" went unmet.
+
 **M0 — Engine spike.** Settle libgit2 packaging, signing, graph performance with `commit-graph`,
 and **reftable compatibility**. Output is `docs/engine-findings.md` and a delete of the spike code.
 Nothing else starts until this lands.
+
+**Exit criteria:**
+
+- [x] `docs/engine-findings.md` answers all four questions with measured evidence, not estimates.
+- [x] The spike code is deleted from the tree.
+- [x] A reftable repository can be read by whatever the engine actually uses.
 
 **M1 — `switchyard` read commands and worktrees.** `whereami`, `graph`, `status`, `hunks`,
 `conflicts`, `log`, `verify`, plus the `switchyard wt` group. JSON schemas fixed and documented. This
@@ -659,6 +675,21 @@ the journal is not trustworthy without it: an agent running `git` directly is th
 guard that fires without being able to say what moved the ref is a dead end for whoever hits it.
 Heavy test coverage on undo across every mutating path.
 
+**Exit criteria:**
+
+- [ ] `checkpoint`, `undo`, `redo`, `journal`, `restore`, `commit`, `fixup`, `stage`, `unstage` each
+      **run from the built binary** and emit a `schemaVersion: 1` envelope.
+- [ ] `switchyard hooks install` installs the `reference-transaction` and `post-rewrite` handlers,
+      chains any hook already present, and `hooks status` reports what is installed.
+- [ ] The hook returns 0 immediately in the `preparing` and `prepared` states, and skips the
+      journal's own transactions via the environment marker.
+- [ ] Undo round-trips every mutating command, including with an unmerged index, and the round-trip
+      suite (#0035) covers each path.
+- [ ] The journal survives a rebuild from refs alone (#0030), and pruning never orphans an anchor.
+- [ ] Commits sign under both SSH and GPG, and a signature that cannot be produced fails with exit 9
+      rather than committing unsigned.
+- [ ] `swift test` is green and every command has a test that exercises the **binary**.
+
 **M3 — Switchyard.app: window, tabs, and the graph view.** The full shell — multiple windows,
 repository tabs on SlidingTabs, and the three-pane Git View — rendering the graph from `YardGit`.
 Read-only at first. Port the RemoteControl XPC pattern in the same milestone so the app is
@@ -669,11 +700,44 @@ The shell is not a later polish pass. Tab identity keyed on `$GIT_COMMON_DIR` is
 into — building either of those before the shell means routing work into a structure that does not
 exist yet.
 
+**Exit criteria:**
+
+- [ ] The app **launches, opens a repository, and renders its graph**. Launching is the test, not
+      building — #0123 crashed in dyld with both suites green.
+- [ ] Every view lives in `YardUI`; `Switchyard/` holds only the `@main` `App` type, assets,
+      `Info.plist`, entitlements and `SMAppService` registration (§11 decision 10).
+- [ ] Multiple windows, and repository tabs whose identity is `$GIT_COMMON_DIR`, so opening the same
+      repository twice focuses rather than duplicates.
+- [ ] The `switchyard` binary is embedded in the bundle and drives the app over XPC; the broker
+      launches the app when it is not running and the CLI exits 3 when that times out.
+- [ ] `SMAppService` registration succeeds, and repair is driven from a failed broker call rather
+      than from reported status.
+- [ ] A launch smoke test runs unattended under CLI `xcodebuild` (#0125) — no UI-automation test in
+      the unattended suite.
+- [ ] `swift test` is green and the app builds unsigned.
+
 **M4 — Human-in-the-loop.** `review --wait`, `ask`, `resolve --interactive`, `watch`. This is the
 differentiator. Everything before it is table stakes.
 
+**Exit criteria:**
+
+- [ ] `review --wait`, `ask`, `resolve --interactive` and `watch` each run from the built binary.
+- [ ] Each **fails with exit 3 when the app is not running** rather than falling back to something
+      non-interactive. An agent told to get human approval must not proceed without it (§8).
+- [ ] A human decision is recorded as a git note and survives a fetch.
+- [ ] `swift test` is green; the interactive paths have a manual verification script, since they
+      cannot run unattended.
+
 **M5 — Advanced rewriting.** `absorb`, `split`, `reorder`, `drop`. These need the rebase engine
 and are the highest-effort, so they come after the thing that makes the project distinctive.
+
+**Exit criteria:**
+
+- [ ] `absorb`, `split`, `reorder`, `drop` and `reword` each run from the built binary.
+- [ ] Every one of them is undoable through the M2 journal, proven by a round-trip test.
+- [ ] `rewrite-diff` reports what changed using `range-diff`, and `post-rewrite` records the old→new
+      mapping for each.
+- [ ] `swift test` is green and every command has a test that exercises the binary.
 
 **The `switchyard` skill ships continuously from M1**, regenerated whenever the command surface changes.
 It is not a milestone of its own. See [Section 8](#8-the-agent-skill-and-why-there-is-no-mcp-server).

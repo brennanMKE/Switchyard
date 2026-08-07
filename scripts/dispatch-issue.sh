@@ -169,6 +169,10 @@ Rules for this run, which override anything in the issue that disagrees:
   8. Do NOT spawn a subagent — no Explore, no Task, no delegation of any kind.
      The issue names every file, type and signature you need. Four of the last
      five failed rounds hung on that handoff and produced nothing at all.
+  8b. Load the \`swift-guidance\` skill before writing Swift. It encodes this
+     project's expectations for concurrency, actor isolation, logging, SwiftUI
+     and build configuration. Follow its stopping rule -- it is guidance for
+     writing the code, not an invitation to audit the repository.
   9. Read the files the issue names, then START EDITING. Do not survey the
      repository first. One round read twelve files without writing a line,
      filled its context to 49k, was compacted, and died -- it had treated a
