@@ -36,7 +36,8 @@ a figure derived from it appears.
 | 2026-08-06 | — | Cross-cutting post-mortem over all failed rounds | 134,166 | $1.07 |
 | 2026-08-06 | #0086 | Dispatch round 1 (REJECTED, 125s) | 47,974 | $0.38 |
 | 2026-08-06 | #0086 | Dispatch round 2 (accepted, 302s) | 60,608 | $0.48 |
-| | | **Total measured** | **954,281** | **$7.63** |
+| 2026-08-06 | #0091 | Dispatch round 1 (accepted, 782s) | 62,046 | $0.50 |
+| | | **Total measured** | **1,016,327** | **$8.13** |
 
 ## What this total does and does not cover
 
