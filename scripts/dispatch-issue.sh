@@ -67,7 +67,13 @@ Write a '## Review' section explaining what to do differently, or split the
 issue. See docs/review-failures.md." 10
     grep -q '^## Review' "issues/$ISSUE.md" || die \
 "round $ROUND, but issues/$ISSUE.md has no '## Review' section.
-The model has no way to know what went wrong last round." 10
+The model has no way to know what went wrong last round.
+
+Add one. If the previous round produced nothing -- a timeout, an empty tree --
+say exactly that under the heading, along with what has changed since so this
+round will not repeat it. 'Nothing to review' is itself the review, and the
+model needs to read it. Do NOT reach for --force; the heading costs a minute
+and the round costs twenty." 10
   fi
 fi
 
