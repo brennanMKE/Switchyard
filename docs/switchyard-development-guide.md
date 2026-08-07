@@ -567,7 +567,7 @@ operation happened in, while restoring a branch ref affects every worktree that 
 out. An entry records which worktree it came from, restore refuses to run from a different one
 without `--worktree`, and `undo` warns by name when it will disturb a sibling.
 
-**Concurrency.** Two `yard` processes in the same repo must not interleave journal writes. Use a
+**Concurrency.** Two `switchyard` processes in the same repo must not interleave journal writes. Use a
 lock file under `.git/switchyard/` with a timeout, and fail cleanly rather than blocking forever.
 
 ---
@@ -659,13 +659,13 @@ differentiator. Everything before it is table stakes.
 **M5 — Advanced rewriting.** `absorb`, `split`, `reorder`, `drop`. These need the rebase engine
 and are the highest-effort, so they come after the thing that makes the project distinctive.
 
-**The `yard` skill ships continuously from M1**, regenerated whenever the command surface changes.
+**The `switchyard` skill ships continuously from M1**, regenerated whenever the command surface changes.
 It is not a milestone of its own. See [Section 8](#8-the-agent-skill-and-why-there-is-no-mcp-server).
 
 **Candidates for M5+, not committed.**
 [git internals §6](switchyard-git-internals-and-undo.md#6-further-features-these-docs-surface)
 develops these; two are worth naming here because they are unusually cheap relative to their value.
-`yard rewrite-diff` uses `git range-diff` plus the `post-rewrite` mapping to answer "what changed in
+`switchyard rewrite-diff` uses `git range-diff` plus the `post-rewrite` mapping to answer "what changed in
 the changes" after a rewrite — it is what makes the journal feel trustworthy rather than merely
 present, since a reviewer who can see the delta accepts a rewrite instead of undoing it
 defensively. And `rerere` means a human resolves a conflict once in the three-way UI and every
@@ -702,7 +702,7 @@ a feature at any milestone on the grounds that GitUp had it.
   per-worktree ref split directly: restoring `HEAD` must not move a sibling, restoring
   `refs/heads/*` must be detected as affecting one.
 - **The state-directory rebuild path is tested by deleting it.** Blow away
-  `~/.local/state/switchyard/` and assert `yard journal` still reconstructs from
+  `~/.local/state/switchyard/` and assert `switchyard journal` still reconstructs from
   `refs/switchyard/journal/*`. An untested fallback is a fallback that does not work.
 - **Signing tests** generate a throwaway SSH key in a temp dir and verify round-trip through
   `ssh-keygen -Y verify`. Skip GPG tests when `gpg` is absent rather than failing.

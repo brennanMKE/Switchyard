@@ -236,7 +236,7 @@ The CLI is the product for agents. Three rules make it usable by one:
 **There is no MCP server** — decided, with the reasoning and the conditions for revisiting in guide
 §8. Do not add one, and do not let anything depend on one existing.
 
-The skill teaching agents to drive `yard` lives in `skills/yard/SKILL.md` and is **generated from
+The skill teaching agents to drive `switchyard` lives in `skills/yard/SKILL.md` and is **generated from
 the same command metadata that builds `--help`**, so it cannot drift from the binary. Hand-written
 prose that restates flags will go stale within a milestone. Package it per client (Claude Code
 plugin, OpenCode) on top of that one source; do not maintain parallel copies. A command lands with
