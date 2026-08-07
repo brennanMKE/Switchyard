@@ -49,6 +49,7 @@ public struct WorktreeStatusEntry {
             case "A", "+": self = .added
             case "D", "-": self = .deleted
             case "M": self = .modified
+            case "R", "C": self = .modified
             default: return nil
             }
         }
@@ -158,7 +159,7 @@ public struct WorktreeStatusParser {
     /// including the leading tag) precede the path.
     private static let fieldCount: [String: Int] = [
         "1": 7,   // XY sub mH mI mW hH hI — path at token index 8
-        "2": 8,   // XY sub m1 m2 m3 h1 h2 h3 — path at token index 9
+        "2": 8,   // XY sub m1 m2 m3 h1 h2 h3 — path at token index 10
         "u": 9,   // XY sub m1 m2 m3 h1 h2 h3 — unmerged/conflict variant
         "?": 0,   // bare "?" token
         "!": 0,   // bare "!" — ignored records (need --ignored)
@@ -166,20 +167,44 @@ public struct WorktreeStatusParser {
 
     /// Split `data` into NUL-delimited records, returning one `[UInt8]` per
     /// record (with the NUL itself dropped). Paths may contain newlines or
-    /// arbitrary bytes, so a `String` split is unsafe and a `2` record carries
-    /// two paths — the second NUL belongs to it, not a new record.
+    /// arbitrary bytes, so a `String` split is unsafe. A `2` record carries
+    /// two NUL-terminated paths — the second one is the original path and
+    /// must be merged back into that record rather than being parsed as a
+    /// separate (and skipped) entry. We do this by consuming the original-
+    /// path NUL inline while we build each record.
     private static func splitRecords(_ data: Data) -> [[UInt8]] {
+        let bytes = [UInt8](data)
         var records: [[UInt8]] = []
-        var current: [UInt8] = []
-        for byte in data {
-            if byte == 0x00 {
-                if !current.isEmpty { records.append(current) }
-                current = []
-            } else {
-                current.append(byte)
+        var i = 0, n = bytes.count
+        while i < n {
+            // Find the start of the next record.
+            var start = i
+            while start < n && bytes[start] == 0x00 { start += 1 }
+            if start >= n { break }
+            // Find the first NUL.
+            var p = start
+            while p < n && bytes[p] != 0x00 { p += 1 }
+            var record = Array(bytes[start..<p])
+            if !record.isEmpty {
+                let leadingByte = record.first ?? 0
+                // `2` records own a second NUL-terminated field: the original
+                // path. Consume it now so downstream code sees a single record.
+                if leadingByte == UInt8(ascii: "2") {
+                    p += 1 // skip the first NUL
+                    let origStart = p
+                    while p < n && bytes[p] != 0x00 { p += 1 }
+                    if p < n {
+                        let origBytes = Array(bytes[origStart..<p])
+                        if !origBytes.isEmpty { record.append(contentsOf: [0x00] + origBytes) }
+                        p += 1 // skip the second NUL
+                    }
+                } else {
+                    p += 1 // skip the single NUL after this record.
+                }
+                records.append(record)
             }
+            i = p
         }
-        if !current.isEmpty { records.append(current) }
         return records
     }
 
@@ -211,7 +236,17 @@ public struct WorktreeStatusParser {
             let expectedFields = Self.fieldCount[leading]
             guard let expectedFields else { continue }
 
-            let tokens = Self.splitSpaces(rawRecord)
+            // A `2` record has the original path appended after a NUL by
+            // splitRecords. Tokenize only up to that NUL, or the new path comes
+            // back as "renamed.txt\0orig.txt" glued into one token.
+            let headSlice: [UInt8]
+            if leading == "2", let nul = rawRecord.firstIndex(of: 0x00) {
+                headSlice = Array(rawRecord[..<nul])
+            } else {
+                headSlice = rawRecord
+            }
+
+            let tokens = Self.splitSpaces(headSlice)
             guard tokens.count > expectedFields else { continue }
 
             // The path starts at index `expectedFields + 1` (after the leading tag
@@ -254,9 +289,12 @@ public struct WorktreeStatusParser {
                 entry.worktree = workChar
 
                 // The third token is the `<sub>` field (e.g. "S123", "N...").
-                // We ignore it for now — not all record types carry one, and the
-                // only place that matters is renaming, which uses tokens[2] as a
-                // path component.
+                // `N...` means an ordinary path (not a submodule) — we store nil.
+                // `S<c><m><u>` means a submodule and we populate entry.submodule.
+                if tokens.count > 2 {
+                    let subStr = String(bytes: tokens[2], encoding: .ascii) ?? ""
+                    entry.submodule = WorktreeStatusEntry.SubmoduleState(subToken: subStr)
+                }
 
                 // Conflict is signalled by the LEADING token being `u`, never by
                 // the XY field — on a `u` record XY is e.g. "AA".
@@ -265,18 +303,30 @@ public struct WorktreeStatusParser {
                 }
 
                 // A `2` record carries two NUL-terminated paths: original, then new.
-                // We need to reconstruct the original path by walking rawRecord up to
-                // where tokens[expectedFields] begins.
-                if leading == "2" {
-                    let tokenOffset = offsetOfToken(in: rawRecord, atIndex: expectedFields)
-                    var origBytes = Array(rawRecord[..<tokenOffset])
-                    if origBytes.last == 0x20 { origBytes.removeLast() }
+                // splitRecords merged the original-path fragment into the end of rawRecord as a single
+                // NUL-delimited suffix. We extract both paths by splitting the record on NULs:
+                // everything before the first (space-delimited) token slice is unchanged, and
+                // everything after the NUL is the original path.
+                if leading == "2", let nulPos = rawRecord.firstIndex(of: 0x00) {
+                    // Everything from nulPos onwards is "<NUL><orig-path>" (may include a trailing NUL
+                    // that follows the original path — splitRecords does not strip it). The true
+                    // original-path bytes are from nulPos+1 to the next NUL (or end of data).
+                    var origEnd = rawRecord.count
+                    for j in (nulPos + 1)..<rawRecord.count {
+                        if rawRecord[j] == 0x00 { origEnd = j; break }
+                    }
 
-                    let origStr = String(decoding: origBytes, as: UTF8.self)
-                    guard !origStr.isEmpty else { continue }
+                    let rawOriginalBytes = Array(rawRecord[(nulPos + 1)..<origEnd])
+                    if !rawOriginalBytes.isEmpty {
+                        entry.originalPathBytes = rawOriginalBytes
+                        entry.originalPath = String(decoding: rawOriginalBytes, as: UTF8.self)
+                    }
 
-                    entry.originalPath = origStr
-                    entry.originalPathBytes = origBytes
+                    // If everything from nulPos onwards was a bare NUL terminator (path is empty), the
+                    // original path would be nil. We only write to entry.originalPath when we got real
+                    // bytes above; otherwise the optional defaults stay nil. The path itself (new path)
+                    // is already set from the tokens loop above. We do not throw if the raw bytes are
+                    // non-UTF-8 — `originalPathBytes` preserves them exactly.
                 }
             }
 
