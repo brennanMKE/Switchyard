@@ -2,7 +2,7 @@
 
 import Foundation
 
-private let encodingFailureEnvelope =
+internal let encodingFailureEnvelope =
     #"{"schemaVersion":1,"ok":false,"error":{"code":"request_failed","message":"Failed to encode the response."}}"#
 
 /// Pure, testable entry-point logic. Takes the argument array *after* the
@@ -84,9 +84,9 @@ private func runSchema() -> (stdout: String, stderr: String, exitCode: ExitCode)
     }
 }
 
-// MARK: - Private helpers
+// MARK: - Internal helpers (exposed for testing)
 
-private func jsonString<T: Encodable>(_ value: T) -> String {
+internal func jsonString<T: Encodable>(_ value: T) -> String {
     guard let data = try? JSONEncoder().encode(value),
           let text = String(data: data, encoding: .utf8) else {
         return encodingFailureEnvelope
