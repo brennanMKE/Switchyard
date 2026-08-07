@@ -58,7 +58,12 @@ a figure derived from it appears.
 | 2026-08-07 | #0013 | Dispatch round 1 (no output, truncated write) | 48,408 | $0.39 |
 | 2026-08-07 | #0014 | Dispatch round 1 (no output, truncated write) | 45,134 | $0.36 |
 | 2026-08-07 | #0014 | Dispatch round 2 (timed out, placeholder bodies) | 44,477 | $0.36 |
-| | | **Total measured** | **2,270,645** | **$18.17** |
+| 2026-08-07 | #0113 | Dispatch round 1 (sandbox rejection, no output) | 41,137 | $0.33 |
+| 2026-08-07 | #0113 | Dispatch round 2 (REJECTED, red suite) | 51,226 | $0.41 |
+| 2026-08-07 | #0014 | Round 3 dispatch blocked by unmerged review | 44,255 | $0.35 |
+| 2026-08-07 | #0113 | Dispatch round 3 + hand finish (accepted) | 52,198 | $0.42 |
+| 2026-08-07 | #0014 | Dispatch round 3 (REJECTED, review defect) | 59,498 | $0.48 |
+| | | **Total measured** | **2,518,959** | **$20.15** |
 
 ## What this total does and does not cover
 

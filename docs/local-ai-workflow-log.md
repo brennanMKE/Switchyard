@@ -811,6 +811,40 @@ it is dispatched, not after it fails.
 a default — prefer repair framing, prefer smaller first deliverables — not a refusal to ever create a
 file.
 
+### 2.6 The sandbox rule survived three escalations and still fired
+
+The `/tmp` rejection has now cost or damaged four rounds — #0070 r2, #0098 r1, #0113 r1 and #0113 r2 —
+and each fix was a level more forceful than the last:
+
+1. Fixed the **issue** that reached for `/tmp`. It recurred three issues later (§2.4b).
+2. Added **`AGENTS.md` Rule 6**, the file OpenCode loads. It recurred (#0113 r1, fatally).
+3. Put the rule in the **dispatch prompt itself**, which every round receives directly. **It recurred
+   again** — #0113 round 2 ran `cat > /tmp/probe-fixture.sh` and was rejected.
+
+So the honest conclusion: **prompt-level instruction does not stop this model reaching for `/tmp`.**
+Three escalations of the same kind of fix produced the same outcome, which is the signal to stop
+escalating that kind of fix.
+
+**What did change is the failure mode, and it is worth separating.** Round 1 died 245s after the
+rejection, having stopped one sentence later. Round 2 absorbed the rejection and worked for another
+twenty minutes, producing both files. The prompt rule converted *fatal* into *survivable*. That is a
+real gain and not the one that was intended.
+
+**Two conclusions.**
+
+The narrow one: for anything that needs a repository fixture, **generate the bytes yourself and paste
+them into the issue.** #0113 asked the model to run `git status --porcelain=v2 -z` and read the
+output; it failed twice, and both failures cost a round. Capturing the five records took me under a
+minute in a directory I am allowed to write to. An issue that hands over evidence beats an issue that
+asks for it to be discovered, whenever the discovery is cheap for the author and blocked for the
+implementer.
+
+The general one: **when three escalations of the same fix fail, the next fix must be a different
+kind.** More forceful wording is the same kind. The different kind here is a sandbox permission change
+in `~/.config/opencode/opencode.json` — untried, because the schema was not to hand and guessing at a
+permission config on someone else's machine at 3am is a worse idea than pasting bytes into an issue.
+It remains the right fix if this keeps happening.
+
 ### 3.7 Review feedback can make the next round impossible
 
 Round 2 of #0070 was killed by the sandbox because *my feedback* told it to verify git behaviour,
