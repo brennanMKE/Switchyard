@@ -40,17 +40,14 @@ public struct WhereAmI: Sendable, Equatable {
     public let untrackedCount: Int
 
     /// Number of files with unstaged changes, as returned by
-    /// `git diff-index --name-status HEAD` (with no index cache). The code passes
-    /// the index bytes it built from `ls-files` instead of relying on the
-    /// on-disk index, so `-z` is preferred for correctness against paths with
-    /// whitespace or newlines. A non-zero exit on a fresh repository (no HEAD)
+    /// `git diff-index --name-status HEAD`. The code splits stdout on `\n` and
+    /// counts non-empty lines; a non-zero exit on a fresh repository (no HEAD)
     /// is treated as zero files.
     public let unstagedCount: Int
 
     /// Number of files with staged changes, as returned by
-    /// `git diff-index --name-status --cached HEAD`. The code only counts the
-    /// lines after stripping trailing empties — there is no index cache, so
-    /// the two numbers should match in practice.
+    /// `git diff-index --name-status --cached HEAD`. The code splits stdout on
+    /// `\n` and counts non-empty lines.
     public let stagedCount: Int
 
     /// True when the index contains unmerged (conflicted) entries.
@@ -62,9 +59,7 @@ public struct WhereAmI: Sendable, Equatable {
     /// The raw form of HEAD, for debugging. Always a SHA or empty (the code
     /// runs `git rev-parse HEAD`), never the symbolic `"ref: refs/heads/main"`
     /// form — that only appears when `symbolic-ref` is called, which this
-    /// property does not do. Empty on a fresh repository with no commits yet;
-    /// callers should treat a SHA length of less than 7 as "unborn" rather
-    /// than relying on this property.
+    /// property does not do. Empty on a fresh repository with no commits yet.
     public let rawHead: String
 
     public init(
@@ -110,8 +105,7 @@ public func whereAmI(
     git: GitProcess = GitProcess()
 ) throws -> WhereAmI {
 
-    // HEAD's raw form: `ref: refs/heads/main` or a full SHA when detached.
-    // An empty repository has no HEAD yet, so fall back to a sentinel string;
+    // HEAD's raw form: a full SHA or empty. An empty repository has no HEAD yet, so fall back to "";
     // callers can still check the branch via `symbolic-ref -q` (which also
     // returns non-zero with no commits).
     let rawHead: String = {
