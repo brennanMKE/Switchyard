@@ -34,12 +34,12 @@ public enum ExitCode: Int, Sendable {
     /// a bug.
     case appUnavailable = 3
 
-    /// The XPC session was terminated by the app.
-    case sessionTerminated = 4
-
     /// A request to the broker failed for a reason unrelated to reachability
     /// or termination — bad payload, unhandled path, etc.
-    case requestFailed = 5
+    case requestFailed = 4
+
+    /// The XPC session was terminated by the app.
+    case sessionTerminated = 5
 
     /// The repository is in a state the command cannot work with: not a
     /// repository, detached HEAD on a rebase in progress, ref format the
@@ -66,8 +66,8 @@ public enum ExitCode: Int, Sendable {
         case .usage: return "usage"
         case .brokerUnreachable: return "broker_unreachable"
         case .appUnavailable: return "app_unavailable"
-        case .sessionTerminated: return "session_terminated"
         case .requestFailed: return "request_failed"
+        case .sessionTerminated: return "session_terminated"
         case .repositoryError: return "repository_error"
         case .humanDeclined: return "human_declined"
         case .blockedOnConflicts: return "blocked_on_conflicts"
