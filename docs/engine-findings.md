@@ -166,6 +166,26 @@ or `/usr/local` (Intel), and a distributed app cannot depend on a user's Homebre
 viable for development but **not for shipping**, since the embedded `yard` (#0050) must run on a
 machine with no Homebrew at all.
 
+### libgit2 needs no transport at all — measured 2026-08-06
+
+`git_libgit2_features()` on the current Homebrew build reports `HTTPS yes, SSH yes`. Those two
+options are the entire reason the dependency tree includes OpenSSL and libssh2; with
+`-DUSE_SSH=OFF -DUSE_HTTPS=OFF` the vendoring problem collapses from five libraries to one.
+
+Nothing is lost, because network operations were never going to use libgit2. `CLAUDE.md` already
+requires shelling out to `git` for hooks, network operations, and signing, centralised in
+`GitProcess`. That is the stronger choice on its own merits: `git` already resolves the user's SSH
+agent, `credential.helper`, Keychain, `.netrc`, `insteadOf` rewrites, proxies and 2FA tokens.
+libgit2's transport would mean implementing credential callbacks that reproduce a *subset* of that,
+and any divergence appears to the user as "works in my terminal, fails in the app".
+
+libgit2 keeps every local operation — objects, refs, index, diff, merge, traversal — which is where
+per-query process spawning would be unaffordable and where the commit-graph measurements above apply.
+The `git_remote_*` family becomes unusable; note that ahead/behind for `yard whereami` reads
+`refs/remotes/` locally and needs no network, so the highest-traffic command is unaffected.
+
+Acceptance for the vendored build is the probe, not the build log: HTTPS off, SSH off, THREADS on.
+
 ### Route B has a known-good shape — GitUp's, checked 2026-08-06
 
 GitUp vendors **static** libraries inside universal `.xcframework`s, built from source with CMake by
