@@ -36,7 +36,7 @@ struct WorktreeListTests {
         defer { repo.destroy() }
 
         let entries = try worktreeList(path: repo.url.path)
-        #expect(entries.count == 1, "single main worktree must yield exactly one entry")
+        try #require(entries.count == 1, "single main worktree must yield exactly one entry")
 
         let e = entries[0]
         #expect(e.isMainWorktree)
@@ -52,7 +52,7 @@ struct WorktreeListTests {
         defer { repo.destroy() }
 
         let entries = try worktreeList(path: repo.url.path)
-        #expect(entries.count == 1, "one entry in \(format.rawValue)")
+        try #require(entries.count == 1, "one entry in \(format.rawValue)")
 
         let e = entries[0]
         #expect(e.isMainWorktree)
@@ -69,7 +69,7 @@ struct WorktreeListTests {
         }
 
         let entries = try worktreeList(path: repo.url.path)
-        #expect(entries.count == 5, "five worktrees must yield five entries")
+        try #require(entries.count == 5, "five worktrees must yield five entries")
 
         // The main worktree is the first entry and carries no name-like path
         // collision with a linked one.
@@ -141,7 +141,7 @@ struct WorktreeListTests {
                 "lock reason must be surfaced from porcelain")
 
         // And the main worktree still reports unlocked.
-        let main = entries.first { $0.isMainWorktree }!
+        let main = try #require(entries.first { $0.isMainWorktree })
         #expect(!main.locked)
     }
 
@@ -171,7 +171,8 @@ struct WorktreeListTests {
         defer { repo.destroy() }
 
         let entries = try worktreeList(path: repo.url.path)
-        let e = try #require(entries.first(where: { _ in true }))
+        try #require(entries.count == 1, "bare repo has exactly one entry")
+        let e = entries[0]
         #expect(e.bare, "the entry is marked bare")
         // Bare repos have no main worktree; the lone entry's path is nil.
     }
@@ -216,7 +217,7 @@ struct WorktreeListTests {
         let entries = try worktreeList(path: repo.url.path)
 
         // There's still only one entry from main; confirm its detached flag.
-        let mainEntry = entries.first { $0.isMainWorktree }!
+        let mainEntry = try #require(entries.first { $0.isMainWorktree })
 
         // Porcelain emits `detached` when HEAD is not a branch ref.
         #expect(mainEntry.head == oid, "HEAD OID must be preserved in detached state")
@@ -224,7 +225,7 @@ struct WorktreeListTests {
 
     // MARK: - Unit-level parser tests on hand-crafted NUL input
 
-    @Test func parserAcceptsHandCraftedPorcelainBytes() {
+    @Test func parserAcceptsHandCraftedPorcelainBytes() throws {
         // Construct a minimal -z buffer: two records, one locked with reason,
         // one without. This exercises the parser in isolation — no git needed.
 
@@ -257,7 +258,7 @@ struct WorktreeListTests {
         // parser, not git. (The production entry point `worktreeList` shells out.)
         let entries = parsePorcelain(data, path: "/does-not-matter")
 
-        #expect(entries.count == 3)
+        try #require(entries.count == 3)
         #expect(entries[0].path == "/main/path")
         #expect(entries[0].isMainWorktree)
         #expect(entries[0].head == "1234567890abcdef")
@@ -279,8 +280,8 @@ struct WorktreeListTests {
         var repo = try FixtureRepository.linear()
         defer { repo.destroy() }
 
-        let first  = try worktreeList(path: repo.url.path).first!
-        let second = try worktreeList(path: repo.url.path).first!
+        let first  = try #require(try worktreeList(path: repo.url.path).first)
+        let second = try #require(try worktreeList(path: repo.url.path).first)
 
         #expect(first == second)
     }
@@ -295,6 +296,7 @@ struct WorktreeListTests {
         defer { try? FileManager.default.removeItem(at: wtPath) }
 
         let entries = try worktreeList(path: wtPath.path)
+        try #require(entries.count >= 1, "expected at least the main worktree")
         #expect(entries[0].isMainWorktree, "from a linked worktree, index 0 is still main")
     }
 
@@ -322,7 +324,7 @@ struct WorktreeListTests {
         #expect(entries.isEmpty)
     }
 
-    @Test func singleFieldNoRecordBoundaryReturnsOneEntryIfUsable() {
+    @Test func singleFieldNoRecordBoundaryReturnsOneEntryIfUsable() throws {
         // A buffer ending with a single NUL (no double-NUL) is still one record.
         var buf: [UInt8] = []
         func append(_ s: String) { buf.append(contentsOf: Array(s.utf8)) }
@@ -333,7 +335,7 @@ struct WorktreeListTests {
         // No trailing double-NUL.
 
         let entries = parsePorcelain(Data(buf), path: "")
-        #expect(entries.count == 1)
+        try #require(entries.count == 1)
         #expect(entries[0].path == "/only/path")
     }
 
