@@ -192,6 +192,9 @@ struct FixtureRepositoryTests {
         let entry = try #require(entries.first(where: { $0.oid == repo.oids["x"] }))
         // git's `commit -m` appends a trailing newline to the message stored in the object store;
         // CommitLog must preserve whatever git actually wrote, not what was originally supplied.
+        // `git commit -m` applies its default cleanup, which ends the stored message
+        // with exactly one newline. %B is verbatim, so the parser now returns it --
+        // the old assertion without it encoded the trim this change removes.
         #expect(entry.message == body + "\n")
     }
 }

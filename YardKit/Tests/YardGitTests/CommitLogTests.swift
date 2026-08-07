@@ -66,15 +66,30 @@ struct CommitLogTests {
         #expect(entry.message == "\(body)\n", "trailing newline must be preserved verbatim")
     }
 
-    @Test func parseSkipsEmptyTailRecordWithoutSoh() throws {
-        let oid = "d" + String(repeating: "0", count: 39)
+    @Test func parseSkipsEmptyTailRecordAndStripsTheRecordSeparator() throws {
+        // The real shape, from `od -c` on the project's own format string:
+        //
+        //     <record>\n \0 \n <record>\n \0 \n
+        //
+        // %B's trailing newline, then the %x00 from the format, then the
+        // separator newline `git log` writes between entries. A fixture that
+        // omits that separator cannot detect the bug where it is treated as part
+        // of the next record -- which is exactly what round 1 shipped.
+        let oid1 = "d" + String(repeating: "0", count: 39)
+        let oid2 = "e" + String(repeating: "0", count: 39)
         let soH = "\u{01}"
-        // Two records back-to-back; the final NUL produces an empty trailing record.
-        let body1 = "first commit"
-        let body2 = "second commit"
-        let record = "\(oid)\(soH)\(soH)fixture<fixture@example.invalid>\(soH)\(soH)(HEAD, main)\(soH)\(body1)\u{0}\(oid)\(soH)\(soH)fixture<fixture@example.invalid>\(soH)\(soH)(HEAD, main)\(soH)\(body2)\u{0}"
-        let entries = CommitLog.parse(output: record)
-        #expect(entries.count == 2, "empty trailing record must be skipped")
+        func record(_ oid: String, _ body: String) -> String {
+            "\(oid)\(soH)\(soH)fixture<fixture@example.invalid>\(soH)\(soH)(HEAD, main)\(soH)\(body)\n\u{0}\n"
+        }
+        let output = record(oid1, "first commit") + record(oid2, "second commit")
+
+        let entries = CommitLog.parse(output: output)
+
+        #expect(entries.count == 2, "the empty trailing record must be skipped")
+        #expect(entries.map(\.oid) == [oid1, oid2],
+                "the separator newline must not survive into the oid field")
+        #expect(entries.map(\.message) == ["first commit\n", "second commit\n"],
+                "%B's own trailing newline must survive")
     }
 
     @Test func parseFindsSohWhenRecordContainsLeadingNewlines() throws {
@@ -215,6 +230,9 @@ struct CommitLogTests {
         let message = try #require(entries.first?.message)
         // git's `commit -m` appends a trailing newline to the stored message; CommitLog preserves
         // whatever was actually written by git, which is what we observe here.
+        // `git commit -m` applies its default cleanup, which ends the stored message
+        // with exactly one newline. %B is verbatim, so the parser now returns it --
+        // the old assertion without it encoded the trim this change removes.
         #expect(message == multiLine + "\n")
     }
 

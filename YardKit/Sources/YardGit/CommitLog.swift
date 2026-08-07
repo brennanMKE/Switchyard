@@ -149,7 +149,17 @@ public enum CommitLog {
         let records = output.split(separator: "\u{0}", omittingEmptySubsequences: false)
 
         for record in records {
-            let text = String(record)
+            // `git log` writes `<record>\n\0\n` -- the trailing newline of %B,
+            // then the %x00 from the format string, then its own separator
+            // newline between entries. Splitting on NUL therefore leaves every
+            // record after the first beginning with that separator, which is not
+            // part of the record. Drop exactly one.
+            //
+            // The old record-level trimmingCharacters(.whitespacesAndNewlines)
+            // removed it -- and also ate %B's trailing newline, which is the bug
+            // this change exists to fix. One line was doing both jobs.
+            var text = String(record)
+            if text.hasPrefix("\n") { text = String(text.dropFirst()) }
             guard text.contains("\u{01}") else { continue }
 
             // Split each record on SOH into fields. The body is the last field
