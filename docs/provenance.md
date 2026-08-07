@@ -34,8 +34,11 @@ will treat each as a separate entry.
 - No bare newlines inside the value; a value that spans multiple lines belongs to the commit message,
   not the trailer line. If the agent needs a long session identifier, let it hash or abbreviate rather
   than introducing newlines.
-- `Agent-Name` and `Agent-Model` are case-sensitive on read. Canonicalise to lowercase at write time
-  so that `claude-code` and `Claude-Code` resolve to the same agent.
+- `Agent-Name` and `Agent-Model` are **written** with canonical casing
+  (`Agent-Name: claude-code`, `Agent-Model: claude-opus-5`), but git matches trailer keys
+  case-insensitively on read. A commit whose trailer reads `agent-name: Ornith` is still returned by
+  `%(trailers:key=Agent-Name,valueonly)`. `yard log --agent-only` must therefore accept any
+  casing on read while writing the canonical form.
 - `Agent-Session` is opaque; it may contain any characters except newlines and control characters.
 
 ## Multiple agents on one commit
@@ -81,9 +84,24 @@ is so that a human can look at a commit and see what happened around it without 
 make the record permanent.
 
 The split is documented here once so that the question does not get relitigated for every feature
-that touches either carrier. `docs/switchyard-development-guide.md` §6 "Agent provenance" and
-`docs/switchyard-git-internals-and-undo.md` §6 "Notes for decisions, trailers for provenance" point
-at this file; `docs/provenance.md` is the contract.
+that touches either carrier. `docs/switchyard-development-guide.md` §6 "Agent provenance" points at
+this file; `docs/provenance.md` is the contract.
+
+## Hard constraint: trailer block must be the final paragraph
+
+The entire trailer block must be the **final paragraph** of the commit message. If any prose
+follows it, `git interpret-trailers --parse` returns zero trailers and `%(trailers)` produces
+nothing — the whole block is silently void. There is no warning, no error code, and no partial
+match: git treats the entire block as ordinary commit-message prose.
+
+Trailing blank lines are harmless; git strips them. Verified on git 2.50.1: a message ending in two
+blank lines after the block still parses both trailers, while the same message with a single line of
+prose appended parses **zero**.
+
+Consequence for #0038: anything that appends text to a commit message after provenance has been
+written destroys the entire provenance record with no error. Writers must write the trailer block
+last, and anything that rebases or rewrites a commit message must be aware that provenance is lost
+if any text follows it in the resulting message.
 
 ## Verification against standard tooling
 
@@ -104,7 +122,7 @@ Agent-Session: 01J8X...
 ```
 
 `git interpret-trailers --parse` enumerates every trailer it finds, in order. If this command
-produces the three lines above (and nothing else), every git consumer — `git log --format=%trailers`,
+produces the three lines above (and nothing else), every git consumer — `git log --format='%(trailers)'`,
 pull-request tooling, patchwork — can read these trailers without a custom parser. Switchyard parses
 them with its own code so it can do the field-specific rules above (ordering, multiple-agent
 handling); `git interpret-trailers` verifies that the raw text is well-formed.
