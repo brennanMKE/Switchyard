@@ -193,6 +193,21 @@ An issue being actively worked must say so, or the tracker lies about what is
 happening. Set it back to 'open' if the round is abandoned."
 fi
 
+# --- Check 3b (HARD) — the Module field must not be empty -------------------
+# An empty Module makes this script classify the issue as non-code, which skips
+# Check 4 -- the hard "names a verification command with a baseline count".
+# Seven issues filed through new-issue.sh sat that way, each one reading as
+# clean while the check that matters most was never run.
+MODULE_RAW=$(grep -m1 '^| \*\*Module\*\*' "issues/$ISSUE.md" 2>/dev/null \
+  | sed 's/^| \*\*Module\*\* | *//; s/ *|$//' || true)
+if [[ -z "${MODULE_RAW// /}" ]]; then
+  fail "the Module field is empty" \
+"An empty Module classifies this as a non-code issue and SKIPS the verification
+check. Fill it in -- YardGit, YardKit, yard, app, docs, or a combination."
+else
+  pass "Module is set ($MODULE_RAW)"
+fi
+
 # --- Check 4b (WARN) — the stated baseline matches main's real count --------
 # #0096 round 1 was reviewed against a baseline of 216 when main was 225. A
 # stale number hides a small increase, and can make an unmoved count read as
@@ -200,7 +215,10 @@ fi
 if [[ -f docs/test-baseline.txt ]]; then
   REAL=$(<docs/test-baseline.txt)
   # $SPEC is a FILE holding the spec text, not the text itself.
-  STATED=$(grep -oE 'reported [0-9]+ on' "$SPEC" 2>/dev/null | grep -oE '[0-9]+' | head -1 || true)
+  # The phrase often wraps across a line break in the issue text, so flatten
+  # whitespace before matching -- the first version missed every wrapped one
+  # and printed nothing, which read as "no baseline stated".
+  STATED=$(tr '\n' ' ' < "$SPEC" | grep -oE 'reported +[0-9]+ +on' | grep -oE '[0-9]+' | head -1 || true)
   if [[ -n "$STATED" && -n "$REAL" && "$STATED" != "$REAL" ]]; then
     warn "issue states a baseline of $STATED, but main's suite is $REAL" \
 "A stale baseline hides a small increase. Update the issue before dispatching."
