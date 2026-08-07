@@ -16,6 +16,7 @@
 #   NARROWING a loop over cases whose body discards all but one via
 #             `guard case ... else { continue }`
 #   TAUTOLOGY an assertion over literals, e.g. #expect(true)
+#   SKIPSHAPE a bare `return` in a @Test body — a quiet skip that reports success
 #   HANDROLLED a hand-written `allCases`, which makes "every case" mean
 #             "every case someone remembered"
 #
@@ -58,6 +59,19 @@ NARROW=$(grep -rn -A2 --include='*.swift' -E '^[[:space:]]*for +[A-Za-z_(].* in 
   | grep -B2 -E 'guard +case .*continue' \
   | grep -v '^--$' | sed 's/^/  NARROWING  /' || true)
 
+# --- SKIPSHAPE: a bare `return` inside a @Test body -------------------------
+# A bare `return` in a test is nearly always a quiet skip: the test exits
+# before its assertions and reports success. Three rounds have now shipped
+# this shape -- a guard-else-return in #0090, and in #0012 a test that merges
+# an ancestor, gets "Already up to date", finds no MERGE_HEAD, and returns
+# before its only #expect. The INERT scan cannot see it because an #expect is
+# textually present.
+#
+# Bare `return` only: a closure returning a value uses `return x`, so this
+# stays quiet on the common legitimate case.
+SKIPSHAPE=$(grep -rn --include='*.swift' -E '^[[:space:]]*(return|.*else \{ return \})[[:space:]]*$' $TARGETS 2>/dev/null \
+  | sed 's/^/  SKIPSHAPE  /' || true)
+
 # --- TAUTOLOGY: an assertion whose operands are literals --------------------
 # #expect(true) passes no matter what the code does. Found in a round that had
 # already been graded "no inert tests" — the body does contain an assertion
@@ -72,6 +86,19 @@ HAND=$(grep -rn -E 'static +(var|let) +allCases' Sources YardKit/Sources --inclu
 for block in "$INERT" "$NARROW" "$TAUT" "$HAND"; do
   if [[ -n "${block//[[:space:]]/}" ]]; then print -r -- "$block"; FOUND=1; fi
 done
+
+# SKIPSHAPE is advisory for now. Six instances already exist on main and are
+# owned by #0105; failing the exit code on them would make every dispatch
+# review report a defect unrelated to its own round, and a detector that is
+# always red is a detector nobody reads. Promote it to a hard failure once
+# #0105 lands.
+if [[ -n "${SKIPSHAPE//[[:space:]]/}" ]]; then
+  print -r -- "$SKIPSHAPE"
+  print ""
+  print "SKIPSHAPE is advisory (see #0105). A bare 'return' in a @Test body exits"
+  print "before the assertions and reports success. Legitimate only if the test"
+  print "genuinely cannot run — and then it should fail loudly, not skip."
+fi
 
 if (( FOUND )); then
   print ""
