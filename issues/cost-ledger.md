@@ -57,7 +57,8 @@ a figure derived from it appears.
 | 2026-08-07 | #0020 | Dispatch round 3 (accepted, 246s) | 52,087 | $0.42 |
 | 2026-08-07 | #0013 | Dispatch round 1 (no output, truncated write) | 48,408 | $0.39 |
 | 2026-08-07 | #0014 | Dispatch round 1 (no output, truncated write) | 45,134 | $0.36 |
-| | | **Total measured** | **2,226,168** | **$17.81** |
+| 2026-08-07 | #0014 | Dispatch round 2 (timed out, placeholder bodies) | 44,477 | $0.36 |
+| | | **Total measured** | **2,270,645** | **$18.17** |
 
 ## What this total does and does not cover
 
