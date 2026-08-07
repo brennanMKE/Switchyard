@@ -219,7 +219,13 @@ while its tests contributed nothing to the number.
     two full `swift test` runs into its context before doing any work, compacted, and then worked from
     a summary that had invented four prior rounds and a set of test names that do not exist. When the
     issue already carries the measured failure, say so and say not to re-measure it.
-33. **Does the issue name the collaborators, not just the output file?** "Name the file" fixed
+33. **Does the test compare a fixture path against a path git printed?** They are different strings.
+    `NSTemporaryDirectory()` gives `/var/folders/…`; git always reports the resolved
+    `/private/var/folders/…`. #0097 round 1 lost every one of its assertions to a `try #require` on a
+    lookup that could not succeed. `FixtureRepository.url` is now resolved at construction with
+    `realpath(3)` — and note that `resolvingSymlinksInPath()` does **not** do this, it strips a
+    leading `/private` instead.
+34. **Does the issue name the collaborators, not just the output file?** "Name the file" fixed
     convergence months of rounds ago, and it is necessary but not sufficient: a file name says where
     code goes and nothing about what it may call. If the work must use an existing type, **quote its
     real surface in the issue** — #0012 lost a full 30-minute cap to a model inventing
