@@ -203,14 +203,6 @@ public struct EnvelopeError: Sendable, Encodable {
 }
 
 
-public indirect enum StandardStream {
-    case stderr
-
-    func print(_ message: String) {
-        _ = Swift.print(message, terminator: "\n")
-    }
-}
-
 public struct EnvelopeFail: Sendable, Encodable {
     public let schemaVersion: Int
     public let ok: Bool
@@ -235,10 +227,15 @@ public struct EnvelopeFail: Sendable, Encodable {
         case error = "error"
     }
 
-    /// Writes a failure envelope to stdout. The caller decides whether and how
-    /// the process exits — `write` focuses solely on emitting the JSON contract.
-    public func write(stream: StandardStream = .stderr) {
-        stream.print("[error] \(error.code): \(error.message)")
+    /// Writes a failure envelope to stdout and the human-readable line to
+    /// stderr. stdout carries exactly one thing: the JSON envelope. The caller
+    /// decides whether and how the process exits — `write` focuses solely on
+    /// emitting the JSON contract.
+    public func write() {
+        let human = "[error] \(error.code.rawValue): \(error.message)\n"
+        if let data = human.data(using: .utf8) {
+            FileHandle.standardError.write(data)
+        }
 
         let data = try! JSONEncoder().encode(self)
         FileHandle.standardOutput.write(data)
