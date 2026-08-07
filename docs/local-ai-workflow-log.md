@@ -516,10 +516,18 @@ state it is already in the middle of misjudging. The agent does not experience s
 sentence that reads to itself like a status update, and the turn simply ends. There is no moment at
 which it decides to stop.
 
-**Second fix — target the sentence, not the intent.** The resume message now says: *"if you are ever
-about to write a sentence like 'waiting' or 'I'll check back', that is the signal to make another
-tool call instead."* That is checkable against its own output as it writes, rather than requiring it
-to model its own turn boundary.
+**Second attempt — target the sentence, not the intent:** *"if you are about to write 'waiting' or
+'I'll check back', make another tool call instead."* Better, but still an instruction, and
+instructions have now failed once at this exact spot.
+
+**Third, structural: `scripts/await-dispatch.sh`.** Waiting stops being a decision. The script blocks
+inside a tool call for a budget under the 10-minute foreground limit, then exits **0** if the
+dispatch has finished or **75** if it is still running, meaning *call me again*. The agent either
+holds a result or must make another call. There is no state in which "wait" is something it can
+merely intend, so the sentence that ends the turn has nowhere to appear.
+
+That is the difference between the three attempts: the first two asked the agent to recognise a
+boundary it demonstrably cannot see; the third removes the boundary.
 
 **And the recovery is what actually matters.** `SendMessage` resumes the agent from its transcript
 with full context, so a premature stop costs a round-trip and nothing else — but only if it is
