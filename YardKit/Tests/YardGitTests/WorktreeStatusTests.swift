@@ -7,8 +7,9 @@ struct WorktreeStatusTests {
     
     // MARK: - Test 1: Files matching repo.oids for basic staged/unstaged
     
-    @Test func statusOfFilesMatchingOids() throws {
-        var repo = try FixtureRepository.linear()
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func statusOfFilesMatchingOids(format: FixtureRepository.RefFormat) throws {
+        let repo = try FixtureRepository.linear(refFormat: format)
         defer { repo.destroy() }
         
         let repoGit = GitProcess()
@@ -57,8 +58,9 @@ struct WorktreeStatusTests {
     
     // MARK: - Test 2: Staged modifications (modify THEN stage, not just path write)
     
-    @Test func stagedModificationAfterModifyAndStage() throws {
-        var repo = try FixtureRepository.linear()
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func stagedModificationAfterModifyAndStage(format: FixtureRepository.RefFormat) throws {
+        let repo = try FixtureRepository.linear(refFormat: format)
         defer { repo.destroy() }
         
         let repoGit = GitProcess()
@@ -97,8 +99,9 @@ struct WorktreeStatusTests {
     
     // MARK: - Test 3: Untracked files detection
     
-    @Test func untrackedFilesDetected() throws {
-        var repo = try FixtureRepository.linear()
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func untrackedFilesDetected(format: FixtureRepository.RefFormat) throws {
+        let repo = try FixtureRepository.linear(refFormat: format)
         defer { repo.destroy() }
         
         // Create a truly untracked file (not added to index)  

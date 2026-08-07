@@ -42,8 +42,9 @@ struct WorktreeRemoveTests {
     // MARK: - Tests
 
     /// A clean linked worktree is removed cleanly.
-    @Test("removes an existing linked worktree without forcing") func removesExistingWorktree() throws {
-        var fixture = try FixtureRepository()
+    @Test("removes an existing linked worktree without forcing", arguments: FixtureRepository.RefFormat.supported())
+    func removesExistingWorktree(format: FixtureRepository.RefFormat) throws {
+        var fixture = try FixtureRepository(refFormat: format)
 
         let worktreeURL: URL = try fixture.addWorktree(named: "clean-wt", branch: "main")
 
@@ -67,8 +68,9 @@ struct WorktreeRemoveTests {
     /// An unclean worktree (with a modified tracked file) is refused without
     /// --force. The error names the dirty path, and the directory still exists
     /// afterwards.
-    @Test("refuses to remove a dirty worktree without force") func refusesDirtyWorktreeWithoutForce() throws {
-        var fixture = try FixtureRepository()
+    @Test("refuses to remove a dirty worktree without force", arguments: FixtureRepository.RefFormat.supported())
+    func refusesDirtyWorktreeWithoutForce(format: FixtureRepository.RefFormat) throws {
+        var fixture = try FixtureRepository(refFormat: format)
 
         let worktreeURL: URL = try fixture.addWorktree(named: "dirty-wt", branch: "main")
 
@@ -99,8 +101,9 @@ struct WorktreeRemoveTests {
     }
 
     /// An unclean worktree with --force is removed.
-    @Test("removes a dirty worktree when forced") func removesDirtyWorktreeWithForce() throws {
-        var fixture = try FixtureRepository()
+    @Test("removes a dirty worktree when forced", arguments: FixtureRepository.RefFormat.supported())
+    func removesDirtyWorktreeWithForce(format: FixtureRepository.RefFormat) throws {
+        var fixture = try FixtureRepository(refFormat: format)
 
         let worktreeURL: URL = try fixture.addWorktree(named: "forced-dirty-wt", branch: "main")
 
@@ -125,8 +128,9 @@ struct WorktreeRemoveTests {
     }
 
     /// A worktree locked by an agent session is unlocked then removed cleanly.
-    @Test("releases an agent lock before removing a clean worktree") func releasesAgentLock() throws {
-        var fixture = try FixtureRepository()
+    @Test("releases an agent lock before removing a clean worktree", arguments: FixtureRepository.RefFormat.supported())
+    func releasesAgentLock(format: FixtureRepository.RefFormat) throws {
+        var fixture = try FixtureRepository(refFormat: format)
 
         let worktreeURL: URL = try fixture.addWorktree(named: "agent-wt", branch: "main")
         try fixture.lockWorktree(worktreeURL, reason: "agent session id-42")
@@ -159,8 +163,9 @@ struct WorktreeRemoveTests {
     }
 
     /// Unknown path returns a structured error, not a crash.
-    @Test("returns unknown-error for a path that is not a worktree") func refusesUnknownPath() throws {
-        var fixture = try FixtureRepository()
+    @Test("returns unknown-error for a path that is not a worktree", arguments: FixtureRepository.RefFormat.supported())
+    func refusesUnknownPath(format: FixtureRepository.RefFormat) throws {
+        var fixture = try FixtureRepository(refFormat: format)
 
         let git = GitProcess()
         let repoPath = try repoPath(for: fixture, git: git)
