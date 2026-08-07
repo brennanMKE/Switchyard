@@ -150,7 +150,7 @@ public func worktreeRemove(
     // 4. If force was not requested, refuse cleanly — carry the list of dirty paths
     //    so callers do not have to parse git's stderr for it.
     guard force else {
-        let dirty = extractDirtyPaths(from: outcome, at: normalizedTarget)
+        let dirty = extractDirtyPaths(from: outcome, at: normalizedTarget, git: git)
         return WorktreeRemoveResult(
             worktreePath: normalizedTarget,
             lockedRelease: releasedLock,
@@ -162,7 +162,7 @@ public func worktreeRemove(
     //    the issue specifies we must never pass --force on an agent's behalf. The
     //    first attempt failing is what *triggers* the second, which is not the same
     //    as "we told git to force from the start".
-    let forced = try git.run(
+    let forced = try git.capture(
         ["worktree", "remove", "--force", normalizedTarget],
         workingDirectory: repositoryPath
     )
@@ -187,7 +187,11 @@ public func worktreeRemove(
 /// We return those paths so the caller can surface them structurally instead of asking the user
 /// to read a raw git message. Returns an empty array when the failure is something other than
 /// "dirty worktree".
-private func extractDirtyPaths(from outcome: GitProcess.Output, at path: String) -> [String] {
+private func extractDirtyPaths(
+    from outcome: GitProcess.Output,
+    at path: String,
+    git: GitProcess
+) -> [String] {
     let stderr = outcome.standardError.trimmingCharacters(in: .whitespacesAndNewlines)
 
     // `git worktree remove` on a dirty worktree prints:
@@ -200,7 +204,7 @@ private func extractDirtyPaths(from outcome: GitProcess.Output, at path: String)
     // modified/added/deleted/untracked. This keeps the interface deterministic — we
     // always return a list of paths instead of "maybe".
     let statusArgs: [String] = ["status", "--porcelain=v2", "-z"]
-    let statusOut = try? GitProcess().capture(statusArgs, workingDirectory: path)
+    let statusOut = try? git.capture(statusArgs, workingDirectory: path)
     guard let statusOut = statusOut else { return [] }
 
     var entries: [WorktreeStatusEntry] = []
