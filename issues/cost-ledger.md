@@ -65,7 +65,9 @@ a figure derived from it appears.
 | 2026-08-07 | #0014 | Dispatch round 3 (REJECTED, review defect) | 59,498 | $0.48 |
 | 2026-08-07 | #0107 | Dispatch round 1 (accepted, 176s) | 37,723 | $0.30 |
 | 2026-08-07 | #0111 | Dispatch round 1 (REJECTED, fabricated comments) | 38,174 | $0.31 |
-| | | **Total measured** | **2,594,856** | **$20.76** |
+| 2026-08-07 | #0014 | Dispatch round 4 + hand finish (accepted) | 64,602 | $0.52 |
+| 2026-08-07 | #0111 | Dispatch round 2 + hand finish (accepted) | 42,137 | $0.34 |
+| | | **Total measured** | **2,701,595** | **$21.62** |
 
 ## What this total does and does not cover
 
