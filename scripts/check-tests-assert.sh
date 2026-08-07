@@ -22,6 +22,8 @@
 #             assertion is simply skipped when the condition does not hold
 #   EXPECTBANG `#expect(x != nil)` then `x!` — #expect does not stop, so the
 #             force unwrap traps and takes the whole run summary with it
+#   STDOUTCAPTURE `dup2` / `readDataToEndOfFile` — blocks forever and hijacks
+#             the runner's own stdout, so the suite reports nothing at all
 #   HANDROLLED a hand-written `allCases`, which makes "every case" mean
 #             "every case someone remembered"
 #
@@ -198,6 +200,19 @@ while IFS= read -r f; do
 done < <(find $TARGETS -name '*.swift' -type f 2>/dev/null || true)
 EXPECTBANG=$(print -r -- "$EXPECTBANG" | grep . || true)
 
+# --- STDOUTCAPTURE: dup2 / readDataToEndOfFile in a test ---------------------
+# Redirecting THIS process's stdout into a Pipe and reading to EOF blocks
+# forever -- the write end stays open -- AND swallows the test runner's own
+# output, so the suite emits no `Test run with N tests` line and every other
+# test's result is lost. One round ran 10m50s this way against a 12s baseline.
+#
+# Only `dup2` is the hazard. Reading a *subprocess's* pipe to EOF is normal and
+# safe, because the child exits and closes the write end -- the first version of
+# this scan flagged seven legitimate `readDataToEndOfFile` calls in
+# YardBinaryContractTests and would have been switched off within a day.
+STDOUTCAPTURE=$(grep -rn --include='*.swift' -E '\bdup2\b' $TARGETS 2>/dev/null \
+  | sed 's/^/  STDOUTCAPTURE  /' || true)
+
 # --- HANDROLLED: a hand-written allCases in production code ----------------
 HAND=$(grep -rn -E 'static +(var|let) +allCases' Sources YardKit/Sources --include='*.swift' 2>/dev/null \
   | sed 's/^/  HANDROLLED /' || true)
@@ -211,6 +226,21 @@ done
 # review report a defect unrelated to its own round, and a detector that is
 # always red is a detector nobody reads. Promote it to a hard failure once
 # #0105 lands.
+# STDOUTCAPTURE is advisory until #0114 lands. One instance exists on main --
+# JsonEnvelopeTests dup2s stdout to test EnvelopeFail.write() -- and it happens
+# to terminate, so failing the exit code on it would make every dispatch red
+# for a hazard that has not yet fired there. #0114 replaces it.
+if [[ -n "${STDOUTCAPTURE//[[:space:]]/}" ]]; then
+  print -r -- "$STDOUTCAPTURE"
+  print ""
+  print "STDOUTCAPTURE is advisory until #0114 lands. dup2 on your own STDOUT_FILENO"
+  print "redirects the TEST RUNNER's output, so a suite can finish with no"
+  print "'Test run with N tests' line at all -- every result lost, not just that"
+  print "test's. And a Pipe read to EOF never returns, because the write end"
+  print "stays open. Test the value, not the writing."
+  print ""
+fi
+
 if [[ -n "${SKIPSHAPE//[[:space:]]/}" ]]; then
   print -r -- "$SKIPSHAPE"
   print ""

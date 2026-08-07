@@ -261,6 +261,31 @@ let path = entry.path
 
 `#require` is `#expect`'s stopping sibling. Use it for every optional you are about to unwrap.
 
+### Never capture stdout in a test.
+
+```swift
+let pipe = Pipe()
+dup2(pipe.fileHandleForWriting.fileDescriptor, STDOUT_FILENO)
+let data = pipe.fileHandleForReading.readDataToEndOfFile()   // ← blocks forever
+```
+
+The write end stays open, so EOF never arrives and the read never returns. Worse, you have just
+redirected the **test runner's** stdout into your pipe, so swift-testing's own output goes into the
+void — the suite produces no `Test run with N tests` line and every other test's result is lost.
+
+A round shipped this and its suite ran for 10 minutes 50 seconds without emitting a single line,
+against a 12-second baseline.
+
+If you need to test what a function writes, **do not test the writing — test the value.** Make the
+helper that produces the string `internal` instead of `private` and call it directly under
+`@testable import`. A function whose only output is a side effect on a global file descriptor is not
+testable, and making it testable is a smaller change than capturing the descriptor.
+
+`grep -rn 'dup2' YardKit/Tests/` must return nothing.
+
+Reading a **subprocess's** pipe to EOF is fine — the child exits and closes the write end. The hazard
+is `dup2` on your own `STDOUT_FILENO`.
+
 ## Rule 10 — `swift build` does not compile the tests. Only `swift test` does.
 
 `swift build` builds the library and executable targets. It does **not** build test targets. A test
