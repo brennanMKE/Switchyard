@@ -85,9 +85,10 @@ judgment → a subagent dispatches it → Opus reviews the diff and the real ver
 accept, or write a `## Review` section into the issue and re-dispatch.** Full workflow, roles, and
 loop protection are in `issues/Issues.md`.
 
-**Never dispatch from the main checkout, and keep a `../switchyard-main` worktree on `main`.** A
-dispatch running on `main` pins it, so every finished issue queues behind that round instead of
-landing.
+**The primary checkout stays on `main`, permanently.** It is the checkout a human watches, and it is
+where merged work becomes visible. Never switch it to an issue branch and never run a dispatch in it:
+that pins `main`, so every finished issue queues behind whatever round is running while the repo
+reads as idle. Issue work happens only in `../switchyard-NNNN` worktrees; merges happen here.
 
 **Push immediately and merge immediately.** Push the branch when it is created and after every
 round; squash-merge and push `main` the moment an issue resolves. Do not batch. Work that is
