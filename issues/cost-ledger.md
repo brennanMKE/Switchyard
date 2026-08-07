@@ -39,7 +39,8 @@ a figure derived from it appears.
 | 2026-08-06 | #0091 | Dispatch round 1 (accepted, 782s) | 62,046 | $0.50 |
 | 2026-08-06 | #0087 | Dispatch round 1 (REJECTED, 856s) | 124,876 | $1.00 |
 | 2026-08-06 | #0092 | Dispatch round 1 (accepted, 437s) | 50,143 | $0.40 |
-| | | **Total measured** | **1,191,346** | **$9.53** |
+| 2026-08-06 | #0087 | Dispatch round 2 (accepted, 1548s) | 80,048 | $0.64 |
+| | | **Total measured** | **1,271,394** | **$10.17** |
 
 ## What this total does and does not cover
 

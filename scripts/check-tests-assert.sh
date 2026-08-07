@@ -11,6 +11,8 @@
 #
 # Reports, and exits 1 if anything is found:
 #   INERT     a @Test function containing no assertion macro at all
+#             (string literals are stripped before brace counting, so a
+#              display name containing braces does not truncate the body)
 #   NARROWING a loop over cases whose body discards all but one via
 #             `guard case ... else { continue }`
 #   TAUTOLOGY an assertion over literals, e.g. #expect(true)
@@ -37,7 +39,12 @@ INERT=$(find $TARGETS -name '*.swift' -type f 2>/dev/null | while read -r f; do
       if (name=="?" && match($0, /func[[:space:]]+[A-Za-z_][A-Za-z0-9_]*/))
         name = substr($0, RSTART+5, RLENGTH-5)
       body = body "\n" $0
-      l=$0; n=gsub(/\{/,"",l); l=$0; m=gsub(/\}/,"",l); braces += n - m
+      # Strip string literals before counting braces. A display name like
+      # @Test("encodes via .map { $0 as Any } ?? NSNull()") balances its own
+      # braces on the attribute line, which closed the body before the func
+      # was ever reached and reported a real test as inert.
+      l=$0; gsub(/"[^"]*"/, "", l)
+      c=l; n=gsub(/\{/,"",c); c=l; m=gsub(/\}/,"",c); braces += n - m
       if (n>0) started=1
       if (started && braces<=0) {
         if (body !~ /#expect|#require|Issue\.record|withKnownIssue|XCTAssert|XCTFail|assert[A-Z]/)
