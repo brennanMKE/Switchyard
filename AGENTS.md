@@ -106,6 +106,10 @@ Also: **the name must match what the body does.** A test called
 `envelopeFailWriteEmitsJsonToStdout` that never calls `write()` is a false claim in the test report,
 and it survived review once precisely because the name was read instead of the body.
 
+**Enumerate cases with `CaseIterable`, never a hand-written array.** A hand-written list means the
+next case someone adds is silently untested and nothing fails. If the name says *all*, *every*, or
+*each*, assert the collection's count first so the loop cannot silently run zero times.
+
 Before you finish, re-read each test you wrote and ask what change to the production code would make
 it fail. If the honest answer is "none", the test is not done.
 
