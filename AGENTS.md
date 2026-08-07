@@ -301,6 +301,24 @@ re-measure it** — and in particular, do not run the test suite before you have
 full `swift test` runs is roughly 50 KB of output; piping that into context before doing any work is
 what forced the compaction in the first place.
 
+### A "Mutation:" instruction is for the REVIEWER, not for you to encode as a test.
+
+When an issue says
+
+> **Mutation**: remove `.sortedKeys` and confirm the test fails.
+
+that describes something **the reviewer does to the production source after your round**, to check
+your test is load-bearing. It is **not** a request for a test that reproduces the mutated behaviour.
+
+A round once read it the other way and wrote two tests that built a deliberately-broken encoder and
+asserted its output was *not* sorted. Unsorted order is random, so those tests failed about five runs
+in six -- and they touched no production code, so deleting the real fix would not have failed them.
+Flaky and inert at the same time.
+
+**Write the test that passes when the code is right.** Make it fail hard when the code is wrong:
+assert the exact expected value, not a property the wrong answer might also satisfy. If the correct
+output is a specific string, compare the whole string.
+
 ## Rule 10 — `swift build` does not compile the tests. Only `swift test` does.
 
 `swift build` builds the library and executable targets. It does **not** build test targets. A test

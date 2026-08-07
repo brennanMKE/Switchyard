@@ -96,7 +96,8 @@ a figure derived from it appears.
 | 2026-08-07 | #0116 | Dispatch round 1 (REJECTED, timeout, signatures not supplied) | 59,663 | $0.48 |
 | 2026-08-07 | #0118 | Dispatch round 1 (accepted, no hand finish) | 58,213 | $0.47 |
 | 2026-08-07 | #0116 | Dispatch round 2 + hand finish (accepted) | 67,812 | $0.54 |
-| | | **Total measured** | **4,289,149** | **$34.30** |
+| 2026-08-07 | #0122 | Dispatch round 1 + hand finish (accepted) | 56,208 | $0.45 |
+| | | **Total measured** | **4,345,357** | **$34.75** |
 
 ## What this total does and does not cover
 
