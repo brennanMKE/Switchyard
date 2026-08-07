@@ -239,7 +239,9 @@ public struct EnvelopeFail: Sendable, Encodable {
         }
 
         do {
-            let data = try JSONEncoder().encode(self)
+            let encoder = JSONEncoder()
+            encoder.outputFormatting.insert(.sortedKeys)
+            let data = try encoder.encode(self)
             FileHandle.standardOutput.write(data)
             fflush(stdout)
         } catch {

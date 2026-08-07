@@ -87,7 +87,9 @@ private func runSchema() -> (stdout: String, stderr: String, exitCode: ExitCode)
 // MARK: - Internal helpers (exposed for testing)
 
 internal func jsonString<T: Encodable>(_ value: T) -> String {
-    guard let data = try? JSONEncoder().encode(value),
+    let encoder = JSONEncoder()
+    encoder.outputFormatting.insert(.sortedKeys)
+    guard let data = try? encoder.encode(value),
           let text = String(data: data, encoding: .utf8) else {
         return encodingFailureEnvelope
     }
