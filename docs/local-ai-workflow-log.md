@@ -155,6 +155,27 @@ script's own 2400s timeout, leaving a half-written tree.
 
 **Fix:** background every dispatch and poll the log.
 
+### 2.5 OpenCode's sandbox silently kills a round that needs a scratch directory
+
+#0070 round 2 exited **0 after 233 seconds having changed nothing**. OpenCode auto-rejected the
+model's attempt to create a throwaway repo under `/tmp`:
+
+```
+! permission requested: external_directory (/tmp/*); auto-rejecting
+Error: The user rejected permission to use this specific tool call.
+```
+
+The run terminated there, after only reads. Exit 0 again overstated the outcome — only the script's
+own no-progress guard caught it.
+
+The trap is that **round 1 had succeeded at the same task** because it happened not to need a scratch
+directory; the review feedback then asked the model to *verify* claims about git, which requires one.
+So the feedback itself made the round unrunnable.
+
+**Fix, two options:** grant the sandbox permission for a scratch path, or — better for a small local
+model — **state verified facts as givens in the review feedback** so the round does not need to run
+experiments at all. Verification is the reviewer's job, not the implementer's.
+
 ### 2.5 A subagent returned "standing by" without finishing
 
 The dispatcher launched the run, returned immediately, and reported that it was waiting — which is
