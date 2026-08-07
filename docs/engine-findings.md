@@ -166,6 +166,29 @@ or `/usr/local` (Intel), and a distributed app cannot depend on a user's Homebre
 viable for development but **not for shipping**, since the embedded `yard` (#0050) must run on a
 machine with no Homebrew at all.
 
+### Route B has a known-good shape — GitUp's, checked 2026-08-06
+
+GitUp vendors **static** libraries inside universal `.xcframework`s, built from source with CMake by
+`rebuild-*.sh` scripts, with the built artefacts committed:
+`GitUpKit/Third-Party/libgit2.xcframework/macos-arm64_x86_64/libgit2.a`, plus the same treatment for
+`libssh2`, `libssl`, `libcrypto` and `libsqlite3`, tracked against a maintained fork.
+
+Static is the important part. A static `.a` cannot fail at launch on a machine that lacks a dylib,
+because there is no dylib — the failure mode disappears rather than being relocated into
+`Contents/Frameworks/` where it needs embedding, `@rpath` handling and separate signing.
+
+That GitUp also vendors libssh2 and OpenSSL confirms the transitive problem measured here: Homebrew's
+`libgit2.1.9.dylib` is itself linked against `/opt/homebrew/opt/llhttp/…` and
+`/opt/homebrew/opt/libssh2/…` by absolute path, so "copy the dylib into the bundle" is really "copy a
+dependency tree and rewrite every load command in it".
+
+**Licensing:** libgit2 is GPLv2 **with a linking exception** granting unlimited permission to link the
+compiled library into other programs and distribute the combination without restriction. MIT
+Switchyard may link and ship it. Modifying libgit2 itself would put those changes under GPLv2, so pin
+unmodified upstream. This is separate from the GitUp clean-room rule — GitUp's own source is off
+limits; libgit2 is a third-party dependency both projects consume. Their rebuild scripts are GPLv3;
+read them for shape, write ours.
+
 ### Route B: vendored / prebuilt — the shipping route, not yet built
 
 libgit2 builds with CMake, which SwiftPM cannot drive directly, so this means building libgit2
