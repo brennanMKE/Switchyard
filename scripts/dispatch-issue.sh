@@ -289,6 +289,20 @@ if [[ -d YardKit ]]; then
   SUITE_LINE=$(grep -E 'Test run with [0-9]+ tests' "$LOG_DIR/$ISSUE-round$ROUND-suite.txt" | tail -1 || true)
   if [[ -n "$SUITE_LINE" ]]; then
     print -r -- "$SUITE_LINE"
+    # A round that applies its own mutations and forgets to restore one leaves
+    # the tree red, and the line above still reads as a real measurement
+    # because it names a plausible test count. #0019 round 2 finished with
+    # mutation 2 still applied and reported "356 tests ... failed with 6
+    # issues"; nothing shouted, and it was caught only by a human reading the
+    # words. Say it loudly instead.
+    if [[ "$SUITE_LINE" == *failed* ]]; then
+      print ""
+      print "*** THE SUITE IS RED AT THE END OF THIS ROUND. ***"
+      print "Most often this is a mutation the round applied and did not restore."
+      print "Check 'git diff' below before reading anything the round claimed:"
+      git diff --stat -- YardKit/Sources/ || true
+      print ""
+    fi
   else
     print "NO 'Test run with N tests' LINE. The suite did not build, or a test is blocking."
     print "First error:"
