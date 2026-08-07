@@ -276,15 +276,19 @@ struct JsonEnvelopeTests {
     }
 
     @Test func envelopeFailWriteEmitsOnlyJsonToStdout() throws {
-        let pipe = Pipe()
+        // Take ownership of the pipe write-end fd by dup'ing it; redirect
+        // stdout onto that independent copy so we are the sole owner of what
+        // writes to the pipe and can close it without touching the FileHandle
+        // that `pipe` owns. One dup → one close, exactly once.
 
-        // Capture the file descriptors *before* dup2 so we still own them
-        // after stdout has been replaced with the pipe's write end.
-        let pipeWriteFd = pipe.fileHandleForWriting.fileDescriptor
+        let pipe = Pipe()
+        let pipeWriteFd = dup(pipe.fileHandleForWriting.fileDescriptor)
         let pipeReadFd  = pipe.fileHandleForReading.fileDescriptor
 
-        // Replace stdout with the pipe's write end so `FileHandle.standardOutput.write(data)`
-        // lands in the pipe buffer instead of the real terminal.
+        // Replace stdout with the dup so `FileHandle.standardOutput.write(data)`
+        // lands in the pipe buffer instead of the real terminal. Restore is
+        // guarded by a defer so stdout always returns, even if `write` or the
+        // capture throws.
         let savedStdout = dup(STDOUT_FILENO)
         defer { dup2(savedStdout, STDOUT_FILENO); close(savedStdout) }
 
@@ -298,15 +302,29 @@ struct JsonEnvelopeTests {
 
         env.write()
 
-        dup2(savedStdout, STDOUT_FILENO)
+        // Restore stdout, then close the dup we redirected onto fd 1. The
+        // pipe's `fileHandleForWriting` owns its own (different) fd and closes
+        // it on deinit — a separate descriptor, so there is no second close of
+        // `pipeWriteFd`. Closing the dup drops this process's reference count
+        // on the pipe write side; once it is closed there are no more writers
+        // from us and reading will see EOF after the FileHandle closes its end.
 
-        // Close the extra write-end reference (the dup we made to redirect stdout is one;
-        // pipeWriteFd itself is the other). If we don't close this dup's target, readDataToEndOfFile
-        // would block waiting for the pipe to be drained. We already saved stdout with dup2,
-        // so we need to close the original pipe write fd that we dup'd.
+        dup2(savedStdout, STDOUT_FILENO)
         close(pipeWriteFd)
 
-        let data = FileHandle(fileDescriptor: pipeReadFd).readDataToEndOfFile()
+        // Close the pipe's own write end so readDataToEndOfFile sees EOF.
+        // `closeFile()` is the FileHandle's sole close of its own fd — one
+        // owner, one close. We read with a FileHandle that does NOT take
+        // ownership (`closeOnDealloc: false`) because `pipe.fileHandleForReading`
+        // already owns that fd and will close it on deinit — the FHI we create
+        // just borrows the descriptor for reading.
+
+        let data: Data
+        do {
+            pipe.fileHandleForWriting.closeFile()
+            data = FileHandle(fileDescriptor: pipeReadFd, closeOnDealloc: false).readDataToEndOfFile()
+        }
+
         #expect(data.count > 0, "stdout should not be empty")
 
         let text = String(data: data, encoding: .utf8) ?? ""
