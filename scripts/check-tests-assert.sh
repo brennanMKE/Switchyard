@@ -13,6 +13,7 @@
 #   INERT     a @Test function containing no assertion macro at all
 #   NARROWING a loop over cases whose body discards all but one via
 #             `guard case ... else { continue }`
+#   TAUTOLOGY an assertion over literals, e.g. #expect(true)
 #   HANDROLLED a hand-written `allCases`, which makes "every case" mean
 #             "every case someone remembered"
 #
@@ -50,11 +51,18 @@ NARROW=$(grep -rn -A2 --include='*.swift' -E '^[[:space:]]*for +[A-Za-z_(].* in 
   | grep -B2 -E 'guard +case .*continue' \
   | grep -v '^--$' | sed 's/^/  NARROWING  /' || true)
 
+# --- TAUTOLOGY: an assertion whose operands are literals --------------------
+# #expect(true) passes no matter what the code does. Found in a round that had
+# already been graded "no inert tests" — the body does contain an assertion
+# macro, so the INERT scan above cannot see it.
+TAUT=$(grep -rn --include='*.swift' -E '#(expect|require)\((true|false|1 == 1|0 == 0)\)' $TARGETS 2>/dev/null \
+  | sed 's/^/  TAUTOLOGY  /' || true)
+
 # --- HANDROLLED: a hand-written allCases in production code ----------------
 HAND=$(grep -rn -E 'static +(var|let) +allCases' Sources YardKit/Sources --include='*.swift' 2>/dev/null \
   | sed 's/^/  HANDROLLED /' || true)
 
-for block in "$INERT" "$NARROW" "$HAND"; do
+for block in "$INERT" "$NARROW" "$TAUT" "$HAND"; do
   if [[ -n "${block//[[:space:]]/}" ]]; then print -r -- "$block"; FOUND=1; fi
 done
 

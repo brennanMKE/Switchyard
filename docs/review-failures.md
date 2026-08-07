@@ -26,6 +26,7 @@ otherwise.**
 | #0085 | 1 | Correct code and 54 passing tests, but time burned on `ld: symbol(s) not found`, and the model edited `issues/0085.md` to match its own deviation | The issue named `YardKit/Sources/yard/CommandSpec.swift`; `yard` is an `executableTarget`, so `@testable import yard` does not link. The path was unbuildable. Four more issues carried the identical defect. | `spec-defect` (+ `model-behaviour`) |
 | #0090 | 1 | Exit 0 after 1289s, rejected on review: 2 of 5 criteria failed. `Envelope.swift` rewritten from scratch — `EnvelopeFail`, `EnvelopeSchema`, `StandardStream`, `write()`, `terminate()` and `ExitCode.swift` all lost. Wire strings changed (`usage` → `usage_error`). A test named `allCasesRoundTripThroughJson` iterates `allCases` then `guard case .ok = code else { continue }` — it tests one case while appearing to test all. | The issue said "start from `issue/0011`, which has the enum", but the worktree was cut from `main`, which does not contain that branch's `Envelope.swift`. **`git merge-base --is-ancestor issue/0011 issue/0090` is false.** The model could not carry forward what was not there, so a one-field type change became a from-scratch reimplementation. The issue also named zero source paths. | `spec-defect` (+ `environment`) |
 | #0086 | 1 | Exit 0 after 125s, both files at the right paths, no scope violations — rejected on two counts. `<argument>` was dropped for any flag that also had a short name (`-o, --output` instead of `-o, --output <PATH>`), and the eight new tests were XCTest in a swift-testing package, so `Test run with 54 tests` was **identical with both new files deleted**. | (a) The model read "flags render as `--long` or `-s, --long`, with `<argument>` appended" as three mutually exclusive forms rather than two prefixes plus an independent suffix, and wrote an if/else-if chain. Its tests were split so no test ever built a flag with *both* a short name and an argument — each half passed alone, and their conjunction, the only case that exposes the bug, was untested. (b) The issue never named the test framework. | `model-behaviour` (+ `spec-defect`, thin) |
+| #0087 | 1 | Exit 0 after 856s, 109 tests (up from 92), detector clean, emitter verifiably correct — rejected anyway. `testTopLevelKeysAreSorted`'s extractor skips any line not starting with **four** spaces; `JSONSerialization` pretty-prints with **two**. It returns `[]` on every input, so both assertions reduce to `[] == []` and `0 == 0`. | A hardcoded indent width in a test helper, whose failure mode is silence rather than a failed assertion. The model had already hit the 4-vs-2 mismatch once and deleted a failing `contains("\n    \"")` assertion, then left the same assumption in the extractor where it fails quietly. An unsorted emitter passes that test identically. | `model-behaviour` |
 | #0098 | 1 | Exit 7, 81s, nothing produced | The issue never said where the scratch image should go, so the model chose `/var/tmp`, which the sandbox auto-rejects. It then wrote "Now I have a clear picture. Let me execute the steps" and ended its turn having executed none of them. | `environment` (+ `spec-defect`, `model-behaviour`) |
 | #0010, #0011, #0022 | — | Repeatedly failed to converge before being split | Each bundled four deliverables. No multi-deliverable issue has converged in this project; every converged issue named exactly one file. | `sizing` |
 
@@ -51,6 +52,10 @@ Checks read the **spec only** — everything above the first `## Review`, `## Wo
 | 7 | Are two dispatches already running? LM Studio is `PARALLEL 2`; a third queues silently. | warn | tooling |
 | 8 | Round > 1 with an issue file unchanged since the last round, or with no `## Review` section. | hard (in `dispatch-issue.sh`) | #0070 r2 |
 | 9 | Does the verification criterion state a baseline the count must exceed? | warn | #0086 r1 |
+
+`scripts/check-tests-assert.sh` also gained a TAUTOLOGY scan for `#expect(true)` and friends, after
+#0087 shipped a `testSuiteHasSufficientTests` whose entire body was `#expect(true)`. The INERT scan
+could not see it: the body *does* contain an assertion macro.
 
 Check 3 is the strongest signal in the log: **every code round that failed named zero source paths;
 every round that converged first try named exactly one.**
@@ -84,7 +89,13 @@ while its tests contributed nothing to the number.
     covered "flag with a short name" and "flag with an argument" separately and never both at once —
     which is exactly the case its code got wrong. When a criterion has two independent dimensions,
     ask for the test that crosses them.
-15. **Do the new tests actually assert?** The recurring inert-test pattern: a loop over `allCases`
+15. **Does any test extract or filter before asserting, without checking the extraction is
+    non-empty?** This is the inert-test shape that has an `#expect` and still proves nothing — a
+    helper returns `[]`, and the comparison becomes `[] == []`. It is invisible to the detector and
+    to a reading of the test's name. Whenever a test parses, scans, or filters, look for
+    `#expect(!x.isEmpty)` before the real assertion; if it is missing, run the helper yourself
+    against real input and see what it returns.
+16. **Do the new tests actually assert?** The recurring inert-test pattern: a loop over `allCases`
     whose body `continue`s past everything but one case, and test functions containing zero
     `#expect`. Both look like coverage. Grep the diff for `#expect` per test function.
 
@@ -104,6 +115,23 @@ those 41 until it is written properly.
 The one thing to carry forward: **the check found #0012 through #0020 all claiming coverage in prose**
 ("tested against both ref formats via the fixture harness") **without naming a command whose output
 could be pasted.** That phrasing reads as rigour and grades as nothing.
+
+## The guards have fired — what they caught, after being written
+
+Recorded because a guard nobody can point to a catch for is superstition, and should be deleted.
+
+| Guard | Caught |
+|---|---|
+| Branch-dependency check (5) | **#0092**, which said "Start from `issue/0011`" — the exact defect that cost #0090 a full 1289s round. Rejected before dispatch, at no cost. |
+| Names-a-source-file check (3) | **#0092** and **#0093**, both of which named none. Every code round that has ever failed named zero paths. |
+| Verification-command check (4) | **41 open issues**, including #0012–#0020, which claimed coverage in prose ("tested against both ref formats") with no command whose output could be pasted. |
+| Baseline-count check (9) | Every issue authored before #0086 — a bare "prints `Test run with N tests`" is satisfiable by a round that adds nothing to the run. |
+| Executable-target check (1) | **#0026, #0086, #0087, #0088**, all queued behind #0085 with the identical unbuildable path. |
+| Negative controls on the guards themselves | Two guards that would have blocked *every* dispatch — one killing the script on any healthy issue under `ERR_EXIT`, one rejecting #0085 for quoting its own post-mortem. Both caught before being wired in. |
+
+The pattern worth noting: **most of these were already-written rules that nothing enforced.**
+"Name the file" was in `issues/Issues.md` before #0090 was authored in violation of it. The rule was
+not the fix; the check was.
 
 ## Already covered — do not add duplicate guards
 
