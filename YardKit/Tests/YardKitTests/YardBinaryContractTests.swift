@@ -8,50 +8,43 @@ import Testing
 /// stdout envelope + exit code. This is the only way to verify the
 /// contract: encoding a struct in-process cannot prove what a caller
 /// actually receives from the running binary.
+
 struct YardBinaryContractTests {
 
     // MARK: - Locator
 
     /// Anchors on a type defined in the test target so Bundle is the one
     /// registered when `swift test` runs.
+
     private final class BundleAnchor {}
 
     var yardBinary: URL {
         Bundle(for: BundleAnchor.self)
-            .bundleURL                       // …/debug/YardKitPackageTests.xctest
-            .deletingLastPathComponent()     // …/debug
+            .bundleURL                       // .../debug/YardKitPackageTests.xctest
+            .deletingLastPathComponent()     // .../debug
             .appendingPathComponent("switchyard")
     }
 
-    /// Preflight: if the binary isn't there the test must fail loudly.
-    /// A subprocess test that silently does nothing is exactly the
-    /// failure this file exists to prevent.
-    private var binaryExists: Bool {
-        FileManager.default.fileExists(atPath: yardBinary.path)
+    @Test("binary exists") func binaryExistsCheck() {
+        #expect(
+            FileManager.default.fileExists(atPath: yardBinary.path),
+            "switchyard binary not found at \(yardBinary.path); swift test must build it first"
+        )
     }
 
     // MARK: - Helpers
 
-    /// Spawn the binary, capture stdout and stderr separately, return
-    /// (exitCode, stdoutBytes, stderrBytes). `args` may be empty for the
-    /// bare binary invocation. Foundation's `Process.arguments` setter
-    /// rejects `nil`, so we always assign a non-nil array — an empty one
-    /// gives us argv[0] only.
-    private func run(args: String...) -> (status: Int32, stdout: Data, stderr: Data) {
+    private func runProcess(binaryPath: URL, args: [String]) throws -> (status: Int32, stdout: Data, stderr: Data) {
         let proc = Process()
-        proc.executableURL = yardBinary
-
-        // Process.arguments excludes argv[0] — argv[0] derives from
-        // executableURL. Do not insert the binary path as an argument,
-        // that becomes a bogus subcommand and every case fails.
-        proc.arguments = Array(args.filter { !$0.isEmpty })
+        proc.executableURL = binaryPath
+        proc.arguments = args
 
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
         proc.standardOutput = stdoutPipe
         proc.standardError = stderrPipe
 
-        try? proc.run()
+        try proc.run()
         proc.waitUntilExit()
 
         let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
@@ -60,156 +53,197 @@ struct YardBinaryContractTests {
         return (proc.terminationStatus, stdoutData, stderrData)
     }
 
-    /// Best-effort UTF-8 decode for assertions.
-    private func stdoutString(data: Data) -> String {
-        String(data: data, encoding: .utf8) ?? ""
-    }
-
-    /// Parse `data` as JSON via JSONSerialization; return nil if it does
-    /// not parse (or is empty).
-    private func parseJSON(_ data: Data) -> Any? {
-        try? JSONSerialization.jsonObject(with: data, options: [])
-    }
-
-    // MARK: - Preflight
-
-    @Test("binary exists") func binaryExistsCheck() {
-        #expect(binaryExists, "switchyard binary not found at \(yardBinary.path); swift test must build it first")
-    }
-
     // MARK: - Success path
 
-    @Test("root command exits 0 with a valid envelope") func rootCommandSuccess() {
-        guard binaryExists else { return }
+    @Test("root command exits 0 with a valid envelope") func rootCommandSuccess() throws {
+        #expect(
+            FileManager.default.fileExists(atPath: yardBinary.path),
+            "switchyard binary not found at \(yardBinary.path); swift test must build it first"
+        )
 
-        let (status, stdout, _) = run()
+        let (status, stdout, _) = try runProcess(binaryPath: yardBinary, args: [])
         #expect(status == 0)
 
-        let json = parseJSON(stdout)
-        #expect(json != nil, "root command stdout is not valid JSON")
+        do {
+            let json = try JSONSerialization.jsonObject(with: stdout, options: [])
+            #expect(json is [String: Any], "root command stdout is not a JSON dictionary")
+            let dict = try #require(json as? [String: Any], "stdout parsed but was not a JSON object")
 
-        guard let dict = json as? [String: Any] else { return }
-        #expect(dict["ok"] is Bool && (dict["ok"] as? Bool) == true, "success envelope must have ok=true")
-        #expect(dict["schemaVersion"] is Int)
+            #expect(dict["ok"] as? Bool == true, "success envelope must have ok=true")
+            #expect(dict["schemaVersion"] is Int)
+        } catch {
+            Issue.record("root command stdout is not valid JSON: \(error)")
+        }
     }
 
-    // MARK: - Failure path — usage error
+    // MARK: - Failure path -- usage error
 
-    @Test("unknown subcommand exits 1 with a valid envelope") func unknownSubcommandUsageError() {
-        guard binaryExists else { return }
+    @Test("unknown subcommand exits 1 with a valid envelope") func unknownSubcommandUsageError() throws {
+        #expect(
+            FileManager.default.fileExists(atPath: yardBinary.path),
+            "switchyard binary not found at \(yardBinary.path); swift test must build it first"
+        )
 
-        let (status, stdout, _) = run(args: "bogus-command")
+        let (status, stdout, _) = try runProcess(binaryPath: yardBinary, args: ["bogus-command"])
         #expect(status == 1)
 
-        let json = parseJSON(stdout)
-        #expect(json != nil, "usage-error stdout is not valid JSON")
+        do {
+            let json = try JSONSerialization.jsonObject(with: stdout, options: [])
+            #expect(json is [String: Any], "usage-error stdout is not a JSON dictionary")
+            let dict = try #require(json as? [String: Any], "stdout parsed but was not a JSON object")
 
-        guard let dict = json as? [String: Any] else { return }
-        #expect(dict["ok"] is Bool && (dict["ok"] as? Bool) == false, "failure envelope must have ok=false")
+            #expect(dict["ok"] as? Bool == false, "failure envelope must have ok=false")
 
-        let errorCode: Any?
-        if let inner = dict["error"] as? [String: Any] {
-            errorCode = inner["code"]
-        } else {
-            errorCode = nil
+            let errorCode: Any?
+            if let inner = dict["error"] as? [String: Any] {
+                errorCode = inner["code"]
+            } else {
+                errorCode = nil
+            }
+
+            #expect(errorCode as? String == "usage", "error.code must be \"usage\", got \(String(describing: errorCode))")
+        } catch {
+            Issue.record("usage-error stdout is not valid JSON: \(error)")
         }
-        #expect(errorCode as? String == "usage", "error.code must be \"usage\", got \(String(describing: errorCode))")
     }
 
     // MARK: - No non-JSON prefix/suffix
 
-    @Test("success stdout is pure JSON") func successNoNonJsonPrefixOrSuffix() {
-        guard binaryExists else { return }
+    @Test("success stdout is pure JSON with no prefix or suffix") func successStdoutIsPureJson() throws {
+        #expect(
+            FileManager.default.fileExists(atPath: yardBinary.path),
+            "switchyard binary not found at \(yardBinary.path); swift test must build it first"
+        )
 
-        let (_, stdout, _) = run(args: "")
-        guard !stdout.isEmpty else {
-            Issue.record("success stdout was empty")
-            return
-        }
+        let (_, stdout, _) = try runProcess(binaryPath: yardBinary, args: [])
+        #expect(!stdout.isEmpty, "success stdout was empty")
 
-        let str = stdoutString(data: stdout)
-        // The first character of a JSON value must be `{`, `[`, `"`, digit, `t`, `f`, or `n`.
-        let jsonStart = CharacterSet(charactersIn: "{}[]\"")
-            .union(CharacterSet(charactersIn: "tf"))
+        let str = String(data: stdout, encoding: .utf8) ?? ""
+        #expect(isJsonStart(str.first), "success stdout does not start with a JSON value")
 
-        let firstIsJSON: Bool = if let c = str.first {
-            "{}[]\"tf".contains(c) || CharacterSet.decimalDigits.contains(c.unicodeScalars.first!)
-        } else {
-            false
-        }
-        #expect(firstIsJSON, "success stdout does not start with a JSON value")
-        // The last non-whitespace character of a JSON value must be `}`, `]`, `"`, digit, `t`, `f`, or `n`.
         let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
         #expect(!trimmed.isEmpty, "success stdout was empty after trimming")
+
+        #expect(isJsonEnd(trimmed.last), "success stdout does not end with a JSON value")
     }
 
-    @Test("failure stdout is pure JSON") func failureNoNonJsonPrefixOrSuffix() {
-        guard binaryExists else { return }
+    @Test("failure stdout is pure JSON") func failureNoNonJsonPrefixOrSuffix() throws {
+        #expect(
+            FileManager.default.fileExists(atPath: yardBinary.path),
+            "switchyard binary not found at \(yardBinary.path); swift test must build it first"
+        )
 
-        let (_, stdout, _) = run(args: "bogus-command")
-        guard !stdout.isEmpty else {
-            Issue.record("failure stdout was empty")
-            return
+        let (_, stdout, _) = try runProcess(binaryPath: yardBinary, args: ["bogus-command"])
+        #expect(!stdout.isEmpty, "failure stdout was empty")
+
+        do {
+            let _ = try JSONSerialization.jsonObject(with: stdout, options: [])
+        } catch {
+            Issue.record("failure stdout is not valid JSON: \(error)")
         }
-
-        _ = stdoutString(data: stdout)
-        #expect(parseJSON(stdout) != nil, "failure stdout is not valid JSON")
     }
 
     // MARK: - stderr contract
 
-    @Test("stderr is empty on success") func stderrEmptyOnSuccess() {
-        guard binaryExists else { return }
-        let (_, _, stderr) = run(args: "")
+    @Test("stderr is empty on success") func stderrEmptyOnSuccess() throws {
+        #expect(
+            FileManager.default.fileExists(atPath: yardBinary.path),
+            "switchyard binary not found at \(yardBinary.path); swift test must build it first"
+        )
+
+        let (_, _, stderr) = try runProcess(binaryPath: yardBinary, args: [])
         #expect(stderr.isEmpty, "stderr should be empty on success but got \(String(data: stderr, encoding: .utf8) ?? "<non-UTF8>")")
     }
 
-    @Test("stderr carries the error line on failure") func stderrCarriesErrorLineOnFailure() {
-        guard binaryExists else { return }
-        let (_, _, stderr) = run(args: "bogus-command")
+    @Test("stderr carries the error line on failure") func stderrCarriesErrorLineOnFailure() throws {
+        #expect(
+            FileManager.default.fileExists(atPath: yardBinary.path),
+            "switchyard binary not found at \(yardBinary.path); swift test must build it first"
+        )
 
+        let (_, _, stderr) = try runProcess(binaryPath: yardBinary, args: ["bogus-command"])
         let text = String(data: stderr, encoding: .utf8) ?? ""
+
         #expect(!text.isEmpty, "stderr must not be empty on failure")
-        #expect(text.hasPrefix("[error]"), "stderr should begin with '[error]' marker")
-        #expect(text.contains("usage"), "stderr must contain the error code label 'usage'")
-        #expect(text.contains("bogus-command"), "stderr must contain the offending subcommand name")
-        #expect(text.hasSuffix("\n"), "stderr line must terminate with newline")
+        if !text.isEmpty {
+            #expect(text.hasPrefix("[error]"), "stderr should begin with '[error]' marker")
+            #expect(text.contains("usage"), "stderr must contain the error code label 'usage'")
+            #expect(text.contains("bogus-command"), "stderr must contain the offending subcommand name")
+            #expect(text.hasSuffix("\n"), "stderr line must terminate with newline")
+        }
     }
 
-    @Test("failure stderr uses wire code not Swift case name") func failureStderrUsesWireCode() {
-        guard binaryExists else { return }
-        let (_, _, stderr) = run(args: "bogus-command")
+    @Test("failure stderr uses wire code not Swift case name") func failureStderrUsesWireCode() throws {
+        #expect(
+            FileManager.default.fileExists(atPath: yardBinary.path),
+            "switchyard binary not found at \(yardBinary.path); swift test must build it first"
+        )
 
+        let (_, _, stderr) = try runProcess(binaryPath: yardBinary, args: ["bogus-command"])
         let text = String(data: stderr, encoding: .utf8) ?? ""
-        #expect(text.contains("usage"), "stderr should carry wire code 'usage'")
-        #expect(!text.contains("EnvelopeErrorCode"), "stderr must not leak Swift type qualifiers")
+
+        #expect(!text.isEmpty, "stderr must not be empty on failure")
+        if !text.isEmpty {
+            #expect(text.contains("usage"), "stderr should carry wire code 'usage'")
+            #expect(!text.contains("EnvelopeErrorCode"), "stderr must not leak Swift type qualifiers")
+        }
     }
 
     // MARK: - noop path (second success case)
 
-    @Test("noop exits 0 with a valid envelope") func noopSuccess() {
-        guard binaryExists else { return }
+    @Test("noop exits 0 with a valid envelope") func noopSuccess() throws {
+        #expect(
+            FileManager.default.fileExists(atPath: yardBinary.path),
+            "switchyard binary not found at \(yardBinary.path); swift test must build it first"
+        )
 
-        let (status, stdout, _) = run(args: "noop")
+        let (status, stdout, _) = try runProcess(binaryPath: yardBinary, args: ["noop"])
         #expect(status == 0)
 
-        let json = parseJSON(stdout)
-        #expect(json != nil, "noop stdout is not valid JSON")
+        do {
+            let json = try JSONSerialization.jsonObject(with: stdout, options: [])
+            #expect(json is [String: Any], "noop stdout is not a JSON dictionary")
+            let dict = try #require(json as? [String: Any], "stdout parsed but was not a JSON object")
 
-        guard let dict = json as? [String: Any] else { return }
-        #expect(dict["ok"] is Bool && (dict["ok"] as? Bool) == true, "noop envelope must have ok=true")
+            #expect(dict["ok"] as? Bool == true, "noop envelope must have ok=true")
+        } catch {
+            Issue.record("noop stdout is not valid JSON: \(error)")
+        }
     }
 
     // MARK: - Non-zero exit code distinct from usage-specific codes
 
-    @Test("usage failure emits schemaVersion and ok=false") func usageEmitsSchemaVersionAndOkFalse() {
-        guard binaryExists else { return }
+    @Test("usage failure emits schemaVersion and ok=false") func usageEmitsSchemaVersionAndOkFalse() throws {
+        #expect(
+            FileManager.default.fileExists(atPath: yardBinary.path),
+            "switchyard binary not found at \(yardBinary.path); swift test must build it first"
+        )
 
-        let (_, stdout, _) = run(args: "bogus-command")
-        #expect(!stdout.isEmpty)
+        let (_, stdout, _) = try runProcess(binaryPath: yardBinary, args: ["bogus-command"])
+        #expect(!stdout.isEmpty, "stdout was empty on usage failure")
 
-        guard let dict = parseJSON(stdout) as? [String: Any] else { return }
-        #expect(dict["schemaVersion"] is Int)
-        #expect((dict["ok"] as? Bool) == false, "usage envelope must have ok=false")
+        do {
+            let json = try JSONSerialization.jsonObject(with: stdout, options: [])
+            #expect(json is [String: Any], "usage failure stdout is not a JSON dictionary")
+            let dict = try #require(json as? [String: Any], "stdout parsed but was not a JSON object")
+
+            #expect(dict["schemaVersion"] is Int)
+            #expect((dict["ok"] as? Bool) == false, "usage envelope must have ok=false")
+        } catch {
+            Issue.record("usage failure stdout is not valid JSON: \(error)")
+        }
     }
+
+    // MARK: - JSON boundary helpers
+
+    private func isJsonStart(_ c: Character?) -> Bool {
+        guard let c = c else { return false }
+        return "{}[]\"".contains(c) || "tf".contains(c) || c.isNumber
+    }
+
+    private func isJsonEnd(_ c: Character?) -> Bool {
+        guard let c = c else { return false }
+        return "}]\"".contains(c) || "tf".contains(c) || c.isNumber
+    }
+
 }
