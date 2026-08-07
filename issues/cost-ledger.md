@@ -48,7 +48,8 @@ a figure derived from it appears.
 | 2026-08-06 | #0104 | Dispatch round 1 (accepted, 648s) | 47,260 | $0.38 |
 | 2026-08-06 | #0099 | Dispatch round 1 (accepted, 1044s) | 41,981 | $0.34 |
 | 2026-08-06 | #0100 | Dispatch round 1 (accepted, 471s) | 42,344 | $0.34 |
-| | | **Total measured** | **1,745,328** | **$13.96** |
+| 2026-08-06 | #0094 | Dispatch round 1 (accepted, 1019s) | 56,551 | $0.45 |
+| | | **Total measured** | **1,801,879** | **$14.42** |
 
 ## What this total does and does not cover
 
