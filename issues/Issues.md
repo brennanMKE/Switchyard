@@ -166,28 +166,41 @@ Real bugs found later use the standard bug shape with all sections.
 
 Every resolved issue ends with a `## Work log` section recording who did the work and what it cost:
 
+**Cost is recorded per phase, not per issue.** There are three phases and only one of them is ever
+free:
+
 ```markdown
 ## Work log
 
+| Phase | Who | Cost |
+|---|---|---|
+| **Authoring** | Opus | hosted |
+| **Implementation** | OpenCode / ornith-1.0-35b-mlx-oq8 (local) | $0.00 |
+| **Review** | Opus | hosted |
+
 | | |
 |---|---|
-| **Implementer** | OpenCode / ornith-1.0-35b-mlx-oq8 (local, LM Studio) |
 | **Rounds** | 2 |
-| **Token cost** | $0.00 (local inference) |
 | **Wall time** | 14m |
-| **Authored / reviewed by** | Opus |
 ```
 
-Local inference costs **$0.00** — that is the point of running it, and recording it makes the saving
-visible rather than assumed. Wall time is recorded because local inference trades money for time,
-and the trade can only be evaluated if both numbers exist.
+**Authoring and review are always hosted and always cost money.** Writing an issue detailed enough
+that implementation needs no further judgment is real work, and so is reading a diff and its
+verification output against the done-criteria. Recording those as free would make delegation look
+cheaper than it is and would hide where the remaining spend actually goes.
 
-**Rounds** is the number of dispatches it took to converge. It is the most useful number in the
-table: an issue that took three rounds was underspecified when it was authored, and that is feedback
-about the authoring, not about the model.
+**Implementation is $0.00 only when it actually ran locally.** When a round is taken over by hand —
+or by a hosted model for any reason — that row reads `Opus, hosted`, not `$0.00`. The table exists so
+a reader can tell at a glance which issues were genuinely free to implement and which were not, so
+misattributing one destroys the only thing it is for.
 
-Record the authoring and reviewing model separately, since those are hosted and do carry cost. If a
-round was taken over by hand, say so rather than attributing it to the local model.
+Give a token or dollar figure where one is genuinely known; write `hosted` where it was not
+separately metered. **Never invent a number** — an unmetered phase is honestly unmetered.
+
+**Rounds** is how many dispatches it took to converge, and it is the most useful number here: an
+issue that took three rounds was underspecified when it was authored, which is feedback about the
+authoring rather than about the model. **Wall time** matters because local inference trades money for
+time, and that trade can only be judged with both numbers present.
 
 ### Format details that matter
 
@@ -250,6 +263,11 @@ main reason the workflow is shaped this way.
 2. **Author** the issue, or update it with review feedback in a `## Review` section.
 3. **Dispatch**: a subagent runs `scripts/dispatch-issue.sh NNNN --round N`.
 4. **Review** the diff and the pasted verification output — not the model's summary of them.
+   **Re-run the verification yourself.** A round that pastes real command output can still be wrong
+   about what the output means, and a well-written document is the easiest kind to under-review. On
+   #0070 round 1 the model genuinely ran `git interpret-trailers`, and the document still asserted
+   three false things about git — caught only because the dispatcher re-ran the checks independently
+   rather than reading the prose and agreeing with it.
 5. **Commit the round to the branch.** Every round that produced something worth reading becomes a
    commit, including rounds that were later corrected. That history is the artifact.
 6. **Accept** and merge (below) **or** write `## Review` feedback and go to step 3 with `--round N+1`.
