@@ -106,11 +106,10 @@ public func whereAmI(
     // returns non-zero with no commits).
     let rawHead: String = {
         guard let out = try? git.run(
-            ["rev-parse", "HEAD"], workingDirectory: path),
-              !out.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return ""
-        }
-        return out.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            ["rev-parse", "HEAD"], workingDirectory: path) else { return "" }
+        let text = out.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, text != "HEAD" else { return "" }
+        return text
     }()
 
     // Branch: the short ref name if HEAD points at a branch, nil on detached.
