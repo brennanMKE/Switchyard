@@ -214,7 +214,10 @@ tail -40 "$LOG"
 # round 3 and #0124 round 2, both to a mistyped absolute path that fell outside
 # the worktree. `opencode run` still exits 0, so without this the harness
 # reports a successful round.
-REJECTS=$(grep -ac 'auto-rejecting' "$LOG" 2>/dev/null || print 0)
+# `grep -c` prints 0 AND exits 1 on no match, so `|| print 0` appended a second
+# zero and `(( REJECTS > 0 ))` choked on "00" -- an error on every clean round.
+REJECTS=$(grep -ac 'auto-rejecting' "$LOG" 2>/dev/null)
+REJECTS=${REJECTS:-0}
 if (( REJECTS > 0 )); then
   print -u2 "\ndispatch: $REJECTS SANDBOX AUTO-REJECT(S) in this round -- the run was cut short there."
   print -u2 "dispatch: the rejected path is on the line above each; check it for a typo before"

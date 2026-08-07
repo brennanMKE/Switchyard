@@ -105,7 +105,8 @@ a figure derived from it appears.
 | 2026-08-07 | #0126 | Dispatch round 1 + hand finish (accepted) | 41,760 | $0.33 |
 | 2026-08-07 | #0124 | Dispatch round 1 (FAILED, hung inference, no code) | 44,636 | $0.36 |
 | 2026-08-07 | #0124 | Dispatch round 2 (REJECTED, sandbox reject mid-edit) | 43,288 | $0.35 |
-| | | **Total measured** | **4,722,435** | **$37.77** |
+| 2026-08-07 | #0124 | Dispatch round 3 (REJECTED, no tests; cap spent) | 61,388 | $0.49 |
+| | | **Total measured** | **4,783,823** | **$38.26** |
 
 ## What this total does and does not cover
 
