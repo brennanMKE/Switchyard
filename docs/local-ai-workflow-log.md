@@ -451,6 +451,47 @@ than block, because a guard that blocks good issues is worse than the bug it pre
 where exactly that nearly happened. Both hard checks were validated against real issues that must pass
 *and* synthetic ones that must fail before being wired in.
 
+### 3.8 A green count is not evidence unless it moved
+
+#0086 round 1 pasted `Test run with 54 tests in 6 suites passed` and claimed it as "8 new + 46
+existing". The reviewer deleted both new files, re-ran, and got the identical `54 tests in 6 suites`.
+
+The tests were real. They ran, they asserted, they passed — in **XCTest**, in a package where every
+other test file uses swift-testing. `swift test`'s summary line counts only swift-testing tests, so
+eight passing tests were invisible in the exact number the issue asked for. Nobody lied; the metric
+simply did not measure the work.
+
+**Two fixes, and the second matters more.** `AGENTS.md` Rule 8 requires swift-testing. And every
+test-count criterion must now name a baseline — *"N must be greater than 92"* — because a bare
+"prints a `Test run with N tests` line" is satisfiable by a round that adds nothing to the run. The
+preflight warns when a criterion omits the baseline.
+
+**The general form:** when a criterion cites a metric, state what the metric must *change to*. An
+absolute reading of a number proves only that the number exists. This is the same failure as §3.2
+(assertions present but wrong) and §3.6d (help text accurate but not decisive) in a third costume:
+the evidence was real and the inference from it was not.
+
+### 3.9 Test each criterion's conjunctions, not each half
+
+#0086's other defect: `<argument>` was dropped for any flag that *also* had a short name. The round
+shipped two tests — one for a flag with a short name, one for a flag with an argument — and neither
+built a flag with both. Each half of the criterion passed alone; their conjunction, the only case the
+code got wrong, was never constructed.
+
+This is not laziness, it is the natural reading. The criterion said flags render as `--long` or
+`-s, --long`, with `<argument>` appended when the flag takes one — which describes two prefix forms
+and an independent suffix, but scans as three alternatives. The model wrote an if/else-if chain and
+tests matching its own reading, and both were internally consistent.
+
+**Fix:** when a criterion has two independent dimensions, enumerate the cross product in the issue.
+#0086 now says "all four combinations must render correctly" and lists them. **Ask of any criterion
+containing "or" and "with": is that three cases or two-by-two?**
+
+**Reviewer's version:** when a round's tests each cover one dimension, that is the signal to build the
+crossed case yourself. The reviewer here did — and ran the probe against round 1's committed code
+first to confirm it reproduced the bug before trusting it against round 2. A test that has never been
+seen to fail proves less than one that has.
+
 ### 3.7 Review feedback can make the next round impossible
 
 Round 2 of #0070 was killed by the sandbox because *my feedback* told it to verify git behaviour,
