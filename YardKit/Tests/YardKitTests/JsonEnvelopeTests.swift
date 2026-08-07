@@ -70,7 +70,7 @@ struct JsonEnvelopeTests {
     }
 
     @Test func failureEnvelopeErrorIncludesOptionalHint() {
-        let hint = "Run `yard checkpoint` to release the lock."
+        let hint = "Run `switchyard checkpoint` to release the lock."
         let env = EnvelopeFail(
             code: .repositoryError,
             message: "The worktree lock is corrupted.",
@@ -226,7 +226,7 @@ struct JsonEnvelopeTests {
         let env = EnvelopeFail(
             code: .usage,
             message: "Unknown subcommand 'bogus'.",
-            hint: "Run `yard --help` for a list of commands."
+            hint: "Run `switchyard --help` for a list of commands."
         )
 
         let data = try JSONEncoder().encode(env)

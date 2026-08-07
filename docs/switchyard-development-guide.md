@@ -136,7 +136,7 @@ Switchyard.xcodeproj
 ├── YardKit/             Swift package
 │   ├── YardGit          the engine: object model, DAG, index, diff, journal
 │   ├── YardKit          XPC protocols, message types, ServiceNames, CLIInstaller
-│   ├── yard             CLI executable
+│   ├── switchyard       CLI executable
 │   └── Tests
 ├── Support/             Info.plist, entitlements, agent launchd plist
 ├── skills/yard/         SKILL.md (generated) + hand-written workflow prose, and the

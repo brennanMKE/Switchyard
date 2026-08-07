@@ -86,7 +86,7 @@ struct ServiceNamesTests {
     /// is the test that keeps the "single source of truth" claim true as the
     /// codebase grows, rather than true only on the day it was written.
     @Test func noOtherSwiftSourceHardcodesTheIdentifiers() throws {
-        let forbidden = ["co.sstools.Switchyard", "refs/switchyard/", "/usr/local/bin/yard"]
+        let forbidden = [ServiceNames.bundleIdentifier, ServiceNames.journalRefPrefix, ServiceNames.cliInstallPath]
         let fm = FileManager.default
         var offenders: [String] = []
 

@@ -118,7 +118,7 @@ designed so an MCP wrapper would be a thin dispatch layer if that changes.
 
 ## The command set
 
-Full detail in the [development guide](docs/switchyard-development-guide.md#6-the-yard-cli). In brief:
+Full detail in the [development guide](docs/switchyard-development-guide.md#6-the-switchyard-cli). In brief:
 
 | Group | Commands |
 | --- | --- |

@@ -165,7 +165,7 @@ honest about which store is authoritative.
   "schemaVersion": 1,
   "id": "01J8X...",
   "operation": "fixup",
-  "command": "yard fixup HEAD~2",
+  "command": "switchyard fixup HEAD~2",
   "timestamp": "2026-08-06T18:22:31Z",
   "worktree": { "id": "agent-a", "path": "/Users/b/src/proj-agent-a" },
   "captured": { "refs": true, "head": true, "index": true, "worktree": "stash", "untracked": true },
