@@ -116,7 +116,9 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-08-07 | #0127 | Fable planning pass, re-author to code level (F) | 148,904 | $2.38 |
 | 2026-08-07 | #0016 | Fable planning pass, re-author to code level + split (F) | 189,586 | $3.03 |
 | 2026-08-07 | #0127 | Dispatch round 1 (accepted, one hand-finish line) | 51,082 | $0.41 |
-| | | **Total measured** | **5,548,129** | **$47.12** |
+| 2026-08-07 | #0017 | Dispatch round 1 retry on fixed harness (accepted) | 55,219 | $0.44 |
+| 2026-08-07 | #0019 | Dispatch round 1 (rejected, incomplete) + failure analysis | 69,807 | $0.56 |
+| | | **Total measured** | **5,673,155** | **$48.12** |
 
 ## What this total does and does not cover
 
