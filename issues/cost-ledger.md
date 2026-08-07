@@ -72,7 +72,8 @@ a figure derived from it appears.
 | 2026-08-07 | #0105 | Dispatch round 1 + hand finish (accepted) | 44,917 | $0.36 |
 | 2026-08-07 | #0112 | Dispatch round 1 (REJECTED, unrunnable mutations) | 40,053 | $0.32 |
 | 2026-08-07 | #0095 | Dispatch round 1 (REJECTED, tests never compiled) | 57,216 | $0.46 |
-| | | **Total measured** | **2,923,638** | **$23.39** |
+| 2026-08-07 | #0095 | Dispatch round 2 + hand finish (accepted) | 55,081 | $0.44 |
+| | | **Total measured** | **2,978,719** | **$23.83** |
 
 ## What this total does and does not cover
 
