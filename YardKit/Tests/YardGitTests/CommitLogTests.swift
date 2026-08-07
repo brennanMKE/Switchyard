@@ -10,20 +10,111 @@ struct CommitLogTests {
 
     // MARK: - SignatureStatus parsing
 
-    @Test func signatureStatusMapsGLowerToValid() {
-        #expect(SignatureStatus("g") == .valid)
+    @Test func signatureStatusMapsGToGood() {
+        #expect(SignatureStatus("G") == .good)
     }
 
-    @Test func signatureStatusMapsGCapitalToInvalid() {
-        #expect(SignatureStatus("G") == .invalid)
+    @Test func signatureStatusMapsUToGoodUntrusted() {
+        #expect(SignatureStatus("U") == .goodUntrusted)
     }
 
-    @Test func signatureStatusMapsOtherToNoSig() {
-        #expect(SignatureStatus("x") == .noSig)
+    @Test func signatureStatusMapsBToBad() {
+        #expect(SignatureStatus("B") == .bad)
     }
 
-    @Test func signatureStatusWithEmptyStringReturnsNoSig() {
-        #expect(SignatureStatus("") == .noSig)
+    @Test func signatureStatusMapsXToExpiredSignature() {
+        #expect(SignatureStatus("X") == .expiredSignature)
+    }
+
+    @Test func signatureStatusMapsYToExpiredKey() {
+        #expect(SignatureStatus("Y") == .expiredKey)
+    }
+
+    @Test func signatureStatusMapsRToRevokedKey() {
+        #expect(SignatureStatus("R") == .revokedKey)
+    }
+
+    @Test func signatureStatusMapsEToCannotCheck() {
+        #expect(SignatureStatus("E") == .cannotCheck)
+    }
+
+    @Test func signatureStatusMapsNToNoSig() {
+        #expect(SignatureStatus("N") == .noSig)
+    }
+
+    @Test func signatureStatusMapsUnrecognizedToUnknown() {
+        #expect(SignatureStatus("x") == .unknown)
+        #expect(SignatureStatus("?") == .unknown)
+    }
+
+    @Test func signatureStatusMapsLowercaseGToUnknownGitNeverEmitsIt() {
+        #expect(SignatureStatus("g") == .unknown)
+    }
+
+    @Test func signatureStatusWithEmptyStringReturnsUnknown() {
+        #expect(SignatureStatus("") == .unknown)
+    }
+
+    @Test func signatureStatusCharacterInitAgreesWithStringInit() {
+        #expect(SignatureStatus(Character("G")) == .good)
+        #expect(SignatureStatus(Character("N")) == .noSig)
+    }
+
+    // MARK: - SignatureStatus end-to-end (no signing key is ever created)
+
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func unsignedCommitReportsNoSigThroughRun(format: FixtureRepository.RefFormat) throws {
+        var repo = try FixtureRepository(refFormat: format)
+        defer { repo.destroy() }
+        try repo.build([FixtureRepository.Commit("a")])
+
+        let entries = try CommitLog.run(path: repo.url.path, rangeArguments: ["HEAD"])
+        #expect(entries.count == 1)
+        // Measured: %G? on an unsigned commit is `N`.
+        #expect(entries.first?.signatureStatus == .noSig)
+    }
+
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func craftedBadSSHSignatureReportsBadThroughRun(format: FixtureRepository.RefFormat) throws {
+        var repo = try FixtureRepository(refFormat: format)
+        defer { repo.destroy() }
+        try repo.build([FixtureRepository.Commit("a")])
+
+        // A structurally-valid, cryptographically garbage SSH signature block,
+        // written as a raw commit object. No key exists anywhere in this test.
+        // Continuation lines carry exactly one leading space — that is commit
+        // object header-continuation syntax, and it is load-bearing.
+        let tree = try repo.revParse("HEAD^{tree}")
+        let ident = "Fixture <fixture@example.invalid> 1700000000 +0000"
+        let object = """
+        tree \(tree)
+        author \(ident)
+        committer \(ident)
+        gpgsig -----BEGIN SSH SIGNATURE-----
+         U1NIU0lHTAAAAAWZha2VmYWtlZmFrZQ==
+         -----END SSH SIGNATURE-----
+
+        crafted signed commit
+        """ + "\n"
+        let out = try git.run(
+            ["hash-object", "-t", "commit", "-w", "--stdin", "--literally"],
+            workingDirectory: repo.url.path,
+            standardInput: Data(object.utf8)
+        )
+        let sha = out.lines[0]
+
+        // Local config overrides any global config, so this is deterministic
+        // whatever the developer's machine has. Measured: %G? is then `B`.
+        try repo.writeUntracked(["allowed_signers": ""])
+        try git.run(
+            ["config", "gpg.ssh.allowedSignersFile",
+             repo.url.appendingPathComponent("allowed_signers").path],
+            workingDirectory: repo.url.path
+        )
+
+        let entries = try CommitLog.run(path: repo.url.path, rangeArguments: ["-1", sha])
+        #expect(entries.count == 1)
+        #expect(entries.first?.signatureStatus == .bad)
     }
 
     // MARK: - Embedded delimiter in message
