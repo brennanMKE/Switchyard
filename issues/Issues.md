@@ -535,6 +535,26 @@ If the user names a specific issue ("fix 0046"), skip the picking step.
 
 Status flow: `open` → `in-progress` → `resolved`. **Never set `closed`** — the user does that after verifying the fix.
 
+### The scripts, and which failure each one exists to prevent
+
+Every one of these was written after a specific round was lost. Run them; do not reimplement their
+checks by hand.
+
+| script | when | what it prevents |
+|---|---|---|
+| `scripts/new-issue.sh "<title>"` | filing anything | allocating a number that a **resolved** issue already owns, and clobbering it with a `>` redirect. It allocates over every `NNNN.md` below 8000 and refuses an existing path. Body on stdin. |
+| `scripts/set-issue-status.sh NNNN <status>` | claiming and releasing | an invalid status value, and setting `closed`, which is Brennan's alone. Valid: `open`, `in-progress`, `resolved`, `wontfix`. |
+| `scripts/preflight-issue.sh NNNN` | **before every dispatch**, from the issue's worktree | the eight authoring defects that have each cost at least one round — a file named inside an executable target, a `/tmp` path the sandbox rejects, no source file named, no verification command or baseline count, a dependency on a branch that does not exist, delegated discovery, an unclaimed issue, and a third concurrent dispatch. |
+| `scripts/dispatch-issue.sh NNNN --round N` | running a round | an unbounded run, a fourth round, a dirty tree, and the wrong branch. |
+| `scripts/await-dispatch.sh NNNN` | inside the dispatching subagent | the subagent ending its turn while its round is still running. Blocks; exit 0 means finished, exit 75 means call it again. **The issue number is required** — without it, concurrent dispatches block each other. |
+| `scripts/check-tests-assert.sh` | reviewing every round | tests that cannot fail: no assertion macro, a `guard case … else { continue }` that skips silently, `#expect(true)`, a bare `return` in a `@Test`, a hand-written `allCases`, and `ORPHANTEST` — a test file outside every declared target path, which SwiftPM never compiles while the suite stays green. |
+| `scripts/ornith-tally.sh --write` | after accepting a round | losing the local model's token volume, which exists only in OpenCode's SQLite and nowhere else. |
+
+**`check-tests-assert.sh` and `preflight-issue.sh` are necessary and not sufficient.** Neither can see
+an assertion whose predicate is structurally unsatisfiable, or one that is true for a second, wrong
+reason. Only mutation catches those — break the thing the assertion guards and confirm it fails. Every
+rejected round in this project had a green suite.
+
 ### Build / verify command for this project
 
 **Read `CLAUDE.md` at the repo root first — its code-signing rules are binding and non-negotiable.**

@@ -949,3 +949,224 @@ Not workflow problems, but each was a silent failure worth remembering.
   authoring reduces round count is not yet measured — the `Rounds` column exists to answer this.
 - **No automated check that a round's tests assert the spec** rather than the implementation. Caught
   by human review twice; both times it was nearly missed.
+
+### 5.2 Probing the tool before authoring changed what got built, twice in one night
+
+#0096 and #0097 both carried a Givens block probed on 2026-08-06. Re-probing the same commands on
+2026-08-07 — because both issues were about to be dispatched and the checklist says to name
+affordances rather than requirements — turned up three things the earlier probe had not asked about.
+
+- **`git worktree list --porcelain` already reports `prunable <reason>`.** #0096's Expected behavior
+  said "reports prunable worktrees with git's own stated reason", which reads like a discovery
+  routine to write. There is nothing to write; it is a field in output the code already parses.
+- **A locked worktree whose directory is gone is never reported prunable and is never reaped.** So
+  #0096's headline criterion — *never removes a worktree still locked by a live agent session* — is
+  git's guarantee, not code. An implementation that "adds" it would be adding a second, weaker copy
+  of a guarantee already in place. What actually remains is the *report*, because git will never
+  clean those entries up on its own.
+- **Both `prune -v` and `repair` write to stderr.** `GitProcess.Output.text` and `.lines` are stdout
+  only, so a round parsing them reports "nothing to prune" and "nothing repaired" for every
+  repository, in code that looks entirely correct and passes any test whose fixture has nothing to
+  prune. That is a rejection in both issues, and neither issue mentioned it.
+
+Then the finding that reversed a design decision: **`git worktree prune` cannot tell a moved worktree
+from a deleted one, and reaping a moved one is unrecoverable.** Move a worktree, and the porcelain
+reports its old path as `prunable gitdir file points to non-existent location` — byte-identical to a
+deleted one. Prune reaps it, the directory stays on disk full of the user's work, and
+`git worktree repair <newpath>` now exits 1 with *"unable to locate repository"*. Before the prune,
+that repair would have succeeded.
+
+So `wt gc` reports by default and prunes only under an explicit `--prune`, rather than pruning by
+default with `--dry-run` available. That is not a preference; it is the probe.
+
+**The general form:** §3.6d said verifying the tool beats transcribing its `--help`. This is the
+stronger version — verifying the tool beats *transcribing a previous verification*. The 2026-08-06
+probe was accurate about everything it asked. It just did not ask whether git already solved the
+problem, and that is the question that changes the issue.
+
+### 1.15 I overwrote a resolved issue with a shell redirect
+
+`cat > issues/0113.md` to file a new issue. #0113 already existed — *Parse git status porcelain v2
+into per-file entries*, resolved hours earlier — and the redirect clobbered it silently. Recovered
+from `bb97107` and verified byte-identical; the new issue became #0114.
+
+Two mistakes, and the second is the interesting one:
+
+1. I picked the next number from the **open** issue list, which by construction cannot contain
+   resolved issues. The number has to come from every `NNNN.md` on disk.
+2. I used a tool that overwrites. `>` has no opinion about whether the target exists.
+
+Nothing in the harness caught it. I noticed only because this log happens to mention "#0113 round 1"
+in a paragraph about timeouts, and that did not match the issue I had just written — a coincidence,
+not a check.
+
+`scripts/new-issue.sh` now allocates the number over all files below 8000 (so the reserved 8888/9999
+test issues do not drag allocation up) and refuses to write to a path that exists. Both directions are
+controlled: it allocated past a resolved #0113 and an open #0114 to land on #0115, and the guard fires
+when pointed at an existing path.
+
+Writing it turned up a second thing worth recording: **`cat` and `date` are not reliably available to
+a script the sandbox runs**, even when the calling shell has both. `ls`, `sed`, `grep`, `awk`, `sort`
+and `tail` all worked in the same script; `cat` and `date` failed with *command not found*. The fixes
+are zsh builtins — `$(</dev/stdin)` and `zmodload zsh/datetime; strftime` — which are better anyway.
+Any script in `scripts/` that shells out to `cat` or `date` should be assumed broken until run.
+
+### 5.3 Probe the code, not only the tool
+
+§5.2 was about re-running `git` before authoring. This is the other half: **run the code the issue is
+about, against real input, before writing a word of the issue.**
+
+#0013 was due to be re-authored after #0113 landed the porcelain v2 parser. Instead of reading the
+parser and describing what was left to do, I fed it real
+`git status --porcelain=v2 -z --ignored` bytes from a fixture containing a rename, a submodule, a
+path with a space, a path with a **newline**, a conflict, an untracked file and an ignored file —
+seven files. Six came out. Then a record whose path is the two bytes `0xFF 0xFE`: **zero** came out,
+the entire status silently empty.
+
+Three defects, none of which the existing tests can see:
+
+- **Renames are dropped by an off-by-one.** `fieldCount["2"] = 9` puts the path index one past the
+  last token, so `path` is `""` and the `guard !path.isEmpty` two lines down discards the record
+  without a trace. #0113's tests pass because none of them contains a rename.
+- **One non-UTF-8 byte erases the whole status.** `String(data:encoding:.utf8)` returns nil and
+  `parse` returns an empty list — reported as success, indistinguishable from a clean worktree.
+- **Submodule state is flattened.** The `<sub>` field (`SC..`, `SCMU`) is read into a variable and
+  never used.
+
+**The issue that came out of this is a repair with five named mutations and a measured before-count.
+The issue I would have written from reading the source would have been a feature request.** That is
+the difference the probe makes, and it took four minutes.
+
+It also settled a requirement that could not be built: the original #0013 asked for "renames and
+copies reported as such", and **`git status` has no copy detection** — `--porcelain=v2 -C` fails with
+``unknown switch `C` ``. A round would have spent itself discovering that, or worse, invented a
+`copy` state nothing can produce. Now guide §11 decision 7.
+
+The general rule, and it is cheap: **before authoring an issue against code that already exists, run
+that code on the input the issue is about and print what comes back.** A throwaway test in the
+existing target, deleted immediately, is enough. Reading the source tells you what it intends;
+running it tells you what it does.
+
+### 5.4 `@testable import` hides an entire class of defect
+
+`gitStatus` is `public` and returns a `public struct WorktreeStatus` whose `entries` property is
+**internal**. An out-of-module caller can obtain the value and do nothing with it. Proved with a
+throwaway SwiftPM package depending on the `YardGit` product:
+
+```
+error: 'entries' is inaccessible due to 'internal' protection level
+```
+
+**No test in the suite can catch this**, because `YardGitTests` uses `@testable import YardGit`,
+which grants internal access. The tests and the caller are compiling against different modules. Every
+test passes against an API nobody can use.
+
+The same probe compiled clean for `whereAmI`, `worktreeList`, `worktreeRemove` and `yardWhere` — so it
+is one type, not a systemic rot, and #0116 is scoped accordingly. What #0116 also builds is the check:
+a test target that imports **without** `@testable`, where reverting `entries` to internal must break
+the compile. That is the only construct that sees what a caller sees.
+
+Worth stating plainly because it generalises past Swift: **a test harness with extra privileges cannot
+verify a boundary defined by privilege.** Anywhere the tests get a capability the caller does not —
+`@testable`, a friend class, a test-only export, a mock that bypasses an interface — the boundary
+needs its own check compiled at the caller's level.
+
+### 3.14 A round that ends with a question is a stop, and nothing had said so
+
+#0096 round 1 wrote `WorktreePrune.swift` correctly — it read `standardError` rather than `.text`,
+which is the defect the issue warned about hardest, and against a real fixture it classified an
+agent-locked deleted worktree as an abandoned session, reported the unlocked one with git's verbatim
+reason, and left the locked one alone.
+
+Then it stopped. **4,251 output tokens**, one file, and a final log line:
+
+> *"Would you like me to proceed with step 1 (write tests) and the rest of the verification
+> workflow?"*
+
+It had just enumerated its own four remaining steps. It knew exactly what was left. No test
+references `WorktreePrune`, so all four required mutations were unrunnable and each left the suite
+green at exactly the 225 baseline — the round verified nothing at all.
+
+**This was not disobedience.** `AGENTS.md` had nine hundred words on what a round must verify and
+nothing saying it must not stop to ask. The model is running unattended; whatever it asks goes into a
+log nobody reads until after it has stopped. Now Rule 9: do every unambiguous part first, take the
+most literal reading of the criteria, and state the assumption at the end after the suite has run. An
+unanswered question at the end of a finished round is useful; a question instead of a finished round
+is the one outcome that cannot be reviewed.
+
+Two of the issue's own defects contributed, and both are now checklist items:
+
+- **Expected behavior named only a file.** "Reporting is the default, pruning is opt-in" had no
+  signature to attach to, so the round produced `report(...)` and `runPrune(...)` as two unrelated
+  statics with nothing choosing between them. A default needs a parameter, and a parameter needs a
+  signature — write it into the issue (item 22).
+- **The stated baseline was stale**: 216, when `main` was 225 after three merges. A stale baseline
+  hides a small increase, which is precisely what the criterion exists to catch. `docs/test-baseline.txt`
+  now records the real count and preflight check 4b compares it. Controlled both ways.
+
+Writing check 4b produced its own small lesson: the first version read `$SPEC` as if it held the spec
+text, when it is a **temp file path**. The check silently never fired and printed nothing — the same
+shape as §3.6c's guard that could not fail. It was caught only because the negative control was run.
+**Every new check gets both controls, every time.** That rule has now paid for itself twice.
+
+### 1.16 A dispatcher subagent refused three ways around a guard, and was right
+
+#0013's re-dispatch was blocked: `dispatch-issue.sh` requires a `## Review` section for any round
+after the first, and round 1 had been killed at the timeout months of context ago, producing nothing
+to review. The dispatcher tried `--force`, was denied by the permission layer, and then **stopped
+rather than route around it** — explicitly rejecting three workarounds it had already identified:
+dispatching as `--round 1` (which would overwrite round 1's log and misattribute the cost), renaming
+the previous round's log (deleting the guard's input to defeat the guard), and writing the `## Review`
+section itself (a spec edit, which is not the dispatcher's to make).
+
+That is the behaviour the guards are for, and it is worth recording as a success rather than only
+logging failures. The fix was one minute of authoring: say under the heading that round 1 produced
+nothing and what has changed since. **"Nothing to review" is itself the review**, and the model needs
+to read it. The guard's message now says so, so the next person does not reach for `--force`.
+
+One thing that did go wrong: I first placed that section *before* the Givens, and preflight reads
+everything above the first `## Review` as the spec — so the Givens, the Expected behavior and the
+verification command all fell outside it and two hard checks failed. Reviews go at the end of the
+file. The check caught it in three seconds, which is the entire argument for running preflight rather
+than trusting a read-through.
+
+### 5.5 What the probing pass covered, and what came back clean
+
+§5.3's technique was applied to every public surface in the package on 2026-08-07, so the result is
+worth recording in full — a clean probe is only useful if nobody repeats it.
+
+**Defects found, each now an issue with measured before-counts:**
+
+| surface | defect | issue |
+|---|---|---|
+| `WorktreeStatusParser` | renames dropped by an off-by-one; one non-UTF-8 byte erases the entire status; submodule state flattened | #0013 |
+| `CommitLog.parse` | a body containing the `\u{01}` field delimiter is truncated at that byte, losing the trailers with it | #0117 |
+| `WorktreeContext.resolveRef` | returns `nil` for every shared ref, indistinguishable from "does not exist" | #0119 |
+| `gitStatus` | returns a `public` type whose members are internal — unusable from outside the module, invisible to `@testable` tests | #0116 |
+| `WorktreeRemoveTests`, `WorktreeStatusTests` | never parameterised over reftable, unlike the other seven test files | #0118 |
+
+**Probed and correct — do not re-check these:**
+
+- **`GitProcess`.** Pointed at a non-existent executable, both `capture` and `run` throw
+  `could not launch git`. `capture` does **not** throw on a non-zero exit (`git config --get` of a
+  missing key returns `exitCode == 1` quietly); `run` does, as `Failure.exited`, carrying stderr. A
+  non-existent working directory is not a launch failure — `capture` returns 128 with
+  `fatal: cannot change to …`, so it cannot be used to provoke a throw.
+- **`EnvelopeErrorCode` → `ExitCode`.** All ten cases map one-to-one to 0–9 with matching
+  `codeLabel`s, and every one round-trips through the JSON envelope with `schemaVersion: 1` and
+  `ok: false`.
+- **`worktreeList`.** Correct against worktree paths containing spaces and double quotes, and lock
+  reasons containing spaces.
+- **`WorktreeContext.resolve` inside a git submodule**, where `.git` is a *file* pointing into the
+  superproject's `modules/` directory: `gitDir` and `commonDir` both resolve to
+  `…/super/.git/modules/sub`, `topLevel` is the submodule directory, `path(for: "HEAD")` resolves,
+  and it is correctly reported as neither linked nor bare.
+- **`gitStatus` and `worktreeRemove` under `--ref-format=reftable`.** Both behave identically to
+  `files`. #0118 is a coverage gap, not a bug — a round that "fixes" either implementation is wrong.
+- **`CommitLog`** on multi-paragraph bodies, blank lines, CJK, accented Latin, emoji, merge parents,
+  trailer blocks, and `-1`/range arguments. All round-trip.
+
+Five real defects in about ninety minutes, in code that was already reviewed, already tested, and
+already merged. None of them were visible from reading; every one showed up the moment real input went
+in and the output was printed.
+

@@ -164,6 +164,53 @@ The tests ran and passed on a different channel, invisible in the number the iss
 So: `import Testing`, `@Test func name()`, `#expect(...)`. Never `import XCTest`, `XCTestCase`, or
 `XCTAssert*`. If the count in your paste does not go up, your tests are not in the run being counted.
 
+## Rule 8b — A test file outside a declared target path is never compiled.
+
+`YardKit/Package.swift` declares exactly two test target paths:
+
+```
+Tests/YardGitTests     — tests for the YardGit target
+Tests/YardKitTests     — tests for the YardKit target
+```
+
+**A `.swift` file anywhere else under `Tests/` is invisible to SwiftPM.** It is not an error and there
+is no warning. `swift build` succeeds, `swift test` succeeds, the summary line does not move, and your
+tests have never run.
+
+A round wrote its tests to `Tests/YardGit/` — one character different from `Tests/YardGitTests/` — and
+reported `Test run with 216 tests` as proof of success. 216 was the count *before* the change. The
+whole round was lost. Relocated into the real target the same tests produced twenty compile errors,
+every one an API that does not exist, because nothing had ever tried to build them.
+
+So, before you finish:
+
+```sh
+ls YardKit/Tests/          # must print exactly: YardGitTests  YardKitTests
+```
+
+If any other directory appears there, your tests are not being compiled, whatever else is true. And
+the count in your paste must be **greater** than the count you measured before you started — an
+unchanged count is the signature of this exact mistake.
+
+## Rule 9 — Never end a round with a question.
+
+You have no one to ask. The round runs unattended; whatever you ask goes into a log nobody reads
+until after you have stopped, and the round is scored as if you had refused to do the work.
+
+A round once wrote its source file correctly, listed its own four remaining steps — write the tests,
+run them, run the mutations, report — and ended with *"Would you like me to proceed with step 1?"*. It
+knew exactly what was left. The whole round was rejected, because none of the four mutations the issue
+required could run against a file with no tests.
+
+If something is genuinely ambiguous:
+
+1. **Do every part that is not ambiguous, first.** That is almost always most of the work.
+2. Pick the reading that satisfies the issue's Expected behavior most literally, and implement it.
+3. Say what you assumed at the **end**, in one sentence, after the work is done and the suite has run.
+
+An unanswered question at the end of a finished round is useful. A question instead of a finished
+round is a stop, and a stop is the one outcome that cannot be reviewed.
+
 ## Build commands
 
 ```sh

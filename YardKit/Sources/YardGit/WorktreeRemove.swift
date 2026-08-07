@@ -1,0 +1,229 @@
+// WorktreeRemove.swift — `yard wt rm`
+
+import Foundation
+
+/// Result of a worktree removal attempt.
+public struct WorktreeRemoveResult: Sendable {
+    /// The path that was removed, after any lock release or force operation.
+    public let worktreePath: String
+
+    /// True when a lock was released before the removal (clean path).
+    public let lockedRelease: Bool
+
+    /// True when --force was needed because the worktree was dirty.
+    public let forced: Bool
+
+    /// The specific reason code for a failure, when refusal was structured.
+    public let error: WorktreeRemoveError?
+
+    public init(
+        worktreePath: String,
+        lockedRelease: Bool = false,
+        forced: Bool = false,
+        error: WorktreeRemoveError? = nil
+    ) {
+        self.worktreePath = worktreePath
+        self.lockedRelease = lockedRelease
+        self.forced = forced
+        self.error = error
+    }
+
+    /// True when the removal succeeded (no structured error).
+    public var success: Bool { error == nil }
+
+    /// True when the removal was refused without force.
+    public var refusal: Bool { if case .unclean = error { return true } else { return false } }
+
+    /// True when the worktree was locked by an agent session and had to release.
+    public var lockReleased: Bool { lockedRelease }
+
+    /// True when force was needed to remove the worktree.
+    public var hadToForce: Bool { forced }
+}
+
+/// Errors raised by `worktreeRemove`. Each case carries enough information for a structured
+/// JSON refusal rather than a bare "git exited 128" message.
+public enum WorktreeRemoveError: Error, CustomStringConvertible, Sendable {
+
+    /// The worktree is dirty (modified or untracked files). Emitted with the list of offending
+    /// paths so the caller can report them without running a second command.
+    case unclean(paths: [String])
+
+    /// The path does not exist or is not a worktree known to the repository.
+    case unknown(path: String)
+
+    /// The path is inside another worktree's working tree.
+    case nested(inside: String, target: String)
+
+    /// `git worktree remove` exited with a code we did not recognise.
+    case unknownFailure(code: Int32, stderr: String)
+
+    /// The worktree was locked by an agent and the lock could not be released.
+    case lockFailed(path: String, detail: String)
+
+    public var description: String {
+        switch self {
+        case let .unclean(paths):
+            return "refusing to remove dirty worktree \(paths.joined(separator: ", "))"
+        case let .unknown(path):
+            return "not a worktree: \(path)"
+        case let .nested(inside, target):
+            return "worktree \(target) is inside another worktree at \(inside)"
+        case let .unknownFailure(code, stderr):
+            return "git worktree remove exited \(code)" + (stderr.isEmpty ? "" : ": \(stderr)")
+        case let .lockFailed(path, detail):
+            return "could not release lock on \(path): \(detail)"
+        }
+    }
+
+    /// Structured form suitable for JSON output, carried in the result's `error` field.
+    public var code: String {
+        switch self {
+        case .unclean: return "dirty"
+        case .unknown: return "notFound"
+        case .nested: return "nested"
+        case .unknownFailure: return "failure"
+        case .lockFailed: return "lockFailed"
+        }
+    }
+}
+
+/// Removes a linked worktree from the repository at `repositoryPath`.
+///
+/// Steps:
+///   1. Verify the worktree exists and is a linked (non-main) worktree.
+///   2. Release any agent-session lock (`locked <reason>` from `git worktree list`).
+///   3. Attempt `git worktree remove` without --force. If the exit code is non-zero
+///      and stderr names a dirty worktree, run `git status --porcelain=v2 -z` to collect
+///      the offending paths, then attempt again with --force.
+///   4. Never pass --force on an agent's behalf — the caller decides whether to force.
+public func worktreeRemove(
+    at repositoryPath: String,
+    _ worktreePath: String,
+    force: Bool = false,
+    git: GitProcess = GitProcess()
+) throws -> WorktreeRemoveResult {
+    let normalizedTarget = canonicalize(worktreePath)
+
+    // 1. Confirm the path is known to this repository before touching it.
+    let entries = try worktreeList(path: repositoryPath, git: git)
+    guard let entry = entries.first(where: { canonicalize($0.path ?? "") == normalizedTarget }) else {
+        return WorktreeRemoveResult(
+            worktreePath: worktreePath,
+            error: .unknown(path: normalizedTarget)
+        )
+    }
+
+    // 2. Release an agent session lock if present. We explicitly unlock *agent*
+    //    sessions (reason contains "agent") and leave other locks alone — a human
+    //    lock is not the same as an agent session and the issue asks us only to
+    //    release the `wt new --agent` lock.
+    var releasedLock = false
+    if entry.locked, let reason = entry.lockReason, reason.contains("agent") {
+        do {
+            try git.run(
+                ["worktree", "unlock", normalizedTarget],
+                workingDirectory: repositoryPath
+            )
+            releasedLock = true
+        } catch {
+            throw WorktreeRemoveError.lockFailed(path: normalizedTarget, detail: error.localizedDescription)
+        }
+    }
+
+    // 3. Try the removal without --force first, exactly like `git worktree remove`
+    //    would. We use capture() so a non-zero exit does not propagate as an error —
+    //    we interpret it ourselves.
+    let outcome = try git.capture(
+        ["worktree", "remove", normalizedTarget],
+        workingDirectory: repositoryPath
+    )
+
+    if outcome.exitCode == 0 {
+        return WorktreeRemoveResult(
+            worktreePath: normalizedTarget,
+            lockedRelease: releasedLock,
+            forced: false
+        )
+    }
+
+    // 4. If force was not requested, refuse cleanly — carry the list of dirty paths
+    //    so callers do not have to parse git's stderr for it.
+    guard force else {
+        let dirty = extractDirtyPaths(from: outcome, at: normalizedTarget, git: git)
+        return WorktreeRemoveResult(
+            worktreePath: normalizedTarget,
+            lockedRelease: releasedLock,
+            error: .unclean(paths: dirty)
+        )
+    }
+
+    // 5. Caller asked for force; retry with --force. We do *not* pass it up-front:
+    //    the issue specifies we must never pass --force on an agent's behalf. The
+    //    first attempt failing is what *triggers* the second, which is not the same
+    //    as "we told git to force from the start".
+    let forced = try git.capture(
+        ["worktree", "remove", "--force", normalizedTarget],
+        workingDirectory: repositoryPath
+    )
+    guard forced.exitCode == 0 else {
+        throw WorktreeRemoveError.unknownFailure(
+            code: forced.exitCode,
+            stderr: forced.standardError
+        )
+    }
+
+    return WorktreeRemoveResult(
+        worktreePath: normalizedTarget,
+        lockedRelease: releasedLock,
+        forced: true
+    )
+}
+
+/// Extracts the list of dirty paths from a failed `git worktree remove` stderr.
+///
+/// When the exit code is 128 and stderr matches `'<path>' contains modified or untracked
+/// files, use --force to delete it`, git prints a single line listing the offending paths.
+/// We return those paths so the caller can surface them structurally instead of asking the user
+/// to read a raw git message. Returns an empty array when the failure is something other than
+/// "dirty worktree".
+private func extractDirtyPaths(
+    from outcome: GitProcess.Output,
+    at path: String,
+    git: GitProcess
+) -> [String] {
+    let stderr = outcome.standardError.trimmingCharacters(in: .whitespacesAndNewlines)
+
+    // `git worktree remove` on a dirty worktree prints:
+    //   fatal: '<path>' contains modified or untracked files, use --force to delete it
+    guard stderr.hasSuffix("use --force to delete it") else { return [] }
+
+    // git status porcelain v2 -z lists paths after a separator line. Rather than
+    // fork another process, we run `git -C <path> status --porcelain=v2 -z` and
+    // parse the XY records, keeping only entries whose worktree-or-staged side is
+    // modified/added/deleted/untracked. This keeps the interface deterministic — we
+    // always return a list of paths instead of "maybe".
+    let statusArgs: [String] = ["status", "--porcelain=v2", "-z"]
+    let statusOut = try? git.capture(statusArgs, workingDirectory: path)
+    guard let statusOut = statusOut else { return [] }
+
+    var entries: [WorktreeStatusEntry] = []
+    let parser = WorktreeStatusParser()
+    do {
+        entries = try parser.parse(statusOut.standardOutput).entries
+    } catch { return [] }
+
+    // Keep only "dirty" entries: staged or worktree side is anything other than unmodified.
+    return entries.compactMap { entry -> String? in
+        guard entry.staged != .unmodified || entry.worktree != .unmodified else { return nil }
+        return entry.path
+    }
+}
+
+// MARK: - Helpers
+
+/// Canonicalize a path the same way `WorktreeContext` does, so /private/var paths
+/// compare correctly against gitDir/commonDir, which are canonicalized.
+private func canonicalize(_ path: String) -> String {
+    URL(fileURLWithPath: path).resolvingSymlinksInPath().standardizedFileURL.path
+}

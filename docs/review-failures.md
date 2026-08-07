@@ -38,6 +38,10 @@ otherwise.**
 | #0106 | 1 | Suite green at 216, diff clean, detector clean — and **three of four required mutations passed**. A layering test that cannot detect a layering violation. | Two independent defects, both invisible to every mechanical check. `stripImportAttributes` never strips `import `, so `marker.hasPrefix("YardKit")` is false for every real import line and the assertion is **unfalsifiable**. And `enumerator.skipDescendants()` is called on every directory, so the "recursive" walk never descends — the `recursive:` parameter is inert. The words from the criteria (`enumerator`, `@testable`, non-empty) are all present in the source; none of them function. | `model-behaviour` |
 | #0112 | 1 | Suite aborts with signal 5 and **no test-count line at all**. Both required mutations were *unrunnable*: the tests trap at lines 98 and 143, before they ever call the function under test. | `FixtureRepository.branch(_:at:)` creates a ref without writing to `oids`, so `repo.oids["branch1"]!` is unconditionally nil. Underneath that, the tests still built **one** commit and pointed two branches at it — no divergence, so no `MERGE_HEAD` even without the trap, i.e. exactly the vacuity the issue exists to remove. And `FixtureRepository.conflicted()` already builds the required state; the round reconstructed it incorrectly instead. Partly the issue's fault: it named the constraint without naming the affordance. | `spec-defect` (+ `model-behaviour`) |
 | #0095 | 1 | Implementation correct and verified in all four scenarios. Rejected because the tests were written to `Tests/YardGit/`, **which is not a declared target path**, so SwiftPM never compiled them — and the round reported `Test run with 216 tests` as proof, which is exactly the pre-change baseline. Relocated into the right target they produce 20+ errors, every one an invented API: `worktree.path`, `resolve(forPath:)`, `fixture.git` (private), `context.repositoryPath` (no such member). | A test file outside every target is silently ignored, so the suite stays green and the count does not move. The baseline-count criterion caught it — N had to exceed 216 and did not. Now also caught mechanically by an `ORPHANTEST` scan. | `model-behaviour` |
+| — | — | **I overwrote a resolved issue.** `cat > issues/0113.md` created a new issue at a number that was already taken; #0113 "Parse git status porcelain v2 into per-file entries" had been resolved hours earlier. Recovered from git; the new issue is #0114. | I picked the next number by reading the *open* issue list, which does not contain resolved ones. `ls issues/[0-9]*.md \| sort -n \| tail -1` is the only correct way to pick a number, and a shell redirect that clobbers is the wrong tool for creating a file that must not already exist. | `review-defect` |
+| #0112 | 2 | Suite completes at 217 and both mutations are runnable and fail correctly — round 1's blocking defect is fixed. Rejected because **the cherry-pick fixture was never touched**: still one root commit with two branches pointing at it, 0 unmerged index entries. It passes because cherry-picking a commit whose content the tree already has produces an *empty* commit, and git parks at `CHERRY_PICK_HEAD` with a non-zero exit either way. | The test asserted `CHERRY_PICK_HEAD` exists, and that is true in **both** the conflicted state and the empty-commit state — so the assertion cannot distinguish them. Same family as #0106: a predicate that is true for the wrong reason. The fix is to assert on unmerged index entries, which are 3 in a real conflict and 0 in the accident. The round said in its own log that it had not touched the test; the review's instruction to reuse `conflicted()` was ignored for that half. | `model-behaviour` |
+| #0096 | 1 | Exit 0 in 442s and **4,251 output tokens**. Wrote `WorktreePrune.swift` — which is correct, reads `standardError`, and behaves right against a real fixture — then ended the log with *"Would you like me to proceed with step 1 (write tests)…?"*. **Zero tests.** All four required mutations were unrunnable; each left the suite green at exactly the 225 baseline. | The model enumerated its own four remaining steps and asked permission instead of doing them. Nothing in `AGENTS.md` said a round must not end with a question, so it was not disobedience. Two spec gaps contributed: Expected behavior named only a file, so "reporting is the default" had no signature to attach to and the round produced two unrelated statics with no gate between them; and the stated baseline was stale (216, actually 225), which would have hidden a small increase. | `model-behaviour` (+ `spec-defect`) |
+| #0088 | 1 | 1801s, +7 tests, and a **working binary** — all six invocations correct, `schema` parses to two commands under a real JSON parser, and the decisive comma mutation fails. Rejected on four counts: two of the four required assertions do not exist (empty `schemaName` and empty `noopSpec.exitCodes` both **survive**), per-subcommand help was added after the issue forbade it in as many words, that addition **regressed `switchyard noop extra`** into `Unknown subcommand 'noop'`, and `--version` has no test. | The registry test asserted `name` only. The exit-code mutation appeared to die but died *by accident*, through a `--help` **rendering** test that only ever renders one spec — the same mutation on the other spec passed silently. So a mutation dying is not sufficient evidence: **which test killed it matters.** Also a scope violation the guards cannot see — the round created and switched to `issues/0088` (plural) mid-run; `dispatch-issue.sh` checks the branch before the round, not after. | `model-behaviour` |
 | #0098 | 1 | Exit 7, 81s, nothing produced | The issue never said where the scratch image should go, so the model chose `/var/tmp`, which the sandbox auto-rejects. It then wrote "Now I have a clear picture. Let me execute the steps" and ended its turn having executed none of them. | `environment` (+ `spec-defect`, `model-behaviour`) |
 | #0010, #0011, #0022 | — | Repeatedly failed to converge before being split | Each bundled four deliverables. No multi-deliverable issue has converged in this project; every converged issue named exactly one file. | `sizing` |
 
@@ -133,7 +137,41 @@ while its tests contributed nothing to the number.
     `FixtureRepository.conflicted()` already builds precisely that state. The round reconstructed it
     badly. Stating a requirement invites reinvention; **naming the helper that satisfies it does not**.
     Before writing "you will need X", grep for whether X already exists.
-18. **Does the issue name the collaborators, not just the output file?** "Name the file" fixed
+18. **Before creating `issues/NNNN.md`, is NNNN actually free?** Pick the number with
+    `ls issues/[0-9]*.md | sed 's/.*\///;s/\.md//' | sort -n | tail -1`, over **every** file, not
+    over the open ones — a resolved issue still owns its number. Create it with a tool that fails on
+    an existing path, never a `>` redirect. I clobbered resolved issue #0113 this way and only
+    noticed because the workflow log happened to mention it by number.
+19. **Does the assertion distinguish the right state from a neighbouring wrong one?** Not just "can
+    it fail" — *what else makes it pass*. `CHERRY_PICK_HEAD exists` is true for a conflicting
+    cherry-pick **and** for an empty one; #0112 round 2 shipped the second while claiming the first.
+    For any marker-file check, name a second observable that differs between the two states — here,
+    unmerged index entries, 3 versus 0 — and assert on that instead.
+20. **Has the code the issue is about actually been run, on the input the issue is about?** Not
+    read — run. #0013's re-authoring fed real porcelain v2 bytes to the parser on `main` and found
+    three defects its own tests cannot see: renames silently dropped by an off-by-one, a single
+    non-UTF-8 byte erasing the entire status, and submodule state flattened. A throwaway test in the
+    existing target, deleted immediately, costs four minutes and turns a feature request into a
+    repair with a measured before-count. See workflow log §5.3.
+21. **If the tests have privileges the caller does not, is the boundary checked at the caller's
+    level?** `@testable import` grants internal access, so a `public` API whose members are internal
+    passes every test and is unusable from outside — #0116, found by compiling a probe package
+    against the product. Anywhere the harness has a capability the caller lacks, that boundary needs
+    a check compiled the way a caller compiles. See workflow log §5.4.
+22. **If the issue says a behaviour is "the default", does it name the function that has a default?**
+    #0096 said reporting is the default and pruning is opt-in, and named only the output file. The
+    round produced two unrelated static functions with nothing choosing between them — a default
+    needs a parameter, and a parameter needs a signature. Write the signature into the issue.
+23. **When a mutation dies, does the *right* test kill it?** #0088's `exitCodes = []` mutation
+    failed the suite — through a `--help` rendering test that greps text for "Exit codes", not
+    through the registry test the criterion asked for. The same mutation on the second spec passed
+    silently, because that spec is never rendered. **Record which test failed, not just that one
+    did**; a mutation killed by an unrelated test is evidence of coverage you do not have.
+24. **Verify the branch at the END of a round, not just the start.** `dispatch-issue.sh` checks
+    `git rev-parse --abbrev-ref HEAD` before dispatching and cannot see a mid-round switch. #0088
+    round 1 came back on `issues/0088` — plural — a branch it created itself, against `AGENTS.md`
+    Rule 4.
+25. **Does the issue name the collaborators, not just the output file?** "Name the file" fixed
     convergence months of rounds ago, and it is necessary but not sufficient: a file name says where
     code goes and nothing about what it may call. If the work must use an existing type, **quote its
     real surface in the issue** — #0012 lost a full 30-minute cap to a model inventing

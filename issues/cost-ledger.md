@@ -72,7 +72,13 @@ a figure derived from it appears.
 | 2026-08-07 | #0105 | Dispatch round 1 + hand finish (accepted) | 44,917 | $0.36 |
 | 2026-08-07 | #0112 | Dispatch round 1 (REJECTED, unrunnable mutations) | 40,053 | $0.32 |
 | 2026-08-07 | #0095 | Dispatch round 1 (REJECTED, tests never compiled) | 57,216 | $0.46 |
-| | | **Total measured** | **2,923,638** | **$23.39** |
+| 2026-08-07 | #0095 | Dispatch round 2 + hand finish (accepted) | 55,081 | $0.44 |
+| 2026-08-07 | #0112 | Dispatch round 2 (REJECTED, cherry-pick fixture untouched) | 53,571 | $0.43 |
+| 2026-08-07 | #0110 | Dispatch round 1 (accepted) | 53,310 | $0.43 |
+| 2026-08-07 | #0112 | Dispatch round 3 (accepted) | 54,826 | $0.44 |
+| 2026-08-07 | #0096 | Dispatch round 1 (REJECTED, no tests written) | 50,676 | $0.41 |
+| 2026-08-07 | #0088 | Dispatch round 1 (REJECTED, two assertions absent, scope violation) | 62,839 | $0.50 |
+| | | **Total measured** | **3,253,941** | **$26.03** |
 
 ## What this total does and does not cover
 
