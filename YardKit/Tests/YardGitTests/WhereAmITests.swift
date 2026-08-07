@@ -78,45 +78,40 @@ struct WhereAmITests {
         var repo = try FixtureRepository(refFormat: .files)
         defer { repo.destroy() }
 
-        // base → branch1 (edits f.txt). Each build transitions HEAD to detached
-        // after the last commit, so we re-attach via checkout. To keep branch1
-        // as a ref after commit, create it via raw git on the SHA.
-        try repo.build([FixtureRepository.Commit("base", files: ["f.txt": "original\n"])])
+        // base → branch1 (edits f.txt) and branch2 (edits f.txt differently).
+        // Both commits are on top of the same base, so merging them conflicts.
+        try repo.build([
+            FixtureRepository.Commit("base", files: ["f.txt": "original\n"]),
+            FixtureRepository.Commit("branch1", parents: ["base"], files: ["f.txt": "branch1 content\n"]),
+        ])
+        try repo.build([
+            FixtureRepository.Commit("branch2", parents: ["base"], files: ["f.txt": "branch2 content\n"]),
+        ])
 
-        // Create branch1 via raw git so we have a ref. HEAD ends up detached
-        // on the base commit after the build above; we don't switch away yet.
-        let baseOID = repo.oids["base"]!
-
-        // Switch HEAD to branch1 by pointing a ref at the SHA and checking it out.
-        _ = try git.run(["update-ref", "refs/heads/branch1", baseOID], workingDirectory: repo.url.path)
-        try repo.checkout("branch1")
-
-        // Create branch2 off base. Merging branch2 into branch1 produces a
-        // conflict because both modify the same line.
-        try repo.branch("branch2", at: "base")
-
+        // We are now detached on branch2. Switch main to branch1, then merge
+        // branch2 into main.
         let branch2OID = repo.oids["branch2"]!
+        try repo.checkoutDetached(repo.oids["base"]!)
+        try repo.branch("main", at: "branch1")
+        try repo.checkout("main")
+
         let mergeResult = try git.capture(
             ["merge", "--no-commit", branch2OID], workingDirectory: repo.url.path)
 
-        // A conflicting merge exits non-zero but leaves MERGE_HEAD in place.
         #expect(mergeResult.exitCode != 0, "the merge should conflict")
 
-        // Confirm MERGE_HEAD exists.
         let mPath = try git.run(
             ["rev-parse", "--path-format=absolute", "--git-path", "MERGE_HEAD"],
             workingDirectory: repo.url.path)
 
         #expect(!mPath.lines.isEmpty, "MERGE_HEAD path was returned")
-        #expect(FileManager.default.fileExists(atPath: mPath.lines[0]), "MERGE_HEAD file exists")
+        let mergeHeadExists = FileManager.default.fileExists(atPath: mPath.lines[0])
+        #expect(mergeHeadExists, "MERGE_HEAD file exists")
 
         let r = try whereAmI(path: repo.url.path, git: git)
         #expect(r.isMidMerge == true, "isMidMerge reports a real in-progress merge")
         #expect(!r.isMidRebase, "a mid-merge must not also report mid-rebase")
         #expect(!r.isMidCherryPick, "a mid-merge must not report mid-cherry-pick")
-
-        // Abort the merge to leave the fixture clean.
-        _ = try? git.run(["merge", "--abort"], workingDirectory: repo.url.path)
     }
 
     @Test func midCherryPickReportsFlagWhenConflictPresent() throws {
@@ -130,30 +125,27 @@ struct WhereAmITests {
 
         let baseOID = repo.oids["base"]!
 
-        // Create branch1 via raw git ref so checkout works later.
         _ = try git.run(["update-ref", "refs/heads/branch1", baseOID], workingDirectory: repo.url.path)
 
-        // Create branch2 off base. Cherry-picking branch1 onto branch2 will
-        // conflict because both modify the same line.
         try repo.branch("branch2", at: "base")
+        let branch1OID = try git.capture(
+            ["rev-parse", "refs/heads/branch1"], workingDirectory: repo.url.path).text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // Switch to branch2 and attempt a cherry-pick of branch1.
         try repo.checkout("branch2")
 
-        let branch1OID = repo.oids["branch1"]!
         let cherryResult = try git.capture(
             ["cherry-pick", branch1OID], workingDirectory: repo.url.path)
 
-        // A conflicting cherry-pick exits non-zero but leaves CHERRY_PICK_HEAD.
         #expect(cherryResult.exitCode != 0, "the cherry-pick should conflict")
 
-        // Confirm CHERRY_PICK_HEAD exists.
         let cpPath = try git.run(
             ["rev-parse", "--path-format=absolute", "--git-path", "CHERRY_PICK_HEAD"],
             workingDirectory: repo.url.path)
 
         #expect(!cpPath.lines.isEmpty, "CHERRY_PICK_HEAD path was returned")
-        #expect(FileManager.default.fileExists(atPath: cpPath.lines[0]), "CHERRY_PICK_HEAD file exists")
+        let cherryPickExists = FileManager.default.fileExists(atPath: cpPath.lines[0])
+        #expect(cherryPickExists, "CHERRY_PICK_HEAD file exists")
 
         let r = try whereAmI(path: repo.url.path, git: git)
         #expect(r.isMidCherryPick == true, "isMidCherryPick reports a real in-progress cherry-pick")
