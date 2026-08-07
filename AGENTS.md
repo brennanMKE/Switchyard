@@ -286,6 +286,21 @@ testable, and making it testable is a smaller change than capturing the descript
 Reading a **subprocess's** pipe to EOF is fine — the child exits and closes the write end. The hazard
 is `dup2` on your own `STDOUT_FILENO`.
 
+### After a context compaction, re-read the issue before you act.
+
+If your context was summarized mid-round, **the summary is not a record of what happened.** One has
+already invented three prior rounds, a fourth review, and a list of test names that did not exist —
+and the model worked from all of it, including re-importing a sandbox rejection from a previous round
+as a live instruction.
+
+`issues/NNNN.md` on disk is the record. Re-read it. It contradicts anything the summary got wrong.
+
+The same round also discarded the correct fix, which the summary *did* contain, and went back to
+re-deriving a diagnosis the issue had already measured. **If the issue states a measurement, do not
+re-measure it** — and in particular, do not run the test suite before you have written anything. Two
+full `swift test` runs is roughly 50 KB of output; piping that into context before doing any work is
+what forced the compaction in the first place.
+
 ## Rule 10 — `swift build` does not compile the tests. Only `swift test` does.
 
 `swift build` builds the library and executable targets. It does **not** build test targets. A test
