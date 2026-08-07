@@ -94,11 +94,25 @@ Note the exception: `git write-tree` refuses to write an unmerged index. When co
 present, snapshot the index file itself as a blob and restore it byte-for-byte. That is the one
 place where copying a git file directly is correct, because the file *is* the state.
 
-**The worktree** is captured with `git stash create`. This is the important primitive and it is
-underused: it builds a stash commit from the current worktree and index and prints its OID
-**without touching the worktree or the stash stack**. Combined with `--include-untracked`, one
-call produces a commit object holding everything uncommitted. Restore with
-`git stash apply <oid>`, or `git read-tree` plus `git checkout-index` for a harder reset.
+**The worktree** is captured with `git stash create`. It builds a stash commit from the current
+worktree and index and prints its OID **without touching the worktree or the stash stack**, which is
+what makes it usable for snapshotting.
+
+> **Correction, verified 2026-08-06 on git 2.50.1.** An earlier version of this document claimed that
+> `git stash create --include-untracked` captures untracked files too. **It does not.** `git stash
+> create` silently ignores both `-u` and `--include-untracked`: it produces a 2-parent stash commit
+> containing only tracked modifications. Only `git stash push -u` produces the 3-parent form that
+> includes untracked files — and `push` mutates the worktree and the stash stack, so it is unusable
+> here.
+>
+> Untracked files must therefore be captured **separately and explicitly**: build a tree from the
+> untracked (non-ignored) paths using a temporary `GIT_INDEX_FILE`, `write-tree` it, and
+> `commit-tree` the result, recording that OID alongside the stash commit. Anything less loses
+> untracked files on restore without saying so, which is exactly the silent data-loss failure this
+> section opens by warning about.
+
+Restore with `git stash apply <oid>`, or `git read-tree` plus `git checkout-index` for a harder
+reset — plus an explicit restore of the untracked tree.
 
 So a full snapshot is: one blob of ref state, one tree or blob for the index, and optionally one
 stash commit. All three are ordinary objects in the ODB.

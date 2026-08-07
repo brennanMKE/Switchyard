@@ -712,6 +712,10 @@ a feature at any milestone on the grounds that GitUp had it.
 2. **No MCP server.** The agent surface is the CLI plus a generated skill. Rationale and the
    conditions for revisiting are in
    [Section 8](#8-the-agent-skill-and-why-there-is-no-mcp-server).
+3. **Journal capture policy: capture everything except ignored files, always.** Recorded in
+   [journal-capture-policy.md](journal-capture-policy.md). Under-capturing loses the user's work
+   silently; over-capturing costs objects `gc` reclaims. Excluding ignored files is what keeps
+   "always" affordable.
 
 ### Still open
 
@@ -720,11 +724,9 @@ Decide these with Brennan, do not decide them in code.
 1. **Name availability.** Domain, Homebrew formula name, npm, and the App Store name have not
    been checked. `yard` as a binary name in `/usr/local/bin` should be checked against anything
    already installed. Do this before the identifiers above are baked in.
-2. **Journal worktree policy.** How much uncommitted state to snapshot, and what `undo` promises
-   when it did not capture everything.
-3. **Rebase engine scope.** GitUp wrote its own. How much of one does M5 actually require, and
+2. **Rebase engine scope.** GitUp wrote its own. How much of one does M5 actually require, and
    can `absorb` and `split` be built on narrower primitives?
-4. **Distribution.** Mac App Store or direct. Affects sandboxing, which is baked in early and now
+3. **Distribution.** Mac App Store or direct. Affects sandboxing, which is baked in early and now
    has **two** concrete consequences, not one: the Mach service name must be prefixed with an
    app-group identifier, *and* the state directory diverges — `~/.local/state/switchyard/` from a
    sandboxed app resolves to
