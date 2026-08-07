@@ -242,7 +242,11 @@ tail -40 "$LOG"
 # reports a successful round.
 # `grep -c` prints 0 AND exits 1 on no match, so `|| print 0` appended a second
 # zero and `(( REJECTS > 0 ))` choked on "00" -- an error on every clean round.
-REJECTS=$(grep -ac 'auto-rejecting' "$LOG" 2>/dev/null)
+# `grep -c` exits 1 on no match, and this script runs under ERR_EXIT -- so a
+# CLEAN round killed the harness here, before the suite section, and no
+# *-suite.txt was written. The `|| true` is what makes it safe; `${:-0}` alone
+# was not, which is the second bug in this three-line guard.
+REJECTS=$(grep -ac 'auto-rejecting' "$LOG" 2>/dev/null || true)
 REJECTS=${REJECTS:-0}
 if (( REJECTS > 0 )); then
   print -u2 "\ndispatch: $REJECTS SANDBOX AUTO-REJECT(S) in this round -- the run was cut short there."
