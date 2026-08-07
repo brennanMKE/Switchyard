@@ -11,6 +11,9 @@ not written down here at the moment it was measured is unrecoverable.
 **85% input / 15% output** = **$8.00 per million combined tokens**. The assumption is stated wherever
 a figure derived from it appears.
 
+**Fable 5 planning** runs bill at $10.00 per million input and $50.00 per million output; the
+same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using it are marked `(F)`.
+
 **Local implementation via Ornith/LM Studio is $0.00** at any volume and is not listed here.
 
 ## Measured dispatcher subagent runs
@@ -101,7 +104,6 @@ a figure derived from it appears.
 | 2026-08-07 | #0097 | Dispatch round 2 (REJECTED, found a real production defect) | 65,428 | $0.52 |
 | 2026-08-07 | #0097 | Dispatch round 3 + hand finish (accepted) | 49,704 | $0.40 |
 | 2026-08-07 | #0123 | Dispatch round 1 (accepted, app-launch fix) | 65,077 | $0.52 |
-| 2026-08-07 | #0123 | Dispatch round 1 (accepted, app-launch fix) | 65,077 | $0.52 |
 | 2026-08-07 | #0126 | Dispatch round 1 + hand finish (accepted) | 41,760 | $0.33 |
 | 2026-08-07 | #0124 | Dispatch round 1 (FAILED, hung inference, no code) | 44,636 | $0.36 |
 | 2026-08-07 | #0124 | Dispatch round 2 (REJECTED, sandbox reject mid-edit) | 43,288 | $0.35 |
@@ -110,7 +112,9 @@ a figure derived from it appears.
 | 2026-08-07 | #0108 | Dispatch round 1 (ACCEPTED, no hand finish) | 65,164 | $0.52 |
 | 2026-08-07 | #0109 | Fable planning update to code level | 94,382 | $0.75 |
 | 2026-08-07 | #0109 | Dispatch round 1 + hand finish (accepted) | 72,666 | $0.58 |
-| | | **Total measured** | **5,109,733** | **$40.86** |
+| 2026-08-07 | #0017 | Dispatch round 1 — FAILED, no code (context exhaustion) | 48,824 | $0.39 |
+| 2026-08-07 | #0127 | Fable planning pass, re-author to code level (F) | 148,904 | $2.38 |
+| | | **Total measured** | **5,307,461** | **$43.68** |
 
 ## What this total does and does not cover
 
