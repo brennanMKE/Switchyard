@@ -105,6 +105,23 @@ The one thing to carry forward: **the check found #0012 through #0020 all claimi
 ("tested against both ref formats via the fixture harness") **without naming a command whose output
 could be pasted.** That phrasing reads as rigour and grades as nothing.
 
+## The guards have fired — what they caught, after being written
+
+Recorded because a guard nobody can point to a catch for is superstition, and should be deleted.
+
+| Guard | Caught |
+|---|---|
+| Branch-dependency check (5) | **#0092**, which said "Start from `issue/0011`" — the exact defect that cost #0090 a full 1289s round. Rejected before dispatch, at no cost. |
+| Names-a-source-file check (3) | **#0092** and **#0093**, both of which named none. Every code round that has ever failed named zero paths. |
+| Verification-command check (4) | **41 open issues**, including #0012–#0020, which claimed coverage in prose ("tested against both ref formats") with no command whose output could be pasted. |
+| Baseline-count check (9) | Every issue authored before #0086 — a bare "prints `Test run with N tests`" is satisfiable by a round that adds nothing to the run. |
+| Executable-target check (1) | **#0026, #0086, #0087, #0088**, all queued behind #0085 with the identical unbuildable path. |
+| Negative controls on the guards themselves | Two guards that would have blocked *every* dispatch — one killing the script on any healthy issue under `ERR_EXIT`, one rejecting #0085 for quoting its own post-mortem. Both caught before being wired in. |
+
+The pattern worth noting: **most of these were already-written rules that nothing enforced.**
+"Name the file" was in `issues/Issues.md` before #0090 was authored in violation of it. The rule was
+not the fix; the check was.
+
 ## Already covered — do not add duplicate guards
 
 | Failure mode | Existing guard |
