@@ -592,6 +592,61 @@ its own run before concluding anything — a probe that establishes state and th
 measuring itself. This is the same shape as the vacuous test in §3.8, one level up: the evidence was
 real and the inference from it was not.
 
+### 5.1 Did the failure log actually help? Measured, not felt
+
+`docs/review-failures.md` and `scripts/preflight-issue.sh` landed at 19:08. Here is the record either
+side of that line, from OpenCode's session database and the issue files.
+
+**Before 19:08 — 8 rounds across 5 issues.** #0010 timed out at the cap and was split for being
+oversized. #0011 took two rounds and was split. #0070 needed three, the first accepted then rejected
+on re-verification. #0098 round 1 died on a sandbox denial. #0085 converged first try. #0090 round 1
+was rejected.
+
+**After 19:08 — 10 rounds across 6 issues.** #0090, #0086 and #0087 each converged on round 2.
+#0091 and #0092 converged on round 1. #0093 and #0102 were rejected on round 1 and are re-authored.
+
+**What genuinely improved:**
+
+- **Nothing has needed a third round.** Before, two issues went to three rounds or were abandoned;
+  after, every accepted issue landed in one or two.
+- **First-round acceptance went from 1 in 5 to 2 in 6.** Real but modest, and too small a sample to
+  lean on.
+- **The preflight has refused defective issues before a round was spent** — #0092 carried the same
+  stale-branch reference that cost #0090 a 1289-second round, and #0093 named no source file. Those
+  are rounds that never happened, so they appear in no timing comparison.
+- **Fixes generalised.** The XCTest-invisible-count defect was fixed once and then applied to all
+  nineteen dispatch-ready M1 issues; the executable-target defect was found in #0085 and removed from
+  four queued issues before any of them ran.
+
+**What did not improve, and this is the honest part.**
+
+One failure family keeps recurring in a new costume each time: **a check that cannot fail.**
+
+| round | the costume |
+|---|---|
+| #0011 r2 | a test named `envelopeFailWriteEmitsJsonToStdout` that never calls `write()` |
+| #0090 r1 | `for code in allCases { guard case .ok = code else { continue } }` — ten cases, one tested |
+| #0087 r1 | an extractor that returns `[]`, so the assertion is `[] == []` |
+| #0102 r1 | a guard test still forbidding the *old* path — passed unchanged, guarding nothing |
+| #0086 r1 | a test count that was identical with the new files deleted |
+| #0102 r1 | a `grep '"yard"'` criterion that cannot match an interpolated literal |
+
+Each was caught, logged, and given a detector. **Each next one wore a shape the previous detector
+could not see.** The `INERT` scan cannot see `[] == []` because there is an `#expect`; the `TAUTOLOGY`
+scan cannot see a stale guard because the literal is plausible; no scan sees a grep that is simply too
+narrow.
+
+**So the accurate claim is not "fewer failures". It is: no failure class has recurred once logged,
+and novel ones keep arriving at a steady rate.** The mechanism converts *"the same mistake
+repeatedly"* into *"each mistake once"*, which is worth a great deal and is not the same as
+improvement in the raw failure rate.
+
+**And the last three failures were mine, not the model's.** #0093 died on a Givens snippet I had
+reasoned rather than executed. #0102 died on a grep I wrote that could not match the defect it was
+looking for. Both were labelled as verified fact. The model did what it was told, and what it was
+told was wrong — which is why the checklist now asks whether a grep was run against known-bad input
+before being written into a criterion, and why nothing may enter a Givens block unexecuted.
+
 ### 3.7 Review feedback can make the next round impossible
 
 Round 2 of #0070 was killed by the sandbox because *my feedback* told it to verify git behaviour,
