@@ -10,8 +10,17 @@
 setopt ERR_EXIT PIPE_FAIL
 cd "${0:A:h}/.."
 
-[[ -n "$1" ]] || { print -u2 "usage: new-issue.sh <title> [< body]"; exit 2 }
-title="$1"
+[[ -n "$1" ]] || { print -u2 "usage: new-issue.sh <title> [--module M] [< body]"; exit 2 }
+title="$1"; shift
+# An empty Module makes preflight classify the issue as non-code and skip the
+# hard verification check, so it is asked for here rather than left blank.
+module=""
+while (( $# )); do
+  case "$1" in
+    --module) module="${2:-}"; shift 2 ;;
+    *) print -u2 "new-issue: unknown argument '$1'"; exit 2 ;;
+  esac
+done
 
 # Every file on disk, not just the open ones. Reserved test numbers (8888,
 # 9999) must not drag the allocation up with them.
@@ -48,12 +57,18 @@ body=""
   print -r -- "| | |"
   print -r -- "|---|---|"
   print -r -- "| **Status** | open |"
-  print -r -- "| **Module** |  |"
-  print -r -- "| **Milestone** |  |"
+  print -r -- "| **Module** | $module |"
+  print -r -- "| **Milestone** | M1 |"
   print -r -- "| **Platform** | macOS |"
   print -r -- "| **First seen** | $today |"
   print -r -- ""
   [[ -n "$body" ]] && print -r -- "$body"
 } > "$path"
+
+if [[ -z "$module" ]]; then
+  print -u2 "new-issue: WARNING -- Module is empty in $path."
+  print -u2 "  preflight will classify it as a non-code issue and skip the"
+  print -u2 "  verification check. Fill it in, or pass --module next time."
+fi
 
 print -- "$path"

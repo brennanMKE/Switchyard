@@ -179,4 +179,17 @@ struct FixtureRepositoryTests {
             try repo.build([FixtureRepository.Commit("x", parents: ["nope"])])
         }
     }
+
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func commitWithEmbeddedDelimiterInBodyRoundTripsThroughLog(format: FixtureRepository.RefFormat) throws {
+        let soH = "\u{01}"
+        var repo = try FixtureRepository(refFormat: format)
+        defer { repo.destroy() }
+        let body = "has \(soH) delimiter inside\n\nbody paragraph"
+        try repo.build([FixtureRepository.Commit("x", message: body)])
+
+        let entries = try CommitLog.run(path: repo.url.path, rangeArguments: ["HEAD"])
+        let entry = try #require(entries.first(where: { $0.oid == repo.oids["x"] }))
+        #expect(entry.message == body)
+    }
 }
