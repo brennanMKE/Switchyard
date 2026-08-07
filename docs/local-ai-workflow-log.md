@@ -564,6 +564,34 @@ rather than skipping — and it was defeated by a single line I told it to trust
 The verified form, probed inside a running test bundle, anchors on a type in the test target:
 `Bundle(for: BundleAnchor.self).bundleURL.deletingLastPathComponent()`.
 
+### 1.13 My verification probe changed the thing it was measuring
+
+Following 1.12, I set out to verify the *corrected* locator myself rather than trust the reviewer's
+probe. My test did two things in one function: resolve the binary via `Bundle(for: BundleAnchor.self)`,
+then assert that `Bundle.allBundles` finds no `.xctest` bundle — expecting to confirm the reviewer's
+diagnosis.
+
+The second assertion failed. `allBundles` **did** contain `YardKitPackageTests.xctest`, which read as
+the reviewer being wrong.
+
+It was not. `Bundle(for:)` **registers** the bundle, and my probe called it on the line above. The
+measurement had been contaminated by its own setup. Probing each form alone settles it:
+
+| probed alone | result |
+|---|---|
+| `Bundle.allBundles` | `count=1`, no `.xctest`, `main` = `…/usr/libexec/swift/pm` |
+| `Bundle(for: BundleAnchor.self)` | `…/.build/arm64-apple-macosx/debug`, binary present |
+
+So the reviewer was right, and the real finding is sharper than either of our first statements:
+`allBundles` is **order-dependent** here. It works if anything earlier in the process touched
+`Bundle(for:)`, and not otherwise — which is a flake waiting to happen rather than an honest failure,
+and strictly worse than a method that never works.
+
+**The lesson:** when a probe contradicts a careful reviewer, suspect the probe. Isolate each claim in
+its own run before concluding anything — a probe that establishes state and then measures it is
+measuring itself. This is the same shape as the vacuous test in §3.8, one level up: the evidence was
+real and the inference from it was not.
+
 ### 3.7 Review feedback can make the next round impossible
 
 Round 2 of #0070 was killed by the sandbox because *my feedback* told it to verify git behaviour,
