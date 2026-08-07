@@ -238,6 +238,56 @@ else
   pass "$RUNNING/2 dispatch slots in use"
 fi
 
+# --- Check 10 (HARD) — the issue fits the context window --------------------
+# #0017 round 1 produced nothing because the mandated reading set (issue +
+# Issues.md + AGENTS.md + the skill = 106KB) exceeded the usable input budget.
+# OpenCode compacted after four reads and threw away the issue's verbatim
+# source block -- the one artifact that made the issue worth authoring.
+#
+# Usable input = limit.context - limit.output, and compaction fires near 90%
+# of it. The prompt floor is OpenCode's system prompt, tool schemas and the
+# dispatch prompt itself: measured at roughly 12k tokens with AGENTS.md
+# auto-loaded. Bytes/4 is the usual rough token estimate for English + code.
+OC_CONF="$HOME/.config/opencode/opencode.json"
+if [[ -f "$OC_CONF" ]]; then
+  CTX=$(sed -n 's/.*"context"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$OC_CONF" | head -1)
+  OUT=$(sed -n 's/.*"output"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$OC_CONF" | head -1)
+  if [[ -n "$CTX" && -n "$OUT" ]]; then
+    USABLE=$(( (CTX - OUT) * 9 / 10 ))
+    FLOOR=12000
+    ISSUE_TOK=$(( $(wc -c < "$FILE") / 4 ))
+    NEED=$(( FLOOR + ISSUE_TOK ))
+    # Leave at least a third of the budget for the work itself: reading the
+    # source files the issue names, and emitting the file.
+    if (( NEED * 3 / 2 > USABLE )); then
+      fail "issue needs ~${NEED} tokens of context against ~${USABLE} usable" \
+"Issue is $ISSUE_TOK tokens, prompt floor ~$FLOOR, usable = (context $CTX - output $OUT) * 0.9.
+The round will compact before it writes, and compaction discards the issue's
+source block first. Split the issue, or raise limit.context in $OC_CONF."
+    else
+      pass "context budget: ~${NEED} needed of ~${USABLE} usable"
+    fi
+  fi
+fi
+
+# --- Check 11 (HARD) — the dispatcher mandates no reading but the issue -----
+# Regression guard on the #0017 fix. AGENTS.md is auto-loaded by OpenCode
+# (verified: it recited the GitUp licensing rule with zero tool calls), and
+# Issues.md is the tracker's process guide, not the implementer's document.
+# Together they cost ~15k tokens of the ~44k budget, for nothing.
+DISPATCH="${0:h}/dispatch-issue.sh"
+if [[ -f "$DISPATCH" ]]; then
+  MANDATE=$(sed -n '/^Work issue \$ISSUE/p' "$DISPATCH" || true)
+  if [[ "$MANDATE" == *"Issues.md"* || "$MANDATE" == *"AGENTS.md"* ]]; then
+    fail "dispatch-issue.sh mandates reading Issues.md or AGENTS.md" \
+"That is the #0017 round 1 failure: ~15k tokens of already-available or
+irrelevant text, spent before the first write. The prompt must name only
+issues/\$ISSUE.md."
+  else
+    pass "dispatcher mandates only the issue itself"
+  fi
+fi
+
 if (( FAILED )); then
   print -u2 "preflight: FAILED — fix $FILE, commit the planning update, then dispatch."
   exit 9

@@ -139,7 +139,13 @@ LOG="$LOG_DIR/$ISSUE-round$ROUND.log"
 BASE_SHA=$(git rev-parse HEAD)
 
 read -r -d '' PROMPT <<EOF || true
-Work issue $ISSUE. Read issues/$ISSUE.md, then issues/Issues.md, then AGENTS.md.
+Work issue $ISSUE. Read issues/$ISSUE.md. That is the only document you need.
+
+Do NOT read AGENTS.md -- it is already in your context, and re-reading it costs
+~5k tokens for nothing. Do NOT read issues/Issues.md; it is the tracker's process
+guide for humans and reviewers, ~10k tokens of which none is your job this round.
+#0017 round 1 died because these two reads plus the skill filled the context
+before a line was written, and it compacted away the issue's own source block.
 
 This is round $ROUND of at most $MAX_ROUNDS. If a previous round left review
 feedback in the issue's "## Review" section, that feedback is the task.
@@ -169,10 +175,13 @@ Rules for this run, which override anything in the issue that disagrees:
   8. Do NOT spawn a subagent — no Explore, no Task, no delegation of any kind.
      The issue names every file, type and signature you need. Four of the last
      five failed rounds hung on that handoff and produced nothing at all.
-  8b. Load the \`swift-guidance\` skill before writing Swift. It encodes this
-     project's expectations for concurrency, actor isolation, logging, SwiftUI
-     and build configuration. Follow its stopping rule -- it is guidance for
-     writing the code, not an invitation to audit the repository.
+  8b. Load the \`swift-guidance\` skill before writing Swift ONLY IF the issue
+     does not already contain the Swift source to write. When the issue carries
+     a verbatim source block, it was authored with that skill loaded and the
+     code already conforms -- loading it again costs ~4k tokens and teaches you
+     nothing the block does not already show. When you do load it, follow its
+     stopping rule: it is guidance for writing the code, not an invitation to
+     audit the repository.
   9. Read the files the issue names, then START EDITING. Do not survey the
      repository first. One round read twelve files without writing a line,
      filled its context to 49k, was compacted, and died -- it had treated a
