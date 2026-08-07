@@ -125,6 +125,42 @@ Findings worth recording:
   target already sets `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` and will hit the same class of
   error.
 
+### Confirmed by direct experiment, 2026-08-06
+
+Prompted by Brennan noticing that `Switchyard.xcodeproj` referenced nothing from `YardKit`, the
+integration was tested on a scratchpad **copy** of the project — the real one was open in Xcode, and
+Xcode rewrites `project.pbxproj` underneath edits.
+
+`YardKit` and `YardGit` were added as an `XCLocalSwiftPackageReference` with both products as
+`XCSwiftPackageProductDependency`, and `ContentView` was made to reference a real symbol from each so
+that linking was exercised rather than merely declared.
+
+**Result: `** BUILD SUCCEEDED **`, and the integration is genuinely real.** Verified on the built
+product rather than trusting the build result — note that under Xcode 26 the app's `MacOS/Switchyard`
+is a thin stub and the code lives in `Switchyard.debug.dylib`, so checking the wrong file shows
+nothing:
+
+```
+otool -L Switchyard.debug.dylib
+    /opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib (current version 1.9.6)
+nm -u  → _git_libgit2_init, _git_libgit2_shutdown, _git_libgit2_version
+nm     → YardKit, YardGit symbols present
+```
+
+**So an Xcode app target does build and link against a SwiftPM package whose chain includes a
+`systemLibrary` target resolved by Homebrew `pkgConfig`.** That was an open assumption underneath
+every issue written so far, and it holds.
+
+**And it fails to ship, exactly as predicted, now with the mechanism visible.** The load command is
+the absolute path `/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib`. An app distributed with that
+load command runs only on a machine with Homebrew libgit2 installed at that precise path — which is
+no user's machine. It is not a link-time failure that CI would catch; it is a launch-time failure on
+someone else's Mac.
+
+This affects the **app target as well as the embedded CLI**. #0050 covers embedding `switchyard` in
+the bundle; nothing yet covers replacing the Homebrew `systemLibrary` with a vendored binary for the
+app itself. Filed as #0103.
+
 **Unresolved for route A:** Homebrew installs per-architecture into `/opt/homebrew` (Apple Silicon)
 or `/usr/local` (Intel), and a distributed app cannot depend on a user's Homebrew. This route is
 viable for development but **not for shipping**, since the embedded `yard` (#0050) must run on a
