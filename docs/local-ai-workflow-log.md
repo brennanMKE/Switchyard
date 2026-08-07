@@ -783,6 +783,34 @@ without meaning to"*, no instruction fixes it — §1.11 proves that directly, s
 happened with the instruction present. Recovery has to come from outside the turn. `/loop` is that
 outside.
 
+### 3.11 Rounds that repair converge; rounds that create a large file do not
+
+Every timeout in this project has been a round writing a **large new file from scratch**: #0010,
+#0012 round 1, #0013, #0014 rounds 1 and 2, #0113 round 1. Every round scoped as a **repair** has
+converged, and quickly: #0012 round 3 in 504s, #0020 round 3 in 246s, #0102 round 2 in 132s.
+
+That is not a statement about difficulty — the repairs were fiddly and the greenfield files were
+ordinary. It is about **recoverable state**. A repair starts from something that exists and can be
+built; each step either compiles or does not, and the round can stop mid-way having improved things.
+A monolithic write is all-or-nothing: #0014 round 2 emitted 306 lines with `{ ... }` placeholder
+bodies still in them, declared three properties twice, and then spent twenty minutes and seven builds
+failing to dig out. Nothing it produced could be kept.
+
+**So the shape to aim for is: make the first round produce something that compiles, however little.**
+Types and signatures first, `swift build`, then bodies. A file with two working functions is a
+foundation; a file with twelve stubbed ones is a liability, because the next round inherits the
+confusion rather than the progress.
+
+**Practical consequences already applied.** The dispatch prompt tells the model to build incrementally
+and to use a heredoc if `write` fails twice. Reviews that follow a failed greenfield round should be
+written as repairs against whatever landed, naming each defect — that is what turned #0012, #0020 and
+#0102 around. And an issue whose deliverable will exceed roughly 200 lines should be split *before*
+it is dispatched, not after it fails.
+
+**One caution.** This is a correlation across ~30 rounds on one model, not a law. What it justifies is
+a default — prefer repair framing, prefer smaller first deliverables — not a refusal to ever create a
+file.
+
 ### 3.7 Review feedback can make the next round impossible
 
 Round 2 of #0070 was killed by the sandbox because *my feedback* told it to verify git behaviour,
