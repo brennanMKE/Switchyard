@@ -85,6 +85,18 @@ judgment → a subagent dispatches it → Opus reviews the diff and the real ver
 accept, or write a `## Review` section into the issue and re-dispatch.** Full workflow, roles, and
 loop protection are in `issues/Issues.md`.
 
+**Never dispatch from the main checkout, and keep a `../switchyard-main` worktree on `main`.** A
+dispatch running on `main` pins it, so every finished issue queues behind that round instead of
+landing.
+
+**Push immediately and merge immediately.** Push the branch when it is created and after every
+round; squash-merge and push `main` the moment an issue resolves. Do not batch. Work that is
+committed but unpushed is invisible, and invisible work is indistinguishable from no work — this has
+already happened once, with seven finished branches sitting unpushed while `main` looked idle.
+
+Concurrency ceiling: LM Studio is configured `PARALLEL 2`, so a third simultaneous dispatch queues
+rather than running. Two rounds at a time is the real limit until that is raised.
+
 Two rules that bind this file specifically:
 
 - **Dispatch through a subagent, never from the main loop.** An OpenCode transcript is long and
