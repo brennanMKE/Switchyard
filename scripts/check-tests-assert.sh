@@ -18,6 +18,8 @@
 #   TAUTOLOGY an assertion over literals, e.g. #expect(true)
 #   ORPHANTEST a test file outside every declared target — never compiled
 #   SKIPSHAPE a bare `return` in a @Test body — a quiet skip that reports success
+#   EMPTYELSE an `else` block containing only comments — the `if` branch's
+#             assertion is simply skipped when the condition does not hold
 #   HANDROLLED a hand-written `allCases`, which makes "every case" mean
 #             "every case someone remembered"
 #
@@ -110,11 +112,57 @@ if [[ -f YardKit/Package.swift ]]; then
   fi
 fi
 
+# --- EMPTYELSE: an `else` block that asserts nothing ------------------------
+# `if let x { #expect(...) } else { /* not present */ }` passes when x is
+# absent -- the assertion is skipped and the test reports success. #0096
+# round 2 shipped five of these. The right shape is `try #require(...)`, which
+# fails when the value is missing.
+#
+# Brace-balanced from `else {` to its close, counting only from the `else`
+# keyword onward -- the `}` in `} else {` closes the *previous* block, and
+# counting it was the bug that made the first version of this scan never fire.
+EMPTYELSE_AWK=$(cat <<'AWKEOF'
+{
+  line = $0
+  gsub(/"([^"\\]|\\.)*"/, "\"\"", line)          # strip string literals
+}
+depth > 0 {
+  body = body "\n" line
+  n = gsub(/{/, "{", line); m = gsub(/}/, "}", line)
+  depth += n - m
+  if (depth <= 0) { report(); depth = 0; body = "" }
+  next
+}
+{
+  # Find `else {` and count braces only from there onward.
+  tail = line
+  if (sub(/^.*[^A-Za-z0-9_]else[ \t]*{/, "{", tail) || sub(/^else[ \t]*{/, "{", tail)) {
+    start = NR; body = tail
+    n = gsub(/{/, "{", tail); m = gsub(/}/, "}", tail)
+    depth = n - m
+    if (depth <= 0) { report(); depth = 0; body = "" }
+  }
+}
+function report(   s) {
+  s = body
+  gsub(/\/\/[^\n]*/, "", s)
+  gsub(/[ \t\n{}]/, "", s)
+  if (s == "") printf "  EMPTYELSE  %s:%d: else block asserts nothing\n", F, start
+}
+AWKEOF
+)
+EMPTYELSE=""
+while IFS= read -r f; do
+  [[ -n "$f" ]] || continue
+  EMPTYELSE+="$(awk -v F="$f" "$EMPTYELSE_AWK" "$f" || true)"$'\n'
+done < <(find $TARGETS -name '*.swift' -type f 2>/dev/null || true)
+EMPTYELSE=$(print -r -- "$EMPTYELSE" | grep . || true)
+
 # --- HANDROLLED: a hand-written allCases in production code ----------------
 HAND=$(grep -rn -E 'static +(var|let) +allCases' Sources YardKit/Sources --include='*.swift' 2>/dev/null \
   | sed 's/^/  HANDROLLED /' || true)
 
-for block in "$INERT" "$NARROW" "$TAUT" "$ORPHAN" "$HAND"; do
+for block in "$INERT" "$NARROW" "$TAUT" "$ORPHAN" "$EMPTYELSE" "$HAND"; do
   if [[ -n "${block//[[:space:]]/}" ]]; then print -r -- "$block"; FOUND=1; fi
 done
 
