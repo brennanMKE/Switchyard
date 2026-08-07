@@ -29,7 +29,8 @@ a figure derived from it appears.
 | 2026-08-06 | #0006–#0009 | Work-log format conversion | 25,992 | $0.21 |
 | 2026-08-06 | #0024 | Work-log format conversion | 19,096 | $0.15 |
 | 2026-08-06 | #0098 | Dispatch round 1 (failed: sandbox denial, exit 7) | 45,120 | $0.36 |
-| | | **Total measured** | **482,356** | **$3.86** |
+| 2026-08-06 | #0098 | Dispatch round 2 (converged, 190s) | 55,326 | $0.44 |
+| | | **Total measured** | **537,682** | **$4.30** |
 
 ## What this total does and does not cover
 
