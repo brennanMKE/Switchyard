@@ -152,9 +152,9 @@ public enum CommitLog {
             let trimmed = String(record).trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { continue }
 
-            // Split each record on SOH into fields. The body (last field)
-            // may contain newlines and anything except NUL, so split with
-            // limit 6 so the trailing field gets everything after the 5th separator.
+            // Split each record on SOH into fields. The body is the last field
+            // and may contain newlines, and SOH itself -- so this split can
+            // produce more than six parts, and the body is rejoined below.
             let parts = trimmed.split(separator: "\u{01}", omittingEmptySubsequences: false)
 
             guard parts.count >= 5 else { continue }
@@ -169,11 +169,11 @@ public enum CommitLog {
 
             // The body is everything after the 5th SOH. `git log --format=%B`
             // emits newlines literally, so the body arrives as one string with
-            // actual \n chars in it. We only need to guard against the empty
-            // case (i.e., no body at all), but since we split with
-            // `omittingEmptySubsequences: false`, an empty body yields a single
-            // empty string at parts[5], which is exactly what we want.
-            let message = parts.count > 5 ? String(parts[5]) : ""
+            // actual \n chars in it. Since the format ends with `%B%x00` and
+            // `%B` is the last field, joining parts[5...] with SOH preserves any
+            // embedded delimiters in the body verbatim. When only five fields
+            // are present there is no trailing field and the message is empty.
+            let message = parts.count > 5 ? parts[5...].joined(separator: "\u{01}") : ""
 
             // Parents: space-separated hex. Empty means root commit.
             let parents = parentsRaw.isEmpty ? [String]() : parentsRaw.split(separator: " ").map(String.init)
