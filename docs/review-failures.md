@@ -78,6 +78,23 @@ requirement.
     whose body `continue`s past everything but one case, and test functions containing zero
     `#expect`. Both look like coverage. Grep the diff for `#expect` per test function.
 
+## Backlog debt this surfaced
+
+Running the preflight across every open issue on the day it was written: **41 fail**. 41 name no
+gradeable verification command; 29 name no source file. The M1 read commands were fixed in place —
+they already named a file and lacked only the proof line, which is the same one-line addition in each.
+The rest are M2 and M3 issues written as a plan rather than as a dispatch-ready spec.
+
+**That backlog is not a bug to fix in bulk.** An issue is authored to dispatch standard when it
+reaches the front of the queue, because authoring it earlier means authoring against a tree that will
+have changed by the time it runs — which is exactly how #0090 round 1 failed. What matters is that
+the debt is now *enforced* rather than discovered mid-round: `dispatch-issue.sh` will refuse each of
+those 41 until it is written properly.
+
+The one thing to carry forward: **the check found #0012 through #0020 all claiming coverage in prose**
+("tested against both ref formats via the fixture harness") **without naming a command whose output
+could be pasted.** That phrasing reads as rigour and grades as nothing.
+
 ## Already covered — do not add duplicate guards
 
 | Failure mode | Existing guard |
