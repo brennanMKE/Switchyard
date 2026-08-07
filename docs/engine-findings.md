@@ -271,6 +271,13 @@ So: build content with `git_commit_create_buffer`, sign that buffer with
 field `gpgsig`. git reads the result as a good signature. libgit2 never produces the signature, only
 attaches it, exactly as the guide anticipated.
 
+**Re-confirmed with the production key, 2026-08-07.** The same three-step shape signs correctly with
+Brennan's registered `~/.ssh/id_ed25519`, not merely with a throwaway: the object carries `gpgsig` and
+`git log --show-signature` reports `Good "git" signature for offwhite@gmail.com with ED25519 key
+SHA256:NSSbIJ9ghfbmdsa8wOkq…`. The `allowedSignersFile` behaviour reproduced exactly as recorded
+below — without it, the same valid signature reports as **No signature**, which is why `verify` has
+three states and not two.
+
 Findings worth carrying into #0036:
 
 - **`gpg.ssh.allowedSignersFile` is not optional for verification.** Without it git reports the
