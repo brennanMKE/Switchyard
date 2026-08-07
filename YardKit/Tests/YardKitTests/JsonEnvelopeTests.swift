@@ -275,6 +275,52 @@ struct JsonEnvelopeTests {
 
     }
 
+    @Test func envelopeFailWriteEmitsOnlyJsonToStdout() throws {
+        let pipe = Pipe()
+
+        // Capture the file descriptors *before* dup2 so we still own them
+        // after stdout has been replaced with the pipe's write end.
+        let pipeWriteFd = pipe.fileHandleForWriting.fileDescriptor
+        let pipeReadFd  = pipe.fileHandleForReading.fileDescriptor
+
+        // Replace stdout with the pipe's write end so `FileHandle.standardOutput.write(data)`
+        // lands in the pipe buffer instead of the real terminal.
+        let savedStdout = dup(STDOUT_FILENO)
+        defer { dup2(savedStdout, STDOUT_FILENO); close(savedStdout) }
+
+        dup2(pipeWriteFd, STDOUT_FILENO)
+
+        let env = EnvelopeFail(
+            code: .brokerUnreachable,
+            message: "The broker service is not responding.",
+            hint: nil
+        )
+
+        env.write()
+
+        dup2(savedStdout, STDOUT_FILENO)
+
+        // Close the extra write-end reference (the dup we made to redirect stdout is one;
+        // pipeWriteFd itself is the other). If we don't close this dup's target, readDataToEndOfFile
+        // would block waiting for the pipe to be drained. We already saved stdout with dup2,
+        // so we need to close the original pipe write fd that we dup'd.
+        close(pipeWriteFd)
+
+        let data = FileHandle(fileDescriptor: pipeReadFd).readDataToEndOfFile()
+        #expect(data.count > 0, "stdout should not be empty")
+
+        let text = String(data: data, encoding: .utf8) ?? ""
+        #expect(text.first == "{", "first byte should be `{`, got '\(text.prefix(30))'")
+        #expect(text.last == "}", "last byte should be `}`, got '\(text.suffix(30))'")
+
+        let parsed = try JSONSerialization.jsonObject(with: data, options: []) as! [String: Any]
+        #expect((parsed["ok"] as? Bool) == false)
+
+        let error = parsed["error"] as! [String: Any]
+        #expect((error["code"] as! String) == "broker_unreachable")
+
+    }
+
     @Test func exitCodes4And5MatchContract() {
         // Codes 2-5 must agree with RemoteControl (non-negotiable). Round 1 had
         // them swapped; this is the new assertion order.
