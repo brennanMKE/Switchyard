@@ -779,3 +779,17 @@ Paths below are relative to the **repository root**, not to this file.
    is `-M` / `--find-renames`. Copy detection lives on `git diff -C`. If copies are ever wanted they
    come from a diff-based command; the status parser must not carry a `copy` state nothing can
    produce.
+
+8. **`switchyard wt gc` reports by default; pruning is opt-in behind `--prune`.** `git worktree prune`
+   cannot distinguish a *moved* worktree from a *deleted* one — both appear as
+   `prunable gitdir file points to non-existent location`, naming the old path. Reaping a moved one is
+   **not recoverable**: the directory stays on disk full of the user's work, and
+   `git worktree repair <newpath>` then exits 1 with *"unable to locate repository"*, where before the
+   prune it would have succeeded. A destructive default with `--dry-run` available inverts the risk;
+   this way round, the irreversible action needs a word typed.
+
+9. **Agent worktree locks use the reason prefix `switchyard-agent:`.** Git's own `worktree lock
+   --reason` is the mechanism — no parallel registry. An entry that is `locked` with that prefix and
+   whose directory no longer exists is an **abandoned session**: git never reports it as `prunable`
+   and never reaps it, so nothing cleans it up but us, and we report it rather than remove it. A lock
+   reason without the prefix belongs to the user and is reported as an ordinary lock.
