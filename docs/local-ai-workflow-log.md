@@ -881,6 +881,37 @@ would need a test to be true.* And when reviewing it, read the prose against the
 by line — the same discipline as re-running a test rather than reading its name, applied to the one
 artifact that cannot be run at all.
 
+### 3.13 Criteria-shaped code: the vocabulary without the behaviour
+
+#0106 asked for three specific things — walk the tree recursively, match `@testable import X`, assert
+the file set is non-empty. Round 1 delivered source containing `FileManager.enumerator`, the string
+`"@testable "`, and `#expect(!swiftFiles.isEmpty)`. Every criterion is visibly represented. **Three of
+the four mutations still passed**, meaning a layering test that cannot detect a layering violation.
+
+The two defects are worth stating precisely, because each is invisible in review by reading:
+
+- `stripImportAttributes` strips `@testable `, `internal ` and `public ` — and never strips
+  `import `. The caller then asks `marker.hasPrefix("YardKit")` of a string that always begins
+  `import `. **False for every real import line**, forever.
+- `enumerator.skipDescendants()` is called on every directory, which means *do not descend*. The
+  recursive walk never goes below one level and the `recursive:` parameter is inert.
+
+**This is the fifth costume of "a check that cannot fail" in one session**, and the first where the
+predicate operates on real data and still cannot fire. The earlier four — an assertion-free test, a
+loop that `continue`s past all but one case, `[] == []`, a test count that does not move — are each
+caught by something mechanical. This one is not. `check-tests-assert.sh` passed correctly: it looks
+for missing assertion macros and `return`-shaped skips, not predicates that are structurally
+unsatisfiable.
+
+**The general shape:** when acceptance criteria name specific mechanisms, a round can satisfy the
+*naming* without the *doing*, and every artefact-level check — the diff, the test count, the detector,
+a careful read — will agree that it complied. The words are there.
+
+**So the only reliable verification is mutation.** Break the thing the assertion guards; confirm it
+fails. That is not a nice-to-have on top of the other checks, it is the only one of them that can
+distinguish a working guard from a decorative one. Every review in this project now leads with the
+mutation table rather than ending with it.
+
 ### 3.7 Review feedback can make the next round impossible
 
 Round 2 of #0070 was killed by the sandbox because *my feedback* told it to verify git behaviour,

@@ -67,7 +67,8 @@ a figure derived from it appears.
 | 2026-08-07 | #0111 | Dispatch round 1 (REJECTED, fabricated comments) | 38,174 | $0.31 |
 | 2026-08-07 | #0014 | Dispatch round 4 + hand finish (accepted) | 64,602 | $0.52 |
 | 2026-08-07 | #0111 | Dispatch round 2 + hand finish (accepted) | 42,137 | $0.34 |
-| | | **Total measured** | **2,701,595** | **$21.62** |
+| 2026-08-07 | #0106 | Dispatch round 1 (REJECTED, unfalsifiable assertions) | 38,807 | $0.31 |
+| | | **Total measured** | **2,740,402** | **$21.92** |
 
 ## What this total does and does not cover
 
