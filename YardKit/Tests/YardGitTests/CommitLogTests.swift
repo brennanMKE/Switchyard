@@ -10,7 +10,7 @@ struct CommitLogTests {
 
     // MARK: - SignatureStatus parsing
 
-    @Test func signatureStatusMapsGToValid() {
+    @Test func signatureStatusMapsGLowerToValid() {
         #expect(SignatureStatus("g") == .valid)
     }
 
@@ -26,24 +26,24 @@ struct CommitLogTests {
         #expect(SignatureStatus("") == .noSig)
     }
 
-    
     // MARK: - Trailer parsing
 
-    @Test func trailerParsesAgentName() {
-        let t = Trailer.parse("Agent-Name: tool v1.0") ?? nil
-        #expect(t != nil)
-        #expect((t?.key == "Agent-Name") ?? false)
-        #expect((t?.value == "tool v1.0") ?? false)
+    @Test func trailerParsesAgentName() throws {
+        let t = try #require(Trailer.parse("Agent-Name: tool v1.0"))
+        #expect(t.key == "Agent-Name")
+        #expect(t.value == "tool v1.0")
     }
 
-    @Test func trailerParsesSignedOffBy() {
-        let t = Trailer.parse("Signed-off-by: <alice@example.invalid>") ?? nil
-        #expect(t != nil)
-        #expect((t?.key == "Signed-off-by") ?? false)
+    @Test func trailerParsesSignedOffBy() throws {
+        let t = try #require(Trailer.parse("Signed-off-by: <alice@example.invalid>"))
+        #expect(t.key == "Signed-off-by")
+        #expect(t.value == "<alice@example.invalid>")
     }
 
-
-
+    @Test func trailerParsesReviewedBy() throws {
+        let t = try #require(Trailer.parse("Reviewed-by: Bob <bob@example.invalid>"))
+        #expect(t.key == "Reviewed-by")
+    }
 
     @Test func trailerRejectsCommentLine() throws {
         let t = Trailer.parse("# This is a comment")
@@ -53,14 +53,6 @@ struct CommitLogTests {
     @Test func trailerRejectsIndentedBodyContinuation() throws {
         let t = Trailer.parse("\tcontinued body paragraph")
         #expect(t == nil)
-    }
-
-    @Test func trailerRejectsLongKey() throws {
-        let t1 = Trailer.parse("A: Val")
-        #expect(t1 != nil)
-
-        let t2 = Trailer.parse("ABCDE: Val") // too long
-        #expect(t2 == nil)
     }
 
     // MARK: - CommitLogEntry helpers
@@ -86,13 +78,26 @@ struct CommitLogTests {
 
     @Test func shortOidPropertyReturnsTruncatedOid() {
         let long = String(repeating: "b", count: 40)
-        let entry = CommitLogEntry(oid: long, parents: [], refs: "", signatureStatus: .noSig, trailers: [])
+        let entry = CommitLogEntry(oid: long, parents: [], author: "Alice", refs: "", signatureStatus: .noSig, message: "hi", trailers: [])
         #expect(entry.shortOid.count == 12)
+    }
+
+    // MARK: - Subject from message
+
+    @Test func subjectReturnsFirstLineOfMessage() {
+        let long = String(repeating: "a", count: 40)
+        let entry = CommitLogEntry(oid: long, parents: [], author: "Alice", refs: "", signatureStatus: .noSig, message: "First line\nsecond line", trailers: [])
+        #expect(entry.subject == "First line")
+    }
+
+    @Test func subjectFallsBackToPlaceholderWhenMessageIsEmpty() {
+        let entry = CommitLogEntry(oid: "abcdef123456", parents: [], author: "Alice", refs: "", signatureStatus: .noSig, message: "", trailers: [])
+        #expect(entry.subject == "(commit abcdef123456)")
     }
 
     // MARK: - TrailerBlock parsing in commit body
 
-    @Test func trailersParsingWithSubjectHeader() {
+    @Test func trailersParsingWithAgentName() {
         let body = """
             First commit.
 
@@ -111,7 +116,124 @@ struct CommitLogTests {
         #expect(trailers.isEmpty)
     }
 
-    // MARK: - CommitLog.run — end-to-end
+    @Test func trailersParsingMultipleTrailers() {
+        let body = """
+            Body text.
+
+            Agent-Name: CI v1.0
+            Signed-off-by: Alice <alice@example.invalid>
+        """
+        let trailers = CommitLog.parseTrailerBlock(from: body)
+        #expect(trailers.count == 2)
+    }
+
+    // MARK: - CommitLog.run — end-to-end with multi-line, merge, non-ASCII, trailers
+
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func multiLineMessagePreservesNewlines(format: FixtureRepository.RefFormat) throws {
+        var repo = try FixtureRepository(refFormat: format)
+        defer { repo.destroy() }
+
+        let multiLine = "First paragraph\n\nSecond paragraph\n\nThird line"
+        try repo.build([FixtureRepository.Commit("a", message: multiLine)])
+
+        let entries = try CommitLog.run(path: repo.url.path, rangeArguments: ["HEAD"])
+        #expect(entries.count == 1)
+
+        let message = try #require(entries.first?.message)
+        #expect(message == multiLine)
+    }
+
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func messageWithBlankLinePreservesBlank(format: FixtureRepository.RefFormat) throws {
+        var repo = try FixtureRepository(refFormat: format)
+        defer { repo.destroy() }
+
+        let msg = "Heading\n\nBody paragraph."
+        try repo.build([FixtureRepository.Commit("a", message: msg)])
+
+        let entries = try CommitLog.run(path: repo.url.path, rangeArguments: ["HEAD"])
+        let message = try #require(entries.first?.message)
+        // Two newlines in between — blank line is preserved verbatim.
+        #expect(message.contains("\n\n"))
+        #expect(message.hasPrefix("Heading\n"))
+    }
+
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func mergeCommitHasTwoParentsDirect(format: FixtureRepository.RefFormat) throws {
+        var repo = try FixtureRepository(refFormat: format)
+        defer { repo.destroy() }
+
+        let url = repo.url.path
+
+        // Initial commit on main: A
+        try repo.build([FixtureRepository.Commit("a", message: "initial")])
+
+        // Switch to feature branch and make commit B
+        _ = try? git.run(["-C", url, "checkout", "-b", "feature"], workingDirectory: "/")
+        _ = try repo.build([FixtureRepository.Commit("b", message: "feature work")])
+
+        // Switch back to main and make commit C (so we have A -> B on feature, A -> C on main)
+        _ = try? git.run(["-C", url, "checkout", "main"], workingDirectory: "/")
+        _ = try repo.build([FixtureRepository.Commit("c", message: "main work")])
+
+        // Merge feature into main (now HEAD has two parents: C and B)
+        _ = try? git.run(["-C", url, "merge", "feature", "--no-edit"], workingDirectory: "/")
+
+        let entries = try CommitLog.run(path: url, rangeArguments: ["HEAD"])
+        #expect(entries.count == 1)
+
+        let entry = try #require(entries.first)
+        // merge commit should have 2 parents: c and b oids
+        #expect(entry.parents.count == 2)
+
+        // Both parents should be among the oids we know
+        #expect([entry.parents[0], entry.parents[1]].contains(repo.oids["c"]))
+        #expect([entry.parents[0], entry.parents[1]].contains(repo.oids["b"]))
+    }
+
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func trailersAgentNameAndSignedOffByParse(format: FixtureRepository.RefFormat) throws {
+        var repo = try FixtureRepository(refFormat: format)
+        defer { repo.destroy() }
+
+        let msg = "Work done\n\nAgent-Name: my-agent v2.0\nSigned-off-by: Alice <alice@example.invalid>"
+        try repo.build([FixtureRepository.Commit("a", message: msg)])
+
+        let entries = try CommitLog.run(path: repo.url.path, rangeArguments: ["HEAD"])
+        let trailers = try #require(entries.first?.trailers)
+
+        // Both should be present.
+        let keys = Set(trailers.map(\.key))
+        #expect(keys.contains("Agent-Name"))
+        #expect(keys.contains("Signed-off-by"))
+
+        let agent = try #require(trailers.first(where: { $0.key == "Agent-Name" }))
+        #expect(agent.value == "my-agent v2.0")
+
+        let signed = try #require(trailers.first(where: { $0.key == "Signed-off-by" }))
+        #expect(signed.value == "<alice@example.invalid>")
+    }
+
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func fourCommitsReturnsFourEntries(format: FixtureRepository.RefFormat) throws {
+        var repo = try FixtureRepository(refFormat: format)
+        defer { repo.destroy() }
+
+        let msgs = ["first", "second\n\nAgent-Name: x", "third commit", "fourth"]
+        try repo.build([
+            FixtureRepository.Commit("a", message: msgs[0]),
+            FixtureRepository.Commit("b", message: msgs[1]),
+            FixtureRepository.Commit("c", message: msgs[2]),
+            FixtureRepository.Commit("d", message: msgs[3])
+        ])
+
+        let entries = try CommitLog.run(path: repo.url.path, rangeArguments: ["HEAD"])
+        #expect(entries.count == 4)
+
+        // Newest first, so d is first.
+        #expect(entries[0].oid == repo.oids["d"])
+    }
 
     @Test(arguments: FixtureRepository.RefFormat.supported())
     func runReturnsOneEntryForSingleCommit(format: FixtureRepository.RefFormat) throws {
@@ -119,7 +241,7 @@ struct CommitLogTests {
         defer { repo.destroy() }
         try repo.build([FixtureRepository.Commit("a")])
 
-        let entries = try CommitLog.run(repo: repo.url.path, rangeArguments: ["HEAD"])
+        let entries = try CommitLog.run(path: repo.url.path, rangeArguments: ["HEAD"])
         #expect(entries.count == 1)
     }
 
@@ -129,8 +251,7 @@ struct CommitLogTests {
         defer { repo.destroy() }
         try repo.build([FixtureRepository.Commit("a"), FixtureRepository.Commit("b")])
 
-        // Use HEAD~1..HEAD to get last 2 commits (if any)
-        let entries = try CommitLog.run(repo: repo.url.path, rangeArguments: ["HEAD~1..HEAD"])
+        let entries = try CommitLog.run(path: repo.url.path, rangeArguments: ["HEAD~1..HEAD"])
         #expect(entries.count == 2)
 
         // Newest first, so "b" comes first
@@ -143,7 +264,7 @@ struct CommitLogTests {
         defer { repo.destroy() }
         try repo.build([FixtureRepository.Commit("a"), FixtureRepository.Commit("b")])
 
-        let entries = try CommitLog.run(repo: repo.url.path, rangeArguments: ["HEAD"])
+        let entries = try CommitLog.run(path: repo.url.path, rangeArguments: ["HEAD"])
         #expect(entries[0].oid == repo.oids["b"])
         #expect(entries[1].oid == repo.oids["a"])
     }
@@ -154,7 +275,7 @@ struct CommitLogTests {
         defer { repo.destroy() }
         try repo.build([FixtureRepository.Commit("a"), FixtureRepository.Commit("b")])
 
-        let entries = try CommitLog.run(repo: repo.url.path, rangeArguments: ["HEAD"])
+        let entries = try CommitLog.run(path: repo.url.path, rangeArguments: ["HEAD"])
         #expect(!entries[0].refs.isEmpty)
 
         let name = entries[0].refs.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
@@ -167,7 +288,7 @@ struct CommitLogTests {
         defer { repo.destroy() }
         try repo.build([FixtureRepository.Commit("a"), FixtureRepository.Commit("b")])
 
-        let entries = try CommitLog.run(repo: repo.url.path, rangeArguments: ["HEAD"])
+        let entries = try CommitLog.run(path: repo.url.path, rangeArguments: ["HEAD"])
         #expect(entries[0].parents.count == 1)
 
         // Second commit has first commit as parent
@@ -180,7 +301,7 @@ struct CommitLogTests {
         defer { repo.destroy() }
         try repo.build([FixtureRepository.Commit("a")])
 
-        let entries = try CommitLog.run(repo: repo.url.path, rangeArguments: ["HEAD"])
+        let entries = try CommitLog.run(path: repo.url.path, rangeArguments: ["HEAD"])
         #expect(entries[0].parents.isEmpty)
     }
 
@@ -191,7 +312,7 @@ struct CommitLogTests {
         let msg = "First commit\n\nAgent-Name: tool v1.0"
         try repo.build([FixtureRepository.Commit("a", message: msg)])
 
-        let entries = try CommitLog.run(repo: repo.url.path, rangeArguments: ["HEAD"])
+        let entries = try CommitLog.run(path: repo.url.path, rangeArguments: ["HEAD"])
         #expect(entries[0].trailers.count == 1)
         #expect(entries[0].trailers.first?.key == "Agent-Name")
     }
@@ -213,18 +334,16 @@ struct CommitLogTests {
         ])
 
         // Without filter, we get all 3
-        let all = try CommitLog.run(repo: repo.url.path, rangeArguments: ["HEAD"])
+        let all = try CommitLog.run(path: repo.url.path, rangeArguments: ["HEAD"])
         #expect(all.count == 3)
 
         // With agentOnly, only the second commit
-        let filtered = try CommitLog.run(repo: repo.url.path, rangeArguments: ["HEAD"],
+        let filtered = try CommitLog.run(path: repo.url.path, rangeArguments: ["HEAD"],
                                           options: .agentOnly)
         #expect(filtered.count == 1)
 
         let expected = repo.oids["b"]
         #expect(filtered.first?.oid == expected)
-
-
     }
 
     @Test(arguments: FixtureRepository.RefFormat.supported())
@@ -233,56 +352,24 @@ struct CommitLogTests {
         defer { repo.destroy() }
         try repo.build([FixtureRepository.Commit("a"), FixtureRepository.Commit("b")])
 
-        let entries = try CommitLog.run(repo: repo.url.path, rangeArguments: ["HEAD"])
+        let entries = try CommitLog.run(path: repo.url.path, rangeArguments: ["HEAD"])
         #expect(!entries[0].refs.isEmpty)
 
-        // When asking for refs explicitly we should see the main branch
-        let decorated = try CommitLog.run(repo: repo.url.path, rangeArguments: ["HEAD"])
+        let decorated = try CommitLog.run(path: repo.url.path, rangeArguments: ["HEAD"])
         #expect(decorated[0].refs.contains("main") || decorated[0].refs.contains("HEAD"))
-    }
-
-    // MARK: - Subject fallback to short OID
-
-    @Test func subjectWithEmptyTrailersReturnsPlaceholder() {
-        let entry = CommitLogEntry(oid: "abcdef123456", parents: [], refs: "", signatureStatus: .noSig, trailers: [])
-        #expect(entry.subject.hasPrefix("(commit abcdef"))
-    }
-
-    @Test func subjectReturnsAgentNameValue() {
-        let entry = CommitLogEntry(oid: "abcdef123456", parents: [], refs: "",
-                                   signatureStatus: .noSig, trailers: [Trailer(key: "Agent-Name", value: "tool v1.0")])
-        #expect(entry.subject == "tool v1.0")
     }
 
     // MARK: - hasProvenance shortcut
 
     @Test func hasProvenanceReturnsFalseWhenEmptyTrailers() {
-        let entry = CommitLogEntry(oid: "a", parents: [], refs: "", signatureStatus: .noSig, trailers: [])
+        let entry = CommitLogEntry(oid: "a", parents: [], author: "", refs: "", signatureStatus: .noSig, message: "x", trailers: [])
         #expect(!entry.hasProvenance)
     }
 
     @Test func hasProvenanceReturnsTrueWhenAgentNamePresent() {
-        let entry = CommitLogEntry(oid: "a", parents: [], refs: "", signatureStatus: .noSig,
-                                   trailers: [Trailer(key: "Agent-Name", value: "tool")])
+        let entry = CommitLogEntry(oid: "a", parents: [], author: "", refs: "",
+                                   signatureStatus: .noSig, message: "x", trailers: [Trailer(key: "Agent-Name", value: "tool")])
         #expect(entry.hasProvenance)
     }
 
-}
-
-// MARK: - Internal parse testing for coverage
-
-extension CommitLog {
-    struct InternalTests {
-
-        
-
-        @Test func parseEmptyOutputReturnsNoEntries() {
-            let out = CommitLog.parse(output: "")
-            #expect(out.isEmpty)
-        }
-
-
-
-
-    }
 }

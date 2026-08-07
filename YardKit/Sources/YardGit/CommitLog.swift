@@ -8,14 +8,14 @@ public enum SignatureStatus: String, Sendable {
     case noSig
 
     /// Good, but unverified signature.
-    case valid     // %G? → `g`
+    case valid     // %G? -> `g`
 
     /// Verification failed: bad key, tampered message.
-    case invalid   // %G? → `G`
+    case invalid   // %G? -> `G`
 
     public init(_ flag: String) {
         let ch = flag.isEmpty ? "n" : String(flag.first.flatMap(Character.init) ?? Character("n"))
-        switch ch.lowercased() {
+        switch ch {
         case "g": self = .valid
         case "G": self = .invalid
         default:  self = .noSig
@@ -38,7 +38,7 @@ public struct Trailer: Equatable, CustomStringConvertible, Sendable {
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed.first != "#", trimmed.first != "\t" else { return nil }
         guard let colon = trimmed.firstIndex(of: ":"),
-              trimmed.distance(from: trimmed.startIndex, to: colon) <= 4 else { return nil }
+              !trimmed[trimmed.startIndex..<colon].contains(where: \.isWhitespace) else { return nil }
         let key = trimmed[trimmed.startIndex..<colon].trimmingCharacters(in: .whitespaces)
         let value = trimmed[trimmed.index(after: colon)...].trimmingCharacters(in: .whitespaces)
         return Trailer(key: key, value: value)
@@ -49,13 +49,12 @@ public struct Trailer: Equatable, CustomStringConvertible, Sendable {
 public struct CommitLogEntry: Equatable {
     public let oid: String
     public let parents: [String]   // list of parent SHAs; empty for the root commit
+    public let author: String      // `%an` output (raw)
     public let refs: String        // raw "%D" output, e.g. `"main, tag: v1.0"`
     public let signatureStatus: SignatureStatus
+    public let message: String     // the full commit body, verbatim (first non-empty line = subject)
     /// Parsed trailer lines from the commit message, in order.
     public let trailers: [Trailer]
-
-    /// First non-empty line of the commit body, used as the human-readable
-    /// identifier when the hash is not needed.
 }
 
 /// Configuration that changes what `CommitLog.run` returns. Built as a single
@@ -91,6 +90,9 @@ enum _Delimiter: String {
 
     /// Footer sent to the next parser call.
     case footer = "\n"
+
+    /// NUL record terminator so multi-record output stays unambiguous.
+    case recordEnd = "\u{0}"
 }
 
 /// Public entry point for the commit log module. Holds no state; all input is
@@ -98,150 +100,135 @@ enum _Delimiter: String {
 /// responsibility single-purpose.
 public enum CommitLog {
 
-    /// Format string used internally by `run(repo:rangeArguments:options:)`.
+    /// Format string used internally by `run(path:rangeArguments:options:)`.
     /// Mirrors the format recommended in #0014 (round 1 design): a hex-encoded
     /// field separator guarantees the output stays byte-clean across CJK
-    /// characters, merge commits and multi-paragraph bodies.
-    static let formatString = "--format=%H\u{01}%P\u{01}%G?\u{01}%D"
+    /// characters, merge commits and multi-paragraph bodies. The trailing
+    /// `%B%x00` keeps the body verbatim (newlines and blank lines preserved)
+    /// and terminates each record with NUL so the parser can split reliably.
+    static let formatString = "--format=%H\u{01}%P\u{01}%an\u{01}%G?\u{01}%D\u{01}%B%x00"
 
     /// Run `git log`, decode its structured output and return a sequence of
     /// `CommitLogEntry`. Exceptions are propagated.
-    public static func run(repo path: String, rangeArguments: [String], options: CommitLogOptions = [], git: GitProcess = GitProcess()) throws -> [CommitLogEntry] {
+    public static func run(path: String, rangeArguments: [String], options: CommitLogOptions = [], git: GitProcess = GitProcess()) throws -> [CommitLogEntry] {
         var args: [String]
 
         // Build the format string by appending range arguments after an
         // explicit HEAD (when nothing is given), so the output is predictable.
-        args = ["log", formatString]
+        let fmt = String(formatString.dropFirst("--format=".count))
+        args = ["log", "--format=\(fmt)"]
 
         if rangeArguments.isEmpty {
             args.append("HEAD")
         } else {
-            // Pass through anything that is not itself a flag — ranges like
+            // Pass through anything that is not itself a flag -- ranges like
             // `A..B` and revspecs like `--since=...` come through here.
             args.append(contentsOf: rangeArguments.filter { !$0.hasPrefix("-") })
         }
 
-        if options.contains(.agentOnly) {
-            // Always pull trailers (we need them for `subject`, and
-            // caller's filter happens after the fact).
-        }
-
         let output = try git.run(args, workingDirectory: path)
-        return parse(output: output.text, options: options)
-    }
+        var entries = parse(output: output.text, options: options)
 
-    /// Parse the text produced by `run(repo:rangeArguments:)`. Returns an
-    /// array of entries in reverse commit-order (newest first).
-    static func parse(output: String, options: CommitLogOptions = []) -> [CommitLogEntry] {
-        let delimiter = _Delimiter.commit.rawValue
-        // Split on the visible commit boundary first.
-        var groups: [String] = []
-
-        for substring in output.split(separator: delimiter, omittingEmptySubsequences: true) {
-            let trimmed = String(substring).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { continue }
-            groups.append(trimmed)
-        }
-
-        var entries: [CommitLogEntry] = []
-
-        for group in groups {
-            // The first real line holds the structured fields. Split on `%x01`.
-            guard let delimiterLine = group.split(separator: "\n").first else { continue }
-
-            // Safe defaults — parse will overwrite them.
-            let parts = delimiterLine.components(separatedBy: _Delimiter.field.rawValue)
-            var oid = ""
-            let parentsRaw: String
-            let sigChar: Character
-
-            switch parts.count {
-            case 0: oid = ""; parentsRaw = ""; sigChar = "n"
-            case 1: oid = parts[0]; parentsRaw = ""; sigChar = "n"
-            case 2: oid = parts[0]; parentsRaw = String(parts[1]).trimmingCharacters(in: .whitespaces); sigChar = "n"
-            case 3...: oid = parts[0]; parentsRaw = String(parts[1]).trimmingCharacters(in: .whitespaces); sigChar = (parts[2].first ?? "n")
-            default: oid = ""; parentsRaw = ""; sigChar = "n"
-            }
-
-            // Trim trailing garbage in the sig field — sometimes git emits a trailing space.
-            let sig = (sigChar == " ") ? Character("n") : sigChar
-
-            // Parents: space-separated hex. Empty means root commit.
-            let parents = parentsRaw.isEmpty ? [String]() : parentsRaw.split(separator: " ").map(String.init)
-
-            // Refs come from the fourth field of "%D". Will be `""` for
-            // detached HEAD if `--decorate=full` isn't asked. We use the raw
-            // `%D` so its exact grammar stays identical to git's output.
-            let refs = parts.count >= 4 ? String(parts[3]) : ""
-
-            // Trailer parsing happens once we have the full commit body —
-            // here we just remember the text for later, and skip if the user
-            // only needs the body itself.
-            let trailers = parseTrailerBlock(from: group)
-
-            // Apply the `agentOnly` filter.
-            if options.contains(.agentOnly), !CommitLogEntry.hasAgentName(trailers: trailers) { continue }
-
-            entries.append(CommitLogEntry(
-                oid: oid,
-                parents: parents,
-                refs: refs,
-                signatureStatus: SignatureStatus(sig),
-                trailers: trailers
-            ))
+        if options.contains(.agentOnly) {
+            entries = entries.filter { $0.hasAgentName }
         }
 
         return entries.reversed()   // newest first matches `git log` order.
     }
 
-    /// Pulls out the trailer block from a body — everything after the first
+    /// Parse the text produced by `run(path:rangeArguments:)`. Returns an
+    /// array of entries in reverse commit-order (newest first).
+    static func parse(output: String, options: CommitLogOptions = []) -> [CommitLogEntry] {
+        var entries: [CommitLogEntry] = []
+
+        // Split on NUL first -- each non-empty piece is one commit record.
+        let records = output.split(separator: "\u{0}", omittingEmptySubsequences: false)
+
+        for record in records {
+            let trimmed = String(record).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+
+            // Split each record on SOH into fields. The body (last field)
+            // may contain newlines and anything except NUL, so split with
+            // limit 6 so the trailing field gets everything after the 5th separator.
+            let parts = trimmed.split(separator: "\u{01}", omittingEmptySubsequences: false)
+
+            guard parts.count >= 5 else { continue }
+
+            let oid = String(parts[0]).trimmingCharacters(in: .whitespaces)
+            guard !oid.isEmpty else { continue }
+
+            let parentsRaw = String(parts[1]).trimmingCharacters(in: .whitespaces)
+            let author = String(parts[2])
+            let sigFlag = String(parts[3]).trimmingCharacters(in: .whitespaces)
+            let refs = String(parts[4])
+
+            // The body is everything after the 5th SOH. `git log --format=%B`
+            // emits newlines literally, so the body arrives as one string with
+            // actual \n chars in it. We only need to guard against the empty
+            // case (i.e., no body at all), but since we split with
+            // `omittingEmptySubsequences: false`, an empty body yields a single
+            // empty string at parts[5], which is exactly what we want.
+            let message = parts.count > 5 ? String(parts[5]) : ""
+
+            // Parents: space-separated hex. Empty means root commit.
+            let parents = parentsRaw.isEmpty ? [String]() : parentsRaw.split(separator: " ").map(String.init)
+
+            // Trailer parsing happens once we have the full commit body.
+            let trailers = parseTrailerBlock(from: message)
+
+            // Apply the `agentOnly` filter inside the loop so we skip early.
+            if options.contains(.agentOnly), !CommitLogEntry.hasAgentName(trailers: trailers) { continue }
+
+            entries.append(CommitLogEntry(
+                oid: oid,
+                parents: parents,
+                author: author,
+                refs: refs,
+                signatureStatus: SignatureStatus(sigFlag),
+                message: message,
+                trailers: trailers
+            ))
+        }
+
+        return entries
+    }
+
+    /// Pulls out the trailer block from a body -- everything after the first
     /// blank line (if any) that looks like `Key: Value`.
     static func parseTrailerBlock(from commitBody: String) -> [Trailer] {
-        let lines = commitBody.split(separator: "\n")
+        let lines = commitBody.split(separator: "\n", omittingEmptySubsequences: false)
 
-        // Body ends at the first line that is empty followed by either a
-        // trailer-lookalike or an end-of-text. We stop when we hit content
-        // that is clearly body text (tab/quote-prefixed continuation).
-        var startIdx = 0
-
-        for i in 0 ..< lines.count {
+        // Find the first blank-line separator between body and trailers.
+        var separatorIndex: Int? = nil
+        for i in 0 ..< lines.count - 1 {
             let line = lines[i].trimmingCharacters(in: .whitespaces)
-            if !line.isEmpty, line.hasPrefix("\t"), i > 0 { continue }
-
-            if startIdx == 0 && !line.isEmpty, line.first?.isLetter == true {
-                // First real line of the body. Track start so we know where trailers begin.
-                continue
-            }
-
-            if line.isEmpty, i < lines.count - 1 {
-                // Blank separator — look ahead to see if a trailer follows.
+            if line.isEmpty {
+                // Look ahead -- is the next non-blank line a trailer?
                 for j in (i + 1) ..< lines.count {
                     let next = lines[j].trimmingCharacters(in: .whitespaces)
-                    guard !next.isEmpty else { continue }
-
-                    if next.hasPrefix("Co-Author:") || next.hasPrefix("Signed-off-by:")
-                        || next.hasPrefix("Agent-Name:") {
-                        startIdx = j + 1
-                    } else if next.hasPrefix("Acked-by:") || next.hasPrefix("Reviewed-by:") {
-                        startIdx = j + 1
-                    } else { break }
+                    if next.isEmpty { continue }
+                    // A trailer starts at word boundary, no leading whitespace.
+                    if next.first?.isWhitespace == false && next.firstIndex(of: ":") != nil {
+                        separatorIndex = i
+                    }
+                    break
                 }
-
-                if startIdx > i { break }   // we found the separator
+                if separatorIndex != nil { break }
             }
         }
 
-        let trailerText = lines[startIdx...]
+        let startIdx = max(separatorIndex.map { $0 + 1 } ?? lines.count, 0)
         var trailers: [Trailer] = []
 
-        for line in trailerText {
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        for i in startIdx ..< lines.count {
+            let trimmed = String(lines[i]).trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { continue }
 
             if let t = Trailer.parse(trimmed) {
                 trailers.append(t)
-            } else if line.hasPrefix(" ") || line.hasPrefix("\t") {
-                // Continuation of the previous trailer — handle multi-value cases.
+            } else if trimmed.first?.isWhitespace == true {
+                // Continuation of the previous trailer -- handle multi-value cases.
                 if var last = trailers.popLast() {
                     // Append the continuation as a space-prefixed suffix, since git
                     // uses `" value"` to extend trailers.
@@ -255,29 +242,31 @@ public enum CommitLog {
     }
 }
 
-// MARK: - Protocol support helpers (extending `CommitLogEntry`)
+// MARK: - Convenience helpers (extending `CommitLogEntry`)
 
 extension CommitLogEntry {
+    /// First non-empty line of the commit message, used as the human-readable
+    /// identifier when the hash is not needed.
     public var subject: String {
-        // Look up the first trailer whose key is `Subject:` (rare) and fall back
-        // to a placeholder otherwise. Trailers are the source of truth for agents.
-        if let first = trailers.first, first.key.lowercased() == "subject" { return first.value }
-
-        // Fall back to the short OID — safer than a fictional subject from an
-        // unparseable body. The caller can fall back further if they need a
-        // usable label (e.g. the first non-blank line of a parsed body).
-        let short = CommitLogEntry.shortOid(oid)
-        return "(commit \(short))"
+        let firstLine = message.split(separator: "\n").first.map(String.init) ?? ""
+        return firstLine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "(commit \(shortOid))"
+            : firstLine.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    public var shortOid: String { CommitLogEntry.shortOid(self.oid) }
+    /// Short OID representation for an entry's `oid`. Returns the first 12 hex
+    /// digits or `"<unknown>"`.
+    public var shortOid: String { Self.shortOid(oid) }
 
     /// Whether any trailer carries an `Agent-Name:` key (case-insensitive).
     public var hasProvenance: Bool { CommitLogEntry.hasAgentName(trailers: trailers) }
 
+    /// Whether any trailer in the list matches `Agent-Name` (case-insensitive).
+    internal var hasAgentName: Bool { CommitLogEntry.hasAgentName(trailers: trailers) }
+
     /// Short OID representation for an entry's `oid`. Returns the first 12 hex
     /// digits or `"<unknown>"`.
-    static func shortOid(_ oid: String) -> String {
+    public static func shortOid(_ oid: String) -> String {
         guard !oid.isEmpty else { return "<unknown>" }
 
         let count = min(12, oid.count)
@@ -289,7 +278,17 @@ extension CommitLogEntry {
     }
 
     /// Whether any trailer in the list matches `Agent-Name` (case-insensitive).
-    static func hasAgentName(trailers: [Trailer]) -> Bool {
+    public static func hasAgentName(trailers: [Trailer]) -> Bool {
         return trailers.contains(where: { $0.key.lowercased() == "agent-name" })
     }
 }
+
+// MARK: - Convenience for parse output in tests
+
+extension CommitLog {
+    /// Parse output without range filtering. Exposed for testability; production code uses `run(path:rangeArguments:)`.
+    static func parseClean(output: String) -> [CommitLogEntry] {
+        return CommitLog.parse(output: output, options: [])
+    }
+}
+

@@ -108,7 +108,7 @@ public struct FixtureRepository {
     ///
     /// A commit with no named parents starts from the current `HEAD`, so a
     /// simple linear history needs no parent bookkeeping at all.
-    public mutating func build(_ commits: [Commit]) throws {
+    public mutating func build(_ commits: [Commit], checkoutToMain: Bool = false) throws {
         for commit in commits {
             if !commit.parents.isEmpty {
                 let parentOids = try commit.parents.map { name -> String in
