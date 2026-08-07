@@ -102,7 +102,8 @@ a figure derived from it appears.
 | 2026-08-07 | #0097 | Dispatch round 3 + hand finish (accepted) | 49,704 | $0.40 |
 | 2026-08-07 | #0123 | Dispatch round 1 (accepted, app-launch fix) | 65,077 | $0.52 |
 | 2026-08-07 | #0123 | Dispatch round 1 (accepted, app-launch fix) | 65,077 | $0.52 |
-| | | **Total measured** | **4,592,751** | **$36.73** |
+| 2026-08-07 | #0126 | Dispatch round 1 + hand finish (accepted) | 41,760 | $0.33 |
+| | | **Total measured** | **4,634,511** | **$37.06** |
 
 ## What this total does and does not cover
 
