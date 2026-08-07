@@ -161,6 +161,17 @@ this sequence before anything else is dispatched:
    been filed.
 4. **Then** do the planning update to the issue and re-dispatch.
 
+### Reviewing a round — the two things that have slipped through
+
+**Re-run the verification yourself.** Reading the model's pasted output and agreeing with its
+interpretation is not review; #0070 round 1 was accepted that way and was wrong in three places.
+
+**Read the body of every new test, not its name.** Twice now a round has landed a green suite whose
+tests assert nothing — a loop over `allCases` that `continue`s past all but one case, and functions
+containing no `#expect` at all. Ask what production change would make each test fail. If the answer
+is "none", the criterion is not met however green the run was. This is `AGENTS.md` Rule 7 from the
+reviewer's side.
+
 ### The classes, so a failure gets filed rather than re-derived
 
 `spec-defect` (the issue text was wrong or unbuildable) · `environment` (sandbox, missing tool,

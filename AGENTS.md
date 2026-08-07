@@ -89,6 +89,26 @@ there.
 Two separate runs have now died on this. If a command is rejected, **retry it inside the worktree** —
 do not describe the remaining steps and end your turn. A plan is not an outcome.
 
+## Rule 7 — A test that cannot fail is worse than no test.
+
+Two rounds have now shipped tests that look like coverage and assert nothing. Both were green. Both
+hid a real defect.
+
+The two shapes to never write:
+
+- **A loop that skips almost everything.** `for code in allCases { guard case .ok = code else
+  { continue }; ... }` iterates every case and tests exactly one, under a name promising all of them.
+  If you loop over cases, every iteration must reach an assertion.
+- **A test function with no assertion at all.** If it contains no `#expect`, it passes
+  unconditionally and proves nothing.
+
+Also: **the name must match what the body does.** A test called
+`envelopeFailWriteEmitsJsonToStdout` that never calls `write()` is a false claim in the test report,
+and it survived review once precisely because the name was read instead of the body.
+
+Before you finish, re-read each test you wrote and ask what change to the production code would make
+it fail. If the honest answer is "none", the test is not done.
+
 ## Build commands
 
 ```sh
