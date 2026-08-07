@@ -77,7 +77,9 @@ a figure derived from it appears.
 | 2026-08-07 | #0110 | Dispatch round 1 (accepted) | 53,310 | $0.43 |
 | 2026-08-07 | #0112 | Dispatch round 3 (accepted) | 54,826 | $0.44 |
 | 2026-08-07 | #0096 | Dispatch round 1 (REJECTED, no tests written) | 50,676 | $0.41 |
-| | | **Total measured** | **3,191,102** | **$25.53** |
+| 2026-08-07 | #0088 | Dispatch round 1 (REJECTED, two assertions absent, scope violation) | 62,839 | $0.50 |
+| 2026-08-07 | #0096 | Dispatch round 2 (REJECTED, test file does not compile) | 64,158 | $0.51 |
+| | | **Total measured** | **3,318,099** | **$26.54** |
 
 ## What this total does and does not cover
 

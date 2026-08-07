@@ -193,6 +193,22 @@ An issue being actively worked must say so, or the tracker lies about what is
 happening. Set it back to 'open' if the round is abandoned."
 fi
 
+# --- Check 4b (WARN) — the stated baseline matches main's real count --------
+# #0096 round 1 was reviewed against a baseline of 216 when main was 225. A
+# stale number hides a small increase, and can make an unmoved count read as
+# progress. docs/test-baseline.txt is rewritten whenever main's suite is run.
+if [[ -f docs/test-baseline.txt ]]; then
+  REAL=$(<docs/test-baseline.txt)
+  # $SPEC is a FILE holding the spec text, not the text itself.
+  STATED=$(grep -oE 'reported [0-9]+ on' "$SPEC" 2>/dev/null | grep -oE '[0-9]+' | head -1 || true)
+  if [[ -n "$STATED" && -n "$REAL" && "$STATED" != "$REAL" ]]; then
+    warn "issue states a baseline of $STATED, but main's suite is $REAL" \
+"A stale baseline hides a small increase. Update the issue before dispatching."
+  elif [[ -n "$STATED" ]]; then
+    pass "stated baseline $STATED matches main"
+  fi
+fi
+
 # --- Check 7 (WARN) — concurrency headroom ----------------------------------
 # LM Studio is PARALLEL 2. A third dispatch queues silently and is
 # indistinguishable from a very slow round.
