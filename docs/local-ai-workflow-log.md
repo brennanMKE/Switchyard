@@ -674,6 +674,33 @@ looking for. Both were labelled as verified fact. The model did what it was told
 told was wrong — which is why the checklist now asks whether a grep was run against known-bad input
 before being written into a criterion, and why nothing may enter a Givens block unexecuted.
 
+### 3.10 Naming the file is not naming the API
+
+#0012 named its output file, its twelve fields, and its acceptance criteria. It named no
+collaborators. The round wrote 679 lines against `GitProcess.GitRunner` and `Platform` — a protocol
+and a conforming type it invented as an injection seam — and **did not open `GitProcess.swift` until
+the last five lines of a 1443-line log**, after four rewrite cycles against phantom types. The cap
+killed it with no test file written at all.
+
+This refines §3.6, which has been load-bearing all evening. *Name the file* fixed convergence because
+it forces the author to decide where code goes. But a path says nothing about what the code may
+**call**, and a model with no stated API will infer one — reaching, reasonably, for something
+injectable, because that is what testable code usually looks like.
+
+**Fix:** when an issue depends on existing types, quote their real surface in the Givens, and say
+explicitly when there is *no* abstraction to implement. `GitProcess` is a concrete `Sendable` struct
+constructed as `GitProcess()`; the tests run against real repositories from `FixtureRepository`, so
+there is nothing to inject. That sentence, absent from round 1, is the whole difference.
+
+**The generalisation:** an issue is a contract about an unfamiliar codebase. The author has read it;
+the implementer has not. Every type the work must touch is a place where "obvious" diverges between
+them — and the model's guess will be idiomatic, plausible, and wrong.
+
+**Also note what breadth did.** Twelve fields, sibling-worktree resolution, both ref formats, and a
+test suite in one round. Even had the API been right, the budget was thin. Signing configuration
+became #0108 and the sibling worktree #0109 — neither is needed to answer "where am I", and both are
+independently useful. Splitting after a failure is cheap; the work was never started.
+
 ### 3.7 Review feedback can make the next round impossible
 
 Round 2 of #0070 was killed by the sandbox because *my feedback* told it to verify git behaviour,
