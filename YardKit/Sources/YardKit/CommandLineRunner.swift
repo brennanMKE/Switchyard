@@ -2,6 +2,9 @@
 
 import Foundation
 
+private let encodingFailureEnvelope =
+    #"{"schemaVersion":1,"ok":false,"error":{"code":"request_failed","message":"Failed to encode the response."}}"#
+
 /// Pure, testable entry-point logic. Takes the argument array *after* the
 /// executable name and returns what `switchyard` would write to stdout, any
 /// human-readable line for stderr, and the exit code — no I/O of its own.
@@ -60,16 +63,19 @@ private func runSchema() -> (stdout: String, stderr: String, exitCode: ExitCode)
         // Parse the raw JSON body into a typed [String: Any] value so that
         // .sortedKeys and .prettyPrinted can work on the *outer* envelope too.
         let raw = "{\"schemaVersion\":1,\"ok\":true,\"result\":{\"commands\":[\(schemaBody)]}}"
-            .data(using: .utf8)!
-        let root = try JSONSerialization.jsonObject(with: raw) as! [String: Any]
-
-        guard let data = try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys]) else {
-            let env = EnvelopeFail(code: .requestFailed, message: "Schema encoding failed")
-            let human = "[error] \(env.error.code.rawValue): \(env.error.message)\n"
-            return (stdout: jsonString(env), stderr: human, exitCode: .requestFailed)
+            .data(using: .utf8)
+        guard let raw = raw else {
+            return (stdout: encodingFailureEnvelope, stderr: "", exitCode: .requestFailed)
+        }
+        let root = try JSONSerialization.jsonObject(with: raw) as? [String: Any]
+        guard let root = root else {
+            return (stdout: encodingFailureEnvelope, stderr: "", exitCode: .requestFailed)
         }
 
-        let payload = String(data: data, encoding: .utf8)!
+        guard let data = try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys]),
+              let payload = String(data: data, encoding: .utf8) else {
+            return (stdout: encodingFailureEnvelope, stderr: "", exitCode: .requestFailed)
+        }
         return (stdout: payload, stderr: "", exitCode: .success)
     } catch {
         let env = EnvelopeFail(code: .requestFailed, message: "Failed to render schema: \(error.localizedDescription)")
@@ -81,6 +87,9 @@ private func runSchema() -> (stdout: String, stderr: String, exitCode: ExitCode)
 // MARK: - Private helpers
 
 private func jsonString<T: Encodable>(_ value: T) -> String {
-    let data = try! JSONEncoder().encode(value)
-    return String(data: data, encoding: .utf8)!
+    guard let data = try? JSONEncoder().encode(value),
+          let text = String(data: data, encoding: .utf8) else {
+        return encodingFailureEnvelope
+    }
+    return text
 }
