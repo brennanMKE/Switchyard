@@ -5,24 +5,24 @@ import Foundation
 /// Reestablishes the reverse pointer that links between a main worktree and
 /// its linked worktrees — broken whenever either end is moved on disk.
 ///
-/// Wraps `git worktree repair` and parses its `repair: gitdir incorrect: …`
-/// report from stderr, which is the only place git says what was touched. The
-/// command exits 0 in both cases, so "nothing reported" means nothing needed
-/// repairing — never failure. A round would otherwise assert on stdout, which is
-/// empty for a successful repair and silently report no links were touched.
+/// Wraps `git worktree repair` and parses its report lines from stderr, which
+/// is the only place git says what was touched. The command exits 0 in both
+/// cases, so "nothing reported" means nothing needed repairing — never failure.
 public enum WorktreeRepair {
 
-    /// The prefix git prepends to every "I touched this" line on stderr.
-    public static let repairReportPrefix = "repair: gitdir incorrect:"
+    /// The prefix git prepends to every "I touched this" report line on stderr.
+    /// A line beginning `repair: ` is a success report; a line beginning
+    /// `error: ` is a failure and the exit code will be non-zero.
+    public static let repairReportPrefix = "repair: "
 
     /// All paths the porcelain report named. Empty when nothing changed — that
-    /// is meaningful, not an error. Each entry is the literal string git wrote
-    /// after "repair: gitdir incorrect:" on stderr.
+    /// is meaningful, not an error. Each entry preserves the literal string
+    /// git wrote after `repair: <reason>: ` on stderr.
     public static func run(
         repositoryPath: String,
         atPaths paths: [String] = [],
         git: GitProcess = GitProcess()
-    ) throws -> [String] {
+    ) throws -> [Repaired] {
         var args: [String] = ["worktree", "repair"]
         if !paths.isEmpty {
             args += paths
@@ -43,36 +43,49 @@ public enum WorktreeRepair {
         return parseReport(from: output.standardError)
     }
 
-    /// Splits the literal "repair: gitdir incorrect:" lines out of a stderr
-    /// string. Empty input produces an empty array — that is the "nothing to do"
-    /// case, not a failure. Each line's path component is the value git restored.
-    public static func parseReport(from stderr: String) -> [String] {
-        let trimmed = stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return [] }
+    /// Parses the porcelain report lines from `git worktree repair` stderr. A line is included only when
+    /// it begins with the `repairReportPrefix`. Empty input produces an empty array — that is the "nothing
+    /// to do" case, not a failure.
+    /// One repaired link, as git reported it.
+    ///
+    /// git's `report_repair` (builtin/worktree.c) writes `repair: <reason>: <path>`
+    /// to stderr. There are exactly three reasons — `gitdir incorrect`,
+    /// `.git file broken`, and `gitdir unreadable` — and which one appears
+    /// changes what `path` means: `gitdir incorrect` names the administrative
+    /// `worktrees/<name>/gitdir` file, while `.git file broken` names the linked
+    /// worktree itself. Callers that care can branch on `reason`; callers that
+    /// just want to say what moved can use `path`.
+    public struct Repaired: Sendable, Equatable {
+        public let reason: String
+        public let path: String
 
-        let lines = stderr.split(
-            separator: "\n", omittingEmptySubsequences: false
-        ).map(String.init)
+        public init(reason: String, path: String) {
+            self.reason = reason
+            self.path = path
+        }
+    }
 
-        var repairedPaths: [String] = []
-        for line in lines {
+    public static func parseReport(from stderr: String) -> [Repaired] {
+        var repaired: [Repaired] = []
+        for line in stderr.split(separator: "\n", omittingEmptySubsequences: true) {
             let stripped = line.trimmingCharacters(in: .whitespacesAndNewlines)
             guard stripped.hasPrefix(repairReportPrefix) else { continue }
 
             let rest = String(stripped.dropFirst(repairReportPrefix.count))
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+            // Split on the FIRST ": " only -- a path may contain one, a reason
+            // never does.
+            guard let sep = rest.range(of: ": ") else { continue }
+            let reason = String(rest[rest.startIndex..<sep.lowerBound])
+            let path = String(rest[sep.upperBound...])
+            guard !reason.isEmpty, !path.isEmpty else { continue }
 
-            if !rest.isEmpty {
-                repairedPaths.append(rest)
-            }
+            repaired.append(Repaired(reason: reason, path: path))
         }
-
-        return repairedPaths
+        return repaired
     }
 
-    /// Top-level errors produced by `WorktreeRepair.run`. The test suite must be
-    /// able to distinguish "the command failed" from "git ran and exited 0 but
-    /// reported no repairs".
+/// Top-level errors produced by `WorktreeRepair.run`. Tests must distinguish "the command failed"
+    /// from "git ran and exited 0 but reported no repairs."
     public enum Error: Swift.Error, CustomStringConvertible, Sendable {
         case notRepaired(detail: String, exitCode: Int)
 
@@ -86,21 +99,3 @@ public enum WorktreeRepair {
     }
 }
 
-// MARK: - Readability helpers
-
-extension WorktreeRepair {
-    /// True when the repair touched no links. Meaningful in itself, but tests
-    /// must assert it explicitly so that a "make repair do nothing" mutation is
-    /// caught by the post-repair porcelain check, not this assertion.
-    public static func hasNoRepairs(_ reports: [String]) -> Bool {
-        reports.isEmpty
-    }
-
-    /// The first line of the report, or nil. Tests use this to confirm a
-    /// specific entry was touched on a single-move scenario — that is the
-    /// simplest verification, and the one most likely to look right while the
-    /// mutation hides the real behaviour.
-    public static func firstReportedPath(_ reports: [String]) -> String? {
-        reports.first
-    }
-}

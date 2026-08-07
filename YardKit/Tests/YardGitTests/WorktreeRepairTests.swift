@@ -40,13 +40,37 @@ struct WorktreeRepairTests {
         #expect(!result.isEmpty, "two prefixed lines means the report is non-empty")
     }
 
-    @Test func reportLinesArePathsAfterThePrefix() {
+    @Test func reportLinesSplitIntoReasonAndPath() throws {
+        // git writes `repair: <reason>: <path>`. Keeping them glued together
+        // means no caller can get the path without re-parsing.
         let stderr = "repair: gitdir incorrect: /a/b/c/main.git/worktrees/agent/gitdir\n"
         let result = WorktreeRepair.parseReport(from: stderr)
         #expect(result.count == 1, "one prefix-matched line")
 
-        let extracted = try! #require(result.first)
-        #expect(extracted == "/a/b/c/main.git/worktrees/agent/gitdir")
+        let extracted = try #require(result.first)
+        #expect(extracted.reason == "gitdir incorrect")
+        #expect(extracted.path == "/a/b/c/main.git/worktrees/agent/gitdir")
+    }
+
+    @Test func reportLinesCarryTheMainRepoMovedReasonToo() throws {
+        // The other message git emits, and the one a hardcoded
+        // `repair: gitdir incorrect:` prefix silently dropped.
+        let stderr = "repair: .git file broken: /a/b/c/linked-worktree\n"
+        let result = WorktreeRepair.parseReport(from: stderr)
+
+        let extracted = try #require(result.first)
+        #expect(extracted.reason == ".git file broken")
+        #expect(extracted.path == "/a/b/c/linked-worktree",
+                "for this reason the path is the worktree itself, not an admin file")
+    }
+
+    @Test func reportLinesKeepAColonInsideAPath() throws {
+        // Only the FIRST ": " separates reason from path -- a reason never
+        // contains one, a path may.
+        let stderr = "repair: gitdir incorrect: /tmp/odd: name/w/gitdir\n"
+        let extracted = try #require(WorktreeRepair.parseReport(from: stderr).first)
+        #expect(extracted.reason == "gitdir incorrect")
+        #expect(extracted.path == "/tmp/odd: name/w/gitdir")
     }
 
     @Test func reportReportsSinglePrefixedLineWhenOthersAreUnrelated() {
@@ -58,7 +82,8 @@ struct WorktreeRepairTests {
             """
         let result = WorktreeRepair.parseReport(from: stderr)
         #expect(result.count == 1, "only the prefix-matched line should be reported")
-        #expect(result.first == "/a/b/c/main.git/worktrees/foo/gitdir")
+        #expect(result.first?.reason == "gitdir incorrect")
+        #expect(result.first?.path == "/a/b/c/main.git/worktrees/foo/gitdir")
     }
 
     // MARK: - Run from the main worktree with each moved path passed as an argument.
@@ -163,21 +188,7 @@ struct WorktreeRepairTests {
         #expect(!reports.isEmpty, "git worktree repair from inside a moved linked worktree reports at least one repaired path")
     }
 
-    @Test func runFromInsideMovedWorktreeExitZero() throws {
-        var repo = try FixtureRepository(refFormat: .files)
-        defer { repo.destroy() }
-        try repo.build([FixtureRepository.Commit("a")])
 
-        let added = try repo.addWorktree(named: "agent-inner", branch: "agent-inner")
-        defer { try? fm.removeItem(at: added) }
-
-        let moved = added.deletingLastPathComponent()
-            .appendingPathComponent("\(added.lastPathComponent)-moved")
-
-        try fm.moveItem(atPath: added.path, toPath: moved.path)
-
-        let _ = try WorktreeRepair.run(repositoryPath: moved.path, atPaths: [])
-    }
 
     @Test func runFromInsideMovedLinksNewPathAfterward() throws {
         var repo = try FixtureRepository(refFormat: .files)
@@ -352,25 +363,6 @@ struct WorktreeRepairTests {
     }
 
 
-
-    // MARK: - The report prefix constant.
-
-    @Test func hasNoRepairsReturnsTrueForEmptyAndFalseWhenAnyReportsAreMade() {
-        #expect(WorktreeRepair.hasNoRepairs([]))
-        #expect(!WorktreeRepair.hasNoRepairs(["/a/b/c"]))
-
-        let multiple = ["/one", "/two"]
-        #expect(!WorktreeRepair.hasNoRepairs(multiple))
-
-        let emptyLine = [""]
-        #expect(!WorktreeRepair.hasNoRepairs(emptyLine))
-    }
-
-    @Test func firstReportedPathReturnsTheFirstEntryOrNilWhenEmpty() {
-        #expect(WorktreeRepair.firstReportedPath([]) == nil)
-        #expect(WorktreeRepair.firstReportedPath(["/a/b/c"]) == "/a/b/c")
-        #expect(WorktreeRepair.firstReportedPath(["/one", "/two"]) == "/one")
-    }
 
 }
 
