@@ -161,7 +161,24 @@ public struct FixtureRepository {
         try git.run(["checkout", "-q", "--detach", oid], workingDirectory: url.path)
     }
 
-    /// Adds a linked worktree and returns its path.
+    /// Adds a linked worktree with the given literal directory name (may contain
+    /// newlines, spaces, or other characters that would corrupt newline-terminated
+    /// porcelain — the only reason this variant exists, since `addWorktree`
+    /// encodes a safe name). Returns the resulting worktree path.
+    @discardableResult
+    public func addWorktree(path targetDir: String, branch: String) throws -> URL {
+        let path = url.deletingLastPathComponent()
+            .appendingPathComponent(
+                "\(url.lastPathComponent)-wt-\(targetDir.replacingOccurrences(of: "/", with: "_"))")
+        try git.run(["worktree", "add", "-q", "-b", branch, path.path],
+                    workingDirectory: url.path)
+        return path
+    }
+
+    /// Adds a linked worktree with the given literal directory name (may contain
+    /// newlines, spaces, or other characters that would corrupt newline-terminated
+    /// porcelain — the only reason this variant exists, since `addWorktree`
+    /// encodes a safe name). Returns the resulting worktree path.
     @discardableResult
     public func addWorktree(named name: String, branch: String) throws -> URL {
         let path = url.deletingLastPathComponent()
@@ -169,6 +186,13 @@ public struct FixtureRepository {
         try git.run(["worktree", "add", "-q", "-b", branch, path.path],
                     workingDirectory: url.path)
         return path
+    }
+
+    /// Locks a worktree with the given reason. Used by tests to produce
+    /// porcelain output containing `locked <reason>` (#0021, #0095).
+    public func lockWorktree(_ path: URL, reason: String) throws {
+        try git.run(["worktree", "lock", "--reason", reason, path.path],
+                    workingDirectory: url.path)
     }
 
     /// Writes files without staging them.
