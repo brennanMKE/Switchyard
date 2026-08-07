@@ -428,6 +428,29 @@ yourself first and write down what it actually produced. `--help` documents the 
 execution reveals the output shape, and the output shape is what the integration depends on.
 This pairs with §3.7 — state verified facts as givens rather than asking the model to verify them.
 
+### 1.10 Failed rounds were being learned from once, then forgotten
+
+Every problem in this document was written down *after* a round failed, and then not consulted before
+the next issue was authored. That is why §2.4b happened: the sandbox rule was recorded, filed, and
+violated three issues later by the same person who recorded it. A retrospective is read when something
+goes wrong; an issue is authored when things are going fine. The two never meet.
+
+**Fix:** `docs/review-failures.md` — a failure log whose second half is a **preflight checklist**, and
+`scripts/preflight-issue.sh`, which implements every check a script can decide. `dispatch-issue.sh`
+runs it and refuses to dispatch a known-defective issue. The protocol around it is in `CLAUDE.md`
+§ "Learning from failed reviews": on any failed round, spawn a learning subagent, record the row, and
+**push the fix to where it will be read** — `AGENTS.md` for the model's behaviour and environment, the
+checklist for how issues are written, the script for anything mechanical.
+
+**The rule this encodes:** a finding recorded only in `docs/` has not been fixed, it has been filed.
+Three of the checks in that script correspond to rounds already lost; each one now costs a second
+instead of twenty minutes.
+
+**Watch for over-fitting.** Two of the four mechanical checks are heuristics over prose and warn rather
+than block, because a guard that blocks good issues is worse than the bug it prevents — see §3.6c,
+where exactly that nearly happened. Both hard checks were validated against real issues that must pass
+*and* synthetic ones that must fail before being wired in.
+
 ### 3.7 Review feedback can make the next round impossible
 
 Round 2 of #0070 was killed by the sandbox because *my feedback* told it to verify git behaviour,

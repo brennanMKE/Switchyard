@@ -120,6 +120,55 @@ Run dispatches through `scripts/dispatch-issue.sh NNNN --round N`, which enforce
 timeout, a 3-round cap, a clean tree, and the correct branch. It has looped before; the guards are
 the mechanism, not the prose.
 
+## Learning from failed reviews
+
+**`docs/review-failures.md` is the failure log, and it is read before every dispatch — not after.**
+A failed round is only expensive once; paying for the same failure twice is the thing this section
+exists to prevent. Two rounds have already been lost to a single sandbox rule because the lesson was
+written into a retrospective instead of into the file the model reads.
+
+### Before dispatching any issue — every time, including a re-dispatch
+
+1. **Run `scripts/preflight-issue.sh NNNN`.** It implements every mechanical check derived from a
+   past failure. `dispatch-issue.sh` runs it too and refuses to dispatch on failure, so this is for
+   seeing the result while there is still time to fix the issue.
+2. **Read the `## Preflight checklist` in `docs/review-failures.md`** and answer its `[JUDGMENT]`
+   questions against the issue text. These are the ones no script can decide — whether the issue has
+   one deliverable, whether every fact it asserts was verified, whether it names a path that can hold
+   a tested unit.
+3. **If the issue fails any check, do a planning update first.** Rewrite the issue, commit it as its
+   own change with a message saying what failure class it is being hardened against, and only then
+   dispatch. **Never dispatch an issue you already know is defective** in the hope the model works
+   around it — that is how a round gets spent proving something already known.
+
+### When a review fails
+
+A round that exits non-zero, produces no code, or fails review is a **failed review**, and it triggers
+this sequence before anything else is dispatched:
+
+1. **Kick off a learning subagent** on the failure. Not optional and not deferred: point it at the
+   round log, the issue text, and the existing failure log, and have it return the root cause, the
+   failure class, and the preflight check that would have caught it. It must analyze only — no edits.
+   Doing this in a subagent keeps the round transcript out of the main context, which is the same
+   reason dispatch happens in one.
+2. **Record the round in `docs/review-failures.md`** — one row in the failure table, and a new entry
+   in the preflight checklist if the cause is not already covered. Do this in the turn the finding
+   arrives; see the rule about measurements above, which applies identically here.
+3. **Push the fix to where it will be read.** A lesson about the model's behaviour or its environment
+   goes into `AGENTS.md` as a numbered rule, because that is what OpenCode loads. A lesson about how
+   issues are written goes into the preflight checklist. A lesson that a script can enforce goes into
+   `scripts/preflight-issue.sh`. **A finding recorded only in `docs/` has not been fixed** — it has
+   been filed.
+4. **Then** do the planning update to the issue and re-dispatch.
+
+### The classes, so a failure gets filed rather than re-derived
+
+`spec-defect` (the issue text was wrong or unbuildable) · `environment` (sandbox, missing tool,
+timeout) · `model-behaviour` (narrated instead of acting, looped, fabricated, violated scope) ·
+`review-defect` (the reviewer accepted something wrong, or gave feedback that broke the next round) ·
+`sizing` (too many deliverables). Most failures so far have been `spec-defect` — which is to say
+**most failed rounds are my fault, not the model's**, and the fix belongs upstream of the dispatch.
+
 **`AGENTS.md` is what OpenCode reads — it does not load this file.** Verified: asked for the GitUp
 licensing rule with only `CLAUDE.md` present, the model answered `UNKNOWN`; with `AGENTS.md` present
 it recited the rule. `AGENTS.md` therefore duplicates the licensing and code-signing rules inline
