@@ -145,7 +145,18 @@ while its tests contributed nothing to the number.
     cherry-pick **and** for an empty one; #0112 round 2 shipped the second while claiming the first.
     For any marker-file check, name a second observable that differs between the two states — here,
     unmerged index entries, 3 versus 0 — and assert on that instead.
-20. **Does the issue name the collaborators, not just the output file?** "Name the file" fixed
+20. **Has the code the issue is about actually been run, on the input the issue is about?** Not
+    read — run. #0013's re-authoring fed real porcelain v2 bytes to the parser on `main` and found
+    three defects its own tests cannot see: renames silently dropped by an off-by-one, a single
+    non-UTF-8 byte erasing the entire status, and submodule state flattened. A throwaway test in the
+    existing target, deleted immediately, costs four minutes and turns a feature request into a
+    repair with a measured before-count. See workflow log §5.3.
+21. **If the tests have privileges the caller does not, is the boundary checked at the caller's
+    level?** `@testable import` grants internal access, so a `public` API whose members are internal
+    passes every test and is unusable from outside — #0116, found by compiling a probe package
+    against the product. Anywhere the harness has a capability the caller lacks, that boundary needs
+    a check compiled the way a caller compiles. See workflow log §5.4.
+22. **Does the issue name the collaborators, not just the output file?** "Name the file" fixed
     convergence months of rounds ago, and it is necessary but not sufficient: a file name says where
     code goes and nothing about what it may call. If the work must use an existing type, **quote its
     real surface in the issue** — #0012 lost a full 30-minute cap to a model inventing
