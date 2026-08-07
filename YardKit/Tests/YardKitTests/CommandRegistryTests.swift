@@ -21,10 +21,13 @@ func registryHasAtLeastTwoEntries() {
     #expect(names.contains("switchyard"))
     #expect(names.contains("noop"))
 
-    // Verify each one also has a valid name — empty names would indicate
-    // broken spec construction that we want caught here.
+    // Every spec must have a non-empty name, a non-empty schemaName, and at least
+    // one documented exit code. Empty fields or no exit codes would indicate broken
+    // spec construction that we want caught here — each iteration reaches an assertion.
     for spec in list {
-        #expect(!spec.name.isEmpty)
+        #expect(!spec.name.isEmpty, "Every spec must have a non-empty name")
+        #expect(!spec.schemaName.isEmpty, "Every spec must have a non-empty schemaName")
+        #expect(!spec.exitCodes.isEmpty, "Every spec must have at least one documented exit code")
     }
 }
 
@@ -76,11 +79,11 @@ func runYardHelpPrintsTopLevel() {
     // would fail downstream parsers.
     #expect(!stdout.hasPrefix("{"), "help output must not start with a JSON envelope")
 
-    // The topic — help exit code range — is part of the spec, so it has to appear
-    // in rendered text for visual consistency and so tests below keep passing.
-    #expect(stdout.range(of: "Exit code") != nil || stdout.range(of: "exit code") != nil
-            || stdout.range(of: "Exit codes") != nil,
-            "--help output must mention exit codes so callers know when --version exits 0.")
+    // `renderHelp` emits the literal heading "Exit codes:". Asserting the exact
+    // heading rather than a disjunction of near-identical substrings, two of
+    // which are prefixes of the third and so could never disagree.
+    #expect(stdout.contains("Exit codes:"),
+            "--help must render the exit-code section so callers know when each code is returned.")
 }
 
 @Test("registry schema command writes pretty-printed JSON")
@@ -103,8 +106,6 @@ func runYardSchemaWritesPrettyJSON() {
         return
     }
 
-    #expect(parsed is [String: Any], "schema output must be a JSON object, not true/false/array/string")
-
     // The top-level shape — schemaVersion, ok, result.commands — is the contract.
     #expect(obj["schemaVersion"] != nil)
 
@@ -116,16 +117,85 @@ func runYardSchemaWritesPrettyJSON() {
         return
     }
 
-    #expect(commands.count >= 2, "schema output must include at least the switchyard and noop specs")
+    // Every spec in the registry must appear — a third command dropped by the
+    // emitter would otherwise pass silently. Each element must have a non-empty
+    // command key, asserted unconditionally.
+    #expect(commands.count == CommandRegistry.all.count,
+            "schema output must include exactly as many commands as the registry")
 
-    let names = Set(commands.map { $0["command"] as? String ?? "" })
-    #expect(names.contains("switchyard"))
-    #expect(names.contains("noop"))
+    #expect(!commands.isEmpty, "must have at least one command to iterate")
+    for cmd in commands {
+        let name = cmd["command"] as? String ?? ""
+        #expect(!name.isEmpty, "Every schema element must have a non-empty 'command' key")
+    }
 
     // The indentation test makes sure JSONEncoder was used to pretty-print
     // the envelope, not a raw-string shortcut that skips indentation.
     let lines = stdout.split(whereSeparator: \.isNewline)
     #expect(lines.contains { $0.hasPrefix("  ") && !$0.hasPrefix("    ") }, "schema output must be pretty-printed with indent")
+}
+
+// MARK: - --version / -v
+
+@Test("--version prints version text and exits 0")
+func runYardVersionFlagPrintsText() throws {
+    let (stdout, stderr, code) = runYard(arguments: ["--version"])
+
+    #expect(code == .success, "--version should exit with success (0)")
+    #expect(stderr.isEmpty, "--version must not write to stderr")
+    #expect(!stdout.isEmpty, "the version text is non-empty")
+
+    // --version is a human command: plain text, first byte not {.
+    #expect(stdout.first != "{", "--version output must be plain text, not JSON")
+
+    // The output carries both the CLI name and a version string.
+    let parts = stdout.split(whereSeparator: \.isNewline).map(String.init)
+    let body = try #require(parts.first, "--version must print at least one line")
+    #expect(body.contains(ServiceNames.cliName), "--version output should carry the CLI name")
+
+    // Split on whitespace and check that at least two tokens exist (name + version).
+    let tokens = body.split(separator: " ").map(String.init)
+    #expect(tokens.count >= 2, "--version output should have name and version as separate tokens")
+}
+
+@Test("-v prints version text with the short flag alias")
+func runYardShortVersionFlagPrintsText() {
+    let (stdout, stderr, code) = runYard(arguments: ["-v"])
+
+    #expect(code == .success, "-v should exit with success (0)")
+    #expect(stderr.isEmpty, "-v must not write to stderr")
+    #expect(!stdout.isEmpty, "the version text is non-empty")
+
+    // -v and --version must emit identical output — same bytes.
+    let long = runYard(arguments: ["--version"]).stdout
+    #expect(stdout == long, "-v and --version must emit identical text")
+
+    // First byte still not { — plain text contract holds for the short alias.
+    #expect(stdout.first != "{", "-v output must be plain text, not JSON")
+}
+
+// MARK: - noop after removing per-subcommand help
+
+@Test("noop with extra arguments still returns the success envelope, exit 0")
+func noopWithExtraArgumentsReturnsSuccessEnvelope() {
+    let result = runYard(arguments: ["noop", "extra"])
+
+    #expect(result.exitCode == .success,
+            "noop with extra args must exit 0 and return the success envelope, not 'unknown'")
+    #expect(result.stderr.isEmpty, "noop must produce no stderr on success")
+
+    // stdout is the JSON envelope: first {, last }, parses as an object.
+    let trimmed = result.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+    #expect(trimmed.first == "{", "noop+args output must start with {")
+    #expect(trimmed.last == "}", "noop+args output must end with }")
+
+    guard let data = trimmed.data(using: .utf8),
+          let parsed = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+        Issue.record("noop+args stdout must decode as a valid JSON object")
+        return
+    }
+
+    #expect(parsed["ok"] as? Bool == true, "noop+args envelope should have ok=true")
 }
 
 @Test("noop exits 0 with the success envelope even after extension")

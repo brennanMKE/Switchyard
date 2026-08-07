@@ -27,14 +27,8 @@ public func runYard(arguments: [String]) -> (stdout: String, stderr: String, exi
     case "schema":
         return runSchema()
 
-    case "noop" where arguments.count == 1:
-        return (stdout: jsonString(Envelope()), stderr: "", exitCode: .success)
-
     case "noop":
-        let sub = Array(arguments.dropFirst())
-        if sub.contains(where: { $0 == "--help" || $0 == "-h" }) {
-            return helpForSpec(CommandRegistry.noopSpec)
-        }
+        return (stdout: jsonString(Envelope()), stderr: "", exitCode: .success)
 
     default:
         break
@@ -49,11 +43,6 @@ public func runYard(arguments: [String]) -> (stdout: String, stderr: String, exi
 
 private func helpForTopLevel() -> (stdout: String, stderr: String, exitCode: ExitCode) {
     let rendered = renderHelp(for: CommandRegistry.switchyardSpec)
-    return (stdout: rendered, stderr: "", exitCode: .success)
-}
-
-private func helpForSpec(_ spec: CommandSpec) -> (stdout: String, stderr: String, exitCode: ExitCode) {
-    let rendered = renderHelp(for: spec)
     return (stdout: rendered, stderr: "", exitCode: .success)
 }
 
