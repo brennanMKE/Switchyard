@@ -250,6 +250,37 @@ cap, a wall-clock timeout — hold where instructions do not.
 
 ---
 
+### 3.6 Issue size is the strongest predictor of whether a round succeeds
+
+Four delegated rounds across three issues, and the pattern is stark:
+
+| Issue | Shape | Outcome |
+|---|---|---|
+| #0070 | One markdown document | Converged in **8 min**; rejected only on factual detail |
+| #0011 | Envelope + exit codes + tests + wiring | 26 min; 58 green tests **asserting the wrong contract** |
+| #0010 | Metadata model + help renderer + schema emitter + test | **Timed out at 2400s**, 23 compile errors, build broken |
+
+The two large issues both failed; the small one nearly succeeded first try. #0010 asked for four
+distinct pieces at once with no existing pattern in the codebase to copy, and the model got partway
+into each before the watchdog fired.
+
+**Fix:** author issues at one-file, one-shape granularity for this model. #0010 was split into
+#0085–#0088 — a data type, two pure functions, and an assembly step — each with a test that settles
+it. An issue that names more than one new file is probably too big.
+
+**Corollary:** prefer pure functions returning values over anything that prints. `renderHelp(for:)
+-> String` can be asserted; a function that writes to stdout cannot, and the model reaches for
+printing by default.
+
+### 3.7 Review feedback can make the next round impossible
+
+Round 2 of #0070 was killed by the sandbox because *my feedback* told it to verify git behaviour,
+which needs a scratch directory it is not allowed to create. The feedback was correct about what was
+wrong and wrong about who should establish it.
+
+**Fix:** state verified facts as **givens** in feedback. Verification is the reviewer's job; the
+implementer applies the conclusion.
+
 ## Part 4 — Engineering findings that cost time
 
 Not workflow problems, but each was a silent failure worth remembering.
