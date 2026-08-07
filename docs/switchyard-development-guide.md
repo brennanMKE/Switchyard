@@ -644,25 +644,32 @@ Nothing else starts until this lands.
 - [x] The spike code is deleted from the tree.
 - [x] A reftable repository can be read by whatever the engine actually uses.
 
-**M1 — `switchyard` read commands and worktrees.** `whereami`, `graph`, `status`, `hunks`,
-`conflicts`, `log`, `verify`, plus the `switchyard wt` group. JSON schemas fixed and documented. This
-alone is useful to an agent on day one and validates the engine.
+**M1 — the read engine and worktrees.** The engine behind `whereami`, `graph`, `status`, `hunks`,
+`conflicts`, `log`, `verify`, plus the `switchyard wt` group, with its JSON schemas fixed and
+documented. This validates the engine and settles the response contract.
 
 **Exit criteria, as a checklist** — the milestone review reads these and only these:
 
-- [ ] Each of `whereami`, `graph`, `status`, `hunks`, `conflicts`, `log`, `verify` **runs from the
-      built binary** and emits a `schemaVersion: 1` envelope on stdout.
-- [ ] Each of `wt list`, `wt new`, `wt rm`, `wt where`, `wt gc`, `wt repair` likewise.
-- [ ] `switchyard --help` lists every one of them; `switchyard schema` emits a schema for each.
-- [ ] Every command's failure mode returns a structured error and the exit code from §6, not a trap
-      and not a success envelope with empty fields.
+- [ ] The engine function behind each of `whereami`, `graph`, `status`, `hunks`, `conflicts`, `log`,
+      `verify` exists in `YardGit`, is tested, and returns a type that encodes to a
+      `schemaVersion: 1` envelope.
+- [ ] The engine behind each of `wt list`, `wt new`, `wt rm`, `wt where`, `wt gc`, `wt repair`
+      likewise.
+- [ ] Every failure mode returns a structured error carrying the exit code from §6 — not a trap, and
+      not a success value with empty fields.
 - [ ] The response schemas are documented and versioned (#0026).
-- [ ] `swift test` is green, and every command has a test that exercises the **binary**, not only the
-      engine function.
+- [ ] `swift test` is green, and every engine function has tests that can fail: each has a mutation
+      recorded against a named test that dies under it.
 
-"Built" is not "engine function exists". A command that cannot be run is not delivered — that
-distinction cost M1 forty-two resolved issues with nothing shippable, and is why the milestone review
-exists.
+**Reachability from the CLI is M3's criterion, not M1's** — decided 2026-08-07, §11 decision 11. The
+two are separated because guide §5 has the CLI marshal over XPC and never link `YardGit`, and the XPC
+layer does not exist until M3. Requiring "runs from the built binary" in M1 asked for something M1's
+own architecture forbids. #0115 and #0124 moved to M3 with it.
+
+The earlier phrasing — *"'Built' is not 'engine function exists'"* — was written after forty-two M1
+issues resolved with nothing shippable, and the instinct behind it stands: an engine nobody can call
+is not a product. What was wrong was assigning the fix to the wrong milestone. M1 now claims only what
+it can deliver, and M3 owns the claim that the commands run.
 
 Worktrees are in M1 deliberately. `WorktreeContext` has to exist before any path resolution is
 written; adding it later means auditing every call site that touched a git path, which is the
@@ -710,6 +717,14 @@ exist yet.
       repository twice focuses rather than duplicates.
 - [ ] The `switchyard` binary is embedded in the bundle and drives the app over XPC; the broker
       launches the app when it is not running and the CLI exits 3 when that times out.
+- [ ] **Every M1 read command runs from the built binary** — `whereami`, `graph`, `status`, `hunks`,
+      `conflicts`, `log`, `verify`, and the whole `wt` group — emitting a `schemaVersion: 1` envelope
+      on stdout, with `--help` listing each and `schema` emitting one for each. This criterion moved
+      here from M1 on 2026-08-07 (§11 decision 11), because the CLI reaches the engine over XPC and
+      XPC is built in this milestone.
+- [ ] Every command has a test that exercises the **binary**, not only the engine function.
+- [ ] Every command's failure mode returns a structured error and the exit code from §6, not a trap
+      and not a success envelope with empty fields.
 - [ ] `SMAppService` registration succeeds, and repair is driven from a failed broker call rather
       than from reported status.
 - [ ] A launch smoke test runs unattended under CLI `xcodebuild` (#0125) — no UI-automation test in
@@ -893,3 +908,23 @@ Paths below are relative to the **repository root**, not to this file.
     `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`; a package target does **not** inherit it, and views
     moved across the boundary would silently change isolation. Verified available in this toolchain
     (swift-tools-version 6.3).
+
+11. **CLI reachability is an M3 criterion, not an M1 one.** Decided 2026-08-07 by Brennan. M1's
+    checklist required every read command to *run from the built binary*; §5 requires the CLI to
+    marshal over XPC and never link `YardGit`; and the XPC layer is built in M3. M1 was therefore
+    asking for something its own architecture forbade, and #0115 and #0124 sat blocked on the
+    contradiction rather than on any missing work.
+
+    **M1 now claims the engine and its tests. M3 owns the claim that the commands run.** #0115 and
+    #0124 move to M3 with the criterion.
+
+    Two readings were rejected. *Link the engine into the CLI now and swap to XPC in M3* buys working
+    commands in M1 at the price of rewriting roughly a dozen call sites later. *Link the engine
+    permanently for read commands, keeping XPC only for the interactive ones* is cheaper than it
+    sounds today — `YardGit` currently has no dependencies at all and libgit2 is not in the package —
+    but it splits the engine across two processes as a standing architectural commitment, and the
+    thing that made it tempting is a temporary property of the code rather than a design intent.
+
+    The instinct behind the original criterion was right and is preserved: an engine nobody can call
+    is not a product, and forty-two M1 issues resolved with nothing shippable is what taught that. The
+    error was assigning the fix to a milestone that could not carry it.
