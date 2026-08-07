@@ -89,6 +89,42 @@ there.
 Two separate runs have now died on this. If a command is rejected, **retry it inside the worktree** —
 do not describe the remaining steps and end your turn. A plan is not an outcome.
 
+## Rule 7 — A test that cannot fail is worse than no test.
+
+Two rounds have now shipped tests that look like coverage and assert nothing. Both were green. Both
+hid a real defect.
+
+The two shapes to never write:
+
+- **A loop that skips almost everything.** `for code in allCases { guard case .ok = code else
+  { continue }; ... }` iterates every case and tests exactly one, under a name promising all of them.
+  If you loop over cases, every iteration must reach an assertion.
+- **A test function with no assertion at all.** If it contains no `#expect`, it passes
+  unconditionally and proves nothing.
+
+Also: **the name must match what the body does.** A test called
+`envelopeFailWriteEmitsJsonToStdout` that never calls `write()` is a false claim in the test report,
+and it survived review once precisely because the name was read instead of the body.
+
+**Enumerate cases with `CaseIterable`, never a hand-written array.** A hand-written list means the
+next case someone adds is silently untested and nothing fails. If the name says *all*, *every*, or
+*each*, assert the collection's count first so the loop cannot silently run zero times.
+
+Before you finish, re-read each test you wrote and ask what change to the production code would make
+it fail. If the honest answer is "none", the test is not done.
+
+## Rule 8 — Tests use swift-testing, not XCTest.
+
+Every test file in this package uses `import Testing`, `@Test`, and `#expect`. Match it.
+
+This is not style. `swift test` prints one summary line — `Test run with N tests` — and **that line
+counts only swift-testing tests.** A round once added eight XCTest cases and reported "54 tests = 8
+new + 46 existing"; the real count was 54 either way, and deleting the new file changed nothing.
+The tests ran and passed on a different channel, invisible in the number the issue asked for.
+
+So: `import Testing`, `@Test func name()`, `#expect(...)`. Never `import XCTest`, `XCTestCase`, or
+`XCTAssert*`. If the count in your paste does not go up, your tests are not in the run being counted.
+
 ## Build commands
 
 ```sh
