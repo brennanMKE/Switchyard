@@ -492,6 +492,44 @@ crossed case yourself. The reviewer here did — and ran the probe against round
 first to confirm it reproduced the bug before trusting it against round 2. A test that has never been
 seen to fail proves less than one that has.
 
+### 1.11 A dispatcher subagent can end its turn while the round is still running
+
+The #0087 round-2 dispatcher started the background run and then reported that the dispatch was
+running and it would verify independently once the run exited — and stopped. A subagent's turn ends
+when it emits text without a tool call, so "I will verify once it exits" is not a promise it can
+keep; nothing wakes it. The round ran to completion unwatched and unverified.
+
+This is the same mechanic that makes a progress report a stop for the main loop (1.4), reappearing
+one level down. It is easy to miss because the message reads like a status update from something
+still working.
+
+**Fix:** every dispatch prompt now says to poll with BashOutput until the process *actually exits*,
+and not to report before then. Recovery is cheap — `SendMessage` resumes the agent from its
+transcript with full context — but only if the premature stop is noticed. **Treat a dispatcher whose
+report contains no verification results as unfinished, not as a status update.**
+
+### 4.5 The seam between two correct issues is where the defect lives
+
+#0091 routed the human-readable error line to real stderr so stdout could be pure JSON. #0092 moved
+all I/O out of the entry point into a pure `runYard(arguments:)` — which is what makes it testable at
+all, since nothing in a SwiftPM executable target can be. Both did exactly what they specified, and
+both were accepted on strong evidence.
+
+Together they silently dropped the stderr line: `yard bogus-command` now writes **zero bytes** to
+stderr. Half of #0091's work was undone by #0092, and no criterion in either issue could have caught
+it, because each issue's criteria are about its own delta.
+
+It was found only because #0092's review captured stdout and stderr *separately* and noticed one was
+empty. Filed as #0100.
+
+**For splitting issues:** when a sequence of issues touches one behaviour, the last one in the chain
+needs a criterion asserting the **end-to-end** behaviour still holds — not just its own change. #0093
+is that criterion for the envelope chain, which is why it spawns a real process rather than testing
+in-process.
+
+**For reviewing:** capture every stream, including the ones the issue never mentions. An empty stream
+is information.
+
 ### 3.7 Review feedback can make the next round impossible
 
 Round 2 of #0070 was killed by the sandbox because *my feedback* told it to verify git behaviour,
