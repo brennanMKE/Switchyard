@@ -194,8 +194,37 @@ or by a hosted model for any reason — that row reads `Opus, hosted`, not `$0.0
 a reader can tell at a glance which issues were genuinely free to implement and which were not, so
 misattributing one destroys the only thing it is for.
 
-Give a token or dollar figure where one is genuinely known; write `hosted` where it was not
-separately metered. **Never invent a number** — an unmetered phase is honestly unmetered.
+### Pricing and how to compute a cost
+
+**Claude Opus 5: $5.00 per million input tokens, $25.00 per million output tokens.** Fable 5 is
+$10.00 / $50.00. Local inference through LM Studio is $0.00 at any volume — that is the entire point
+of the delegation.
+
+Two figures are measurable in this harness and must be recorded as real numbers, not as `hosted`:
+
+1. **Dispatcher subagents** report `subagent_tokens` on completion. That is a measured total.
+2. **Local rounds** are $0.00, measured by definition.
+
+`subagent_tokens` is a combined figure — the harness does not split input from output. Agentic
+subagent work is heavily input-weighted (large tool results and re-read context dominate), so cost is
+computed at an assumed **85% input / 15% output** split, which works out to **$8.00 per million
+combined tokens**:
+
+```
+0.85 × $5.00  +  0.15 × $25.00  =  $4.25 + $3.75  =  $8.00 per MTok
+```
+
+**State the assumption inline wherever this rate is used** — write `≈$0.40 (50k tokens @ $8/MTok,
+85/15 split assumed)`, never a bare `$0.40`. A number whose derivation is invisible is
+indistinguishable from an invented one.
+
+**Main-loop authoring and review are not per-issue metered** in this harness — there is no API key or
+`ant` CLI available to call `count_tokens`, and the harness reports no per-turn usage. Record those
+as `hosted — not separately metered` and leave it at that. That gap is tracked as its own issue;
+it is a real limitation, not an excuse to guess.
+
+**Never invent a number.** An estimate is acceptable only with its method and inputs stated beside
+it; a figure with no derivation is not.
 
 **Rounds** is how many dispatches it took to converge, and it is the most useful number here: an
 issue that took three rounds was underspecified when it was authored, which is feedback about the
