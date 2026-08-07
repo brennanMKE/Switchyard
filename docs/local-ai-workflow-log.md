@@ -1011,3 +1011,63 @@ and `tail` all worked in the same script; `cat` and `date` failed with *command 
 are zsh builtins — `$(</dev/stdin)` and `zmodload zsh/datetime; strftime` — which are better anyway.
 Any script in `scripts/` that shells out to `cat` or `date` should be assumed broken until run.
 
+### 5.3 Probe the code, not only the tool
+
+§5.2 was about re-running `git` before authoring. This is the other half: **run the code the issue is
+about, against real input, before writing a word of the issue.**
+
+#0013 was due to be re-authored after #0113 landed the porcelain v2 parser. Instead of reading the
+parser and describing what was left to do, I fed it real
+`git status --porcelain=v2 -z --ignored` bytes from a fixture containing a rename, a submodule, a
+path with a space, a path with a **newline**, a conflict, an untracked file and an ignored file —
+seven files. Six came out. Then a record whose path is the two bytes `0xFF 0xFE`: **zero** came out,
+the entire status silently empty.
+
+Three defects, none of which the existing tests can see:
+
+- **Renames are dropped by an off-by-one.** `fieldCount["2"] = 9` puts the path index one past the
+  last token, so `path` is `""` and the `guard !path.isEmpty` two lines down discards the record
+  without a trace. #0113's tests pass because none of them contains a rename.
+- **One non-UTF-8 byte erases the whole status.** `String(data:encoding:.utf8)` returns nil and
+  `parse` returns an empty list — reported as success, indistinguishable from a clean worktree.
+- **Submodule state is flattened.** The `<sub>` field (`SC..`, `SCMU`) is read into a variable and
+  never used.
+
+**The issue that came out of this is a repair with five named mutations and a measured before-count.
+The issue I would have written from reading the source would have been a feature request.** That is
+the difference the probe makes, and it took four minutes.
+
+It also settled a requirement that could not be built: the original #0013 asked for "renames and
+copies reported as such", and **`git status` has no copy detection** — `--porcelain=v2 -C` fails with
+``unknown switch `C` ``. A round would have spent itself discovering that, or worse, invented a
+`copy` state nothing can produce. Now guide §11 decision 7.
+
+The general rule, and it is cheap: **before authoring an issue against code that already exists, run
+that code on the input the issue is about and print what comes back.** A throwaway test in the
+existing target, deleted immediately, is enough. Reading the source tells you what it intends;
+running it tells you what it does.
+
+### 5.4 `@testable import` hides an entire class of defect
+
+`gitStatus` is `public` and returns a `public struct WorktreeStatus` whose `entries` property is
+**internal**. An out-of-module caller can obtain the value and do nothing with it. Proved with a
+throwaway SwiftPM package depending on the `YardGit` product:
+
+```
+error: 'entries' is inaccessible due to 'internal' protection level
+```
+
+**No test in the suite can catch this**, because `YardGitTests` uses `@testable import YardGit`,
+which grants internal access. The tests and the caller are compiling against different modules. Every
+test passes against an API nobody can use.
+
+The same probe compiled clean for `whereAmI`, `worktreeList`, `worktreeRemove` and `yardWhere` — so it
+is one type, not a systemic rot, and #0116 is scoped accordingly. What #0116 also builds is the check:
+a test target that imports **without** `@testable`, where reverting `entries` to internal must break
+the compile. That is the only construct that sees what a caller sees.
+
+Worth stating plainly because it generalises past Swift: **a test harness with extra privileges cannot
+verify a boundary defined by privilege.** Anywhere the tests get a capability the caller does not —
+`@testable`, a friend class, a test-only export, a mock that bypasses an interface — the boundary
+needs its own check compiled at the caller's level.
+

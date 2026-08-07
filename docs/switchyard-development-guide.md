@@ -773,3 +773,9 @@ Paths below are relative to the **repository root**, not to this file.
 - `../../RemoteControl/docs/cli-embedding-and-install.md` — embedding and installing the CLI binary
 - `../GitUp` — concepts only, per [Section 2](#2-licensing-constraint-read-this-first)
 - libgit2 commit API: https://libgit2.org/docs/reference/main/commit/index.html
+
+7. **`switchyard status` does not report copies.** `git status` has no copy detection — verified,
+   `--porcelain=v2 -C` fails with ``unknown switch `C` ``, and the only similarity option it accepts
+   is `-M` / `--find-renames`. Copy detection lives on `git diff -C`. If copies are ever wanted they
+   come from a diff-based command; the status parser must not carry a `copy` state nothing can
+   produce.
