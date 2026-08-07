@@ -339,6 +339,27 @@ path yourself, resolve it the same way — with `realpath(3)`.
 which normalises in the opposite direction. It looks like the right call and silently does nothing
 useful here.
 
+### Every file path you write must be worktree-relative. Never absolute.
+
+Write `YardKit/Sources/YardKit/CommandLineRunner.swift`, not
+`/Users/brennan/Developer/brennanMKE/Git/switchyard-0124/YardKit/…`.
+
+You are already in the worktree. An absolute path is a long string you have to reproduce from memory,
+and **two rounds have been lost to getting one character of it wrong** — `brenbanMKE` and
+`brenbananMKE` in place of `brennanMKE`. Both times the sandbox correctly read the mistyped path as
+outside the worktree and auto-rejected the write:
+
+```
+! permission requested: external_directory (/Users/brennan/Developer/brenbanMKE/…); auto-rejecting
+Error: The user rejected permission to use this specific tool call.
+```
+
+**That rejection is terminal.** The run ends there. In one of those rounds it happened on the final
+edit, leaving the tree non-compiling with the work half-applied.
+
+A relative path cannot be mistyped this way, because it is short and the parts you would get wrong are
+not there.
+
 ## Rule 10 — `swift build` does not compile the tests. Only `swift test` does.
 
 `swift build` builds the library and executable targets. It does **not** build test targets. A test

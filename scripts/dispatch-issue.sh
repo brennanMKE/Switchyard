@@ -209,6 +209,19 @@ fi
 print "\n--- last 40 lines of $LOG ---"
 tail -40 "$LOG"
 
+# A sandbox auto-reject is TERMINAL -- the model does not recover from it, and
+# the run ends wherever it happened. Two rounds have been lost to one: #0097
+# round 3 and #0124 round 2, both to a mistyped absolute path that fell outside
+# the worktree. `opencode run` still exits 0, so without this the harness
+# reports a successful round.
+REJECTS=$(grep -ac 'auto-rejecting' "$LOG" 2>/dev/null || print 0)
+if (( REJECTS > 0 )); then
+  print -u2 "\ndispatch: $REJECTS SANDBOX AUTO-REJECT(S) in this round -- the run was cut short there."
+  print -u2 "dispatch: the rejected path is on the line above each; check it for a typo before"
+  print -u2 "dispatch: blaming the model. An absolute path outside the worktree is the usual cause."
+  grep -a -B1 'auto-rejecting' "$LOG" | tail -6 | sed 's/^/  /' >&2
+fi
+
 print "\n--- working tree after round $ROUND (base $BASE_SHA) ---"
 if [[ -z "$(git status --porcelain)" ]]; then
   print "NO CHANGES. The run produced nothing — count it as a failed round, do not re-dispatch unchanged."
