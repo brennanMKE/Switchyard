@@ -1299,3 +1299,84 @@ inferences, two mistyped-absolute-path sandbox rejections, roughly six `/tmp` re
 output-cap truncation — and whether routing structural work to Sonnet removes the failures Ornith
 could not clear in three attempts.
 
+
+### 6.9 The revision's first casualty was the revision itself
+
+The new workflow's whole premise is that a planning pass pastes verified, compiled source into the
+issue so the implementer copies rather than invents. On 2026-08-07 the first two issues authored that
+way — #0017 and #0019 — both **failed on the source block being thrown away before it could be used**.
+
+#0017 produced nothing at all: twelve tool calls, zero writes, killed by the stall watchdog at 660s
+with an empty working tree. #0019 got a source file out and then ended its round asking to re-read
+its own issue.
+
+The cause was the dispatch harness, and the arithmetic is unambiguous:
+
+| mandated read | bytes | ~tokens |
+|---|---|---|
+| `issues/0017.md` | 26,690 | ~6.7k |
+| `issues/Issues.md` | 41,435 | ~10.4k |
+| `AGENTS.md` | 20,808 | ~5.2k |
+| `swift-guidance/SKILL.md` | 17,258 | ~4.3k |
+| | **106,191** | **~26.6k** |
+
+Usable input is `limit.context 65,536 − limit.output 16,384 = 49,152`, and OpenCode compacts near 90%
+of it — about 44k. Add the system prompt, the tool schemas and the 291-line dispatch prompt and the
+context is effectively full before the first write. Compaction then discards the largest contiguous
+block it can, which is exactly the 186 lines of pasted Swift.
+
+**The bitter part is that the better the planning pass, the more likely this was to fire.** A prose
+issue is small and survives; an issue carrying compiled source and a measured mutation table is large,
+and largeness is what killed it. The revision made issues better and simultaneously made them fatal to
+the harness that delivered them — and nothing in the fifty-round evidence base predicted it, because
+no issue had ever been that good before.
+
+#### Two of the four reads were pure waste, and one was measurable
+
+`AGENTS.md` is **auto-loaded by OpenCode**. Verified rather than assumed: asked for the GitUp licensing
+rule with all tools forbidden, the model recited it with zero tool calls. So the prompt had been
+spending ~5k tokens per round re-reading what was already in context. `issues/Issues.md` is the
+tracker's process guide — status lifecycles, commit conventions, review policy — none of which is the
+implementer's job.
+
+CLAUDE.md's own claim that "`AGENTS.md` is what OpenCode reads" was right about the outcome and vague
+about the mechanism, and that vagueness is what let a redundant read sit in the prompt for fifty
+rounds.
+
+#### The fix that was not available
+
+The obvious fix is more context: the model's maximum is **262,144** and it was loaded at **65,536**.
+Rejected on measurement — weights are 37.7 GB on a 64 GB machine, and with `PARALLEL 2` the KV cache
+for even a doubling does not fit. Shrinking the reading set was the only option, and it is the better
+one regardless: mandated reading went from ~26.6k tokens to ~6.7k, and the budget saved is budget the
+round writes with.
+
+#### What was hardened
+
+- `scripts/dispatch-issue.sh` names only the issue, and says why the other two are excluded.
+- Rule 8b now skips the skill when the issue already carries verbatim source — that source was
+  authored with the skill loaded and already conforms.
+- `AGENTS.md` gained **Rule 9b**, so the lesson reaches the model even if a future prompt regresses.
+- `scripts/preflight-issue.sh` gained **check 10** (the issue must fit the window, computed from the
+  real `limit.context`/`limit.output` in `opencode.json`) and **check 11** (a regression guard that
+  fails if the dispatch prompt ever mandates `Issues.md` or `AGENTS.md` again).
+
+Both new checks were verified against negative controls, and the first attempt at the control for
+check 11 was itself broken — a substitution that silently did not match, so the check printed nothing
+and the absence read like a pass. That is the `EMPTYELSE` failure a third time: **a control that does
+not fire is indistinguishable from a check that works.** The rule that keeps catching this is to
+require the control to *fail loudly* before believing the check.
+
+#### The metric this changes
+
+"Tool calls" was the wrong number to track. #0108 spent twelve calls and landed its issue; #0017 spent
+twelve and produced nothing. The distinguishing quantity is **how many calls elapse before the first
+write** — orientation is the cost, and a round that has not started writing by call ten has already
+spent the context it needed to write with. Dispatchers now report it explicitly.
+
+#### An unresolved tax
+
+`AGENTS.md` is auto-loaded on every round, so its size is a permanent charge against the budget —
+~5.2k tokens before Rule 9b, more after. Every rule added to it makes every future round slightly more
+likely to compact. It has not yet been trimmed, and at some point the rules will have to earn their
+place by measured value rather than by having once been learned.
