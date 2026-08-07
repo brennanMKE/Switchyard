@@ -149,13 +149,13 @@ public enum CommitLog {
         let records = output.split(separator: "\u{0}", omittingEmptySubsequences: false)
 
         for record in records {
-            let trimmed = String(record).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { continue }
+            let text = String(record)
+            guard text.contains("\u{01}") else { continue }
 
             // Split each record on SOH into fields. The body is the last field
             // and may contain newlines, and SOH itself -- so this split can
             // produce more than six parts, and the body is rejoined below.
-            let parts = trimmed.split(separator: "\u{01}", omittingEmptySubsequences: false)
+            let parts = text.split(separator: "\u{01}", omittingEmptySubsequences: false)
 
             guard parts.count >= 5 else { continue }
 

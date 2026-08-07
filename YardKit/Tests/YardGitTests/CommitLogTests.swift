@@ -53,6 +53,51 @@ struct CommitLogTests {
         #expect(entry.message == body)
     }
 
+    @Test func parsePreservesTrailingNewlineFromBody() throws {
+        let oid = "c" + String(repeating: "0", count: 39)
+        let soH = "\u{01}"
+        // The body must retain its trailing newline -- the raw output from %B ends in \n
+        // before the NUL terminator, and CommitLog must not eat it.
+        let body = "subject\n\nbody line"
+        let record = "\(oid)\(soH)\(soH)fixture<fixture@example.invalid>\(soH)\(soH)(HEAD, main)\(soH)\(body)\n\u{0}"
+        let entries = CommitLog.parse(output: record)
+        #expect(entries.count == 1)
+        let entry = try #require(entries.first(where: { $0.oid == oid }))
+        #expect(entry.message == "\(body)\n", "trailing newline must be preserved verbatim")
+    }
+
+    @Test func parseSkipsEmptyTailRecordWithoutSoh() throws {
+        let oid = "d" + String(repeating: "0", count: 39)
+        let soH = "\u{01}"
+        // Two records back-to-back; the final NUL produces an empty trailing record.
+        let body1 = "first commit"
+        let body2 = "second commit"
+        let record = "\(oid)\(soH)\(soH)fixture<fixture@example.invalid>\(soH)\(soH)(HEAD, main)\(soH)\(body1)\u{0}\(oid)\(soH)\(soH)fixture<fixture@example.invalid>\(soH)\(soH)(HEAD, main)\(soH)\(body2)\u{0}"
+        let entries = CommitLog.parse(output: record)
+        #expect(entries.count == 2, "empty trailing record must be skipped")
+    }
+
+    @Test func parseFindsSohWhenRecordContainsLeadingNewlines() throws {
+        // git always emits SOH-delimited fields from the first character of a record;
+        // that SOH guarantees we still skip leading whitespace without trimming the body.
+        let oid = "e" + String(repeating: "0", count: 39)
+        let soH = "\u{01}"
+        let body = "subject\n\nbody line"
+        let record = "\(oid)\(soH)\(soH)fixture<fixture@example.invalid>\(soH)\(soH)(HEAD, main)\(soH)\(body)\n\u{0}"
+        let entries = CommitLog.parse(output: record)
+        #expect(entries.count == 1)
+        let entry = try #require(entries.first(where: { $0.oid == oid }))
+        // trailing newline from %B is preserved, matching what the body had appended.
+        #expect(entry.message == "\(body)\n")
+    }
+
+    @Test func parseDiscardsRecordWithNoSohDelimiter() throws {
+        // A stray line with no SOH bytes must be skipped.
+        let record = "this is a plain text line\nno delimiters at all\n"
+        let entries = CommitLog.parse(output: record)
+        #expect(entries.isEmpty)
+    }
+
     // MARK: - Trailer parsing
 
     @Test func trailerParsesAgentName() throws {
@@ -168,7 +213,9 @@ struct CommitLogTests {
         #expect(entries.count == 1)
 
         let message = try #require(entries.first?.message)
-        #expect(message == multiLine)
+        // git's `commit -m` appends a trailing newline to the stored message; CommitLog preserves
+        // whatever was actually written by git, which is what we observe here.
+        #expect(message == multiLine + "\n")
     }
 
     @Test(arguments: FixtureRepository.RefFormat.supported())

@@ -190,6 +190,8 @@ struct FixtureRepositoryTests {
 
         let entries = try CommitLog.run(path: repo.url.path, rangeArguments: ["HEAD"])
         let entry = try #require(entries.first(where: { $0.oid == repo.oids["x"] }))
-        #expect(entry.message == body)
+        // git's `commit -m` appends a trailing newline to the message stored in the object store;
+        // CommitLog must preserve whatever git actually wrote, not what was originally supplied.
+        #expect(entry.message == body + "\n")
     }
 }
