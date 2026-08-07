@@ -85,6 +85,17 @@ judgment → a subagent dispatches it → Opus reviews the diff and the real ver
 accept, or write a `## Review` section into the issue and re-dispatch.** Full workflow, roles, and
 loop protection are in `issues/Issues.md`.
 
+**Do not implement issues yourself.** This is the rule that has been broken most often, and it is
+easy to break because implementing feels like progress. Authoring the issue and reviewing the result
+*is* the work; the implementation belongs to Ornith. If an issue is unblocked, the next action is to
+create its worktree and dispatch it — not to open an editor. The only exceptions are the ones listed
+in `issues/Issues.md` under "What is not delegated": clean-room work, signing, the M0 spikes, and
+moving an issue to `resolved`.
+
+**Dispatch in parallel.** Each issue gets its own `git worktree` plus branch, so several rounds run
+at once without colliding, and a dispatch never blocks on another finishing. Use
+`git worktree add -b issue/NNNN ../switchyard-NNNN main`.
+
 Two rules that bind this file specifically:
 
 - **Dispatch through a subagent, never from the main loop.** An OpenCode transcript is long and
