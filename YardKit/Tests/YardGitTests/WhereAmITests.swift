@@ -73,29 +73,71 @@ struct WhereAmITests {
     }
 
     @Test func midMergeReportsFlagWhenMergeHeadPresent() throws {
-        let repo = try FixtureRepository.linear()
+        // Build a repo with two divergent branches that edit the same file,
+        // then start a conflicting merge in progress so MERGE_HEAD exists.
+        var repo = try FixtureRepository(refFormat: .files)
         defer { repo.destroy() }
 
-        // Produce a MERGE_HEAD by starting (and aborting) a merge.
-        let baseOID = repo.oids["a"]!
-        _ = try? git.capture(["merge", "--no-commit", baseOID], workingDirectory: repo.url.path)
+        // base → branch1 (edits f.txt) and branch2 (edits f.txt differently).
+        // Both commits are on top of the same base, so merging them conflicts.
+        try repo.build([
+            FixtureRepository.Commit("base", files: ["f.txt": "original\n"]),
+            FixtureRepository.Commit("branch1", parents: ["base"], files: ["f.txt": "branch1 content\n"]),
+        ])
+        try repo.build([
+            FixtureRepository.Commit("branch2", parents: ["base"], files: ["f.txt": "branch2 content\n"]),
+        ])
 
-        // If MERGE_HEAD was created (it may not be if the merge is a no-op
-        // like merging into itself), verify the flag. Otherwise skip quietly.
-        let gitPath = try git.run(
-            ["rev-parse", "--git-path", "MERGE_HEAD"], workingDirectory: repo.url.path)
-        guard let mPath = gitPath.lines.first, !mPath.isEmpty else { return }
+        // We are now detached on branch2. Switch main to branch1, then merge
+        // branch2 into main.
+        let branch2OID = repo.oids["branch2"]!
+        try repo.checkoutDetached(repo.oids["base"]!)
+        try repo.branch("main", at: "branch1")
+        try repo.checkout("main")
 
-        // Read MERGE_HEAD back to confirm it's a real state file, not empty.
-        if !FileManager.default.fileExists(atPath: mPath) { return }
+        let mergeResult = try git.capture(
+            ["merge", "--no-commit", branch2OID], workingDirectory: repo.url.path)
+
+        #expect(mergeResult.exitCode != 0, "the merge should conflict")
 
         let r = try whereAmI(path: repo.url.path, git: git)
-        #expect(r.isMidMerge == FileManager.default.fileExists(atPath: mPath))
+        #expect(r.isMidMerge == true, "isMidMerge reports a real in-progress merge")
+        #expect(!r.isMidRebase, "a mid-merge must not also report mid-rebase")
+        #expect(!r.isMidCherryPick, "a mid-merge must not report mid-cherry-pick")
+    }
 
-        if r.isMidMerge {
-            // An aborted merge clears MERGE_HEAD; attempt it only while present.
-            _ = try? git.run(["merge", "--abort"], workingDirectory: repo.url.path)
-        }
+    @Test func midCherryPickReportsFlagWhenConflictPresent() throws {
+        // base → a1 (f.txt = "ours") and base → a2 (f.txt = "theirs"), then
+        // cherry-pick a2 onto a1 so CHERRY_PICK_HEAD and unmerged index entries exist.
+        var repo = try FixtureRepository(refFormat: .files)
+        defer { repo.destroy() }
+
+        try repo.build([FixtureRepository.Commit("base", files: ["f.txt": "original\n"])])
+        try repo.build([FixtureRepository.Commit("a1", parents: ["base"], files: ["f.txt": "ours\n"])])
+        try repo.build([FixtureRepository.Commit("a2", parents: ["base"], files: ["f.txt": "theirs\n"])])
+
+        try repo.checkoutDetached(repo.oids["a1"]!)
+        let cherryResult = try git.capture(
+            ["cherry-pick", repo.oids["a2"]!], workingDirectory: repo.url.path)
+
+        #expect(cherryResult.exitCode != 0, "the cherry-pick should conflict")
+
+        // Assert the fixture has real unmerged index entries, not just CHERRY_PICK_HEAD.
+        // An empty cherry-pick (content already present) exits non-zero but leaves 0 unmerged entries.
+        let lsFilesResult = try git.capture(
+            ["diff-index", "--cached", "--name-only", "--diff-filter=U", "HEAD"],
+            workingDirectory: repo.url.path)
+        let unmergedFiles = lsFilesResult.text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(!unmergedFiles.isEmpty, "cherry-pick fixture has real unmerged index entries")
+
+        let r = try whereAmI(path: repo.url.path, git: git)
+        #expect(r.isMidCherryPick == true, "isMidCherryPick reports a real in-progress cherry-pick")
+        #expect(!r.isMidMerge, "a mid-cherry-pick must not also report mid-merge")
+        #expect(!r.isMidRebase, "a mid-cherry-pick must not also report mid-rebase")
+
+        // Abort the cherry-pick to leave the fixture clean.
+        _ = try? git.run(["cherry-pick", "--abort"], workingDirectory: repo.url.path)
     }
 
     @Test func worktreeBranchMatchesMainCheckout() throws {
