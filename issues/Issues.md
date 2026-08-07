@@ -259,7 +259,11 @@ main reason the workflow is shaped this way.
 
 ### The loop
 
-0. **Never work in the main checkout.** Every issue gets its own worktree:
+0. **The primary checkout stays on `main`, always.** It is the one a human looks at, and it is where
+   merged work becomes visible. Never switch it to an issue branch and never run a dispatch in it —
+   doing so pins `main` and hides every finished issue behind whatever round is running.
+
+   Every issue gets its own worktree:
    `git worktree add -b issue/NNNN ../switchyard-NNNN main`. This keeps `main` free so a finished
    issue can be merged immediately instead of queueing behind a running dispatch.
 1. **Branch and push it empty, immediately**: `git push -u origin issue/NNNN`. A branch that exists
