@@ -80,7 +80,7 @@ public struct EncodableResult: Sendable, Encodable {
 ///
 /// Every value also maps to an `ExitCode` so the same code appears both in the
 /// JSON output and as the process exit status — an agent can branch on either.
-public enum EnvelopeErrorCode: String, Sendable {
+public enum EnvelopeErrorCode: String, Sendable, CaseIterable {
 
     /// A command completed successfully — paired with `ExitCode.success`.
     case ok = "ok"
@@ -169,7 +169,7 @@ public enum EnvelopeErrorCode: String, Sendable {
 }
 
 public struct EnvelopeError: Sendable, Encodable {
-    public let code: String // Stable string form of the closed enum for JSON output.
+    public let code: EnvelopeErrorCode
     public let message: String
 
     /// Optional hint to help an agent recover — usually a pointer at the user
@@ -179,14 +179,14 @@ public struct EnvelopeError: Sendable, Encodable {
     public let hint: String?
 
     public init(code: EnvelopeErrorCode, message: String, hint: String? = nil) {
-        self.code = code.rawValue
+        self.code = code
         self.message = message
         self.hint = hint
     }
 
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: _ErrorKey.self)
-        try container.encode(code, forKey: .code)
+        try container.encode(code.rawValue, forKey: .code)
         try container.encode(message, forKey: .message)
         if let hint {
             try container.encode(hint, forKey: .hint)
@@ -199,23 +199,7 @@ public struct EnvelopeError: Sendable, Encodable {
         case hint = "hint"
     }
 
-    // MARK: - Internal lookup from string code back to the closed enum and its exit code.
-
-    public func matchExitCode() -> ExitCode {
-        switch code {
-        case "ok": return .success
-        case "usage": return .usage
-        case "broker_unreachable": return .brokerUnreachable
-        case "app_unavailable": return .appUnavailable
-        case "request_failed": return .requestFailed
-        case "session_terminated": return .sessionTerminated
-        case "repository_error": return .repositoryError
-        case "human_declined": return .humanDeclined
-        case "blocked_on_conflicts": return .blockedOnConflicts
-        case "signing_failed": return .signingFailed
-        default: fatalError("Unknown envelope error code: \(code)")
-        }
-    }
+    public func matchExitCode() -> ExitCode { code.exitCode }
 }
 
 

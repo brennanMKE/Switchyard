@@ -65,7 +65,7 @@ struct JsonEnvelopeTests {
             message: "The worktree lock is corrupted."
         )
 
-        #expect(env.error.code == "repository_error")
+        #expect(env.error.code == .repositoryError)
         #expect(env.error.message == "The worktree lock is corrupted.")
     }
 
@@ -293,6 +293,31 @@ struct JsonEnvelopeTests {
         for code in cases {
             #expect(!code.codeLabel.isEmpty, "\(code) has empty codeLabel")
 
+        }
+    }
+
+    @Test func allEnvelopeErrorCodesEncodeAndMatchExitCode() {
+        #expect(EnvelopeErrorCode.allCases.count == 10)
+
+        let expectedStrings: [String] = [
+            "ok", "usage", "broker_unreachable", "app_unavailable",
+            "request_failed", "session_terminated", "repository_error",
+            "human_declined", "blocked_on_conflicts", "signing_failed"
+        ]
+
+        let expectedExitCodes: [Int32] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+
+        for (index, code) in EnvelopeErrorCode.allCases.enumerated() {
+            let error = EnvelopeError(code: code, message: "test")
+
+            #expect(error.code == code)
+            #expect(code.rawValue == expectedStrings[index], "\(code).rawValue should be \(expectedStrings[index]), got \(code.rawValue)")
+
+            let data = try! JSONEncoder().encode(error)
+            let json = try! JSONSerialization.jsonObject(with: data, options: []) as! [String: Any]
+            #expect((json["code"] as! String) == expectedStrings[index], "\(code) JSON should encode \(expectedStrings[index])")
+
+            #expect(error.matchExitCode().rawValue == expectedExitCodes[index], "\(code).matchExitCode() should be \(expectedExitCodes[index])")
         }
     }
 }
