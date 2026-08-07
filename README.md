@@ -17,9 +17,9 @@ safely. **Every mutating operation is reversible.**
 | Product | What it is |
 | --- | --- |
 | **Switchyard.app** | SwiftUI macOS app. Interactive commit graph, three-way merge, review UI. |
-| **`yard`** | CLI. Structured, non-interactive git operations for humans and agents. |
+| **`switchyard`** | CLI. Structured, non-interactive git operations for humans and agents. |
 
-`yard` ships inside the app bundle and symlinks into `/usr/local/bin`, but **it does not need the
+`switchyard` ships inside the app bundle and symlinks into `/usr/local/bin`, but **it does not need the
 app to run**. All reads and all non-interactive mutations happen in-process, so the CLI works in CI,
 over SSH, and in headless agent runs. The app is required only for the commands that put a human in
 the loop.
@@ -55,7 +55,7 @@ however you arrive at it.
 Three things, in order of how much they matter:
 
 **1. Structured repository state in one call.** An agent today spends four or five `git` invocations
-and fragile text parsing to answer "where am I." `yard whereami` returns one JSON object: branch,
+and fragile text parsing to answer "where am I." `switchyard whereami` returns one JSON object: branch,
 upstream, ahead/behind, in-progress rebase or merge or cherry-pick, stash count, dirty paths,
 conflict count, signing config.
 
@@ -69,7 +69,7 @@ nothing lives outside the repository, and `gc` cannot eat them.
 block on a human decision, and receive the answer as structured data:
 
 ```sh
-yard review --staged --wait --json
+switchyard review --staged --wait --json
 # blocks while a human reviews in Switchyard.app, then:
 # {"schemaVersion":1,"decision":"approve","comments":[…],"editedPatch":"…"}
 # exit 0 on approve, 7 on reject
@@ -93,9 +93,9 @@ The CLI *is* the agent interface. Its contract:
   prompt. A command that needs the app and cannot reach it fails with exit code 3 naming what is
   missing — it never silently falls back, because an agent would then proceed without the human
   approval it was told to obtain.
-- **Every mutating command auto-checkpoints**, so `yard undo` works whether or not the caller
+- **Every mutating command auto-checkpoints**, so `switchyard undo` works whether or not the caller
   thought to ask.
-- **Provenance trailers.** `yard commit --agent <name> --model <id> --session <id>` records who
+- **Provenance trailers.** `switchyard commit --agent <name> --model <id> --session <id>` records who
   actually wrote a commit, following the `Co-authored-by` convention so existing tooling ignores it
   gracefully. A *signed* commit carrying provenance trailers is a meaningfully stronger claim than
   an unsigned one; no other client offers it.
@@ -128,11 +128,11 @@ Full detail in the [development guide](docs/switchyard-development-guide.md#6-th
 | **Hooks** | `hooks install`, `hooks uninstall`, `hooks status` |
 | **Human-in-the-loop** *(needs the app)* | `review --wait`, `ask`, `resolve --interactive`, `watch` |
 
-Three worth calling out. **`yard hunks`** returns stable hunk IDs, which is what makes precise
+Three worth calling out. **`switchyard hunks`** returns stable hunk IDs, which is what makes precise
 agent-driven staging possible without `git add -p` — the interactive command agents cannot use.
-**`yard absorb`** distributes staged hunks into the correct prior commits by matching each hunk
+**`switchyard absorb`** distributes staged hunks into the correct prior commits by matching each hunk
 against the commit that last touched those lines; it is the highest-leverage way to clean up an
-agent's messy branch. And **`yard wt new --agent <id>`** creates an isolated worktree for an agent
+agent's messy branch. And **`switchyard wt new --agent <id>`** creates an isolated worktree for an agent
 session, populated from a repo-level template — because a fresh worktree has the tracked files and
 nothing else, and an agent whose first command dies on a missing `node_modules` starts improvising.
 
@@ -173,7 +173,7 @@ reused directly here.
 The shape, briefly: a plain double-clicked app cannot publish a named Mach service, because
 `NSXPCListener(machServiceName:)` only works when launchd owns the name. So a small launch agent
 embedded in the bundle declares the name and acts as a bootstrap broker. The app registers its
-anonymous listener endpoint with the broker; `yard` connects to the broker by Mach service name,
+anonymous listener endpoint with the broker; `switchyard` connects to the broker by Mach service name,
 receives the endpoint, then connects **directly** to the app. After the handoff the broker is out of
 the data path, and restarting it does not disturb an attached session.
 

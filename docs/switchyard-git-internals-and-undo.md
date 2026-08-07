@@ -51,7 +51,7 @@ a silent data loss bug.
 | Sequencer state | `rebase-merge/`, `rebase-apply/`, `sequencer/` | Per-worktree. An in-progress rebase or cherry-pick. |
 | Merge state | `MERGE_HEAD`, `MERGE_MSG`, `CHERRY_PICK_HEAD`, `REVERT_HEAD`, `ORIG_HEAD` | Per-worktree pseudo refs. |
 | Per-worktree refs | `refs/bisect/*`, `refs/worktree/*`, `refs/rewritten/*` | See Section 5. |
-| Config | `config`, and `config.worktree` when enabled | Rarely part of undo, but `yard` must read both. |
+| Config | `config`, and `config.worktree` when enabled | Rarely part of undo, but `switchyard` must read both. |
 
 ### What git already gives you, and why it is not enough
 
@@ -125,7 +125,7 @@ whole snapshot reachable, survives `git gc` and `git maintenance`, and is remove
 
 Use `refs/switchyard/` rather than anything under `refs/heads` or `refs/tags` so the entries never
 appear in normal branch listings, never get pushed by a default refspec, and are trivially
-identifiable. They will show up in `git for-each-ref` output, so `yard`'s own ref enumeration must
+identifiable. They will show up in `git for-each-ref` output, so `switchyard`'s own ref enumeration must
 filter them.
 
 ### Persistence across launches, and where it lives
@@ -133,7 +133,7 @@ filter them.
 This is the advantage over GitUp, and it comes almost free once snapshots are real objects.
 GitUp's snapshots cannot outlive the process because they are in memory. Switchyard's are in the
 object database, so they survive a quit, a reboot, a different machine that clones the repo, and
-`yard` running with the app closed.
+`switchyard` running with the app closed.
 
 **Split the storage by what it is:**
 
@@ -144,17 +144,17 @@ object database, so they survive a quit, a reboot, a different machine that clon
 | Repository registry, cross-repo recent operations, agent session records, UI state | `~/.local/state/switchyard/` | Not repo-specific. Survives repo deletion. Enables "what did I do everywhere today." |
 
 Honor `XDG_STATE_HOME` with `~/.local/state` as the fallback. Your instinct on the path is right,
-and it beats `~/Library/Application Support` here because `yard` runs in shells, CI, and agent
+and it beats `~/Library/Application Support` here because `switchyard` runs in shells, CI, and agent
 sandboxes where the Library path is awkward or absent. The app uses the same path.
 
 **The trap to record now:** this only works while Switchyard.app stays unsandboxed. A sandboxed
 app gets a container-relative home, and `~/.local/state/switchyard` from the app would become
 `~/Library/Containers/co.sstools.Switchyard/Data/.local/state/switchyard`, silently diverging
-from what `yard` sees. This is one more entry on the list of things that break if sandboxing is
+from what `switchyard` sees. This is one more entry on the list of things that break if sandboxing is
 ever reconsidered.
 
 **The truth is always in the repository.** The state directory is an index and a convenience.
-If it is deleted, `yard journal` must rebuild from `refs/switchyard/journal/*` alone, with
+If it is deleted, `switchyard journal` must rebuild from `refs/switchyard/journal/*` alone, with
 reduced metadata. Write that rebuild path early and test it, because it is what keeps the design
 honest about which store is authoritative.
 
@@ -180,7 +180,7 @@ honest about which store is authoritative.
 
 ### The cross-tool guard
 
-An agent will run `git` directly in the same repository between two `yard` commands. Constantly.
+An agent will run `git` directly in the same repository between two `switchyard` commands. Constantly.
 Before restoring, compare every ref in `guard` against its current value. On mismatch, refuse with
 exit 4 and name the ref, the expected value, and the actual one. Offer `--force` for the human,
 never for a scripted caller.
@@ -190,13 +190,13 @@ never for a scripted caller.
 Journal entries expire on a count limit and an age limit, both configurable, defaulting to
 generous values since the marginal cost of a snapshot is a few small objects. Pruning deletes the
 anchor ref and the metadata entry together; the objects then become unreachable and normal `gc`
-reclaims them. Never call `git gc` from `yard`.
+reclaims them. Never call `git gc` from `switchyard`.
 
 ---
 
 ## 4. Observing changes made outside Switchyard
 
-The journal covers what `yard` does. Something has to notice what `git` does, or the app's view
+The journal covers what `switchyard` does. Something has to notice what `git` does, or the app's view
 goes stale and the guard fires constantly with no explanation.
 
 Git provides a purpose-built mechanism, and it is the single most useful hook for this project.
@@ -204,14 +204,14 @@ Git provides a purpose-built mechanism, and it is the single most useful hook fo
 **`reference-transaction`.** <cite index="30-1">This hook is invoked by any Git command that performs reference updates, executing whenever a reference transaction is preparing, prepared, committed, or aborted, and it also supports symbolic reference updates. For each reference update in the transaction, the hook receives on standard input a line of `<old-value> SP <new-value> SP <ref-name>`.</cite>
 
 That is every ref change in the repository, from any tool, batched by transaction, with old and
-new values. It is exactly the event stream Switchyard needs. Install `yard hook ref-txn` as this
+new values. It is exactly the event stream Switchyard needs. Install `switchyard hook ref-txn` as this
 hook, have it record `committed` transactions into the journal as observed (not undoable) entries,
 and forward them to the app over XPC if it is attached.
 
 Two cautions:
 
 - <cite index="30-1">The hook's exit status is ignored except in the "preparing" and "prepared" states, where a non-zero exit causes the transaction to be aborted.</cite> So the handler must be fast and must never fail in those states. Do the real work on `committed`, return 0 immediately otherwise.
-- The hook runs on every ref update including the journal's own writes. Set an environment marker in `yard` and have the hook skip its own transactions, or the journal records itself recording itself.
+- The hook runs on every ref update including the journal's own writes. Set an environment marker in `switchyard` and have the hook skip its own transactions, or the journal records itself recording itself.
 
 **`post-rewrite`** complements it with the mapping git will not give you any other way. <cite index="30-1">It is invoked by commands that rewrite commits, currently `git commit --amend` and `git rebase`, and receives on stdin a list of `<old-object-name> SP <new-object-name>` lines. For squash and fixup operations, all squashed commits are listed as rewritten to the squashed commit, so several lines may share the same new object name, and commits are listed in the order rebase processed them.</cite>
 
@@ -221,10 +221,10 @@ commits became this one" after a rewrite, rather than just two different graphs.
 **Also worth wiring:** `post-checkout` (fires on `git worktree add` too, unless `--no-checkout`),
 `post-merge`, `post-commit`, and `post-index-change` for index writes.
 
-**Hook installation is a user decision, not something `yard` does silently.** Repositories often
-already have hooks, or use `core.hooksPath` pointing at a managed directory. `yard hooks install`
+**Hook installation is a user decision, not something `switchyard` does silently.** Repositories often
+already have hooks, or use `core.hooksPath` pointing at a managed directory. `switchyard hooks install`
 should detect existing hooks, chain rather than clobber, and be reversible with
-`yard hooks uninstall`. Everything degrades to polling if hooks are declined.
+`switchyard hooks uninstall`. Everything degrades to polling if hooks are declined.
 
 **FSEvents** on `$GIT_COMMON_DIR` and each `$GIT_DIR` remains useful for the app's live view, and
 you have prior experience with it. Treat it as a "something changed, re-read" signal only. It
@@ -273,7 +273,7 @@ Consequences for undo:
 
 Reading another worktree's per-worktree refs is supported and does not require path games:
 <cite index="29-1">per-worktree refs can be accessed from another worktree via the special paths `main-worktree` and `worktrees`, so `main-worktree/HEAD` resolves to the main worktree's `HEAD` and `worktrees/foo/HEAD` resolves to `$GIT_COMMON_DIR/worktrees/foo/HEAD`.</cite>
-Use those. `git rev-parse worktrees/agent-a/HEAD` is the correct way for `yard` to answer "what is
+Use those. `git rev-parse worktrees/agent-a/HEAD` is the correct way for `switchyard` to answer "what is
 agent A on right now."
 
 ### Branch exclusivity is a feature, not an obstacle
@@ -290,7 +290,7 @@ naming the worktree that holds the branch, and should never pass `--force` on an
 
 Practical consequence: if Switchyard offers sparse worktrees for large repos (it should, see
 below), it must enable `extensions.worktreeConfig` first, or one agent's sparse checkout silently
-reshapes every other worktree. <cite index="29-1">Older Git versions refuse to access repositories with this extension</cite>, so it is a prompt to the user, not something `yard` turns on quietly.
+reshapes every other worktree. <cite index="29-1">Older Git versions refuse to access repositories with this extension</cite>, so it is a prompt to the user, not something `switchyard` turns on quietly.
 
 Same category: <cite index="29-1">`worktree.useRelativePaths` set to true implies enabling `extensions.relativeWorktrees`, making the repository incompatible with older versions of Git.</cite> Relative paths are attractive for agent worktrees that get moved or containerized, but the compatibility cost is real. Offer it, default it off.
 
@@ -299,7 +299,7 @@ Same category: <cite index="29-1">`worktree.useRelativePaths` set to true implie
 An agent that crashes, or a container that is torn down, leaves a worktree directory gone and its
 administrative entry behind. Git handles this, but only if asked. <cite index="29-1">If a working tree is deleted without using `git worktree remove`, its administrative files in the repository will eventually be removed automatically per `gc.worktreePruneExpire`, or `git worktree prune` can clean up stale administrative files.</cite> And <cite index="29-1">`git worktree repair` reestablishes connections when the main worktree or a linked worktree has been moved, by running repair in the main worktree, or within the moved worktree, or from any worktree with each tree's new path as an argument.</cite>
 
-There is also a clever repurposing available. <cite index="29-1">`git worktree lock` prevents a worktree's administrative files from being pruned, and also prevents the worktree from being moved or deleted, with `--reason` explaining why.</cite> Its intended use is removable media, but "an agent session is live in this worktree" is an equally valid reason. `yard wt new --agent <id>` should lock with a machine-readable reason, and release on session end. It makes prune safe to run at any time and makes an abandoned session visible in `git worktree list --verbose`.
+There is also a clever repurposing available. <cite index="29-1">`git worktree lock` prevents a worktree's administrative files from being pruned, and also prevents the worktree from being moved or deleted, with `--reason` explaining why.</cite> Its intended use is removable media, but "an agent session is live in this worktree" is an equally valid reason. `switchyard wt new --agent <id>` should lock with a machine-readable reason, and release on session end. It makes prune safe to run at any time and makes an abandoned session visible in `git worktree list --verbose`.
 
 ### Detection and listing
 
@@ -308,7 +308,7 @@ There is also a clever repurposing available. <cite index="29-1">`git worktree l
 Always use `--porcelain -z`. Agent-created worktree paths are machine-generated and will
 eventually contain something awkward. <cite index="29-1">The porcelain format is documented as stable across Git versions and regardless of user configuration.</cite>
 
-`yard wt list --json` should return the porcelain data plus what agents actually need: dirty
+`switchyard wt list --json` should return the porcelain data plus what agents actually need: dirty
 state, ahead/behind, whether a rebase or merge is in progress, the attached agent session, and
 the journal entry count for that worktree.
 
@@ -320,7 +320,7 @@ A fresh worktree has the tracked files and nothing else. No `node_modules`, no `
 This is the highest-value worktree feature Switchyard could ship and nothing does it well:
 
 **Worktree templates.** A Switchyard-level config listing untracked paths to copy, symlink, or
-regenerate on `yard wt new`, plus optional post-create commands. Symlink shared caches, copy
+regenerate on `switchyard wt new`, plus optional post-create commands. Symlink shared caches, copy
 per-worktree secrets, run the bootstrap command once. Store it in the repo so the whole team and
 every agent gets the same treatment.
 
@@ -331,14 +331,14 @@ one subsystem does not materialize the entire tree. <cite index="29-1">`--no-che
 
 | Command | Purpose |
 | --- | --- |
-| `yard wt list` | Structured superset of `worktree list --porcelain`, plus dirty state, ahead/behind, in-progress operation, attached agent, journal depth. |
-| `yard wt new <name>` | Create a worktree. `--branch`, `--from`, `--detach`, `--agent <id>` (locks with a session reason), `--template <name>`, `--sparse <paths>`. |
-| `yard wt rm <name>` | Remove, releasing the lock and the agent session. Refuses when unclean without `--force`, matching git. |
-| `yard wt where` | Resolve the current context: worktree id, path, `$GIT_DIR`, `$GIT_COMMON_DIR`, main worktree path. |
-| `yard wt gc` | `prune` plus reporting of prunable and abandoned-session worktrees. |
-| `yard wt repair [<path>...]` | Wraps `git worktree repair` for the moved-directory case. |
+| `switchyard wt list` | Structured superset of `worktree list --porcelain`, plus dirty state, ahead/behind, in-progress operation, attached agent, journal depth. |
+| `switchyard wt new <name>` | Create a worktree. `--branch`, `--from`, `--detach`, `--agent <id>` (locks with a session reason), `--template <name>`, `--sparse <paths>`. |
+| `switchyard wt rm <name>` | Remove, releasing the lock and the agent session. Refuses when unclean without `--force`, matching git. |
+| `switchyard wt where` | Resolve the current context: worktree id, path, `$GIT_DIR`, `$GIT_COMMON_DIR`, main worktree path. |
+| `switchyard wt gc` | `prune` plus reporting of prunable and abandoned-session worktrees. |
+| `switchyard wt repair [<path>...]` | Wraps `git worktree repair` for the moved-directory case. |
 
-And `yard whereami` gains a `worktree` object so an agent's first call tells it which worktree it
+And `switchyard whereami` gains a `worktree` object so an agent's first call tells it which worktree it
 is in and whether any sibling is working the same branch.
 
 ---
@@ -350,13 +350,13 @@ Ordered by value relative to effort.
 **`rerere`.** Git can record how a conflict was resolved and replay that resolution when the same
 conflict reappears. For agents this is directly valuable: a human resolves a merge conflict once
 in Switchyard's three-way UI, and every subsequent rebase of that branch resolves it without
-asking. `yard rerere status --json` to show what is recorded, and surface it in the app so the
+asking. `switchyard rerere status --json` to show what is recorded, and surface it in the app so the
 recorded resolutions are visible and editable rather than invisible magic. This pairs naturally
 with `resolve --interactive` from the main guide.
 
 **`range-diff` after a rewrite.** After `fixup`, `absorb`, or a rebase, the question a reviewer
 actually has is "what changed in the changes." `git range-diff` answers it, and the `post-rewrite`
-mapping tells you exactly which ranges to compare. `yard rewrite-diff <journal-entry>` gives a
+mapping tells you exactly which ranges to compare. `switchyard rewrite-diff <journal-entry>` gives a
 human the confidence to accept an agent's history rewrite instead of undoing it defensively.
 This is the feature that makes the journal feel trustworthy rather than merely present.
 
@@ -373,7 +373,7 @@ performance measurement rather than treating it as an optimization for later.
 
 **Cheap upstream drift check.** This is what the protocol-v2 document is good for, and it is
 worth being direct that the rest of it is not relevant to undo. Protocol v2 exists so that
-<cite index="28-1">reference advertisement is omitted unless explicitly requested, with an `ls-refs` command to explicitly request some refs</cite>, and <cite index="28-1">`ls-refs` accepts `ref-prefix <prefix>` arguments so that only references matching one of the given prefixes are shown, though this is purely an optimization and clients should filter the result themselves</cite>. That makes "has my branch's upstream moved" a single cheap round trip rather than a fetch. `git ls-remote` already speaks v2 and gives you this for free, which is one more argument for keeping the network path on the CLI. `yard upstream-status --json` lets an agent decide whether it needs to fetch before it starts rewriting.
+<cite index="28-1">reference advertisement is omitted unless explicitly requested, with an `ls-refs` command to explicitly request some refs</cite>, and <cite index="28-1">`ls-refs` accepts `ref-prefix <prefix>` arguments so that only references matching one of the given prefixes are shown, though this is purely an optimization and clients should filter the result themselves</cite>. That makes "has my branch's upstream moved" a single cheap round trip rather than a fetch. `git ls-remote` already speaks v2 and gives you this for free, which is one more argument for keeping the network path on the CLI. `switchyard upstream-status --json` lets an agent decide whether it needs to fetch before it starts rewriting.
 
 Also from that document, <cite index="28-1">the `object-info` command retrieves information about objects, currently size, so a client can make decisions without fully fetching them</cite>. Relevant only if partial clone support becomes a goal.
 
@@ -397,7 +397,7 @@ These were folded into [switchyard-development-guide.md](switchyard-development-
 | --- | --- |
 | M0 gains a fourth question: does the chosen libgit2 build work against a `--ref-format=reftable` repository? | §5 Milestone 0 spike, §9 M0 |
 | M0's performance question measures with and without `commit-graph` | §5 Milestone 0 spike |
-| M2 gains the hook layer: `yard hooks install`, `reference-transaction`, `post-rewrite` | §6 Hooks command group, §9 M2 |
+| M2 gains the hook layer: `switchyard hooks install`, `reference-transaction`, `post-rewrite` | §6 Hooks command group, §9 M2 |
 | Worktrees move into M1, because `WorktreeContext` must precede all path resolution | §6 Worktrees command group, §9 M1 |
 | `$XDG_STATE_HOME`/`~/.local/state/switchyard/` added to the identifiers table | §3 |
 | Sandboxing gains the state-path divergence as a second concrete consequence | §11 open question 4 |

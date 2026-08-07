@@ -41,14 +41,14 @@ public enum ServiceNames {
     // MARK: - CLI
 
     /// CLI binary name.
-    public static let cliName = "yard"
+    public static let cliName = "switchyard"
 
     /// Where the CLI is symlinked for real use. On the default macOS `PATH`,
     /// so nothing needs editing — and root-owned, so installing prompts.
-    public static let cliInstallPath = "/usr/local/bin/yard"
+    public static let cliInstallPath = "/usr/local/bin/switchyard"
 
     /// Path to the CLI inside the app bundle, relative to `Contents/`.
-    public static let cliBundleRelativePath = "Resources/bin/yard"
+    public static let cliBundleRelativePath = "Resources/bin/switchyard"
 
     /// URL scheme for one-shot, fire-and-forget requests.
     public static let urlScheme = "switchyard"

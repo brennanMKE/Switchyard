@@ -77,7 +77,7 @@ restored rather than leaving the user to discover it.
 
 ## Escape hatch
 
-`yard checkpoint --include-ignored` exists for the case where a user genuinely wants a byte-exact
+`switchyard checkpoint --include-ignored` exists for the case where a user genuinely wants a byte-exact
 snapshot of a large tree, and it is never the default and never used by auto-checkpointing. Automatic
 capture before every mutating command must stay cheap enough that nobody turns it off.
 
