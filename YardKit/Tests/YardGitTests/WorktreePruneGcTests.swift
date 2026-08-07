@@ -52,10 +52,12 @@ struct WorktreePruneGcTests {
         try repo.lockWorktree(agentdeletedPath, reason: "switchyard-agent:session=gone")
         try repo.lockWorktree(userdeletedPath, reason: "reviewing this branch later")
 
-        // Delete the agent-locked and user-locked worktrees' directories.
+        // Delete three of the four worktrees' directories.
         // `agentpresentPath` remains on disk (it must stay, so it is not abandoned).
         try FileManager.default.removeItem(at: agentdeletedPath)
         try FileManager.default.removeItem(at: userdeletedPath)
+        // `unlocked` has no lock, so deleting its directory is what makes it prunable.
+        try FileManager.default.removeItem(at: unlockedPath)
 
         return (agentpresentPath, agentdeletedPath, userdeletedPath, unlockedPath)
     }
@@ -85,7 +87,7 @@ struct WorktreePruneGcTests {
         var repo = try FixtureRepository.linear()
         defer { repo.destroy() }
 
-        _ = try buildFourWorktrees(repo: &repo)
+        let (agentpresentPath, _, _, unlockedPath) = try buildFourWorktrees(repo: &repo)
 
         let result = try WorktreePrune.gc(repositoryPath: repo.url.path, prune: true)
 
@@ -95,13 +97,18 @@ struct WorktreePruneGcTests {
         // After a real prune run (the only reaped entry is the unlocked prunable one),
         // a second worktree list call must show that the unlocked entry is gone.
         let entriesAfterPrune = try worktreeList(path: repo.url.path)
-        #expect(!entriesAfterPrune.isEmpty, "main worktree must still be listed after prune")
+        // `!isEmpty` cannot fail -- the main worktree is always listed. Assert on
+        // the specific entry this test is about.
+        #expect(!entriesAfterPrune.contains { normalize($0.path ?? "") == normalize(unlockedPath.path) },
+                "the reaped prunable worktree must be gone from the list")
+        #expect(entriesAfterPrune.contains { normalize($0.path ?? "") == normalize(agentpresentPath.path) },
+                "the locked, present worktree must survive a prune")
     }
 
     // MARK: - gc with mocked git reports empty when there is nothing to report
 
     @Test func gcWithCleanRepoReturnsEmptyReports() throws {
-        var repo = try FixtureRepository.linear()
+        let repo = try FixtureRepository.linear()
         defer { repo.destroy() }
 
         let result = try WorktreePrune.gc(repositoryPath: repo.url.path)
@@ -115,7 +122,7 @@ struct WorktreePruneGcTests {
         var repo = try FixtureRepository.linear()
         defer { repo.destroy() }
 
-        _ = try buildFourWorktrees(repo: &repo)
+        let (_, _, _, unlockedPath) = try buildFourWorktrees(repo: &repo)
 
         let result = try WorktreePrune.gc(repositoryPath: repo.url.path, prune: true)
 
@@ -127,7 +134,8 @@ struct WorktreePruneGcTests {
 
         // After the prune call, the only reaped entry is the unlocked-prunable one.
         let entriesAfter = try worktreeList(path: repo.url.path)
-        #expect(!entriesAfter.isEmpty, "main worktree must still exist after prune")
+        #expect(!entriesAfter.contains { normalize($0.path ?? "") == normalize(unlockedPath.path) },
+                "the reaped prunable worktree must be gone from the list")
     }
 
     // MARK: - gc does NOT prune on default call (report-only retention)
@@ -136,7 +144,7 @@ struct WorktreePruneGcTests {
         var repo = try FixtureRepository.linear()
         defer { repo.destroy() }
 
-        _ = try buildFourWorktrees(repo: &repo)
+        let (_, _, _, unlockedPath) = try buildFourWorktrees(repo: &repo)
 
         // First gc — report only, no prune.
         let first = try WorktreePrune.gc(repositoryPath: repo.url.path)
@@ -149,7 +157,11 @@ struct WorktreePruneGcTests {
         // Second list — the worktree must still be listed. If gc had
         // accidentally called prune, this second `worktreeList` would show it.
         let entries2 = try worktreeList(path: repo.url.path)
-        #expect(!entries2.isEmpty, "worktrees must still be present after report-only gc")
+        // The point of a report-only gc: the prunable entry is STILL THERE.
+        // `!isEmpty` would pass even if gc had reaped it, since the main
+        // worktree is always listed.
+        #expect(entries2.contains { normalize($0.path ?? "") == normalize(unlockedPath.path) },
+                "a default gc must not reap the prunable worktree")
     }
 
     // MARK: - mutation 1 — .text instead of .standardError must kill the prune test
@@ -179,7 +191,7 @@ struct WorktreePruneGcTests {
         var repo = try FixtureRepository.linear()
         defer { repo.destroy() }
 
-        let (_, _, userDeletedPath, unlockedPath) = try buildFourWorktrees(repo: &repo)
+        let (_, _, _, unlockedPath) = try buildFourWorktrees(repo: &repo)
 
         // With a default gc (prune should be false), the prunable entries must
         // still appear in a subsequent worktreeList call because prune is NOT run.
@@ -197,8 +209,9 @@ struct WorktreePruneGcTests {
 
     @Test func mutation3_ignoringExistenceMarksPresentLockedAsAbandoned() throws {
         var repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
 
-        let (agentpresentPath, agentdeletedPath, userdeletedPath, _) = try buildFourWorktrees(repo: &repo)
+        let (agentpresentPath, agentdeletedPath, _, _) = try buildFourWorktrees(repo: &repo)
 
         // Exactly one abandoned session should be reported: the agent-deleted worktree.
         let reports = try WorktreePrune.gc(repositoryPath: repo.url.path).reports
@@ -211,43 +224,39 @@ struct WorktreePruneGcTests {
         #expect(normalize(abandonedEntry.path) == normalize(agentdeletedPath.path), "the abandoned entry must be the agent-deleted worktree")
         #expect(abandonedEntry.removable == false, "abandoned sessions are never removable")
 
-        // The agent-present worktree must NOT be reported as abandoned.
-        let presentEntry = reports.first(where: { normalize($0.path) == normalize(agentpresentPath.path) })
-        #expect(presentEntry != nil, "agent-present worktree must still be in reports")
-        #expect(presentEntry!.type != .abandonedSession, "agent-present worktree must NOT be reported as abandoned session — this is mutation 3")
+        // The agent-present worktree (directory still exists) must NOT appear in reports.
+        #expect(!reports.contains { normalize($0.path) == normalize(agentpresentPath.path) }, "agent-present worktree with present directory must not be in reports — this is mutation 3")
     }
 
     // MARK: - mutation 4 — drop the switchyard-agent prefix check
 
     @Test func mutation4_dropPrefixMakesUserLockedAbandoned() throws {
         var repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
 
         let (_, agentdeletedPath, userdeletedPath, _) = try buildFourWorktrees(repo: &repo)
 
         let reports = try WorktreePrune.gc(repositoryPath: repo.url.path).reports
 
-        // The three deleted worktrees should be prunable.
+        // The three deleted worktrees should all be detected: one prunable, two abandoned sessions.
         let prunableReports = reports.filter { $0.type == .prunable }
-        #expect(prunableReports.count >= 2, "deleted worktrees must be prunable")
+        #expect(prunableReports.count >= 1, "at least one worktree must be prunable (the unlocked one)")
 
-        // Exactly one abandoned entry: the agent-deleted worktree.
+        // Exactly one abandoned entry: the agent-deleted worktree. The user-locked
+        // worktree (reason unrelated to switchyard-agent) must not become abandoned.
         let abandoned = reports.filter { $0.type == .abandonedSession }
-        #expect(abandoned.count == 1, "mutation4: exactly one abandoned session (agent-deleted) with the prefix check intact")
+        #expect(abandoned.count == 1, "mutation4: exactly one abandoned session (agent-deleted) — the user-locked worktree has a non-agent reason so must NOT flip to abandoned")
 
         // The user-locked worktree must NOT be reported as abandoned — its reason
         // is unrelated to the agent prefix. If mutation 4 drops the prefix check,
         // this would flip to abandonedSession:
-        let userEntry = reports.first(where: { normalize($0.path) == normalize(userdeletedPath.path) })
-        #expect(userEntry != nil, "user-deleted worktree must still be in reports")
-        #expect(userEntry!.type != .abandonedSession, "mutation4: user-locked worktree must not be reported as abandoned")
+        #expect(!reports.contains { normalize($0.path) == normalize(userdeletedPath.path) && $0.type == .abandonedSession }, "mutation4: user-locked worktree must not be reported as abandoned")
 
         // The abandoned session that survives should point at the agentdeleted worktree.
         let abandonedEntry = try #require(abandoned.first, "the abandoned entry must exist")
         #expect(normalize(abandonedEntry.path) == normalize(agentdeletedPath.path), "the abandoned entry must be the agent-deleted worktree")
         #expect(abandonedEntry.lockReason != nil, "abandoned session must have a recorded lock reason")
         #expect(abandonedEntry.removable == false, "abandoned sessions are never removable")
-
-        defer { repo.destroy() }
     }
 
     // MARK: - gc wiring: prune flag controls second element of the tuple
@@ -285,23 +294,16 @@ struct WorktreePruneGcTests {
         }
 
         // The prunable entry's reason should be git's verbatim wording.
-        let prunable = reports.first(where: { normalize($0.path) == normalize(unlockedPath.path) && $0.type == .prunable })
-        if let prunable {
-            #expect(prunable.reason != nil, "prunable entries should carry git's reason")
-        }
+        let prunable = try #require(
+            reports.first(where: { normalize($0.path) == normalize(unlockedPath.path) && $0.type == .prunable }),
+            "the unlocked, deleted worktree must be reported as prunable")
+        #expect(prunable.reason != nil, "prunable entries carry git's own reason verbatim")
 
         // The abandoned session is at the deleted path.
-        let agentDeleted = reports.first(where: { normalize($0.path) == normalize(deletedPath.path) })
-        #expect(agentDeleted != nil, "agent-deleted worktree must be in reports")
-        #expect(agentDeleted!.type == .abandonedSession, "the agent-deleted worktree must be reported as abandoned session")
+        let agentDeleted = try #require(reports.first(where: { normalize($0.path) == normalize(deletedPath.path) }))
+        #expect(agentDeleted.type == .abandonedSession, "the agent-deleted worktree must be reported as abandoned session")
 
-        // The presentPath path should NOT be an abandoned session (its directory exists).
-        let present = reports.first(where: { normalize($0.path) == normalize(presentPath.path) })
-        #expect(present != nil, "present worktree must be reported")
-        if let present {
-            #expect(present.type != .abandonedSession, "present worktree must NOT be an abandoned session")
-        }
-
-        defer { repo.destroy() }
+        // The presentPath path should NOT be in reports at all (its directory exists and it's agent-locked).
+        #expect(!reports.contains { normalize($0.path) == normalize(presentPath.path) }, "present agent-locked worktree with existing directory must not be in reports")
     }
 }
