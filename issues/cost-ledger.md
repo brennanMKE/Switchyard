@@ -75,7 +75,8 @@ a figure derived from it appears.
 | 2026-08-07 | #0095 | Dispatch round 2 + hand finish (accepted) | 55,081 | $0.44 |
 | 2026-08-07 | #0112 | Dispatch round 2 (REJECTED, cherry-pick fixture untouched) | 53,571 | $0.43 |
 | 2026-08-07 | #0110 | Dispatch round 1 (accepted) | 53,310 | $0.43 |
-| | | **Total measured** | **3,085,600** | **$24.69** |
+| 2026-08-07 | #0112 | Dispatch round 3 (accepted) | 54,826 | $0.44 |
+| | | **Total measured** | **3,140,426** | **$25.13** |
 
 ## What this total does and does not cover
 
