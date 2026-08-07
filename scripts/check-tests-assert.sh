@@ -20,6 +20,8 @@
 #   SKIPSHAPE a bare `return` in a @Test body — a quiet skip that reports success
 #   EMPTYELSE an `else` block containing only comments — the `if` branch's
 #             assertion is simply skipped when the condition does not hold
+#   EXPECTBANG `#expect(x != nil)` then `x!` — #expect does not stop, so the
+#             force unwrap traps and takes the whole run summary with it
 #   HANDROLLED a hand-written `allCases`, which makes "every case" mean
 #             "every case someone remembered"
 #
@@ -158,11 +160,49 @@ while IFS= read -r f; do
 done < <(find $TARGETS -name '*.swift' -type f 2>/dev/null || true)
 EMPTYELSE=$(print -r -- "$EMPTYELSE" | grep . || true)
 
+# --- EXPECTBANG: `#expect(x != nil)` followed by `x!` ----------------------
+# `#expect` records an issue and KEEPS GOING. So the force unwrap on the next
+# line traps, the test *process* dies, and swift-testing emits no
+# `Test run with N tests` line at all -- every other test's result is lost
+# with it. #0096 round 3 died this way, with the pattern written three times
+# in one file. `try #require` is the stopping sibling.
+EXPECTBANG_AWK=$(cat <<'AWKEOF'
+# Remember the identifier from `#expect(<ident> != nil` and flag a force
+# unwrap of that same identifier within the next few lines. #expect records
+# and continues, so the `!` traps and kills the whole test process.
+{
+  buf[NR] = $0
+  if (match($0, /#expect\([A-Za-z_][A-Za-z0-9_]*[ \t]*!=[ \t]*nil/)) {
+    s = substr($0, RSTART + 8)
+    sub(/[ \t]*!=.*/, "", s)
+    pend[NR] = s
+  }
+}
+END {
+  for (n in pend) {
+    id = pend[n]
+    for (j = n + 1; j <= n + 6 && j <= NR; j++) {
+      if (buf[j] ~ ("(^|[^A-Za-z0-9_.])" id "![^=]")) {
+        printf "  EXPECTBANG  %s:%d: #expect(%s != nil) then %s! at line %d\n", F, n, id, id, j
+        break
+      }
+    }
+  }
+}
+AWKEOF
+)
+EXPECTBANG=""
+while IFS= read -r f; do
+  [[ -n "$f" ]] || continue
+  EXPECTBANG+="$(awk -v F="$f" "$EXPECTBANG_AWK" "$f" || true)"$'\n'
+done < <(find $TARGETS -name '*.swift' -type f 2>/dev/null || true)
+EXPECTBANG=$(print -r -- "$EXPECTBANG" | grep . || true)
+
 # --- HANDROLLED: a hand-written allCases in production code ----------------
 HAND=$(grep -rn -E 'static +(var|let) +allCases' Sources YardKit/Sources --include='*.swift' 2>/dev/null \
   | sed 's/^/  HANDROLLED /' || true)
 
-for block in "$INERT" "$NARROW" "$TAUT" "$ORPHAN" "$EMPTYELSE" "$HAND"; do
+for block in "$INERT" "$NARROW" "$TAUT" "$ORPHAN" "$EMPTYELSE" "$EXPECTBANG" "$HAND"; do
   if [[ -n "${block//[[:space:]]/}" ]]; then print -r -- "$block"; FOUND=1; fi
 done
 
