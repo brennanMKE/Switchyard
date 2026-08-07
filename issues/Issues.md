@@ -263,6 +263,11 @@ main reason the workflow is shaped this way.
 2. **Author** the issue, or update it with review feedback in a `## Review` section.
 3. **Dispatch**: a subagent runs `scripts/dispatch-issue.sh NNNN --round N`.
 4. **Review** the diff and the pasted verification output — not the model's summary of them.
+   **Re-run the verification yourself.** A round that pastes real command output can still be wrong
+   about what the output means, and a well-written document is the easiest kind to under-review. On
+   #0070 round 1 the model genuinely ran `git interpret-trailers`, and the document still asserted
+   three false things about git — caught only because the dispatcher re-ran the checks independently
+   rather than reading the prose and agreeing with it.
 5. **Commit the round to the branch.** Every round that produced something worth reading becomes a
    commit, including rounds that were later corrected. That history is the artifact.
 6. **Accept** and merge (below) **or** write `## Review` feedback and go to step 3 with `--round N+1`.
