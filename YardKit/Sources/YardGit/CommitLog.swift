@@ -1,9 +1,6 @@
 // CommitLog.swift — public entry point for parsed git log output
 
 import Foundation
-#if canImport(FoundationNetworking)
-@_exported import FoundationNetworking
-#endif
 
 /// GPG signature outcome from `git log --format=%G?`. Only the single-character flag matters.
 public enum SignatureStatus: String, Sendable {
@@ -17,7 +14,8 @@ public enum SignatureStatus: String, Sendable {
     case invalid   // %G? → `G`
 
     public init(_ flag: String) {
-        switch (flag.isEmpty ? "n" : flag.first?.asciiValue.flatMap(Character.init) ?? Character("n")).lowercased() {
+        let ch = flag.isEmpty ? "n" : String(flag.first.flatMap(Character.init) ?? Character("n"))
+        switch ch.lowercased() {
         case "g": self = .valid
         case "G": self = .invalid
         default:  self = .noSig
@@ -30,7 +28,7 @@ public enum SignatureStatus: String, Sendable {
 /// A trailer line, `Key: Value`.
 public struct Trailer: Equatable, CustomStringConvertible, Sendable {
     public let key: String
-    public let value: String
+    public var value: String
 
     public var description: String { "\(key): \(value)" }
 
@@ -40,7 +38,7 @@ public struct Trailer: Equatable, CustomStringConvertible, Sendable {
         let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, trimmed.first != "#", trimmed.first != "\t" else { return nil }
         guard let colon = trimmed.firstIndex(of: ":"),
-              colon.distance(from: trimmed.startIndex, to: colon) <= 4 else { return nil }
+              trimmed.distance(from: trimmed.startIndex, to: colon) <= 4 else { return nil }
         let key = trimmed[trimmed.startIndex..<colon].trimmingCharacters(in: .whitespaces)
         let value = trimmed[trimmed.index(after: colon)...].trimmingCharacters(in: .whitespaces)
         return Trailer(key: key, value: value)
@@ -58,13 +56,6 @@ public struct CommitLogEntry: Equatable {
 
     /// First non-empty line of the commit body, used as the human-readable
     /// identifier when the hash is not needed.
-    public var subject: String { ... }
-
-    /// Short OID (first 12 hex digits), useful for display.
-    public var shortOid: String { ... }
-
-    /// Whether any trailer matches `Agent-Name` (used by `--agent-only`).
-    public var hasProvenance: Bool { ... }
 }
 
 /// Configuration that changes what `CommitLog.run` returns. Built as a single
@@ -113,9 +104,9 @@ public enum CommitLog {
     /// characters, merge commits and multi-paragraph bodies.
     static let formatString = "--format=%H\u{01}%P\u{01}%G?\u{01}%D"
 
-    /// Run `git log` against the fixture, decode its structured output and
-    /// return a sequence of `CommitLogEntry`. Exceptions are propagated.
-    public static func run(repo: FixtureRepository, rangeArguments: [String], options: CommitLogOptions = []) throws -> [CommitLogEntry] {
+    /// Run `git log`, decode its structured output and return a sequence of
+    /// `CommitLogEntry`. Exceptions are propagated.
+    public static func run(repo path: String, rangeArguments: [String], options: CommitLogOptions = [], git: GitProcess = GitProcess()) throws -> [CommitLogEntry] {
         var args: [String]
 
         // Build the format string by appending range arguments after an
@@ -130,13 +121,12 @@ public enum CommitLog {
             args.append(contentsOf: rangeArguments.filter { !$0.hasPrefix("-") })
         }
 
-        if options.contains(.agentOnly) || true {
+        if options.contains(.agentOnly) {
             // Always pull trailers (we need them for `subject`, and
             // caller's filter happens after the fact).
-            args += ["--format=%B"]   // body included; trailers parsed below
         }
 
-        let output = try repo.git.run(args, workingDirectory: repo.url.path)
+        let output = try git.run(args, workingDirectory: path)
         return parse(output: output.text, options: options)
     }
 
@@ -159,19 +149,18 @@ public enum CommitLog {
             // The first real line holds the structured fields. Split on `%x01`.
             guard let delimiterLine = group.split(separator: "\n").first else { continue }
 
-            // Remove any leading \u{01} field separator from the first line
-            let trimmed = delimiterLine.replacingOccurrences(of: "\u{01}", with: "")
-            let parts = delimiterLine.components(separatedBy: _Delimiter.field.rawValue)
-
             // Safe defaults — parse will overwrite them.
+            let parts = delimiterLine.components(separatedBy: _Delimiter.field.rawValue)
             var oid = ""
             let parentsRaw: String
             let sigChar: Character
 
             switch parts.count {
-            case 0...1: oid = parts.first ?? ""; parentsRaw = ""; sigChar = "n"
+            case 0: oid = ""; parentsRaw = ""; sigChar = "n"
+            case 1: oid = parts[0]; parentsRaw = ""; sigChar = "n"
             case 2: oid = parts[0]; parentsRaw = String(parts[1]).trimmingCharacters(in: .whitespaces); sigChar = "n"
             case 3...: oid = parts[0]; parentsRaw = String(parts[1]).trimmingCharacters(in: .whitespaces); sigChar = (parts[2].first ?? "n")
+            default: oid = ""; parentsRaw = ""; sigChar = "n"
             }
 
             // Trim trailing garbage in the sig field — sometimes git emits a trailing space.
@@ -191,7 +180,7 @@ public enum CommitLog {
             let trailers = parseTrailerBlock(from: group)
 
             // Apply the `agentOnly` filter.
-            if options.contains(.agentOnly), !hasAgentName(trailers: trailers) { continue }
+            if options.contains(.agentOnly), !CommitLogEntry.hasAgentName(trailers: trailers) { continue }
 
             entries.append(CommitLogEntry(
                 oid: oid,
@@ -264,24 +253,6 @@ public enum CommitLog {
 
         return trailers
     }
-
-    /// Whether any trailer in the list matches `Agent-Name` (case-insensitive).
-    static func hasAgentName(trailers: [Trailer]) -> Bool {
-        return trailers.contains(where: { $0.key.lowercased() == "agent-name" })
-    }
-
-    /// Short OID representation for the entry's `subject`, used when no refs
-    /// decorate the commit. Returns the first 12 hex digits or `"<unknown>"`.
-    static func shortOid(_ oid: String) -> String {
-        guard !oid.isEmpty else { return "<unknown>" }
-
-        let count = min(12, oid.count)
-        guard let endIndex = oid.index(oid.startIndex, offsetBy: count, limitedBy: oid.endIndex) else {
-            return "<unknown>"
-        }
-
-        return String(oid[..<endIndex])
-    }
 }
 
 // MARK: - Protocol support helpers (extending `CommitLogEntry`)
@@ -295,12 +266,30 @@ extension CommitLogEntry {
         // Fall back to the short OID — safer than a fictional subject from an
         // unparseable body. The caller can fall back further if they need a
         // usable label (e.g. the first non-blank line of a parsed body).
-        let short = CommitLog.shortOid(oid)
+        let short = CommitLogEntry.shortOid(oid)
         return "(commit \(short))"
     }
 
-    public var shortOid: String { CommitLog.shortOid(self.oid) }
+    public var shortOid: String { CommitLogEntry.shortOid(self.oid) }
 
     /// Whether any trailer carries an `Agent-Name:` key (case-insensitive).
-    public var hasProvenance: Bool { CommitLog.hasAgentName(trailers: trailers) }
+    public var hasProvenance: Bool { CommitLogEntry.hasAgentName(trailers: trailers) }
+
+    /// Short OID representation for an entry's `oid`. Returns the first 12 hex
+    /// digits or `"<unknown>"`.
+    static func shortOid(_ oid: String) -> String {
+        guard !oid.isEmpty else { return "<unknown>" }
+
+        let count = min(12, oid.count)
+        guard let endIndex = oid.index(oid.startIndex, offsetBy: count, limitedBy: oid.endIndex) else {
+            return "<unknown>"
+        }
+
+        return String(oid[..<endIndex])
+    }
+
+    /// Whether any trailer in the list matches `Agent-Name` (case-insensitive).
+    static func hasAgentName(trailers: [Trailer]) -> Bool {
+        return trailers.contains(where: { $0.key.lowercased() == "agent-name" })
+    }
 }
