@@ -234,7 +234,13 @@ while its tests contributed nothing to the number.
     implementation is correct" on that basis. Round 2 added the third and it failed immediately —
     git emits a different message when the main repository moves. **An uncovered case is not a
     passing case**, and a verdict formed without it is provisional.
-35. **For an app-target change, does the criterion say "it launches" rather than "it builds"?**
+35. **For an app-target change, does the criterion say "it launches" rather than "it builds"? And is
+    the build SIGNED the way the failure needs?** Linking, embedding, entitlements, `Info.plist` keys
+    and dylib loading all fail at **launch**, not at compile — I accepted `adba141` on a
+    compile-and-link probe and the app died in dyld the first time it ran. But #0123 then showed the
+    corrected criterion is still not sufficient: an **unsigned** build is ad-hoc signed, and an ad-hoc
+    process can map an ad-hoc dylib, so the broken tree launches too. For a Team-ID mismatch the
+    evidence is the **absent load command** (`otool -L`), not the launch.
     Linking, embedding, entitlements, `Info.plist` keys and dylib loading all fail at **launch**, not
     at compile. `xcodebuild build` succeeding proves the symbols resolved and nothing else. I accepted
     `adba141` on a compile-and-link probe and the app died in dyld the first time it was run.
