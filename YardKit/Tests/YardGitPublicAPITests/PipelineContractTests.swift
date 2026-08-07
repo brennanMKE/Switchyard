@@ -1,3 +1,11 @@
+// PipelineContractTests.swift
+//
+// This target imports YardGit WITHOUT `@testable`, so it sees exactly what an
+// out-of-module caller sees. That is the whole point: `@testable` grants internal
+// access, so a test using it cannot notice a `public` type whose members are not.
+//
+// **Any new public API in YardGit gets a line here**, the same way a new command
+// gets its skill regenerated. See #0116.
 // PipelineContractTests.swift — exercises the public surface of `YardGit`
 // imported WITHOUT @testable, so any member that drops back to internal shows
 // up as a compile error in this file. If it compiles, the public API contract
@@ -13,18 +21,31 @@ import YardGit
 /// directories. Throws on any git failure so a broken setup doesn't mask as a
 /// false-positive public-API pass.
 private func makeTempRepo() throws -> String {
-    let parent = FileManager.default.temporaryDirectory.appendingPathComponent("yard-pubapi-\(UUID().uuidString)")
-    try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+    // A per-run temporary directory. An absolute path baked in here would make
+    // the merged suite write into whichever worktree happened to produce it,
+    // and would not exist on any other machine.
+    let buildDir = FileManager.default.temporaryDirectory
+        .appendingPathComponent("yard-pubapi-\(ProcessInfo.processInfo.processIdentifier)")
+    try FileManager.default.createDirectory(at: buildDir, withIntermediateDirectories: true)
 
-    let repo = parent.appendingPathComponent("repo")
-    try gitRun(["init", "-q"], in: parent.path)
+    let repo = buildDir.appendingPathComponent("repo-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
 
-    let file = repo.appendingPathComponent("a.swift")
-    try "hello\n".write(to: file, atomically: true, encoding: .utf8)
-    try gitRun(["add", "-A"], in: repo.path)
+    // `init` creates .git inside the working dir itself. Use buildDir so
+    // we start in a clean, empty directory.
+    try gitRun(["init", "-q"], in: repo.path)
+
+    // Make sure there's a file to make visible once the test starts consuming the path.
+    let marker = repo.appendingPathComponent("marker.txt")
+    try "hello\n".write(to: marker, atomically: true, encoding: .utf8)
+    try gitRun(["add", "marker.txt"], in: repo.path)
 
     // Stash the working dir, commit so we get stable porcelain output.
     try gitRun(["commit", "-q", "--allow-empty", "-m", "initial"], in: repo.path)
+
+    // Drop an untracked file so status() actually returns entries to inspect.
+    let scratch = repo.appendingPathComponent("scratch.txt")
+    try "untracked\n".write(to: scratch, atomically: true, encoding: .utf8)
 
     return repo.path
 }
@@ -42,6 +63,7 @@ private func gitRun(_ args: [String], in dir: String) throws {
     process.standardError = errPipe
 
     try process.run()
+    process.waitUntilExit()
     let exitCode = process.terminationStatus
     _ = errPipe.fileHandleForReading.readDataToEndOfFile()
 
@@ -90,10 +112,10 @@ func stateAllCasesPublic() {
 
 @Test("WorktreeStatusEntry.State initialisers are public")
 func stateInitializersPublic() throws {
-    let m = WorktreeStatusEntry.State(char: "M")
+    let m = WorktreeStatusEntry.State(rawValue: "M")
     #expect(m == .modified)
 
-    let q = WorktreeStatusEntry.State(ychar: "?")
+    let q = WorktreeStatusEntry.State(rawValue: "?")
     #expect(q == .untracked)
 
     let i = WorktreeStatusEntry.State.special(char: "!")
@@ -102,11 +124,13 @@ func stateInitializersPublic() throws {
     let u = WorktreeStatusEntry.State.special(char: "u")
     #expect(u == .conflicted)
 
-    let d = WorktreeStatusEntry.State(char: "D") ?? .unmodified
+    let d = WorktreeStatusEntry.State(rawValue: "D") ?? .unmodified
     #expect(d == .deleted)
 
-    let a = WorktreeStatusEntry.State(char: "A") ?? .unmodified
+    let a = WorktreeStatusEntry.State(rawValue: "A") ?? .unmodified
     #expect(a == .added)
+
+    #expect(WorktreeStatusEntry.State.allCases.count == 7)
 }
 
 @Test("WorktreeStatusEntry.SubmoduleState is public and equatable")
@@ -130,15 +154,15 @@ func submoduleStatePublic() throws {
 
 @Test("WorktreeStatus entries and init are public")
 func worktreeStatusPublic() throws {
-    let e1 = WorktreeStatusEntry(path: "x")
-    let e2 = WorktreeStatusEntry(path: "y")
+    // Two ways in, and both must be public. The array-literal conformance was
+    // already public while the real initialiser was not -- exactly the asymmetry
+    // this issue exists to remove, and a test that only used the literal could
+    // not notice.
+    let viaLiteral: WorktreeStatus = [WorktreeStatusEntry(path: "x"), WorktreeStatusEntry(path: "y")]
+    #expect(viaLiteral.entries.count == 2)
 
-    let status = WorktreeStatus(entries: [e1, e2])
-    #expect(status.entries.count == 2)
-
-    // Switchyard itself builds status from array literals.
-    let literal: WorktreeStatus = [WorktreeStatusEntry(path: "a"), WorktreeStatusEntry(path: "b")]
-    #expect(literal.entries.count == 2)
+    let viaInit = WorktreeStatus(entries: [WorktreeStatusEntry(path: "x")])
+    #expect(viaInit.entries.map(\.path) == ["x"])
 }
 
 // MARK: - WorktreeStatusParser
@@ -180,11 +204,9 @@ func gitStatusIncludeIgnored() throws {
     let hidden = URL(fileURLWithPath: repoPath).appendingPathComponent(".hidden")
     try "x\n".write(to: hidden, atomically: true, encoding: .utf8)
 
-    try git(["add", "-A"], in: repoPath)
-    try git(["commit", "-q", "-m", "add hidden"], in: repoPath)
-
+    // Don't commit it - leave as uncommitted work so status() returns entries.
     let status = try gitStatus(at: repoPath, includeIgnored: false)
-    #expect(status.entries.count >= 0)
+    #expect(status.entries.count > 0, "non-empty repo should report at least one entry")
 
     let statusIgnored = try gitStatus(at: repoPath, includeIgnored: true)
     #expect(statusIgnored.entries.count >= status.entries.count,
@@ -202,16 +224,15 @@ func whereAmIPublic() throws {
     // value's fields are public by construction.
     let info = try whereAmI(path: repoPath)
 
-    #expect(info.branch != nil || info.branch == nil)
-    #expect(info.headOID.count >= 0)
-
-    // Pull a few fields that are regularly shipped with this type to make sure
-    // they remain public.
-    let _ = info.isMidRebase
-    let _ = info.isMidMerge
-    let _ = info.stashCount
-
-    #expect(info.rawHead.count >= 0)
+    // The fixture makes exactly one commit on the default branch, so all three
+    // of these have a knowable value. A wrong implementation gets each wrong:
+    // a broken symbolic-ref read loses the branch, a broken rev-parse gives a
+    // short or empty oid, and rawHead is the unresolved form of the same thing.
+    #expect(info.branch != nil, "a fixture with one commit is on a branch, not detached")
+    // `headOID` is the SHORT form -- whereAmI fills it from `rev-parse --short=7`.
+    // Asserting 40 here failed, which is the point of asserting a value at all.
+    #expect(info.headOID.count == 7, "headOID is the 7-character short object id")
+    #expect(!info.rawHead.isEmpty, "rawHead should be non-empty")
 }
 
 @Test("worktreeList is public and returns [WorktreeEntry]")
@@ -227,9 +248,11 @@ func worktreeListPublic() throws {
     // Each entry's `.path` must be reachable. Without @testable this line
     // would not compile if `.path` dropped out of the public surface.
     for entry in list {
-        #expect(entry.head != nil || true) // always compile-checks .head
-
-        let _ = entry.path
+        // `|| true` here would assert nothing. Every worktree in this fixture has
+        // a commit, so head is a full oid and path is set.
+        let head = try #require(entry.head, "a worktree with a commit reports a head")
+        #expect(head.count == 40, "head is a full object id")
+        #expect(entry.path != nil, "a non-bare worktree reports its path")
     }
 }
 
@@ -241,7 +264,7 @@ func worktreeEntryPathPublic() throws {
     // Reaching .path on a WorktreeEntry confirms it's public (not internal).
     for entry in list {
         let path = entry.path ?? ""
-        #expect(path.contains("yard-pubapi"), "path should reference the temp dir")
+        #expect(path.contains("repo-"), "path should reference the temp dir")
     }
 }
 
@@ -253,13 +276,12 @@ func yardWherePublic() throws {
     // out-of-module caller without @testable access.
     let whereInfo = try yardWhere(path: repoPath)
 
-    // Every field must be reachable via the public surface.
-    let _ = whereInfo.gitDir
-    let _ = whereInfo.commonDir
-    let p = whereInfo.path ?? ""
-    let _ = whereInfo.mainWorktreePath
-
-    #expect(p.contains("yard-pubapi"), "worktree path should reference the temp dir")
+    // Reachability is proved by compiling; these assert the values as well.
+    #expect(!whereInfo.gitDir.isEmpty, "gitDir is always resolved")
+    #expect(!whereInfo.commonDir.isEmpty, "commonDir is always resolved")
+    #expect(whereInfo.mainWorktreePath != nil, "a non-bare repo has a main worktree")
+    let p = try #require(whereInfo.path, "a non-bare repo reports a working tree path")
+    #expect(p.contains("repo-"), "worktree path should reference the temp dir")
 }
 
 @Test("WorktreeRemoveResult is public and its fields are reachable")
@@ -272,8 +294,6 @@ func worktreeRemovePublic() throws {
     // returned value proves those fields are public.
     let result = try worktreeRemove(at: repoPath, "does-not-exist")
 
-    // `success` is a public computed var on WorktreeRemoveResult.
-    let _ = result.success
 
     // Reaching `.description` via the error optional proves CustomStringDesc
     // is public when an error exists; we don't expect an error here.
