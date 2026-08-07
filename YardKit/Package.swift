@@ -13,6 +13,9 @@ let package = Package(
         .library(name: "YardGit", targets: ["YardGit"]),
         // Everything shared between the app, the broker, and the CLI.
         .library(name: "YardKit", targets: ["YardKit"]),
+        // Views for the macOS app. Hosted in a package so they can be tested with
+        // `swift test`, since UI tests cannot run under CLI-driven xcodebuild.
+        .library(name: "YardUI", targets: ["YardUI"]),
         .executable(name: "switchyard", targets: ["switchyard"]),
     ],
     targets: [
@@ -25,6 +28,12 @@ let package = Package(
             name: "YardKit",
             dependencies: [],
             path: "Sources/YardKit"
+        ),
+        .target(
+            name: "YardUI",
+            dependencies: ["YardKit", "YardGit"],
+            path: "Sources/YardUI",
+            swiftSettings: [.defaultIsolation(MainActor.self)]
         ),
         .executableTarget(
             name: "switchyard",
@@ -40,6 +49,11 @@ let package = Package(
             name: "YardKitTests",
             dependencies: ["YardKit"],
             path: "Tests/YardKitTests"
+        ),
+        .testTarget(
+            name: "YardUITests",
+            dependencies: ["YardUI"],
+            path: "Tests/YardUITests"
         ),
         // Tests in this target import YardGit WITHOUT @testable so that any
         // member which silently drops back to internal is caught at compile-time

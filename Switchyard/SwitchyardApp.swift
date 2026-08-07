@@ -1,6 +1,7 @@
 // SwitchyardApp.swift
 
 import SwiftUI
+import YardUI
 
 @main
 struct SwitchyardApp: App {
