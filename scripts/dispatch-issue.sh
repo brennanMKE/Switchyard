@@ -122,6 +122,17 @@ Rules for this run, which override anything in the issue that disagrees:
   5. If you are blocked, or find yourself repeating an action that already
      failed, STOP and report what blocked you. A clear stop is a good outcome.
      Repeating a failing command is not.
+  6. Your sandbox AUTO-REJECTS writes outside this worktree: /tmp, /var/tmp,
+     \$TMPDIR, and anything under ~ that is not here. Put every scratch file,
+     probe and throwaway git fixture under build/ in this worktree. It is
+     already gitignored. THREE rounds have now been lost to this exact
+     rejection. Note the asymmetry: swift test is NOT sandboxed, so
+     FixtureRepository's own temp directories work fine — only commands you
+     run yourself are restricted.
+  7. If a command is rejected or a tool call fails twice the same way, change
+     approach; do not retry it. If the write tool fails twice on one file,
+     create it with a shell heredoc instead: cat > path/File.swift <<'SWIFT'
+     ... SWIFT. Never end your turn by describing steps you have not run.
 
 Finish with a short report: what you changed, what you ran, what it printed,
 and anything you could not do.
