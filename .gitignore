@@ -4,3 +4,6 @@ build/
 xcuserdata/
 .switchyard-runs/
 YardKit/.build/
+
+# Coverage artifact left by `swift test` in the working directory.
+default.profraw
