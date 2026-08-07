@@ -6,6 +6,11 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		26BA44853026752800DDB2E9 /* YardGit in Frameworks */ = {isa = PBXBuildFile; productRef = 26BA44843026752800DDB2E9 /* YardGit */; };
+		26BA44873026752800DDB2E9 /* YardKit in Frameworks */ = {isa = PBXBuildFile; productRef = 26BA44863026752800DDB2E9 /* YardKit */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		26B64D4230251BCF00EB4FD0 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -52,6 +57,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				26BA44853026752800DDB2E9 /* YardGit in Frameworks */,
+				26BA44873026752800DDB2E9 /* YardKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -78,6 +85,7 @@
 				26B64D3630251BCE00EB4FD0 /* Switchyard */,
 				26B64D4430251BCF00EB4FD0 /* SwitchyardTests */,
 				26B64D4E30251BCF00EB4FD0 /* SwitchyardUITests */,
+				26BA44833026752800DDB2E9 /* Frameworks */,
 				26B64D3530251BCE00EB4FD0 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -90,6 +98,13 @@
 				26B64D4B30251BCF00EB4FD0 /* SwitchyardUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		26BA44833026752800DDB2E9 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -112,6 +127,8 @@
 			);
 			name = Switchyard;
 			packageProductDependencies = (
+				26BA44843026752800DDB2E9 /* YardGit */,
+				26BA44863026752800DDB2E9 /* YardKit */,
 			);
 			productName = Switchyard;
 			productReference = 26B64D3430251BCE00EB4FD0 /* Switchyard.app */;
@@ -625,6 +642,17 @@
 			relativePath = YardKit;
 		};
 /* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		26BA44843026752800DDB2E9 /* YardGit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = YardGit;
+		};
+		26BA44863026752800DDB2E9 /* YardKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = YardKit;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 26B64D2C30251BCE00EB4FD0 /* Project object */;
 }
