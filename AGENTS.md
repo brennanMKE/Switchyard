@@ -211,6 +211,34 @@ If something is genuinely ambiguous:
 An unanswered question at the end of a finished round is useful. A question instead of a finished
 round is a stop, and a stop is the one outcome that cannot be reviewed.
 
+## Rule 9b — Your context is small. Read the issue and nothing else.
+
+The usable input budget is about 44k tokens: `limit.context` 65,536 minus the 16,384 reserved for
+output, and compaction fires near 90% of what remains. **When compaction runs, the first thing it
+throws away is the issue's verbatim source block** — the pasted Swift that took a planning pass an
+hour to compile and mutation-test. What comes back is a five-bullet prose summary, and a summary of
+code is not code. You will then notice you are missing details and try to re-read the issue, which
+compacts you again.
+
+Two rounds died exactly this way on 2026-08-07: #0017 produced **zero writes** in twelve tool calls,
+and #0019 got a source file out but ended asking to re-read its own issue.
+
+So:
+
+- **Do not read `AGENTS.md`.** You are reading it now. It is loaded automatically on every round, and
+  re-reading it costs ~5k tokens to learn nothing. Measured: asked a question about this file with all
+  tools forbidden, the model answered correctly with zero tool calls.
+- **Do not read `issues/Issues.md`.** It is ~10k tokens of tracker process written for humans and
+  reviewers — status lifecycles, commit conventions, review policy. None of it is your job. Your job
+  is in the issue.
+- **Do not load the `swift-guidance` skill when the issue already contains the Swift to write.** That
+  source was authored with the skill loaded; it already conforms.
+- **Do not glob or survey.** The issue names every file you need. If you are reading a file the issue
+  did not name, you have already lost.
+
+The budget you save is the budget you write with. A round that reaches its first write inside ten
+tool calls converges; a round that spends its context orienting produces nothing at all.
+
 ## Rule 7b — Bind with `try #require`, never with `if let`, in a test.
 
 ```swift

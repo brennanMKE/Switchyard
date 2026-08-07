@@ -2,27 +2,59 @@
 
 import Foundation
 
-/// GPG signature outcome from `git log --format=%G?`. Only the single-character flag matters.
-public enum SignatureStatus: String, Sendable {
-    /// No signature information present (typically unsigned commits).
+/// Signature outcome from `git log --format=%G?`, one case per flag character
+/// git documents (git's own source emits exactly `G U B X Y R E N`, all
+/// uppercase — gpg-interface.c and pretty.c:1666).
+public enum SignatureStatus: Sendable {
+    /// `%G?` -> `N`: no signature.
     case noSig
 
-    /// Good, but unverified signature.
-    case valid     // %G? -> `g`
+    /// `%G?` -> `G`: good (valid) signature.
+    case good
 
-    /// Verification failed: bad key, tampered message.
-    case invalid   // %G? -> `G`
+    /// `%G?` -> `U`: good signature with unknown validity.
+    case goodUntrusted
 
-    public init(_ flag: String) {
-        let ch = flag.isEmpty ? "n" : String(flag.first.flatMap(Character.init) ?? Character("n"))
-        switch ch {
-        case "g": self = .valid
-        case "G": self = .invalid
-        default:  self = .noSig
+    /// `%G?` -> `B`: bad signature.
+    case bad
+
+    /// `%G?` -> `X`: good signature that has expired.
+    case expiredSignature
+
+    /// `%G?` -> `Y`: good signature made by an expired key.
+    case expiredKey
+
+    /// `%G?` -> `R`: good signature made by a revoked key.
+    case revokedKey
+
+    /// `%G?` -> `E`: the signature cannot be checked (e.g. missing key).
+    case cannotCheck
+
+    /// Anything git does not document, including an empty field. Git never
+    /// emits lowercase characters, so the old mapping's `g` lands here.
+    case unknown
+
+    public init(_ char: Character) {
+        switch char {
+        case "G": self = .good
+        case "U": self = .goodUntrusted
+        case "B": self = .bad
+        case "X": self = .expiredSignature
+        case "Y": self = .expiredKey
+        case "R": self = .revokedKey
+        case "E": self = .cannotCheck
+        case "N": self = .noSig
+        default:  self = .unknown
         }
     }
 
-    public init(_ char: Character) { self.init(String(char)) }
+    public init(_ flag: String) {
+        guard let ch = flag.first else {
+            self = .unknown
+            return
+        }
+        self.init(ch)
+    }
 }
 
 /// A trailer line, `Key: Value`.
