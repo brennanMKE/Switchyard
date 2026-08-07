@@ -503,10 +503,29 @@ This is the same mechanic that makes a progress report a stop for the main loop 
 one level down. It is easy to miss because the message reads like a status update from something
 still working.
 
-**Fix:** every dispatch prompt now says to poll with BashOutput until the process *actually exits*,
-and not to report before then. Recovery is cheap — `SendMessage` resumes the agent from its
-transcript with full context — but only if the premature stop is noticed. **Treat a dispatcher whose
-report contains no verification results as unfinished, not as a status update.**
+**First fix, which did not work:** every dispatch prompt was given a line saying to poll with
+BashOutput until the process *actually exits*, and not to report before then.
+
+**It recurred.** #0102 round 2, dispatched with that exact instruction in the prompt, reported
+*"Baseline captured. Waiting for the dispatch to exit."* and stopped. So the instruction is necessary
+and not sufficient — which is the same lesson as §1.6b and §2.4b: *writing a rule down does not stop
+the behaviour.*
+
+**Why an instruction is weak here.** "Do not report before it exits" asks the agent to recognise a
+state it is already in the middle of misjudging. The agent does not experience stopping — it emits a
+sentence that reads to itself like a status update, and the turn simply ends. There is no moment at
+which it decides to stop.
+
+**Second fix — target the sentence, not the intent.** The resume message now says: *"if you are ever
+about to write a sentence like 'waiting' or 'I'll check back', that is the signal to make another
+tool call instead."* That is checkable against its own output as it writes, rather than requiring it
+to model its own turn boundary.
+
+**And the recovery is what actually matters.** `SendMessage` resumes the agent from its transcript
+with full context, so a premature stop costs a round-trip and nothing else — but only if it is
+noticed. **Treat a dispatcher whose report contains no verification results as unfinished, not as a
+status update.** That check is on the reader, needs no cooperation from the agent, and has caught it
+both times.
 
 ### 4.5 The seam between two correct issues is where the defect lives
 
