@@ -16,6 +16,8 @@
 #   NARROWING a loop over cases whose body discards all but one via
 #             `guard case ... else { continue }`
 #   TAUTOLOGY an assertion over literals, e.g. #expect(true)
+#   ALWAYSTRUE an assertion no implementation can fail: `.count >= 0`,
+#             `x != nil || x == nil`, `... || true`
 #   ORPHANTEST a test file outside every declared target — never compiled
 #   SKIPSHAPE a bare `return` in a @Test body — a quiet skip that reports success
 #   EMPTYELSE an `else` block containing only comments — the `if` branch's
@@ -218,11 +220,22 @@ EXPECTBANG=$(print -r -- "$EXPECTBANG" | grep . || true)
 STDOUTCAPTURE=$(grep -rn --include='*.swift' -E '\bdup2\b' $TARGETS 2>/dev/null \
   | sed 's/^/  STDOUTCAPTURE  /' || true)
 
+# --- ALWAYSTRUE: an assertion no implementation can fail ---------------------
+# Distinct from TAUTOLOGY, which needs literal or self-comparing operands.
+# These read as real assertions over real data and still cannot fail:
+#   .count >= 0        a count is never negative
+#   x != nil || x == nil   exhaustive by construction
+#   ... || true        short-circuits to true
+# #0116 round 1 shipped five of these and check-tests-assert.sh passed it.
+ALWAYSTRUE=$(grep -rnE --include='*.swift' \
+  '#(expect|require)\([^)]*(\.count *>= *0|!= *nil *\|\| *[A-Za-z_][A-Za-z0-9_.]* *== *nil|\|\| *true)' \
+  $TARGETS 2>/dev/null | sed 's/^/  ALWAYSTRUE  /' || true)
+
 # --- HANDROLLED: a hand-written allCases in production code ----------------
 HAND=$(grep -rn -E 'static +(var|let) +allCases' Sources YardKit/Sources --include='*.swift' 2>/dev/null \
   | sed 's/^/  HANDROLLED /' || true)
 
-for block in "$INERT" "$NARROW" "$TAUT" "$TAUT_SELF" "$ORPHAN" "$EMPTYELSE" "$EXPECTBANG" "$HAND"; do
+for block in "$INERT" "$NARROW" "$TAUT" "$TAUT_SELF" "$ALWAYSTRUE" "$ORPHAN" "$EMPTYELSE" "$EXPECTBANG" "$HAND"; do
   if [[ -n "${block//[[:space:]]/}" ]]; then print -r -- "$block"; FOUND=1; fi
 done
 
