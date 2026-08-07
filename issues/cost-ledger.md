@@ -43,7 +43,8 @@ a figure derived from it appears.
 | 2026-08-06 | #0093 | Dispatch round 1 (REJECTED, timed out at 1800s) | 60,714 | $0.49 |
 | 2026-08-06 | #0102 | Dispatch round 1 (REJECTED, 1044s) | 114,261 | $0.91 |
 | 2026-08-06 | #0102 | Dispatch round 2 (REJECTED, 132s) | 58,603 | $0.47 |
-| | | **Total measured** | **1,504,972** | **$12.04** |
+| 2026-08-06 | #0102 | Dispatch round 3 (95%, finished by hand) | 58,121 | $0.46 |
+| | | **Total measured** | **1,563,093** | **$12.50** |
 
 ## What this total does and does not cover
 
