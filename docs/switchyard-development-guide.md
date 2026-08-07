@@ -492,8 +492,8 @@ centerpiece, not a nice-to-have.
 | `yard commit --agent <name> --model <id> --session <id>` | Record provenance trailers on the commit. |
 | `yard log --agent-only` | Filter to agent-authored commits. |
 
-Define the trailer format once and document it in `docs/provenance.md`. Suggested shape,
-following the `Co-authored-by` convention so existing tooling ignores it gracefully:
+Document the settled format in `docs/provenance.md`. The shape, following the `Co-authored-by`
+convention so existing tooling ignores it gracefully:
 
 ```
 Agent-Name: claude-code
