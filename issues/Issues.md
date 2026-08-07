@@ -259,7 +259,11 @@ main reason the workflow is shaped this way.
 
 ### The loop
 
-1. **Branch**: `git switch -c issue/NNNN` from an up-to-date `main`.
+0. **Never work in the main checkout.** Every issue gets its own worktree:
+   `git worktree add -b issue/NNNN ../switchyard-NNNN main`. This keeps `main` free so a finished
+   issue can be merged immediately instead of queueing behind a running dispatch.
+1. **Branch and push it empty, immediately**: `git push -u origin issue/NNNN`. A branch that exists
+   only locally is invisible, and invisible work looks like no work.
 2. **Author** the issue, or update it with review feedback in a `## Review` section.
 3. **Dispatch**: a subagent runs `scripts/dispatch-issue.sh NNNN --round N`.
 4. **Review** the diff and the pasted verification output — not the model's summary of them.
@@ -268,16 +272,24 @@ main reason the workflow is shaped this way.
    #0070 round 1 the model genuinely ran `git interpret-trailers`, and the document still asserted
    three false things about git — caught only because the dispatcher re-ran the checks independently
    rather than reading the prose and agreeing with it.
-5. **Commit the round to the branch.** Every round that produced something worth reading becomes a
-   commit, including rounds that were later corrected. That history is the artifact.
+5. **Commit the round to the branch and push it.** Every round that produced something worth
+   reading becomes a commit, including rounds later corrected — that history is the artifact. **Push
+   after every round**, so progress is visible while it happens rather than only at the end.
 6. **Accept** and merge (below) **or** write `## Review` feedback and go to step 3 with `--round N+1`.
-7. **Escalate** at round 4. The cap is not a suggestion.
+7. **Merge and push the moment an issue resolves.** Do not batch merges. One issue landing on `main`
+   is the unit of visible progress, and a queue of finished-but-unmerged branches reads exactly like
+   no progress at all.
+8. **Escalate** at round 4. The cap is not a suggestion.
 
 ```sh
-git switch -c issue/0012                # once, at the start
+# once, at the start — own worktree, pushed immediately
+git worktree add -b issue/0012 ../switchyard-0012 main
+cd ../switchyard-0012 && git push -u origin issue/0012
+
 lms ps                                  # confirm the model is loaded
-scripts/dispatch-issue.sh 0012          # round 1
-git add -A && git commit -m "#0012 round 1: <what it did>"
+scripts/dispatch-issue.sh 0012          # round 1 (via a subagent, backgrounded)
+git add -A && git commit -m "#0012 round 1: <what it did>" && git push
+
 scripts/dispatch-issue.sh 0012 --round 2
 ```
 
@@ -292,12 +304,16 @@ that record is worth more later than a tidy history is now. Do not rebase them a
 **Merge back to `main` as a single squashed commit per issue:**
 
 ```sh
-git switch main
+# from a worktree on main — never from the issue's own worktree
+cd ../switchyard-main
 git merge --squash issue/0012
 git commit -m "#0012 <issue title>"     # one commit on main, per issue
-git push origin main
+git push origin main                    # immediately, not batched
 git push origin issue/0012              # keep the branch — it is the artifact
 ```
+
+Keep a dedicated `../switchyard-main` worktree checked out on `main` for exactly this. `main` must
+never be the branch a dispatch is running on, or every finished issue waits for that round.
 
 So `main` reads as one commit per issue, while `issue/NNNN` preserves the rounds behind it. **Do not
 delete the branch after merging**, locally or on the remote. `git merge --squash` leaves no merge
