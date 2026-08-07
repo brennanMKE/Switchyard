@@ -1,7 +1,6 @@
 // CommandLineRunner.swift
 
 import Foundation
-import YardGit
 
 /// Pure, testable entry-point logic. Takes the argument array *after* the
 /// executable name and returns what `switchyard` would write to stdout plus the
@@ -11,8 +10,7 @@ import YardGit
 public func runYard(arguments: [String]) -> (stdout: String, exitCode: ExitCode) {
 
     guard !arguments.isEmpty else {
-        let version = YardGit.libgit2Version
-        let summary = "\(ServiceNames.cliName) \(YardKit.version) (libgit2 \(version.major).\(version.minor).\(version.revision))"
+        let summary = "\(ServiceNames.cliName) \(YardKit.version)"
         let env = Envelope(result: EncodableResult(summary))
         return (stdout: jsonString(env), exitCode: .success)
     }
