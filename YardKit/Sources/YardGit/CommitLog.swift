@@ -121,9 +121,10 @@ public enum CommitLog {
         if rangeArguments.isEmpty {
             args.append("HEAD")
         } else {
-            // Pass through anything that is not itself a flag -- ranges like
-            // `A..B` and revspecs like `--since=...` come through here.
-            args.append(contentsOf: rangeArguments.filter { !$0.hasPrefix("-") })
+            // Pass everything through. Filtering out anything starting with `-`
+            // silently discarded `-1`, `--max-count`, `--since` and `--author`,
+            // so a caller asking for one commit got the whole history.
+            args.append(contentsOf: rangeArguments)
         }
 
         let output = try git.run(args, workingDirectory: path)
@@ -133,7 +134,10 @@ public enum CommitLog {
             entries = entries.filter { $0.hasAgentName }
         }
 
-        return entries.reversed()   // newest first matches `git log` order.
+        // `git log` already emits newest-first and `parse` preserves that order,
+        // so returning it unchanged is what matches the comment. Reversing here
+        // made the array oldest-first and broke eight assertions.
+        return entries
     }
 
     /// Parse the text produced by `run(path:rangeArguments:)`. Returns an

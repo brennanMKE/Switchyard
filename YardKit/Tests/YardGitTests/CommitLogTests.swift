@@ -180,12 +180,16 @@ struct CommitLogTests {
         // Merge feature into main (now HEAD has two parents: C and B)
         _ = try? git.run(["-C", url, "merge", "feature", "--no-edit"], workingDirectory: "/")
 
-        let entries = try CommitLog.run(path: url, rangeArguments: ["HEAD"])
+        // `-1` limits to the merge commit itself. Passing bare "HEAD" asks for the
+        // whole history reachable from HEAD, which is four commits here.
+        let entries = try CommitLog.run(path: url, rangeArguments: ["-1", "HEAD"])
         #expect(entries.count == 1)
 
         let entry = try #require(entries.first)
         // merge commit should have 2 parents: c and b oids
-        #expect(entry.parents.count == 2)
+        // #require, not #expect: #expect records a failure and keeps going, so a
+        // wrong count traps on the subscripts below and kills the whole suite.
+        try #require(entry.parents.count == 2)
 
         // Both parents should be among the oids we know
         #expect([entry.parents[0], entry.parents[1]].contains(repo.oids["c"]))
@@ -212,7 +216,8 @@ struct CommitLogTests {
         #expect(agent.value == "my-agent v2.0")
 
         let signed = try #require(trailers.first(where: { $0.key == "Signed-off-by" }))
-        #expect(signed.value == "<alice@example.invalid>")
+        // A trailer value is everything after the colon, name included.
+        #expect(signed.value == "Alice <alice@example.invalid>")
     }
 
     @Test(arguments: FixtureRepository.RefFormat.supported())
@@ -232,6 +237,7 @@ struct CommitLogTests {
         #expect(entries.count == 4)
 
         // Newest first, so d is first.
+        try #require(entries.count >= 1, "not enough entries to index")
         #expect(entries[0].oid == repo.oids["d"])
     }
 
@@ -251,8 +257,11 @@ struct CommitLogTests {
         defer { repo.destroy() }
         try repo.build([FixtureRepository.Commit("a"), FixtureRepository.Commit("b")])
 
-        let entries = try CommitLog.run(path: repo.url.path, rangeArguments: ["HEAD~1..HEAD"])
-        #expect(entries.count == 2)
+        // HEAD~1..HEAD is a single commit — the lower bound is exclusive. This test
+        // is about ordering, so ask for the history and assert newest-first.
+        let entries = try CommitLog.run(path: repo.url.path, rangeArguments: ["HEAD"])
+        try #require(entries.count >= 2)
+        #expect(entries[0].oid == repo.oids["b"], "newest commit must come first")
 
         // Newest first, so "b" comes first
         #expect(entries[0].oid == repo.oids["b"])
@@ -265,6 +274,7 @@ struct CommitLogTests {
         try repo.build([FixtureRepository.Commit("a"), FixtureRepository.Commit("b")])
 
         let entries = try CommitLog.run(path: repo.url.path, rangeArguments: ["HEAD"])
+        try #require(entries.count >= 2, "not enough entries to index")
         #expect(entries[0].oid == repo.oids["b"])
         #expect(entries[1].oid == repo.oids["a"])
     }
@@ -276,10 +286,13 @@ struct CommitLogTests {
         try repo.build([FixtureRepository.Commit("a"), FixtureRepository.Commit("b")])
 
         let entries = try CommitLog.run(path: repo.url.path, rangeArguments: ["HEAD"])
+        try #require(entries.count >= 1, "not enough entries to index")
         #expect(!entries[0].refs.isEmpty)
 
-        let name = entries[0].refs.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
-        #expect(name.contains(where: { $0.hasPrefix("main") || $0 == "HEAD" }))
+        // %D renders the checked-out branch as "HEAD -> main", a single field with
+        // no comma, so splitting on "," and matching a prefix never fires.
+        #expect(entries[0].refs.contains("main"),
+                "refs should name the branch; got \(entries[0].refs)")
     }
 
     @Test(arguments: FixtureRepository.RefFormat.supported())
@@ -289,7 +302,12 @@ struct CommitLogTests {
         try repo.build([FixtureRepository.Commit("a"), FixtureRepository.Commit("b")])
 
         let entries = try CommitLog.run(path: repo.url.path, rangeArguments: ["HEAD"])
-        #expect(entries[0].parents.count == 1)
+        try #require(entries.count >= 2, "not enough entries to index")
+
+        // #require, not #expect: if the order is ever inverted, entries[0] is the
+        // root commit with no parents, and the subscript below traps and kills
+        // the whole suite instead of failing this one test.
+        try #require(entries[0].parents.count == 1, "newest entry should have one parent")
 
         // Second commit has first commit as parent
         #expect(entries[0].parents[0] == entries[1].oid)
@@ -302,6 +320,7 @@ struct CommitLogTests {
         try repo.build([FixtureRepository.Commit("a")])
 
         let entries = try CommitLog.run(path: repo.url.path, rangeArguments: ["HEAD"])
+        try #require(entries.count >= 1, "not enough entries to index")
         #expect(entries[0].parents.isEmpty)
     }
 
@@ -313,6 +332,7 @@ struct CommitLogTests {
         try repo.build([FixtureRepository.Commit("a", message: msg)])
 
         let entries = try CommitLog.run(path: repo.url.path, rangeArguments: ["HEAD"])
+        try #require(entries.count >= 1, "not enough entries to index")
         #expect(entries[0].trailers.count == 1)
         #expect(entries[0].trailers.first?.key == "Agent-Name")
     }
@@ -353,6 +373,7 @@ struct CommitLogTests {
         try repo.build([FixtureRepository.Commit("a"), FixtureRepository.Commit("b")])
 
         let entries = try CommitLog.run(path: repo.url.path, rangeArguments: ["HEAD"])
+        try #require(entries.count >= 1, "not enough entries to index")
         #expect(!entries[0].refs.isEmpty)
 
         let decorated = try CommitLog.run(path: repo.url.path, rangeArguments: ["HEAD"])
