@@ -22,6 +22,8 @@
 #             assertion is simply skipped when the condition does not hold
 #   EXPECTBANG `#expect(x != nil)` then `x!` — #expect does not stop, so the
 #             force unwrap traps and takes the whole run summary with it
+#   STDOUTCAPTURE `dup2` / `readDataToEndOfFile` — blocks forever and hijacks
+#             the runner's own stdout, so the suite reports nothing at all
 #   HANDROLLED a hand-written `allCases`, which makes "every case" mean
 #             "every case someone remembered"
 #
@@ -198,11 +200,24 @@ while IFS= read -r f; do
 done < <(find $TARGETS -name '*.swift' -type f 2>/dev/null || true)
 EXPECTBANG=$(print -r -- "$EXPECTBANG" | grep . || true)
 
+# --- STDOUTCAPTURE: dup2 / readDataToEndOfFile in a test ---------------------
+# Redirecting THIS process's stdout into a Pipe and reading to EOF blocks
+# forever -- the write end stays open -- AND swallows the test runner's own
+# output, so the suite emits no `Test run with N tests` line and every other
+# test's result is lost. One round ran 10m50s this way against a 12s baseline.
+#
+# Only `dup2` is the hazard. Reading a *subprocess's* pipe to EOF is normal and
+# safe, because the child exits and closes the write end -- the first version of
+# this scan flagged seven legitimate `readDataToEndOfFile` calls in
+# YardBinaryContractTests and would have been switched off within a day.
+STDOUTCAPTURE=$(grep -rn --include='*.swift' -E '\bdup2\b' $TARGETS 2>/dev/null \
+  | sed 's/^/  STDOUTCAPTURE  /' || true)
+
 # --- HANDROLLED: a hand-written allCases in production code ----------------
 HAND=$(grep -rn -E 'static +(var|let) +allCases' Sources YardKit/Sources --include='*.swift' 2>/dev/null \
   | sed 's/^/  HANDROLLED /' || true)
 
-for block in "$INERT" "$NARROW" "$TAUT" "$ORPHAN" "$EMPTYELSE" "$EXPECTBANG" "$HAND"; do
+for block in "$INERT" "$NARROW" "$TAUT" "$ORPHAN" "$EMPTYELSE" "$EXPECTBANG" "$STDOUTCAPTURE" "$HAND"; do
   if [[ -n "${block//[[:space:]]/}" ]]; then print -r -- "$block"; FOUND=1; fi
 done
 

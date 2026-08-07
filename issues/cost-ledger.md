@@ -87,7 +87,8 @@ a figure derived from it appears.
 | 2026-08-07 | #0120 | Dispatch round 1 (FAILED, hung inference, zero output) | 45,710 | $0.37 |
 | 2026-08-07 | #0120 | Round-2 guard refusal, no round spent | 39,653 | $0.32 |
 | 2026-08-07 | #0120 | Dispatch round 2 + hand finish (accepted) | 62,182 | $0.50 |
-| | | **Total measured** | **3,759,347** | **$30.08** |
+| 2026-08-07 | #0114 | Dispatch round 1 (REJECTED, deadlocking test, unbuildable criteria) | 67,757 | $0.54 |
+| | | **Total measured** | **3,827,104** | **$30.62** |
 
 ## What this total does and does not cover
 
