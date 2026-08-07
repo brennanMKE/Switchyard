@@ -303,4 +303,26 @@ public extension FixtureRepository {
                                   workingDirectory: repo.url.path)
         return repo
     }
+
+    /// Two files, both edited divergently — the two-path variant of `conflicted`
+    /// used by tests that need to assert conflict *count*, not just *presence*.
+    static func conflictedTwo(refFormat: RefFormat = .files) throws -> FixtureRepository {
+        var repo = try FixtureRepository(refFormat: refFormat)
+        try repo.build([Commit("base", files: [
+            "f.txt": "original f\n",
+            "g.txt": "original g\n",
+        ])])
+        try repo.build([Commit("ours", parents: ["base"], files: [
+            "f.txt": "ours f\n",
+            "g.txt": "ours g\n",
+        ])])
+        try repo.build([Commit("theirs", parents: ["base"], files: [
+            "f.txt": "theirs f\n",
+            "g.txt": "theirs g\n",
+        ])])
+        try repo.checkoutDetached(repo.oids["ours"]!)
+        _ = try? GitProcess().run(["merge", "--no-commit", repo.oids["theirs"]!],
+                                  workingDirectory: repo.url.path)
+        return repo
+    }
 }

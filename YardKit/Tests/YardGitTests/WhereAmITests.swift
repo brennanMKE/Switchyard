@@ -118,4 +118,45 @@ struct WhereAmITests {
         #expect(rWt.branch == "probe-branch", "linked worktree is on its own branch")
     }
 
+    // MARK: - Issue 0110 Required Tests — conflictCount
+
+    @Test func cleanRepositoryReportsZeroConflicts() throws {
+        let repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+
+        let r = try whereAmI(path: repo.url.path, git: git)
+        #expect(r.conflictCount == 0, "a clean repo has no conflicted paths")
+        #expect(!r.hasConflicts, "zero conflict count means hasConflicts is false")
+    }
+
+    @Test func oneConflictFileReportsCountOfOne() throws {
+        let repo = try FixtureRepository.conflicted()
+        defer { repo.destroy() }
+
+        let r = try whereAmI(path: repo.url.path, git: git)
+        #expect(r.conflictCount == 1, "one conflicted file means conflictCount is 1")
+        #expect(r.hasConflicts, "one conflicted file means hasConflicts is true")
+    }
+
+    @Test func twoConflictFilesReportsCountOfTwo() throws {
+        let repo = try FixtureRepository.conflictedTwo()
+        defer { repo.destroy() }
+
+        let r = try whereAmI(path: repo.url.path, git: git)
+        #expect(r.conflictCount == 2, "two conflicted files means conflictCount is 2")
+        #expect(r.hasConflicts, "any conflicts means hasConflicts is true")
+
+        // hasConflicts is derived from conflictCount, so they cannot disagree.
+        #expect(r.hasConflicts == (r.conflictCount > 0))
+
+        // Confirm it is a true path count, not a stage-entry count.
+        // `git ls-files -u` would return 6 lines (3 stages × 2 paths).
+        let lsOutput = try git.capture(
+            ["ls-files", "-u"], workingDirectory: repo.url.path)
+        let lsLineCount = lsOutput.text.split(
+            separator: "\n", omittingEmptySubsequences: true).count
+        #expect(lsLineCount == 6, "ls-files -u reports 3 stages per conflicted path")
+        #expect(r.conflictCount != lsLineCount, "conflict count must be unique paths")
+    }
+
 }

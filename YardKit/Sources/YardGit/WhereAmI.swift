@@ -50,8 +50,16 @@ public struct WhereAmI: Sendable, Equatable {
     /// `\n` and counts non-empty lines.
     public let stagedCount: Int
 
-    /// True when the index contains unmerged (conflicted) entries.
+    /// True when the index contains unmerged (conflicted) entries. Derived from
+    /// `conflictCount`.
     public let hasConflicts: Bool
+
+    /// Number of paths with unmerged entries in the index — one per conflicted
+    /// file, regardless of how many stage entries it has. Backed by
+    /// `git diff --name-only -z --diff-filter=U`; `-z` because the non-`-z`
+    /// form quotes paths containing special characters, and this project
+    /// counts NUL-terminated fields everywhere else for the same reason.
+    public let conflictCount: Int
 
     /// The short form of HEAD's object id, e.g. `"a1b2c3d"`.
     public let headOID: String
@@ -74,6 +82,7 @@ public struct WhereAmI: Sendable, Equatable {
         unstagedCount: Int,
         stagedCount: Int,
         hasConflicts: Bool,
+        conflictCount: Int,
         headOID: String,
         rawHead: String
     ) {
@@ -89,6 +98,7 @@ public struct WhereAmI: Sendable, Equatable {
         self.unstagedCount = unstagedCount
         self.stagedCount = stagedCount
         self.hasConflicts = hasConflicts
+        self.conflictCount = conflictCount
         self.headOID = headOID
         self.rawHead = rawHead
     }
@@ -219,15 +229,26 @@ public func whereAmI(
         return text.count
     }()
 
-    // Conflicts come from `ls-files --unmerged`. An empty output means no
-    // conflicts. The entry line format is "<mode> <sha>\t<stage>\t<name>",
-    // so a non-empty file means at least one conflict.
-    let hasConflicts: Bool = {
+    // Conflicts: `diff --name-only -z --diff-filter=U` lists each conflicted
+    // path exactly once, NUL-terminated. We count the NULs to get a true
+    // path-count rather than a stage-entry count. `ls-files -u` lists up to
+    // three entries per path and is not suitable for counting. The `git diff`
+    // form still lists a path whose worktree content happens to match a stage,
+    // so it does not silently drop a hand-edited conflict.
+    let conflictCount: Int = {
         guard let out = try? git.capture(
-            ["ls-files", "-u"], workingDirectory: path) else { return false }
-        let text = out.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return !text.isEmpty
+            ["diff", "--name-only", "-z", "--diff-filter=U"], workingDirectory: path) else { return 0 }
+        // `out.standardOutput` is NUL-terminated. A clean index produces empty data;
+        // each conflicted path contributes one non-empty field separated by \0.
+        let bytes = out.standardOutput
+        guard !bytes.isEmpty else { return 0 }
+        // Strip the trailing NUL that `--name-only -z` appends.
+        let trimmed = bytes.dropLast(1)
+        guard !trimmed.isEmpty else { return 0 }
+        return trimmed.split(whereSeparator: { $0 == 0 }).count
     }()
+
+    let hasConflicts: Bool = conflictCount > 0
 
     let shortOID = {
         // `git rev-parse --short HEAD` returns a short hash and canonicalizes.
@@ -250,6 +271,7 @@ public func whereAmI(
         unstagedCount: unstagedCount,
         stagedCount: stagedCount,
         hasConflicts: hasConflicts,
+        conflictCount: conflictCount,
         headOID: shortOID,
         rawHead: rawHead
     )
