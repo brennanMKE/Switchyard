@@ -352,6 +352,14 @@ This keeps the critical rule at the top of this file intact — status moves are
 code change — and it means the implementer cannot accidentally land work on `main`, squash away the
 round history, or mark its own work done.
 
+### When something costs time, log it
+
+`docs/local-ai-workflow-log.md` records what went wrong standing this workflow up — process
+mistakes, tooling traps, and local-model behaviour — plus a start-of-project checklist distilled from
+them. **Append to it whenever something costs more than a few minutes to diagnose, or fails
+silently.** Silent failures are the expensive ones: most entries in that file produced no error
+message at all.
+
 ### AGENTS.md is what OpenCode actually reads
 
 **OpenCode loads `AGENTS.md` into its system prompt. It does not load `CLAUDE.md`.** This was

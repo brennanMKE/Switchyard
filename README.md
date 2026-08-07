@@ -201,6 +201,7 @@ built app carries no `com.apple.quarantine` attribute, so Gatekeeper never evalu
 | [docs/switchyard-development-guide.md](docs/switchyard-development-guide.md) | Scope, architecture, the full CLI surface, the journal model, milestones, settled decisions and open questions |
 | [docs/switchyard-git-internals-and-undo.md](docs/switchyard-git-internals-and-undo.md) | How the journal works against git's on-disk state, the hook layer, and worktree support in detail |
 | [CLAUDE.md](CLAUDE.md) | Working agreements for coding agents: licensing rules, signing safety, build commands, known traps |
+| [docs/local-ai-workflow-log.md](docs/local-ai-workflow-log.md) | What went wrong running a local model as the implementer, and a checklist for starting the next project |
 | `issues/` | Task breakdown, `NNNN.md` per task |
 
 ## License
