@@ -1,7 +1,8 @@
 #!/bin/zsh
 # Dispatch one issue to OpenCode running the local model.
 #
-#   scripts/dispatch-issue.sh 0012 [--round N] [--timeout SECS] [--stall SECS] [--force]
+#   scripts/dispatch-issue.sh 0012 [--round N] [--model ornith|sonnet] [--timeout SECS]
+#                                  [--stall SECS] [--force]
 #
 # Guards, in order of how often they matter:
 #   - hard wall-clock timeout, because the model has looped before and there is
@@ -28,6 +29,10 @@ TIMEOUT=1800
 # round appends constantly; silence this long means a hung request.
 STALL=420
 STALL_POLL=30
+# Which implementer. `ornith` is the local model and the default; `sonnet` is
+# billed and is for the work Ornith has repeatedly failed at -- Package.swift,
+# the Xcode project, and anything about the environment. See CLAUDE.md.
+MODEL_CHOICE=ornith
 ROUND=1
 FORCE=0
 ISSUE=""
@@ -37,6 +42,7 @@ while (( $# )); do
     --round)   ROUND="$2"; shift 2 ;;
     --timeout) TIMEOUT="$2"; shift 2 ;;
     --stall)   STALL="$2"; shift 2 ;;
+    --model)   MODEL_CHOICE="$2"; shift 2 ;;
     --force)   FORCE=1; shift ;;
     -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
     *)         ISSUE="$1"; shift ;;
@@ -110,7 +116,23 @@ command -v opencode >/dev/null || die "opencode not found on PATH" 5
 curl -sf -m 5 http://127.0.0.1:1234/v1/models >/dev/null \
   || die "LM Studio is not answering on 127.0.0.1:1234. Start it and load the model." 6
 
-MODEL=$(curl -sf -m 5 http://127.0.0.1:1234/v1/models | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | head -1)
+case "$MODEL_CHOICE" in
+  ornith)
+    MODEL=$(curl -sf -m 5 http://127.0.0.1:1234/v1/models \
+      | sed -n 's/.*"id": "\([^"]*\)".*/\1/p' | head -1)
+    OPENCODE_MODEL_ARG=()
+    [[ -n "$MODEL" ]] || die "LM Studio is not answering on 127.0.0.1:1234. Start it, or pass
+--model sonnet." 9
+    ;;
+  sonnet)
+    MODEL="anthropic/claude-sonnet-5"
+    OPENCODE_MODEL_ARG=(--model "$MODEL")
+    print "dispatch: NOTE -- this round is BILLED. Ornith is $0.00; Sonnet is not."
+    ;;
+  *)
+    die "unknown --model '$MODEL_CHOICE'. Use ornith (local, default) or sonnet (billed)." 2
+    ;;
+esac
 LOG_DIR=".switchyard-runs"
 mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/$ISSUE-round$ROUND.log"
@@ -158,11 +180,11 @@ Finish with a short report: what you changed, what you ran, what it printed,
 and anything you could not do.
 EOF
 
-print "dispatch: issue $ISSUE, round $ROUND/$MAX_ROUNDS, model ${MODEL:-unknown}, timeout ${TIMEOUT}s, stall ${STALL}s"
+print "dispatch: issue $ISSUE, round $ROUND/$MAX_ROUNDS, model ${MODEL:-unknown} (${MODEL_CHOICE}), timeout ${TIMEOUT}s, stall ${STALL}s"
 print "dispatch: log -> $LOG"
 
 START=$SECONDS
-opencode run "$PROMPT" >"$LOG" 2>&1 &
+opencode run "${OPENCODE_MODEL_ARG[@]}" "$PROMPT" >"$LOG" 2>&1 &
 RUN_PID=$!
 
 # Two watchdogs. The wall-clock one bounds a round that is working but slow;

@@ -298,6 +298,28 @@ mid-tier model is no longer in the loop.
 This is also a deliberate experiment in running local AI alongside Claude Code, so treat friction as
 a finding worth recording rather than an annoyance to route around.
 
+### The five roles, revised 2026-08-07
+
+| role | model | scope |
+|---|---|---|
+| Planning | **Fable 5** | Authors the issue down to the code — exact paths, exact signatures, the literal lines, measured before-and-after values |
+| Implementation, pure code | **Ornith**, local, $0.00 | Ordinary Swift against a target the issue already measured |
+| Implementation, structural | **Sonnet 5**, billed | `Package.swift`, the Xcode project, build settings, the environment, the harness |
+| Issue review | **Opus 5** | Re-runs verification, runs mutations, reads every new test |
+| Milestone review | **Fable 5** | Runs when a milestone's issues are all `resolved`; checks the guide §9 exit criteria, not individual issues |
+
+Dispatch with `scripts/dispatch-issue.sh NNNN --round N [--model ornith|sonnet]`. `ornith` is the
+default; `sonnet` warns that the round is billed.
+
+**Route to Sonnet when the issue touches `Package.swift`, `project.pbxproj`, build settings, or the
+harness itself.** Ornith has failed at those repeatedly — #0124 spent three rounds on one command
+wiring, #0126 needed hand finishing on exactly the structural half — while landing single-file repairs
+first time.
+
+**A hand finish is expected, not a failure.** Sixteen of twenty-four accepted rounds needed one.
+Review, finish the last small thing by hand, and re-dispatch only when the *shape* is wrong rather
+than the details.
+
 ### The four roles
 
 | Role | Who | Does |

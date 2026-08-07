@@ -89,18 +89,75 @@ empty or blocked rather than letting it tick.
 Between firings the issue tracker is the state — status rows and branches say what is done, so a fresh
 context resumes without needing the previous conversation.
 
-## Implementation is delegated to OpenCode running a local model
+## Implementation is delegated, and which model depends on the task
 
-Implementation work goes to **OpenCode** driving **Ornith 1.0 35B-A3B** (8-bit MLX) locally via
-**LM Studio** on `127.0.0.1:1234`. Ornith is a Gemma 4 model tuned using Qwen — an MoE without
-thinking, so it is much faster than the dense thinking Qwen it scores close to. That trade suits
-implementation work whose thinking already happened when the issue was authored. **It replaces
-Sonnet here.** Token cost is $0.00.
+**Four roles, revised 2026-08-07 after fifty rounds of evidence.**
 
-**The loop is: Opus or Fable authors the issue in enough detail that implementation needs no further
-judgment → a subagent dispatches it → Opus reviews the diff and the real verification output →
-accept, or write a `## Review` section into the issue and re-dispatch.** Full workflow, roles, and
-loop protection are in `issues/Issues.md`.
+| role | model | what it does |
+|---|---|---|
+| **Planning** | Fable 5 | Authors the issue **down to the code**: exact paths, exact signatures, the literal lines to change, measured before-and-after values. Not a description of the work — a colour-by-numbers of it. |
+| **Implementation, pure code** | Ornith 1.0 35B-A3B, local, $0.00 | One file, or a few files of ordinary Swift, against a target the issue has already measured. |
+| **Implementation, everything else** | Sonnet 5, **billed** | `Package.swift`, the Xcode project, build settings, anything about the environment or the harness. Ornith has failed at these repeatedly and the failures are expensive in wall-clock. |
+| **Issue review** | Opus 5 | Re-runs the verification, runs the mutations, reads every new test. Unchanged — this is where the catches happen. |
+| **Milestone review** | Fable 5 | Runs when every issue in a milestone is `resolved`. See below. |
+
+Dispatch with `scripts/dispatch-issue.sh NNNN --round N [--model ornith|sonnet]`. **`ornith` is the
+default**; `sonnet` prints a billed-round warning. Everything else about the loop is unchanged: a
+subagent absorbs the transcript, Opus reviews the diff and the real verification output, and the
+branch is squash-merged only after it passes.
+
+### Why the split, in numbers
+
+Of fifty rounds on 2026-08-07: 24 accepted, 22 rejected, 3 failed outright. **Sixteen of the
+twenty-four accepted needed a hand finish; two were accepted clean.** The pattern in the failures is
+consistent:
+
+- **Issues that carried measured code converged in one round** — #0117, #0110, #0118. Issues that
+  described the work in prose did not.
+- **Pasting five function signatures into #0116** took round 2 from 26 file rewrites and a timeout to
+  17 edits and a finish inside the clock. Nothing else changed.
+- **Every timeout was a round creating a large new file.** Every round scoped as a repair converged.
+- **Ornith fails structurally on `Package.swift` and the Xcode project.** #0124 spent three rounds on
+  one command wiring and never wrote a test; #0126 needed hand finishing on exactly the structural
+  half. Pure single-file repairs land first time.
+
+So: **smaller issues, with the code in them, and a different model for the work the local one cannot
+do.**
+
+### What "enough detail" means now
+
+An issue is ready when an implementer could follow it without a judgement call. In practice:
+
+- **Name every path in full**, repo-relative. `YardKit/Sources/YardGit/WhereAmI.swift`, not "the
+  engine".
+- **Paste every signature the round must call**, and the public members of each result type.
+- **Paste the literal change** where it is small — the expression, the line, the record layout.
+- **State measured before-and-after values**, and say they were measured. `od -c` bytes, real command
+  output, actual counts.
+- **One deliverable.** If the Expected behavior list has two verbs in it, split it.
+
+The counter-risk is real and has cost rounds: **a code sample written from memory propagates silently**
+(#0093, #0114). Everything pasted into an issue must have been run, and the issue must say so.
+
+### Milestone review
+
+When every issue in a milestone is `resolved`, a **Fable** subagent reviews the milestone as a whole
+against the exit criteria in guide §9 — not issue by issue, which is what per-issue review already
+does and cannot substitute for.
+
+It exists because per-issue review is structurally blind to the gaps *between* issues. #0115 is the
+proof: forty-two M1 issues passed review individually while the milestone's actual criterion — working
+commands — went unmet, and no single issue's review could have seen it.
+
+Rules that keep it from becoming an open-ended quality pass:
+
+- **It may only file issues against the milestone's stated exit criteria in guide §9.** Not general
+  quality, not style, not "this could be better". If a criterion is not in the guide, it is not a
+  finding — it is a proposal, and it goes to Brennan.
+- Findings become ordinary issues, implemented through the normal loop, and the milestone is reviewed
+  again when they resolve.
+- **Two consecutive reviews with no findings closes the milestone.** Without a termination rule the
+  loop can cycle forever.
 
 **The primary checkout stays on `main`, permanently.** It is the checkout a human watches, and it is
 where merged work becomes visible. Never switch it to an issue branch and never run a dispatch in it:

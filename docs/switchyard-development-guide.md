@@ -628,9 +628,25 @@ Ship in this order. Each milestone is independently useful and independently aba
 and **reftable compatibility**. Output is `docs/engine-findings.md` and a delete of the spike code.
 Nothing else starts until this lands.
 
-**M1 — `switchyard` read commands and worktrees, standalone.** `whereami`, `graph`, `status`, `hunks`,
-`conflicts`, `log`, `verify`, plus the `switchyard wt` group. No app, no XPC. JSON schemas fixed and
-documented. This alone is useful to an agent on day one and validates the engine.
+**M1 — `switchyard` read commands and worktrees.** `whereami`, `graph`, `status`, `hunks`,
+`conflicts`, `log`, `verify`, plus the `switchyard wt` group. JSON schemas fixed and documented. This
+alone is useful to an agent on day one and validates the engine.
+
+**Exit criteria, as a checklist** — the milestone review reads these and only these:
+
+- [ ] Each of `whereami`, `graph`, `status`, `hunks`, `conflicts`, `log`, `verify` **runs from the
+      built binary** and emits a `schemaVersion: 1` envelope on stdout.
+- [ ] Each of `wt list`, `wt new`, `wt rm`, `wt where`, `wt gc`, `wt repair` likewise.
+- [ ] `switchyard --help` lists every one of them; `switchyard schema` emits a schema for each.
+- [ ] Every command's failure mode returns a structured error and the exit code from §6, not a trap
+      and not a success envelope with empty fields.
+- [ ] The response schemas are documented and versioned (#0026).
+- [ ] `swift test` is green, and every command has a test that exercises the **binary**, not only the
+      engine function.
+
+"Built" is not "engine function exists". A command that cannot be run is not delivered — that
+distinction cost M1 forty-two resolved issues with nothing shippable, and is why the milestone review
+exists.
 
 Worktrees are in M1 deliberately. `WorktreeContext` has to exist before any path resolution is
 written; adding it later means auditing every call site that touched a git path, which is the
