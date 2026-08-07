@@ -178,6 +178,21 @@ else
   pass "states facts rather than delegating discovery"
 fi
 
+# --- Check 6b (HARD) — the issue must be claimed before work starts --------
+# The tracker is what a human reads to know what is being worked on. Issues
+# were going straight from open to resolved, so a dispatch that was actively
+# running showed as untouched. Gate it here rather than trusting anyone to
+# remember.
+STATUS=$(grep -m1 '^| \*\*Status\*\*' "$FILE" | awk -F'|' '{gsub(/ /,"",$3); print $3}' || true)
+if [[ "$STATUS" == "in-progress" ]]; then
+  pass "issue is claimed (in-progress)"
+else
+  fail "issue status is '$STATUS', not 'in-progress'" \
+"Claim it before dispatching:  ./scripts/set-issue-status.sh $ISSUE in-progress
+An issue being actively worked must say so, or the tracker lies about what is
+happening. Set it back to 'open' if the round is abandoned."
+fi
+
 # --- Check 7 (WARN) — concurrency headroom ----------------------------------
 # LM Studio is PARALLEL 2. A third dispatch queues silently and is
 # indistinguishable from a very slow round.

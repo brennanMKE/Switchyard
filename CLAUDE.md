@@ -128,6 +128,33 @@ Run dispatches through `scripts/dispatch-issue.sh NNNN --round N`, which enforce
 timeout, a 3-round cap, a clean tree, and the correct branch. It has looped before; the guards are
 the mechanism, not the prose.
 
+## Issue status is part of the work, not bookkeeping after it
+
+The tracker is what a human reads to know what is happening. An issue being
+actively dispatched must say so.
+
+**The lifecycle, and who moves it:**
+
+| transition | when | by |
+|---|---|---|
+| `open` → `in-progress` | **before** dispatching a round | `./scripts/set-issue-status.sh NNNN in-progress` |
+| `in-progress` → `resolved` | the round passed review **and** is squash-merged to `main` | the same script |
+| `in-progress` → `open` | the 3-round cap was hit, or the issue is being rewritten or split | the same script |
+| `in-progress` → `wontfix` | the work turned out not to be worth doing | the same script, and say why in the issue |
+| `resolved` → `closed` | **Brennan confirms.** Never set this yourself. | Brennan |
+
+`scripts/set-issue-status.sh` refuses anything outside those five values, and
+**`scripts/preflight-issue.sh` refuses to dispatch an issue that is not
+`in-progress`** — so claiming it is a gate rather than a habit.
+
+**Resolved means merged, not merely accepted.** A round that passes review but
+sits unmerged is still `in-progress`; that is what stops a green branch being
+mistaken for landed work.
+
+**Set it back to `open` when a round is abandoned.** An issue stuck at
+`in-progress` with nothing running is worse than one marked `open`, because it
+reads as claimed and nobody picks it up.
+
 ## Learning from failed reviews
 
 **`docs/review-failures.md` is the failure log, and it is read before every dispatch — not after.**
