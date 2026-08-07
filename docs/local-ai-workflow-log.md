@@ -854,6 +854,33 @@ instruction changes that.** Four rounds, three escalations, one config change st
 
 The next person to hit this should make the permission change rather than write another rule.
 
+### 3.12 Prose has no test, and fluency reads as accuracy
+
+#0111 asked for one thing: three doc comments named commands the code does not run, so correct them.
+The round passed **every** guard — 181 tests exactly, comments-only proven by
+`git diff -U0 | grep -vE '^[+-][[:space:]]*///'` returning nothing, no scope violation, no `/tmp`
+reach — and left the file **less accurate than it found it**.
+
+Each of the three real corrections was padded with invented detail: an `ls-files`/`-z` pipeline that
+does not exist, an assurance that staged and unstaged counts "should match in practice" when they
+routinely differ, and advice to treat a SHA shorter than seven characters as unborn when no length
+check exists anywhere.
+
+**Nothing mechanical could have caught this.** There is no test for a comment. The inert-test detector,
+the preflight, the count check — all of them passed, correctly, because none of them read English
+against code. It took a reviewer opening the function body and checking each new sentence against it.
+
+This is §3.2 and §3.8 again in the medium where those tools do not reach. The earlier ones were
+assertions that were present but wrong, and counts that were real but did not move. Here it is
+sentences that are plausible but false — and prose is the one deliverable where **plausible is the
+whole attack surface**, because there is nothing else to check it against.
+
+**Two practical rules.** When commissioning documentation, say that each sentence must name something
+visible in the code, and that elaboration is not wanted: *a doc comment may not contain a claim that
+would need a test to be true.* And when reviewing it, read the prose against the implementation line
+by line — the same discipline as re-running a test rather than reading its name, applied to the one
+artifact that cannot be run at all.
+
 ### 3.7 Review feedback can make the next round impossible
 
 Round 2 of #0070 was killed by the sandbox because *my feedback* told it to verify git behaviour,
