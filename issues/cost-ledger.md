@@ -31,7 +31,10 @@ a figure derived from it appears.
 | 2026-08-06 | #0098 | Dispatch round 1 (failed: sandbox denial, exit 7) | 45,120 | $0.36 |
 | 2026-08-06 | #0098 | Dispatch round 2 (converged, 190s) | 55,326 | $0.44 |
 | 2026-08-06 | #0090 | Dispatch round 1 (REJECTED, 1289s) | 50,649 | $0.41 |
-| | | **Total measured** | **588,331** | **$4.71** |
+| 2026-08-06 | #0090 | Dispatch round 2 (accepted, 139s) | 45,920 | $0.37 |
+| 2026-08-06 | #0090 | Failure post-mortem subagent | 77,282 | $0.62 |
+| 2026-08-06 | — | Cross-cutting post-mortem over all failed rounds | 134,166 | $1.07 |
+| | | **Total measured** | **845,699** | **$6.77** |
 
 ## What this total does and does not cover
 
