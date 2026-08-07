@@ -530,6 +530,68 @@ in-process.
 **For reviewing:** capture every stream, including the ones the issue never mentions. An empty stream
 is information.
 
+### 1.12 I put an unverified snippet in a Givens block and called it verified
+
+#0093's Given 3 told the implementer to locate the built binary with:
+
+```swift
+Bundle.allBundles.first { $0.bundlePath.hasSuffix(".xctest") }!
+```
+
+It matches nothing. Under `swift test`, swift-testing runs through `swiftpm-testing-helper`,
+`Bundle.main` is the toolchain's `pm` directory, and `allBundles` holds exactly one entry which is not
+the `.xctest` bundle. The round was killed at the full 1800-second cap having produced a structurally
+correct test that could never find the binary.
+
+**What I actually verified was something adjacent.** I ran `swift test` and confirmed it builds the
+executable; I ran `ls` and confirmed the binary and the `.xctest` bundle are siblings in the bin
+directory. Both true. Then I *reasoned* from those facts to a Swift snippet and wrote it into a block
+headed **"Givens — verified on `main`, treat as true"**, which instructs the model not to question it.
+
+That heading is the whole problem. A Givens block converts my confidence into the model's constraint.
+When I am right it saves a round — #0090 went from 1289s to 139s on exactly that mechanism. When I am
+wrong it removes the model's licence to notice, and it spends the budget forcing my error to work
+instead of reaching for the thing that does.
+
+**The rule:** *nothing goes in a Givens block that I have not executed.* Not reasoned from something I
+executed — executed, in the same context the model will run it in. If I want to suggest an unverified
+approach, it goes in the Notes as a suggestion, where disagreeing is allowed.
+
+**Corollary for review:** when a round burns its whole budget on one obstacle, suspect the givens
+before suspecting the model. Round 1 here was competent — real `Process`, real pipes, fails loudly
+rather than skipping — and it was defeated by a single line I told it to trust.
+
+The verified form, probed inside a running test bundle, anchors on a type in the test target:
+`Bundle(for: BundleAnchor.self).bundleURL.deletingLastPathComponent()`.
+
+### 1.13 My verification probe changed the thing it was measuring
+
+Following 1.12, I set out to verify the *corrected* locator myself rather than trust the reviewer's
+probe. My test did two things in one function: resolve the binary via `Bundle(for: BundleAnchor.self)`,
+then assert that `Bundle.allBundles` finds no `.xctest` bundle — expecting to confirm the reviewer's
+diagnosis.
+
+The second assertion failed. `allBundles` **did** contain `YardKitPackageTests.xctest`, which read as
+the reviewer being wrong.
+
+It was not. `Bundle(for:)` **registers** the bundle, and my probe called it on the line above. The
+measurement had been contaminated by its own setup. Probing each form alone settles it:
+
+| probed alone | result |
+|---|---|
+| `Bundle.allBundles` | `count=1`, no `.xctest`, `main` = `…/usr/libexec/swift/pm` |
+| `Bundle(for: BundleAnchor.self)` | `…/.build/arm64-apple-macosx/debug`, binary present |
+
+So the reviewer was right, and the real finding is sharper than either of our first statements:
+`allBundles` is **order-dependent** here. It works if anything earlier in the process touched
+`Bundle(for:)`, and not otherwise — which is a flake waiting to happen rather than an honest failure,
+and strictly worse than a method that never works.
+
+**The lesson:** when a probe contradicts a careful reviewer, suspect the probe. Isolate each claim in
+its own run before concluding anything — a probe that establishes state and then measures it is
+measuring itself. This is the same shape as the vacuous test in §3.8, one level up: the evidence was
+real and the inference from it was not.
+
 ### 3.7 Review feedback can make the next round impossible
 
 Round 2 of #0070 was killed by the sandbox because *my feedback* told it to verify git behaviour,
