@@ -271,6 +271,11 @@ So: build content with `git_commit_create_buffer`, sign that buffer with
 field `gpgsig`. git reads the result as a good signature. libgit2 never produces the signature, only
 attaches it, exactly as the guide anticipated.
 
+**GitHub confirms it, 2026-08-07.** The last outstanding M0 criterion is closed: a commit signed
+with the registered key and pushed to this repository returns `"verified": true, "reason": "valid"`
+from `gh api`. The chain holds end to end — `git_commit_create_buffer` → `ssh-keygen -Y sign` →
+`git_commit_create_with_signature`, accepted by local git *and* by GitHub's verifier.
+
 **Re-confirmed with the production key, 2026-08-07.** The same three-step shape signs correctly with
 Brennan's registered `~/.ssh/id_ed25519`, not merely with a throwaway: the object carries `gpgsig` and
 `git log --show-signature` reports `Good "git" signature for offwhite@gmail.com with ED25519 key
