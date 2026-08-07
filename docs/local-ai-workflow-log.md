@@ -361,6 +361,30 @@ check it against the manifest before writing it into an issue.
 in the log). A round can be simultaneously a success and a process violation; grade the two separately
 rather than letting either verdict swallow the other.
 
+### 3.6c The guard for the last failure nearly caused a worse one
+
+§3.6b's fix is a preflight check in `dispatch-issue.sh` that refuses to dispatch an issue naming a
+file inside an executable target. Written, it looked obviously correct.
+
+It was not. The script runs under `setopt ERR_EXIT PIPE_FAIL`, and the check ends in
+`grep … | grep -v … | sort -u`. When an issue names *no* offending path — the normal case, every
+healthy issue — `grep` matches nothing, exits 1, and `ERR_EXIT` kills the script. A guard meant to
+block four bad issues would instead have blocked **all** of them, and silently: no message, bare
+exit 1.
+
+It was caught only because the guard was tested with a **negative control** — an issue that should
+pass — and not just the positive one that demonstrates it firing. The positive test passed
+beautifully and proved nothing about the common path.
+
+**Fix:** `|| true` on the pipeline, plus three test cases retained in the commit: a legitimate
+`main.swift` reference, an issue naming no such path at all, and the actual defect.
+
+**The rule:** *test a new guard on input that should pass, not only on input that should fail.* A
+guard is a filter, and a filter that rejects everything looks identical to a filter that works until
+someone tries to get through it. This applies to every validation added to this harness — the failure
+mode of a guard is not "misses a bad case", it is "blocks the good ones", and only a negative control
+finds it.
+
 ### 3.7 Review feedback can make the next round impossible
 
 Round 2 of #0070 was killed by the sandbox because *my feedback* told it to verify git behaviour,

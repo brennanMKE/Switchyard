@@ -44,6 +44,29 @@ die() { print -u2 "dispatch: $1"; exit "${2:-1}" }
 [[ "$ISSUE" =~ '^[0-9]{4}$' ]] || die "issue must be 4 digits, got '$ISSUE'"
 [[ -f "issues/$ISSUE.md" ]] || die "issues/$ISSUE.md does not exist"
 
+# A named path is a claim about the build system, and it can be wrong. #0085
+# specified a file under the `yard` executable target; SwiftPM cannot link
+# `@testable import` against an executable, so the issue was unbuildable and
+# the round burned itself discovering that. Four more issues had the same
+# defect queued behind it. Catch it before spending twenty minutes on it.
+if [[ -f YardKit/Package.swift ]]; then
+  EXEC_DIRS=(${(f)"$(sed -n '/\.executableTarget(/,/)/p' YardKit/Package.swift \
+    | sed -n 's/.*path: "\([^"]*\)".*/\1/p')"})
+  for d in $EXEC_DIRS; do
+    # main.swift is legitimately there — it is the entry point and is not
+    # unit-tested. Anything else named in that directory is the defect.
+    # ERR_EXIT + PIPE_FAIL are on: a grep that matches nothing exits 1 and
+    # would kill the script here, which is the *common* case. Swallow it.
+    BAD=$(grep -oE "YardKit/$d/[A-Za-z0-9_]+\.swift" "issues/$ISSUE.md" \
+      | grep -v '/main\.swift$' | sort -u || true)
+    [[ -z "$BAD" ]] || die "issues/$ISSUE.md names a file inside the executable target '$d':
+$BAD
+SwiftPM cannot '@testable import' an executable target, so nothing there can be
+unit-tested. Move the path to a library target (Sources/YardKit or Sources/YardGit)
+and re-dispatch. See docs/local-ai-workflow-log.md §3.6b." 9
+  done
+fi
+
 if (( ROUND > MAX_ROUNDS && ! FORCE )); then
   die "round $ROUND exceeds the cap of $MAX_ROUNDS. The task is not converging.
 Rewrite the issue with more specific guidance, split it, or take it back.
