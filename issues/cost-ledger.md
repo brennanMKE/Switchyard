@@ -84,7 +84,8 @@ a figure derived from it appears.
 | 2026-08-07 | #0117 | Dispatch round 1 + hand finish (accepted) | 48,971 | $0.39 |
 | 2026-08-07 | #0013 | Dispatch round 2 (REJECTED, no tests, fabricated report) | 62,109 | $0.50 |
 | 2026-08-07 | #0013 | Dispatch round 3 + hand finish (accepted) | 63,774 | $0.51 |
-| | | **Total measured** | **3,611,802** | **$28.89** |
+| 2026-08-07 | #0120 | Dispatch round 1 (FAILED, hung inference, zero output) | 45,710 | $0.37 |
+| | | **Total measured** | **3,657,512** | **$29.26** |
 
 ## What this total does and does not cover
 

@@ -1,7 +1,7 @@
 #!/bin/zsh
 # Dispatch one issue to OpenCode running the local model.
 #
-#   scripts/dispatch-issue.sh 0012 [--round N] [--timeout SECS] [--force]
+#   scripts/dispatch-issue.sh 0012 [--round N] [--timeout SECS] [--stall SECS] [--force]
 #
 # Guards, in order of how often they matter:
 #   - hard wall-clock timeout, because the model has looped before and there is
@@ -24,6 +24,10 @@ cd "$REPO_ROOT"
 
 MAX_ROUNDS=3
 TIMEOUT=1800
+# Kill a round that has written nothing to its log for this long. A working
+# round appends constantly; silence this long means a hung request.
+STALL=420
+STALL_POLL=30
 ROUND=1
 FORCE=0
 ISSUE=""
@@ -32,6 +36,7 @@ while (( $# )); do
   case "$1" in
     --round)   ROUND="$2"; shift 2 ;;
     --timeout) TIMEOUT="$2"; shift 2 ;;
+    --stall)   STALL="$2"; shift 2 ;;
     --force)   FORCE=1; shift ;;
     -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
     *)         ISSUE="$1"; shift ;;
@@ -144,22 +149,47 @@ Finish with a short report: what you changed, what you ran, what it printed,
 and anything you could not do.
 EOF
 
-print "dispatch: issue $ISSUE, round $ROUND/$MAX_ROUNDS, model ${MODEL:-unknown}, timeout ${TIMEOUT}s"
+print "dispatch: issue $ISSUE, round $ROUND/$MAX_ROUNDS, model ${MODEL:-unknown}, timeout ${TIMEOUT}s, stall ${STALL}s"
 print "dispatch: log -> $LOG"
 
 START=$SECONDS
 opencode run "$PROMPT" >"$LOG" 2>&1 &
 RUN_PID=$!
 
+# Two watchdogs. The wall-clock one bounds a round that is working but slow;
+# the stall one bounds a round that has stopped producing anything at all.
+#
+# #0120 round 1 hung on an inference request that never returned -- a session
+# row written with 0/0 tokens and no finish reason -- and then sat silent for
+# 27 minutes until the 1800s guard fired. OpenCode's own `chunkTimeout` did not
+# fire. The log's mtime is the cheap, reliable signal: a live round appends to
+# it constantly.
 ( sleep "$TIMEOUT"
   kill -TERM "$RUN_PID" 2>/dev/null
   sleep 10
   kill -KILL "$RUN_PID" 2>/dev/null ) &
 WATCHDOG=$!
 
+( while kill -0 "$RUN_PID" 2>/dev/null; do
+    sleep "$STALL_POLL"
+    [[ -f "$LOG" ]] || continue
+    LAST=$(stat -f %m "$LOG" 2>/dev/null || print 0)
+    NOW=$(date +%s)
+    if (( NOW - LAST >= STALL )); then
+      print -u2 "\ndispatch: STALLED -- no log output for ${STALL}s. Killing."
+      print -u2 "dispatch: this is the hung-inference shape, not a slow round. See #0120 round 1."
+      kill -TERM "$RUN_PID" 2>/dev/null
+      sleep 10
+      kill -KILL "$RUN_PID" 2>/dev/null
+      break
+    fi
+  done ) &
+STALLDOG=$!
+
 STATUS=0
 wait "$RUN_PID" || STATUS=$?
 kill "$WATCHDOG" 2>/dev/null || true
+kill "$STALLDOG" 2>/dev/null || true
 ELAPSED=$(( SECONDS - START ))
 
 print "\ndispatch: exit $STATUS after ${ELAPSED}s"
