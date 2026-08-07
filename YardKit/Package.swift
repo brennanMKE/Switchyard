@@ -32,12 +32,12 @@ let package = Package(
         ),
         .target(
             name: "YardKit",
-            dependencies: ["YardGit"],
+            dependencies: [],
             path: "Sources/YardKit"
         ),
         .executableTarget(
             name: "switchyard",
-            dependencies: ["YardGit", "YardKit"],
+            dependencies: ["YardKit"],
             path: "Sources/switchyard"
         ),
         .testTarget(

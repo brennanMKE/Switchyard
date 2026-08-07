@@ -1,7 +1,6 @@
 // main.swift
 
 import Foundation
-import YardGit
 import YardKit
 
 let arguments = Array(CommandLine.arguments.dropFirst())

@@ -37,4 +37,32 @@ struct LayeringTests {
             }
         }
     }
+
+    /// The CLI must not pull the engine into its binary. YardKit's dependency
+    /// chain is `YardKit → nothing` and the executable depends on YardKit only,
+    /// so a stray `import YardGit` inside Sources/YardKit/ is the failure
+    /// mode this asserts against from the source.
+    @Test func yardKitDoesNotImportYardGit() throws {
+        let here = URL(fileURLWithPath: #filePath)
+        let root = here.deletingLastPathComponent()   // YardKitTests
+            .deletingLastPathComponent()              // Tests
+            .deletingLastPathComponent()              // YardKit (package root)
+        let layer = root.appendingPathComponent("Sources/YardKit")
+
+        let files = try FileManager.default
+            .contentsOfDirectory(at: layer, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "swift" }
+        #expect(!files.isEmpty, "no Swift sources found at \(layer.path)")
+
+        for file in files {
+            let source = try String(contentsOf: file, encoding: .utf8)
+            for line in source.split(separator: "\n") {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                #expect(
+                    !trimmed.hasPrefix("import YardGit"),
+                    "\(file.lastPathComponent) imports YardGit — the CLI must not depend on the engine"
+                )
+            }
+        }
+    }
 }
