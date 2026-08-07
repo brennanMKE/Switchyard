@@ -114,7 +114,8 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-08-07 | #0109 | Dispatch round 1 + hand finish (accepted) | 72,666 | $0.58 |
 | 2026-08-07 | #0017 | Dispatch round 1 — FAILED, no code (context exhaustion) | 48,824 | $0.39 |
 | 2026-08-07 | #0127 | Fable planning pass, re-author to code level (F) | 148,904 | $2.38 |
-| | | **Total measured** | **5,307,461** | **$43.68** |
+| 2026-08-07 | #0016 | Fable planning pass, re-author to code level + split (F) | 189,586 | $3.03 |
+| | | **Total measured** | **5,497,047** | **$46.71** |
 
 ## What this total does and does not cover
 
