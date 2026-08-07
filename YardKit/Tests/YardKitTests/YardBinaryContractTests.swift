@@ -156,18 +156,33 @@ struct YardBinaryContractTests {
         #expect(parseJSON(stdout) != nil, "failure stdout is not valid JSON")
     }
 
-    // MARK: - stderr observed to be empty (documented gap, #0100)
+    // MARK: - stderr contract
 
-    @Test("stderr is currently empty on success") func stderrEmptyOnSuccess() {
+    @Test("stderr is empty on success") func stderrEmptyOnSuccess() {
         guard binaryExists else { return }
         let (_, _, stderr) = run(args: "")
         #expect(stderr.isEmpty, "stderr should be empty on success but got \(String(data: stderr, encoding: .utf8) ?? "<non-UTF8>")")
     }
 
-    @Test("stderr is currently empty on failure") func stderrEmptyOnFailure() {
+    @Test("stderr carries the error line on failure") func stderrCarriesErrorLineOnFailure() {
         guard binaryExists else { return }
         let (_, _, stderr) = run(args: "bogus-command")
-        #expect(stderr.isEmpty, "stderr should be empty on failure but got \(String(data: stderr, encoding: .utf8) ?? "<non-UTF8>")")
+
+        let text = String(data: stderr, encoding: .utf8) ?? ""
+        #expect(!text.isEmpty, "stderr must not be empty on failure")
+        #expect(text.hasPrefix("[error]"), "stderr should begin with '[error]' marker")
+        #expect(text.contains("usage"), "stderr must contain the error code label 'usage'")
+        #expect(text.contains("bogus-command"), "stderr must contain the offending subcommand name")
+        #expect(text.hasSuffix("\n"), "stderr line must terminate with newline")
+    }
+
+    @Test("failure stderr uses wire code not Swift case name") func failureStderrUsesWireCode() {
+        guard binaryExists else { return }
+        let (_, _, stderr) = run(args: "bogus-command")
+
+        let text = String(data: stderr, encoding: .utf8) ?? ""
+        #expect(text.contains("usage"), "stderr should carry wire code 'usage'")
+        #expect(!text.contains("EnvelopeErrorCode"), "stderr must not leak Swift type qualifiers")
     }
 
     // MARK: - noop path (second success case)

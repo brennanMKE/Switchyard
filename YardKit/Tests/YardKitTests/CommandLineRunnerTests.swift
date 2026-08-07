@@ -108,6 +108,49 @@ struct CommandLineRunnerTests {
         #expect(result.exitCode != .usage, "noop should NOT exit 1")
     }
 
+    // MARK: - stderr presence
+
+    @Test func unknownCommandReturnsStderrLineWithCodeAndMessage() {
+        let result = runYard(arguments: ["bogus-command"])
+
+        #expect(!result.stderr.isEmpty, "unknown command must return a stderr line")
+        #expect(result.stderr.hasPrefix("[error]"), "stderr must start with '[error]'")
+        #expect(result.stderr.contains("usage"), "stderr must contain the error code label 'usage'")
+        #expect(result.stderr.contains("bogus-command"), "stderr must contain the subcommand name")
+        #expect(result.stderr.hasSuffix("\n"), "stderr line must end with newline")
+    }
+
+    @Test func successPathsReturnEmptyStderr() {
+        let noArgs = runYard(arguments: [])
+        #expect(noArgs.stderr.isEmpty, "no-args should produce no stderr text")
+
+        let noop = runYard(arguments: ["noop"])
+        #expect(noop.stderr.isEmpty, "noop should produce no stderr text")
+    }
+
+    @Test func unknownCommandStderrUsesWireCodeNotCaseName() {
+        let result = runYard(arguments: ["bogus-command"])
+
+        #expect(!result.stderr.isEmpty)
+        #expect(result.stderr.contains("usage"), "stderr should carry the wire code 'usage', not 'EnvelopeErrorCode.usage'")
+        #expect(!result.stderr.contains("EnvelopeErrorCode"), "stderr must not leak Swift case names")
+    }
+
+    @Test func stderrLineContainsRawValueNotCaseNameForAllCodes() {
+        // Verifies the design invariant that runYard surfaces wire codes,
+        // never Swift enum case names. Looping is appropriate here because
+        // every CaseIterable member reaches an assertion.
+        let failures: [EnvelopeErrorCode] = Array(EnvelopeErrorCode.allCases)
+        #expect(!failures.isEmpty, "must have at least one error code to iterate")
+
+        for caseCode in failures {
+            let env = EnvelopeFail(code: caseCode, message: "test-\(caseCode.rawValue)")
+            let human = "[error] \(env.error.code.rawValue): \(env.error.message)\n"
+            #expect(human.contains(caseCode.rawValue), "stderr line for \(caseCode) should carry rawValue '\(caseCode.rawValue)', not the case name")
+            #expect(!human.contains("EnvelopeErrorCode."), "stderr must never include Swift type qualifiers")
+        }
+    }
+
     // MARK: - Helpers
 
     private func assertJsonIsWellFormed(_ text: String, message: @autoclosure () -> String) {
