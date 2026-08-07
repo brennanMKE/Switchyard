@@ -105,7 +105,12 @@ while its tests contributed nothing to the number.
     strings — it returns clean and proves nothing. Before writing a grep into a criterion, run it
     against a known-bad input and confirm it fires. This is the same failure as an inert test, one
     level up: the check ran, passed, and could not have failed.
-16. **Does the issue name the collaborators, not just the output file?** "Name the file" fixed
+16. **When a review names a defect, does it name the CLASS or one instance?** A review saying "fix
+    X in test Y" reliably gets X fixed in Y and nowhere else. #0020 round 3 added the required
+    `#require` guard to the single test the review named by title and left the identical unguarded
+    subscript at seven other sites — where a mutation then trapped and destroyed the run. If the
+    defect is a pattern, say so, and give the command that finds every occurrence.
+17. **Does the issue name the collaborators, not just the output file?** "Name the file" fixed
     convergence months of rounds ago, and it is necessary but not sufficient: a file name says where
     code goes and nothing about what it may call. If the work must use an existing type, **quote its
     real surface in the issue** — #0012 lost a full 30-minute cap to a model inventing
