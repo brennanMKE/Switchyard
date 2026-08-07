@@ -8,26 +8,17 @@ let package = Package(
     // against a Homebrew libgit2 built for 26.0 and warned on every build.
     platforms: [.macOS(.v26)],
     products: [
-        // The engine. Standalone by design: no XPC, no app, no launch agent.
+        // The engine. Every git operation shells out through GitProcess; see #0103
+        // for the libgit2 work, which is not a dependency of anything yet.
         .library(name: "YardGit", targets: ["YardGit"]),
         // Everything shared between the app, the broker, and the CLI.
         .library(name: "YardKit", targets: ["YardKit"]),
         .executable(name: "switchyard", targets: ["switchyard"]),
     ],
     targets: [
-        // libgit2 comes in through a system library target for development.
-        // This route depends on Homebrew and therefore cannot ship — a
-        // prebuilt xcframework replaces it before the CLI is embedded in the
-        // app bundle (#0050). See docs/engine-findings.md, route A vs B.
-        .systemLibrary(
-            name: "Clibgit2",
-            path: "Sources/Clibgit2",
-            pkgConfig: "libgit2",
-            providers: [.brew(["libgit2"])]
-        ),
         .target(
             name: "YardGit",
-            dependencies: ["Clibgit2"],
+            dependencies: [],
             path: "Sources/YardGit"
         ),
         .target(
@@ -50,11 +41,10 @@ let package = Package(
             dependencies: ["YardKit"],
             path: "Tests/YardKitTests"
         ),
-        // NOTE — tests in this target import YardGit WITHOUT @testable so that
-        // any member which silently drops back to internal is caught at
-        // compile-time rather than passing in `@testable`-masked code. If this
-        // target doesn't build, the public API contract is broken — see issue
-        // #0116.
+        // Tests in this target import YardGit WITHOUT @testable so that any
+        // member which silently drops back to internal is caught at compile-time
+        // rather than passing in @testable-masked code. If this target doesn't
+        // build, the public API contract is broken — see issue #0116.
         .testTarget(
             name: "YardGitPublicAPITests",
             dependencies: ["YardGit"],
