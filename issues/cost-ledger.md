@@ -205,7 +205,9 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-08-08 | #0031 | Ornith r1 local, notional | 348,981 | $0.00 |
 | 2026-08-08 | #0031 | Dispatch r1 + review (O) | 69,312 | $1.11 |
 | 2026-08-08 | #0167 | Fable planning: re-author to code level (F) | 219,108 | $3.51 |
-| | | **Total measured** | **20,558,368** | **$187.06** |
+| 2026-08-08 | #0042 | Ornith r1 local, notional | 2,896,943 | $0.00 |
+| 2026-08-08 | #0042 | Dispatch r1 + review (O) | 71,873 | $1.15 |
+| | | **Total measured** | **23,527,184** | **$188.21** |
 
 ## What this total does and does not cover
 
