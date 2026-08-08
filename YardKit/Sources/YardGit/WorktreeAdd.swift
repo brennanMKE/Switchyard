@@ -52,6 +52,7 @@ public struct WorktreeAddResult: Sendable {
         self.lockReason = lockReason
         self.error = error
     }
+
 }
 
 /// Structured refusals from `git worktree add`, classified from measured
@@ -110,6 +111,7 @@ public enum WorktreeAddError: Error, Equatable, CustomStringConvertible, Sendabl
             return "git worktree add exited \(code)" + (detail.isEmpty ? "" : ": \(detail)")
         }
     }
+
 }
 
 /// Creates a linked worktree for the repository at `repositoryPath`.
@@ -246,4 +248,58 @@ func classifyWorktreeAddFailure(exitCode: Int32, stderr: String) -> WorktreeAddE
         return .invalidReference(String(first.dropFirst("fatal: invalid reference: ".count)))
     }
     return .unknownFailure(code: exitCode, stderr: stderr)
+}
+
+// MARK: - Wire encoding (#0134)
+
+/// `WorktreeAddResult` is a `schemaVersion: 1` payload: it encodes through
+/// `YardKit`'s `Envelope` via `EncodableResult` (`Encodable & Sendable`).
+/// Plain-stdlib `Encodable` — the engine still imports nothing.
+extension WorktreeAddResult: Encodable {
+    /// Stable wire keys, identical to the stored-member names; no raw values.
+    /// The computed `success` is not encoded (derivable: `error` absent).
+    /// The enum is rename-safety; `WorktreeAddWireTests` pins the bytes.
+    private enum CodingKeys: String, CodingKey {
+        case worktreePath, branch, head, lockReason, error
+    }
+}
+
+/// A structured refusal encodes as an object with a stable `code` plus
+/// `message` (= `description`), plus the case's associated values as named
+/// detail fields — an agent branching on the holder must not have to parse
+/// it out of `message` prose. Hand-written because associated-value enums get
+/// no useful synthesis; `code` and `description` are reused, not restated.
+extension WorktreeAddError: Encodable {
+    /// Wire keys: `code` and `message` on every case, then per-case detail.
+    /// `unknownFailure`'s associated `code:` (the git exit status) rides as
+    /// `exitCode` — the `code` key is taken by the stable case string.
+    private enum CodingKeys: String, CodingKey {
+        case code, message
+        case branch, holderPath, holderIsMainWorktree
+        case name, path, reference
+        case exitCode, stderr
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(code, forKey: .code)
+        try container.encode(description, forKey: .message)
+        switch self {
+        case let .branchInUse(branch, holderPath, holderIsMainWorktree):
+            try container.encode(branch, forKey: .branch)
+            try container.encodeIfPresent(holderPath, forKey: .holderPath)
+            try container.encode(holderIsMainWorktree, forKey: .holderIsMainWorktree)
+        case let .branchExists(branch):
+            try container.encode(branch, forKey: .branch)
+        case let .invalidBranchName(name):
+            try container.encode(name, forKey: .name)
+        case let .pathExists(path):
+            try container.encode(path, forKey: .path)
+        case let .invalidReference(reference):
+            try container.encode(reference, forKey: .reference)
+        case let .unknownFailure(exitCode, stderr):
+            try container.encode(exitCode, forKey: .exitCode)
+            try container.encode(stderr, forKey: .stderr)
+        }
+    }
 }
