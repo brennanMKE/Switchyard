@@ -203,6 +203,14 @@ Git provides a purpose-built mechanism, and it is the single most useful hook fo
 
 **`reference-transaction`.** <cite index="30-1">This hook is invoked by any Git command that performs reference updates, executing whenever a reference transaction is preparing, prepared, committed, or aborted, and it also supports symbolic reference updates. For each reference update in the transaction, the hook receives on standard input a line of `<old-value> SP <new-value> SP <ref-name>`.</cite>
 
+> **The quotation above is wrong about the states, and is kept verbatim only because it is a
+> citation.** git 2.50.1 emits **`prepared`, `committed`, `aborted`** — there is no `preparing`
+> state. Measured 2026-08-07 by logging `$1` from a real hook. The stdin format in the same sentence
+> *is* correct and was verified byte-for-byte with `od -c` on both `files` and `reftable`
+> repositories: single `0x20` separators, `LF` terminated. A creation carries the all-zeros oid as
+> old-value; a deletion carries zeros as new-value, and an unconditional `git update-ref -d` carries
+> zeros as **old**-value too, so deletion must be decided on the new value alone.
+
 That is every ref change in the repository, from any tool, batched by transaction, with old and
 new values. It is exactly the event stream Switchyard needs. Install `switchyard hook ref-txn` as this
 hook, have it record `committed` transactions into the journal as observed (not undoable) entries,
