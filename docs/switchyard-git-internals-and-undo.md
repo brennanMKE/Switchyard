@@ -209,6 +209,16 @@ scripted caller.
 >
 > Both found while planning #0031, by an agent working from this document and checking it rather than
 > implementing it.
+>
+> **Implemented and merged 2026-08-08 — `YardKit/Sources/YardGit/CrossToolGuard.swift` is now
+> authoritative over this section.** The union comparison is
+> `Set(recordedByName.keys).union(currentByName.keys).sorted()`, and the refusal carries
+> `.repositoryError`. `CrossToolGuardTests` pins the distinction directly: reverting to the recorded
+> subset leaves every other test green and turns exactly
+> `branchCreatedByAnotherToolReportsAbsentExpected` red — the ref that appeared after capture, which
+> restore would delete. **The sketch above is kept as the record of what was originally designed, not
+> as instructions.** A reviewer read it as live text this session, so if it misleads again, delete it
+> rather than annotating it a third time.
 
 ### Pruning
 
