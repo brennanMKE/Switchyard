@@ -129,10 +129,24 @@ extension WhereAmI: Encodable {
 /// Shells out to `git` for each field, using `WorktreeContext` and the
 /// `path(for:)` helper to find state files in a way that is correct for
 /// linked worktrees and reftable repositories.
+///
+/// - Throws: `WorktreeContext.Error.notARepository` when `path` is not inside
+///   a git repository (or when git cannot answer `rev-parse` there at all).
+///   An empty-but-real repository does not throw: `git init` with no commits
+///   returns the legitimate empty state (`branch: "main"`, `headOID: ""`).
 public func whereAmI(
     path: String,
     git: GitProcess = GitProcess()
 ) throws -> WhereAmI {
+
+    // The not-a-repository gate (#0140, guide §9 M1 criterion 3). Without it
+    // every probe below degrades to nil/0/"" on a non-repository and the
+    // function returns the forbidden success-value-with-empty-fields shape.
+    // Resolving `WorktreeContext` first is also what CLAUDE.md requires — it
+    // is resolved once per invocation. The context value itself is unused
+    // here on purpose: every probe below already goes through `git -C path`
+    // and `rev-parse --git-path`, which is worktree- and reftable-correct.
+    _ = try WorktreeContext.resolve(path: path, git: git)
 
     // HEAD's raw form: a full SHA or empty. An empty repository has no HEAD
     // yet, so fall back to ""; callers can still check the branch via

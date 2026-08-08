@@ -201,4 +201,24 @@ struct WhereAmITests {
         #expect(r.conflictCount != lsLineCount, "conflict count must be unique paths")
     }
 
+    // MARK: - Issue 0140 Required Tests — the not-a-repository gate
+
+    @Test func nonRepositoryDirectoryThrowsNotARepository() throws {
+        let dir = NSTemporaryDirectory() + "yard-not-a-repo-\(UUID().uuidString)"
+        try FileManager.default.createDirectory(
+            atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+
+        let error = #expect(throws: WorktreeContext.Error.self) {
+            _ = try whereAmI(path: dir, git: git)
+        }
+        guard case let .notARepository(path, detail) = try #require(error) else {
+            Issue.record("expected notARepository, got \(String(describing: error))")
+            return
+        }
+        #expect(path == dir, "the error names the path that was asked about")
+        #expect(detail.contains("not a git repository"),
+                "the error carries git's own stderr as the detail")
+    }
+
 }
