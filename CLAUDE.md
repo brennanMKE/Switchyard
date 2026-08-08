@@ -97,7 +97,7 @@ context resumes without needing the previous conversation.
 |---|---|---|
 | **Planning** | Fable 5 | Authors the issue **down to the code**: exact paths, exact signatures, the literal lines to change, measured before-and-after values. Not a description of the work — a colour-by-numbers of it. |
 | **Implementation, pure code** | Ornith 1.0 35B-A3B, local, $0.00 | One file, or a few files of ordinary Swift, against a target the issue has already measured. |
-| **Implementation, everything else** | Sonnet 5, **billed** | `Package.swift`, the Xcode project, build settings, anything about the environment or the harness. Ornith has failed at these repeatedly and the failures are expensive in wall-clock. |
+| **Implementation, structural** | Ornith when the edit is **pasted**; Sonnet when it needs **design** | `Package.swift`, the Xcode project, build settings, the environment. Amended 2026-08-07 — see below. |
 | **Issue review** | Opus 5 | Re-runs the verification, runs the mutations, reads every new test. Unchanged — this is where the catches happen. |
 | **Milestone review** | Fable 5 | Runs when every issue in a milestone is `resolved`. See below. |
 
@@ -105,6 +105,21 @@ Dispatch with `scripts/dispatch-issue.sh NNNN --round N [--model ornith|sonnet]`
 default**; `sonnet` prints a billed-round warning. Everything else about the loop is unchanged: a
 subagent absorbs the transcript, Opus reviews the diff and the real verification output, and the
 branch is squash-merged only after it passes.
+
+**"Ornith cannot do `Package.swift`" was a fact about issues, not about manifests.** #0124 and
+#0126 had it *designing* a manifest change from prose, and it failed repeatedly. #0129 pasted the
+literal ten-line manifest edit, and Ornith transcribed it byte-identically in one round with zero
+edits — verified by extracting the fenced block from the issue and diffing it against the commit. The
+diff was the new target and nothing else: no reformatting, inserted at exactly the specified point.
+
+So route structural work by **how specified it is**, not by which file it touches. A pasted edit goes
+to Ornith at $0.00. Reserve Sonnet for manifest or project work that genuinely requires a decision.
+
+**And check that Sonnet can run at all before relying on it.** As of 2026-08-07 OpenCode on this
+machine has **no `anthropic` provider configured** — `opencode models` lists lmstudio, nebius, openai
+and opencode. `--model sonnet` fails in one second with an opaque `UnknownError`, and that branch of
+`dispatch-issue.sh` had never been exercised, so this table documented a capability that did not
+exist. The script now probes before dispatching.
 
 ### Why the split, in numbers
 
