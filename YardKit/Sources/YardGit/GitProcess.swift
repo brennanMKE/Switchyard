@@ -210,3 +210,14 @@ private extension Array {
         return self[startIndex..<end]
     }
 }
+
+// MARK: - §6 exit class (#0146)
+
+/// Both cases are repository-state failures — guide §6 code 6. `exited` is
+/// git refusing an operation against this repository; `launchFailed` is a 6
+/// and not a 4 (request failed) because codes 1–5 and 7 are decided above
+/// the engine (#0141 Decision 3) — the engine's whole vocabulary is 6/8/9,
+/// and "the git operation could not be carried out" is repository semantics.
+extension GitProcess.Failure: ExitClassCarrying {
+    public var exitClass: ExitClass { .repositoryError }
+}

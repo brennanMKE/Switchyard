@@ -106,3 +106,11 @@ extension WorktreeWhere: Encodable {
         case worktreeName, path, gitDir, commonDir, mainWorktreePath
     }
 }
+
+// MARK: - §6 exit class (#0146)
+
+/// An unlistable worktree set is a repository-state failure — guide §6
+/// code 6.
+extension WorktreeWhere.Error: ExitClassCarrying {
+    public var exitClass: ExitClass { .repositoryError }
+}

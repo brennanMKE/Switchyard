@@ -121,3 +121,12 @@ public func worktreeAddSparse(
 
     return SparseWorktreeResult(add: add, directories: directories)
 }
+
+// MARK: - §6 exit class (#0146)
+
+/// Every refusal here is a repository-state failure — guide §6 code 6. A
+/// refused pattern is git rejecting the argument's repository semantics, not
+/// CLI usage (#0141 Decision 5's `invalidBranchName` reasoning).
+extension WorktreeSparseError: ExitClassCarrying {
+    public var exitClass: ExitClass { .repositoryError }
+}
