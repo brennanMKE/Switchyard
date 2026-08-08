@@ -117,6 +117,23 @@ A green count is not evidence unless it *moved*. Check 4 now warns when an issue
 `Test run with N tests` without saying what N must exceed — #0086 satisfied the criterion literally
 while its tests contributed nothing to the number.
 
+### Techniques that unlock a behaviour thought unverifiable
+
+Worth reaching for before recording something as untestable. All measured in this project:
+
+- **A shell script as `gpg.program`** emitting `[GNUPG:] SIG_CREATED ` on the status fd makes git
+  write a genuinely **signed** commit with **no key anywhere** (#0037). Before this, the signing
+  *success* path was recorded as unverifiable without a key, which the project forbids creating.
+- **`git hash-object -t commit -w --stdin --literally`** builds a commit carrying a structurally
+  valid but cryptographically garbage signature block, producing real `%G?` states (#0019, #0127).
+- **An executable shim as `git`** that passes some subcommands through and fails others — already on
+  `main` in `FailingGitFixture.swift` (#0140).
+- **`git update-index --index-info`** puts a genuinely unmerged entry, including a non-UTF-8 path,
+  into a real index when the filesystem refuses to create such a file (#0131).
+
+The pattern: the thing that seems to need a secret usually needs only the *protocol* the secret
+would have produced.
+
 ### Judgment — read the issue and answer honestly
 
 0. **For every mutation-table row: has the mutation been applied and the named test observed going
