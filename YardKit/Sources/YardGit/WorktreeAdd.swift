@@ -303,3 +303,13 @@ extension WorktreeAddError: Encodable {
         }
     }
 }
+// MARK: - §6 exit class (#0141)
+
+/// Every refusal here is a repository-state failure — guide §6 code 6.
+/// `invalidBranchName` is not usage (§6 code 1): usage is about the CLI
+/// invocation itself and is decided before the engine runs — git refusing
+/// the name is repository semantics.
+extension WorktreeAddError: ExitClassCarrying {
+    public var exitClass: ExitClass { .repositoryError }
+}
+
