@@ -127,7 +127,9 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-08-07 | #0021/#0023/#0128 | Fable planning pass, three-way split + measure (F) | 303,020 | $4.85 |
 | 2026-08-07 | #0025 | Fable planning pass, re-author to code level (F) | 225,068 | $3.60 |
 | 2026-08-07 | #0021 | Dispatch round 1 (accepted) | 68,364 | $0.55 |
-| | | **Total measured** | **7,022,115** | **$66.77** |
+| 2026-08-07 | #0023 | Dispatch round 1 (accepted) | 73,262 | $0.59 |
+| 2026-08-07 | #0026 | Fable planning pass + filed #0129 gap issue (F) | 176,309 | $2.82 |
+| | | **Total measured** | **7,271,686** | **$70.18** |
 
 ## What this total does and does not cover
 
