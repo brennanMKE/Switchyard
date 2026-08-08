@@ -118,3 +118,100 @@ struct ExitClassWireTests {
         }
     }
 }
+
+// MARK: - #0146: the process and worktree error enums
+
+extension ExitClassWireTests {
+
+    /// `GitProcess.Failure`: both cases are repository-state failures — §6
+    /// code 6. `launchFailed` is a 6 and not a 4: codes 1–5 and 7 are decided
+    /// above the engine (#0141 Decision 3), so 6 is the engine's only honest
+    /// class for "the git operation could not be carried out".
+    @Test func gitProcessFailureCasesAreRepositoryErrors() {
+        let failures: [GitProcess.Failure] = [
+            .exited(code: 128, stderr: "fatal: not a git repository", arguments: ["status"]),
+            .launchFailed("posix_spawn failed"),
+        ]
+        #expect(failures.count == 2)
+        for failure in failures {
+            #expect(failure.exitClass == .repositoryError)
+            #expect(ExitCode(rawValue: Int(failure.exitClass.rawValue)) == .repositoryError)
+        }
+    }
+
+    /// `WorktreeListError`: an unlistable worktree set is a repository-state
+    /// failure — §6 code 6.
+    @Test func worktreeListErrorCasesAreRepositoryErrors() {
+        let failures: [WorktreeListError] = [
+            .couldNotList(detail: "fatal: not a git repository"),
+        ]
+        #expect(failures.count == 1)
+        for failure in failures {
+            #expect(failure.exitClass == .repositoryError)
+            #expect(ExitCode(rawValue: Int(failure.exitClass.rawValue)) == .repositoryError)
+        }
+    }
+
+    /// `WorktreeSparseError`: all three refusals are repository-state
+    /// failures — §6 code 6. A refused pattern is git rejecting the
+    /// argument's repository semantics, not CLI usage — #0141 Decision 5's
+    /// `invalidBranchName` reasoning.
+    @Test func worktreeSparseErrorCasesAreRepositoryErrors() {
+        let failures: [WorktreeSparseError] = [
+            .patternRefused(detail: "fatal: specify directories rather than patterns"),
+            .sparseSetFailed(code: 128, stderr: "boom"),
+            .checkoutFailed(code: 128, stderr: "boom"),
+        ]
+        #expect(failures.count == 3)
+        for failure in failures {
+            #expect(failure.exitClass == .repositoryError)
+            #expect(ExitCode(rawValue: Int(failure.exitClass.rawValue)) == .repositoryError)
+        }
+    }
+
+    /// `WorktreeRepair.Error`: a worktree git could not repair is a
+    /// repository-state failure — §6 code 6.
+    @Test func worktreeRepairErrorCasesAreRepositoryErrors() {
+        let failures: [WorktreeRepair.Error] = [
+            .notRepaired(detail: "repair: .git file broken: /x", exitCode: 128),
+        ]
+        #expect(failures.count == 1)
+        for failure in failures {
+            #expect(failure.exitClass == .repositoryError)
+            #expect(ExitCode(rawValue: Int(failure.exitClass.rawValue)) == .repositoryError)
+        }
+    }
+
+    /// `WorktreeWhere.Error`: an unlistable worktree set is a
+    /// repository-state failure — §6 code 6.
+    @Test func worktreeWhereErrorCasesAreRepositoryErrors() {
+        let failures: [WorktreeWhere.Error] = [
+            .couldNotListWorktrees(detail: "fatal: not a git repository"),
+        ]
+        #expect(failures.count == 1)
+        for failure in failures {
+            #expect(failure.exitClass == .repositoryError)
+            #expect(ExitCode(rawValue: Int(failure.exitClass.rawValue)) == .repositoryError)
+        }
+    }
+
+    /// The five #0146 conformances are reachable through the protocol from an
+    /// untyped `any Error` — the shape a generic catch site uses. A runtime
+    /// cast, so removing `: ExitClassCarrying` while keeping an `exitClass`
+    /// property is red here, not silently absorbed.
+    @Test func processAndWorktreeConformancesAreReachableThroughAnyError() {
+        let failures: [any Error] = [
+            GitProcess.Failure.launchFailed("posix_spawn failed"),
+            WorktreeListError.couldNotList(detail: "boom"),
+            WorktreeSparseError.patternRefused(detail: "boom"),
+            WorktreeRepair.Error.notRepaired(detail: "boom", exitCode: 128),
+            WorktreeWhere.Error.couldNotListWorktrees(detail: "boom"),
+        ]
+        #expect(failures.count == 5)
+        for failure in failures {
+            #expect(
+                failure is any ExitClassCarrying,
+                "\(type(of: failure)) does not declare its §6 exit class")
+        }
+    }
+}

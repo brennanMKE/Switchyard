@@ -112,3 +112,11 @@ extension WorktreeRepair.Repaired: Encodable {
         case reason, path
     }
 }
+
+// MARK: - §6 exit class (#0146)
+
+/// A worktree git could not repair is a repository-state failure — guide §6
+/// code 6.
+extension WorktreeRepair.Error: ExitClassCarrying {
+    public var exitClass: ExitClass { .repositoryError }
+}

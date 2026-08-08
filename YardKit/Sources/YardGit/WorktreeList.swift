@@ -208,3 +208,11 @@ extension WorktreeEntry: Encodable {
         case isMainWorktree
     }
 }
+
+// MARK: - §6 exit class (#0146)
+
+/// An unlistable worktree set is a repository-state failure — guide §6
+/// code 6.
+extension WorktreeListError: ExitClassCarrying {
+    public var exitClass: ExitClass { .repositoryError }
+}
