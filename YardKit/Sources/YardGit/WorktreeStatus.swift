@@ -380,3 +380,43 @@ public func gitStatus(
 
     return try WorktreeStatusParser().parse(output.standardOutput)
 }
+
+// MARK: - Wire encoding (#0131)
+
+/// `WorktreeStatusEntry` is a `schemaVersion: 1` payload component: it encodes
+/// through `YardKit`'s `Envelope` via `EncodableResult` (`Encodable &
+/// Sendable`). Plain-stdlib `Encodable` — the engine still imports nothing.
+/// `Sendable` is added here too: public structs get no implicit `Sendable`
+/// across module boundaries, and `EncodableResult`'s bound needs it.
+extension WorktreeStatusEntry: Encodable, Sendable {
+    /// The stable wire keys. Identical to the member names on purpose; no raw
+    /// values — the case name IS the wire key, and `StatusConflictsWireTests`
+    /// pins the encoded bytes. `pathBytes` and `originalPathBytes` are
+    /// deliberately absent (#0129 Decision 6): a JSON string must be valid
+    /// UTF-8, so the wire carries the lossily-decoded `path` /
+    /// `originalPath`; raw bytes never ride the wire.
+    private enum CodingKeys: String, CodingKey {
+        case path, staged, worktree, originalPath, submodule
+    }
+}
+
+/// String-raw enum: encodes as its raw value, a single JSON string — the
+/// porcelain character itself (#0129 Decision 5).
+extension WorktreeStatusEntry.State: Encodable, Sendable {}
+
+extension WorktreeStatusEntry.SubmoduleState: Encodable {
+    /// Stable wire keys, identical to the member names; no raw values.
+    private enum CodingKeys: String, CodingKey {
+        case commitChanged, hasModifications, hasUntracked
+    }
+}
+
+/// `WorktreeStatus` is the whole-status payload: an object with one `entries`
+/// key, not a bare array — an object can gain sibling fields additively under
+/// `YardKit/Schemas/README.md`'s rule; a bare array cannot.
+extension WorktreeStatus: Encodable, Sendable {
+    /// Stable wire keys, identical to the member names; no raw values.
+    private enum CodingKeys: String, CodingKey {
+        case entries
+    }
+}

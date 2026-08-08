@@ -183,3 +183,30 @@ public func conflictedFiles(
     )
     return try ConflictParser().parse(output.standardOutput)
 }
+
+// MARK: - Wire encoding (#0131)
+
+/// `ConflictedFile` is a `schemaVersion: 1` payload: it encodes through
+/// `YardKit`'s `Envelope` via `EncodableResult` (`Encodable & Sendable`).
+/// Plain-stdlib `Encodable` — the engine still imports nothing.
+extension ConflictedFile: Encodable {
+    /// The stable wire keys. Identical to the member names on purpose; no raw
+    /// values — the case name IS the wire key, and `StatusConflictsWireTests`
+    /// pins the encoded bytes. `pathBytes` is deliberately absent (#0129
+    /// Decision 6): a JSON string must be valid UTF-8, so the wire carries the
+    /// lossily-decoded `path`; raw bytes never ride the wire.
+    private enum CodingKeys: String, CodingKey {
+        case path, kind, base, ours, theirs
+    }
+}
+
+/// String-raw enum: encodes as its raw value, a single JSON string — the
+/// porcelain XY pair itself, e.g. `"UU"` (#0129 Decision 5).
+extension ConflictedFile.Kind: Encodable {}
+
+extension ConflictedFile.StageEntry: Encodable {
+    /// Stable wire keys, identical to the member names; no raw values.
+    private enum CodingKeys: String, CodingKey {
+        case oid, mode
+    }
+}
