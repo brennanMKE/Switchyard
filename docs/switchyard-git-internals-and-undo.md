@@ -132,8 +132,17 @@ filter them.
 
 This is the advantage over GitUp, and it comes almost free once snapshots are real objects.
 GitUp's snapshots cannot outlive the process because they are in memory. Switchyard's are in the
-object database, so they survive a quit, a reboot, a different machine that clones the repo, and
-`switchyard` running with the app closed.
+object database, so they survive a quit, a reboot, and `switchyard` running with the app closed.
+
+> **Corrected 2026-08-07: they do NOT survive a clone.** This paragraph claimed "a different machine
+> that clones the repo". Measured on git 2.50.1: a plain `git clone` copies **nothing** under
+> `refs/switchyard/` — only `--mirror` does, because `clone` fetches `refs/heads/*` and `refs/tags/*`
+> and nothing else. `git push`, `push --all` and `push --tags` are likewise clean of journal refs.
+>
+> That is the **right** behaviour and should not be changed — an undo journal is local history, and
+> pushing another machine's checkpoints to a shared remote would be surprising at best. But the
+> durability claim has to be stated accurately, because a design that assumed a colleague could undo
+> your checkpoint after cloning would be built on something that does not happen.
 
 **Split the storage by what it is:**
 
