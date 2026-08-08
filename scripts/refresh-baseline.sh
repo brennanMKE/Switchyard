@@ -32,21 +32,33 @@ for ISSUE in "$@"; do
   FILE="issues/$ISSUE.md"
   [[ -f "$FILE" ]] || { print -u2 "refresh-baseline: $FILE does not exist"; RC=1; continue }
 
-  # The anchor preflight itself uses: the first number within 30 characters
-  # after `test-baseline.txt`. Rewrite that one occurrence and nothing else.
+  # Rewrite every number preflight check 4b would read, using its exact anchor.
   BEFORE=$(python3 - "$FILE" "$CURRENT" <<'PY'
 import re, sys
 path, current = sys.argv[1], sys.argv[2]
 t = open(path).read()
-m = re.search(r'(test-baseline\.txt[^0-9]{0,30})(\d+)', t)
-if not m:
+
+# EXACTLY preflight check 4b's anchor, and EVERY match — not just the first.
+# #0031 stated the baseline twice: `refresh-baseline` rewrote the first, and
+# preflight kept failing on the second, which reads as the script not working.
+# The check scans them all, so they must all be current or none of them may use
+# this phrasing.
+ANCHOR = re.compile(
+    r'(test-baseline\.txt[^0-9]{0,30}|main(?:[^0-9.]{0,20}(?:is|reported|suite is))[^0-9]{0,10})'
+    r'(\*{0,2})([0-9]{2,4})'
+)
+found = list(ANCHOR.finditer(t))
+if not found:
     print("NOANCHOR"); raise SystemExit
-old = m.group(2)
-if old == current:
+olds = [m.group(3) for m in found]
+if all(o == current for o in olds):
     print("CURRENT"); raise SystemExit
-t = t[:m.start(2)] + current + t[m.end(2):]
-open(path, "w").write(t)
-print(old)
+out, last = [], 0
+for m in found:
+    out.append(t[last:m.start(3)]); out.append(current); last = m.end(3)
+out.append(t[last:])
+open(path, "w").write("".join(out))
+print(",".join(sorted(set(o for o in olds if o != current))))
 PY
 )
   case "$BEFORE" in
