@@ -172,3 +172,85 @@ public struct SignatureVerification: Equatable, Sendable {
         return .unrecognized
     }
 }
+
+// MARK: - Wire encoding (#0136)
+
+/// `SignatureVerification` is a `schemaVersion: 1` payload: it encodes through
+/// `YardKit`'s `Envelope` via `EncodableResult` (`Encodable & Sendable`).
+/// Plain-stdlib `Encodable` — the engine still imports nothing.
+extension SignatureVerification: Encodable {
+    /// Stable wire keys, identical to the stored-member names; no raw values.
+    /// The enum is rename-safety; `SigningWireTests` pins the bytes. `signer`
+    /// and `key` are optional and omitted when nil (#0129 Decision 4).
+    private enum CodingKeys: String, CodingKey {
+        case state, format, signer, key
+    }
+}
+
+/// `State` is an associated-value enum (#0129 Decision 5): an object with a
+/// stable `code` string on every case — a uniform frame, not identical key
+/// sets (#0134 refinement 4) — plus `reason` on `cannotCheck` only. There is
+/// no `message` key: `State` has no `description`, and inventing prose here
+/// would put untested English on the wire. Hand-written because SE-0295
+/// synthesis for this enum COMPILES and encodes `{"noSignature":{}}` — an
+/// object keyed by case name, not this shape — so deleting this method is a
+/// silent wire change, not a compile error.
+extension SignatureVerification.State: Encodable {
+    /// Wire keys: `code` on every case; `reason` on `cannotCheck`.
+    private enum CodingKeys: String, CodingKey {
+        case code, reason
+    }
+
+    /// The stable wire vocabulary, one literal per case. Renaming a case is a
+    /// compile error at this switch while the literal — the wire string —
+    /// stays put; `SigningWireTests` pins all eight. This vocabulary is NOT
+    /// `CommitLog.SignatureStatus`'s (`noSignature` here vs `noSig` there,
+    /// no `unknown` case here) — the two types answer different questions
+    /// and their wires are pinned independently.
+    private var wireCode: String {
+        switch self {
+        case .noSignature: "noSignature"
+        case .good: "good"
+        case .goodUntrusted: "goodUntrusted"
+        case .bad: "bad"
+        case .expiredSignature: "expiredSignature"
+        case .expiredKey: "expiredKey"
+        case .revokedKey: "revokedKey"
+        case .cannotCheck: "cannotCheck"
+        }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(wireCode, forKey: .code)
+        if case let .cannotCheck(reason) = self {
+            try container.encode(reason, forKey: .reason)
+        }
+    }
+}
+
+/// `Format` has no raw type and no associated values, so its wire form is a
+/// **declared** case-name string (#0129 Decision 5, middle clause) — a single
+/// JSON string per case, written by an explicit `encode(to:)`. Synthesis
+/// would NOT produce this: SE-0295 synthesis for a payload-free enum encodes
+/// `{"ssh":{}}`, an object, not `"ssh"` (#0133).
+extension SignatureVerification.Format: Encodable {
+    /// The stable wire vocabulary, one literal per case. Never replace this
+    /// with `String(describing: self)`: it derives the same five strings
+    /// today, so no test can see the substitution — but it re-derives the
+    /// wire from case names and a rename would silently change it.
+    private var wireName: String {
+        switch self {
+        case .ssh: "ssh"
+        case .openpgp: "openpgp"
+        case .x509: "x509"
+        case .none: "none"
+        case .unrecognized: "unrecognized"
+        }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(wireName)
+    }
+}

@@ -155,3 +155,53 @@ public struct SigningConfig: Equatable, Sendable {
         )
     }
 }
+
+// MARK: - Wire encoding (#0136)
+
+/// `SigningConfig` is a `schemaVersion: 1` payload: it encodes through
+/// `YardKit`'s `Envelope` via `EncodableResult` (`Encodable & Sendable`).
+/// Plain-stdlib `Encodable` — the engine still imports nothing.
+extension SigningConfig: Encodable {
+    /// Stable wire keys, identical to the stored-member names; no raw values.
+    /// The computed `willSign` / `canVerifySSHSignatures` are not encoded
+    /// (#0129 Decision 7). All four stored members are optional and every nil
+    /// is omitted (#0129 Decision 4) — `commitSigningEnabled`'s absent state
+    /// IS the "nobody decided" answer, so `{}` is the truthful wire for a
+    /// fully unset configuration.
+    private enum CodingKeys: String, CodingKey {
+        case commitSigningEnabled, format, signingKey, allowedSignersFile
+    }
+}
+
+/// `Format` is an associated-value enum (#0129 Decision 5): an object with a
+/// stable `code` string on every case — a uniform frame (#0134 refinement 4) —
+/// plus `value` (the raw config string, #0134 refinement 2) on `unrecognized`
+/// only. Hand-written because SE-0295 synthesis COMPILES for this enum and
+/// encodes `{"ssh":{}}`, so deleting this method is a silent wire change, not
+/// a compile error.
+extension SigningConfig.Format: Encodable {
+    /// Wire keys: `code` on every case; `value` on `unrecognized`.
+    private enum CodingKeys: String, CodingKey {
+        case code, value
+    }
+
+    /// The stable wire vocabulary, one literal per case. Renaming a case is a
+    /// compile error at this switch while the literal stays put;
+    /// `SigningWireTests` pins all four.
+    private var wireCode: String {
+        switch self {
+        case .openpgp: "openpgp"
+        case .ssh: "ssh"
+        case .x509: "x509"
+        case .unrecognized: "unrecognized"
+        }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(wireCode, forKey: .code)
+        if case let .unrecognized(value) = self {
+            try container.encode(value, forKey: .value)
+        }
+    }
+}
