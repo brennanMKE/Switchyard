@@ -154,7 +154,21 @@ defective — the round will only rediscover it." 9
 # Re-dispatching an unchanged prompt produces an unchanged result. issues/Issues.md
 # has said so since #0070 round 2; nothing enforced it. #0098 round 2 only
 # converged because the issue was genuinely rewritten first.
-if (( ROUND > 1 && ! FORCE )); then
+#
+# EXCEPTION: an issue that MANDATES its own split. This guard was written for
+# re-dispatching a round that FAILED, where an unchanged prompt is known not to
+# work. A planned two-round issue is the opposite case — round 2 is the plan
+# working, and its prompt is *supposed* to be the same issue text. Demanding a
+# '## Review' section there makes the dispatcher invent a post-mortem for a
+# round that succeeded, which #0155's dispatcher had to do (and #0028's before
+# it) before round 2 would run at all. Detect the mandate and skip the guard;
+# every other round 2 still faces it.
+PLANNED_SPLIT=0
+if grep -qiE '^\*\*This is a two-round issue|Round 2 writes|two rounds by design|Round 2 is' "issues/$ISSUE.md"; then
+  PLANNED_SPLIT=1
+fi
+
+if (( ROUND > 1 && ! FORCE && ! PLANNED_SPLIT )); then
   PREV_LOG=".switchyard-runs/$ISSUE-round$((ROUND-1)).log"
   if [[ -f "$PREV_LOG" ]]; then
     [[ "issues/$ISSUE.md" -nt "$PREV_LOG" ]] || die \
