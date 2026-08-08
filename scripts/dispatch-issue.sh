@@ -65,6 +65,76 @@ die() { print -u2 "dispatch: $1"; exit "${2:-1}" }
 [[ "$ISSUE" =~ '^[0-9]{4}$' ]] || die "issue must be 4 digits, got '$ISSUE'"
 [[ -f "issues/$ISSUE.md" ]] || die "issues/$ISSUE.md does not exist"
 
+# The round reads the issue file **from this worktree**, and that copy goes stale:
+# planning updates, status changes and baseline refreshes land on main after the
+# branch is cut. #0030 round 1 died exit 9 because its branch was three commits
+# behind and still said `Status: open` with a 565 baseline — while preflight run
+# in the PRIMARY checkout passed, because that is not the copy that matters.
+#
+# Flag only a path main has moved that this branch has NOT touched itself. A
+# branch legitimately runs ahead — #0028 round 2 committed planning updates to
+# its own branch — so plain inequality against main would reject correct work.
+# Comparing both sides against the merge base distinguishes the two exactly.
+# Commit ranges rather than blob ids at `ref:path`. An earlier version compared
+# `git rev-parse main:$path` against the merge base and was SILENTLY INERT: every
+# rev-parse returned non-zero inside the script — while succeeding standalone in
+# the same directory — so every path compared "absent" to "absent" and the guard
+# passed on a branch that was provably three commits behind. It was caught only
+# by `zsh -x`, because a guard that never fires looks exactly like a guard with
+# nothing to report. `git log RANGE -- path` is unambiguous: it either lists
+# commits or it does not.
+# NO `2>/dev/null` ON THESE. Suppressing stderr is what made the first version
+# undetectably inert: in a directory where the sandbox blocked subprocesses, git
+# failed, the error went to /dev/null, the empty output read as "no commits to
+# report", and the guard passed on a branch that was three commits behind. A
+# guard that cannot distinguish "nothing is wrong" from "I could not look" is
+# not a guard. If git cannot answer here, that is itself a hard stop.
+# Die only on POSITIVE evidence of staleness; warn — loudly — when the check
+# cannot run. Being unable to look is an environment quirk (git is not always on
+# PATH for a nested script under some sandboxes, while the dispatch itself commits
+# with it happily), and turning that into a hard stop would halt the queue over a
+# question that was never answered. preflight's status and baseline checks read
+# the same worktree copy and remain the real safety net; this guard exists to
+# name the cause instead of leaving preflight to report a confusing content
+# defect. What it must never do is pass in SILENCE — that was the first version's
+# defect, and only `zsh -x` caught it.
+STALE=()
+STALE_UNKNOWN=""
+if ! git rev-parse --verify -q main >/dev/null 2>&1; then
+  STALE_UNKNOWN="cannot resolve 'main' from this worktree"
+else
+  for path in "issues/$ISSUE.md" docs/test-baseline.txt; do
+    if ! BEHIND=$(git log --format=%H HEAD..main -- "$path" 2>/dev/null); then
+      STALE_UNKNOWN="git log HEAD..main -- $path could not run"
+      break
+    fi
+    [[ -n "$BEHIND" ]] || continue
+    if ! AHEAD=$(git log --format=%H main..HEAD -- "$path" 2>/dev/null); then
+      STALE_UNKNOWN="git log main..HEAD -- $path could not run"
+      break
+    fi
+    [[ -z "$AHEAD" ]] && STALE+=("$path")
+  done
+fi
+if [[ -n "$STALE_UNKNOWN" ]]; then
+  print -u2 "dispatch: WARNING — could not verify this worktree is current against main
+           ($STALE_UNKNOWN). Proceeding; preflight still checks the status and
+           baseline in this worktree's copy of the issue. If preflight then
+           rejects the issue on content, suspect a stale branch first and try
+           'git merge --ff-only main'."
+fi
+if (( ${#STALE} )); then
+  (( ${#STALE} == 1 )) && THEM="it" || THEM="them"
+  die "this worktree is stale — main has newer ${STALE[*]} and this branch has not
+touched $THEM. The round would read the old copy: a stale status, a stale
+baseline, or a spec that has since been corrected.
+
+  git merge --ff-only main     # if this branch has no commits of its own
+  git merge main               # if it does (round 2+)
+
+Then re-run this dispatch." 9
+fi
+
 # Every mechanical check derived from a past failed round lives in
 # preflight-issue.sh, and each one is there because a round was already lost to
 # the thing it looks for. Refusing to dispatch a known-defective issue is the
