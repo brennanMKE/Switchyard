@@ -136,7 +136,49 @@ esac
 LOG_DIR=".switchyard-runs"
 mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/$ISSUE-round$ROUND.log"
+DONE="$LOG_DIR/$ISSUE-round$ROUND.done"
 BASE_SHA=$(git rev-parse HEAD)
+
+# A positive completion record, written on EVERY exit path.
+#
+# Without it, "is this round finished?" can only be inferred from outside —
+# by a process pattern (which a backgrounded wrapper keeps alive in its argv
+# forever) or by log staleness (a threshold, so a genuinely slow round can be
+# misjudged). Both are guesses, and they degrade exactly when something has
+# gone wrong, which is when the answer matters most. Two dispatchers were
+# stranded for over an hour each on 2026-08-07 by the first; the second is a
+# heuristic that replaced it.
+#
+# This file's existence IS the answer. It is removed at start, so a stale one
+# from a previous run of the same round cannot be mistaken for this one.
+rm -f "$DONE"
+
+STATUS=0
+ELAPSED=0
+SUITE_LINE=""
+REJECTS=0
+write_done() {
+  local code=$1
+  # `git status` can fail here (a mid-flight index lock); a completion record
+  # that throws is worse than one with an empty field.
+  local changed
+  changed=$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ') || changed=""
+  {
+    print -r -- "{"
+    print -r -- "  \"issue\": \"$ISSUE\","
+    print -r -- "  \"round\": $ROUND,"
+    print -r -- "  \"exit\": $code,"
+    print -r -- "  \"elapsedSeconds\": ${ELAPSED:-0},"
+    print -r -- "  \"timedOut\": $( (( ${ELAPSED:-0} >= TIMEOUT )) && print true || print false ),"
+    print -r -- "  \"sandboxRejects\": ${REJECTS:-0},"
+    print -r -- "  \"changedPaths\": ${changed:-0},"
+    print -r -- "  \"baseSha\": \"$BASE_SHA\","
+    print -r -- "  \"model\": \"${MODEL:-unknown}\","
+    print -r -- "  \"suiteLine\": \"${SUITE_LINE//\"/\\\"}\""
+    print -r -- "}"
+  } > "$DONE"
+}
+trap 'write_done $?' EXIT
 
 read -r -d '' PROMPT <<EOF || true
 Work issue $ISSUE. Read issues/$ISSUE.md. That is the only document you need.

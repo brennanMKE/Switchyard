@@ -58,6 +58,17 @@ PATTERN="dispatch-issue.sh ${ISSUE}"
 
 running_by_pattern() { pgrep -f "$PATTERN" >/dev/null 2>&1 }
 
+# The authoritative signal, when it exists. `dispatch-issue.sh` writes
+# `.switchyard-runs/NNNN-roundN.done` from an EXIT trap, so it appears on every
+# exit path including a timeout kill and the no-changes exit 7 — and it is
+# removed at start, so it can only describe the current round. Everything below
+# this is inference; this is a fact.
+done_file() {
+  local -a f
+  f=( .switchyard-runs/${ISSUE}-round*.done(N) )
+  (( ${#f} )) && print -r -- "${f[1]}"
+}
+
 # Newest mtime across this issue's round log and suite capture, as an age in
 # seconds. 999999 when neither exists yet.
 output_age() {
@@ -75,6 +86,9 @@ output_age() {
 
 # Returns 0 while the round still looks alive.
 running() {
+  # A completion record ends the question outright, whatever any process or
+  # mtime suggests.
+  [[ -n "$(done_file)" ]] && return 1
   running_by_pattern || return 1
   local age; age=$(output_age)
   if (( age == 999999 )); then
@@ -88,6 +102,12 @@ running() {
 }
 
 finished_note() {
+  local d; d=$(done_file)
+  if [[ -n "$d" ]]; then
+    print "await: #$ISSUE completion record — $d"
+    cat "$d"
+    return
+  fi
   if running_by_pattern; then
     print "await: #$ISSUE — this issue's own output has been silent for $(output_age)s."
     print "       The dispatch process pattern still matches, but that is a"
