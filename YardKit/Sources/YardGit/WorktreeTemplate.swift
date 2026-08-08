@@ -143,6 +143,15 @@ public struct WorktreeTemplate: Sendable, Equatable {
         public let entry: Entry
         public let outcome: Outcome
 
+        /// Public memberwise initializer (#0138). Declaring it replaces the
+        /// compiler-provided memberwise init, which is internal — the wire
+        /// tests construct reports from a non-`@testable` import, the same
+        /// way any public caller would (#0116 failure class).
+        public init(entry: Entry, outcome: Outcome) {
+            self.entry = entry
+            self.outcome = outcome
+        }
+
         public var succeeded: Bool { outcome == .applied }
     }
 
@@ -221,6 +230,86 @@ public struct WorktreeTemplate: Sendable, Equatable {
                     return Report(entry: entry, outcome: .failed(String(describing: error)))
                 }
             }
+        }
+    }
+}
+
+// MARK: - Wire encoding (#0138)
+
+/// `WorktreeTemplate.Report` is a `schemaVersion: 1` payload component:
+/// `apply(from:to:)` returns `[Report]`, which rides as a JSON array in
+/// `result`. Plain-stdlib `Encodable` — the engine still imports nothing.
+/// The reports-never-carry-file-contents guarantee (#0023) extends to the
+/// wire: the encoder writes only `entry` and `outcome`, neither of which can
+/// hold file bytes.
+extension WorktreeTemplate.Report: Encodable {
+    /// Stable wire keys, identical to the stored-member names; no raw values.
+    /// The computed `succeeded` is not encoded (#0129 Decision 7) —
+    /// derivable: `outcome.code == "applied"`.
+    private enum CodingKeys: String, CodingKey {
+        case entry, outcome
+    }
+}
+
+/// `Entry` is already `Codable` (it is decoded from the on-disk template
+/// document); this enum pins its keys explicitly. Measured: a `CodingKeys`
+/// enum added in a same-file extension IS picked up by the main-declaration
+/// `Codable` synthesis, so it guards BOTH persisted contracts — the wire and
+/// the `.switchyard/worktree-template.json` document format. The case names
+/// are the member names; a rename becomes a compile error here instead of a
+/// silent format change.
+extension WorktreeTemplate.Entry {
+    private enum CodingKeys: String, CodingKey {
+        case action, path, command
+    }
+}
+
+/// An outcome encodes as an object with a stable `code` string plus the
+/// case's associated values as named detail fields (#0129 Decision 5). The
+/// payload-free `.applied` is `{"code":"applied"}` — same frame, no detail
+/// and no `message`: `Outcome` declares no `description`, and `message` is
+/// owned by `description` where one exists (#0134 refinement 1).
+/// Hand-written because SE-0295 synthesis for this enum compiles but encodes
+/// `{"applied":{}}` — an object keyed by case name, not this shape.
+extension WorktreeTemplate.Report.Outcome: Encodable {
+    /// Wire keys: `code` on every case, then per-case detail. The unlabeled
+    /// payloads get declared wire names (#0134 refinement 2): the
+    /// `missingSource` / `destinationExists` string is the entry's
+    /// repo-relative path → `path`; the `failed` string is the filesystem
+    /// error's rendering → `detail`.
+    private enum CodingKeys: String, CodingKey {
+        case code
+        case path
+        case exitCode, stderr
+        case detail
+    }
+
+    /// The stable wire vocabulary, one literal per case. Renaming a case is
+    /// a compile error at this switch while the literal — the wire string —
+    /// stays put. Never replace this with `String(describing: self)`.
+    private var wireCode: String {
+        switch self {
+        case .applied: "applied"
+        case .missingSource: "missingSource"
+        case .destinationExists: "destinationExists"
+        case .commandFailed: "commandFailed"
+        case .failed: "failed"
+        }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(wireCode, forKey: .code)
+        switch self {
+        case .applied:
+            break
+        case let .missingSource(path), let .destinationExists(path):
+            try container.encode(path, forKey: .path)
+        case let .commandFailed(exitCode, stderr):
+            try container.encode(exitCode, forKey: .exitCode)
+            try container.encode(stderr, forKey: .stderr)
+        case let .failed(detail):
+            try container.encode(detail, forKey: .detail)
         }
     }
 }
