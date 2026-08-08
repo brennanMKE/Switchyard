@@ -99,6 +99,28 @@ If you write no report the harness still commits, using the tail of your log, wh
 whoever reads the branch later. Squash-merging to `main` records no ancestry, so **this commit is the
 only lasting account of how the round went.**
 
+## Rule 4c — Never `git stash`, `reset`, `checkout --`, or `clean` during a round.
+
+**Your working tree is the deliverable.** There is no measurement worth destroying it for.
+
+#0139 round 1 wrote its change, ran the suite, and got `Test run with 533 tests passed` — complete and
+correct. It then decided 533 "did not match" the 530 the issue quoted as the *pre-change* baseline, ran
+`git stash && swift test` to re-derive a number the issue had explicitly told it to trust, and left a
+red tree. Its recovery, `git stash pop`, was chained behind `&&` with a `/tmp` path; the sandbox
+rejected the whole line, so **the pop never ran**. A finished, green, correct round ended with its work
+invisible in `stash@{0}`.
+
+Two rules come out of that, and neither is checkable from the issue text:
+
+- **Do not run destructive git commands.** Not `stash`, not `reset`, not `checkout --`, not `clean`.
+  If you want a pre-change number, you needed it *before* you started; if you did not take it, say so
+  in your report and move on. A missing baseline is a footnote. A destroyed working tree is the round.
+- **Never chain a recovery step behind `&&` with anything touching a path outside the worktree.** The
+  sandbox rejects the entire command line, and what gets lost is the recovery, not the thing that
+  triggered the rejection. Run the recovery on its own line, first.
+
+The number you are chasing is almost never worth what you would spend to get it.
+
 ## Rule 5 — Stop instead of retrying. A clear stop is a good outcome.
 
 If you are blocked, or you notice you are about to repeat an action that already failed, **stop and
