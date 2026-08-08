@@ -127,6 +127,20 @@ case "$MODEL_CHOICE" in
   sonnet)
     MODEL="anthropic/claude-sonnet-5"
     OPENCODE_MODEL_ARG=(--model "$MODEL")
+    # The ornith branch above probes LM Studio before dispatching; this branch
+    # had no equivalent, and the asymmetry cost #0129 round 1. OpenCode has no
+    # anthropic provider configured on this machine and never has — `opencode
+    # models` lists lmstudio, nebius, openai and opencode only — so the round
+    # died in one second with an opaque `UnknownError` from OpenCode's own
+    # gateway rather than a 401. The sonnet path had never been exercised, so
+    # the workflow table documented a capability that did not exist.
+    opencode models 2>/dev/null | grep -qx "$MODEL" || die \
+"opencode has no '$MODEL'.
+
+'opencode auth list' shows the configured credentials; there is no anthropic
+provider here, so --model sonnet cannot run. Either configure one, or dispatch
+this round to a provider that is available. Do not retry unchanged: the failure
+is instant, total, and produces an UnknownError rather than an auth message." 6
     print "dispatch: NOTE -- this round is BILLED. Ornith is $0.00; Sonnet is not."
     ;;
   *)
