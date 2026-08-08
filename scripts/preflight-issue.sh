@@ -282,6 +282,32 @@ SLOTS=$(lms ps 2>/dev/null | awk '/ornith/ {
 }' | head -1)
 # Sanity-clamp: anything outside 1-8 means the parse drifted again.
 [[ "$SLOTS" == <-> ]] && (( SLOTS >= 1 && SLOTS <= 8 )) || SLOTS=4
+
+# --- Check 7b (HARD) — the LOADED model matches the intended concurrency ------
+# Occupancy is not the only thing that can be wrong. #0029 round 1 died with
+# `Model unloaded` after one tool call: the instance was still running the old
+# PARALLEL 1 configuration and LM Studio reloaded it *underneath the round* to
+# pick up the new setting. Preflight read SLOTS=1 and PASSED anyway, because
+# check 7 only asks whether a slot is free -- 0 < 1 is true.
+#
+# That 1 was the visible signal that the host had not applied the change, and it
+# cost a round. Changing PARALLEL requires a reload, so a mismatch here means
+# either the reload has not happened yet or something re-loaded with the old
+# flag (opencode-ornith.sh does exactly that if re-run).
+EXPECTED_SLOTS=${EXPECTED_SLOTS:-4}
+if (( SLOTS != EXPECTED_SLOTS )); then
+  fail "LM Studio is loaded PARALLEL $SLOTS, expected $EXPECTED_SLOTS" \
+"The loaded instance does not match the intended concurrency. Changing it needs
+a reload, and a reload lands on top of any in-flight round -- #0029 round 1 died
+with 'Model unloaded' exactly this way.
+
+  lms unload --all
+  lms load ornith-1.0-35b-mlx-oq8 --context-length 65536 --parallel $EXPECTED_SLOTS -y
+
+Then re-run preflight. See docs/lm-studio-concurrency.md."
+else
+  pass "LM Studio loaded PARALLEL $SLOTS as intended"
+fi
 if (( RUNNING >= SLOTS )); then
   warn "$RUNNING dispatches already running (LM Studio is PARALLEL $SLOTS)" \
 "Another would queue silently rather than run. Wait for a slot."
