@@ -41,9 +41,28 @@ FILE="issues/$ISSUE.md"
 # wrong in a past round, and discussing a bad path there is correct prose, not a
 # defect. Scanning them made this script reject #0085 for documenting its own
 # post-mortem.
+#
+# That cut is positional, so a `## Review` heading placed ABOVE the `## Change`
+# blocks silently truncates the spec to nothing and every content check below
+# fails on an issue that would otherwise pass. #0028 round 2 hit exactly this:
+# recording round 1's acceptance near the top turned checks 3 and 4 into FAILs
+# ("names no source file", "no baseline count") on an issue that had just passed
+# both. The failure is maximally confusing because it reports content defects,
+# not a placement problem. Any two-round-by-design issue reaches this, so it is
+# guarded rather than documented.
 SPEC=$(mktemp -t preflight-spec)
 trap 'rm -f "$SPEC"' EXIT
 awk '/^## (Review|Work log|Sequencing)/{exit} {print}' "$FILE" > "$SPEC"
+
+CUT_AT=$(grep -n '^## \(Review\|Work log\|Sequencing\)' "$FILE" | head -1 | cut -d: -f1 || true)
+LAST_CHANGE=$(grep -n '^## Change' "$FILE" | tail -1 | cut -d: -f1 || true)
+if [[ -n "$CUT_AT" && -n "$LAST_CHANGE" ]] && (( CUT_AT < LAST_CHANGE )); then
+  print -u2 "preflight: FAIL — a '## Review'/'## Work log'/'## Sequencing' heading at line $CUT_AT"
+  print -u2 "         sits ABOVE the last '## Change' block at line $LAST_CHANGE, so the spec is"
+  print -u2 "         truncated and every content check below would fail spuriously."
+  print -u2 "         Move those sections to the END of the issue and re-run."
+  exit 1
+fi
 
 # Issues for a code module must meet stricter checks than a docs or decision
 # issue, which legitimately names no source file and runs no test suite.

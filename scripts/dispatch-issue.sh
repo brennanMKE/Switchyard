@@ -109,6 +109,23 @@ fi
 BRANCH="issue/$ISSUE"
 CURRENT=$(git rev-parse --abbrev-ref HEAD)
 if [[ "$CURRENT" != "$BRANCH" ]]; then
+  # The overwhelmingly common cause is invoking this script by the WRONG PATH.
+  # `REPO_ROOT="${0:A:h:h}"` then `cd "$REPO_ROOT"` means the script operates on
+  # whichever checkout it was launched from — so `./scripts/dispatch-issue.sh`
+  # run from the primary checkout dispatches against `main` and dies here, with
+  # a message about branches that says nothing about the actual mistake.
+  # The issue's own worktree usually exists and is already on the right branch.
+  WT="${REPO_ROOT:h}/switchyard-$ISSUE"
+  if [[ "$CURRENT" == "main" && -d "$WT" ]]; then
+    die "invoked from the primary checkout, which is on 'main'.
+This script operates on the checkout it was launched from, so it would dispatch
+against main. #$ISSUE already has a worktree — invoke it by that path instead:
+
+  $WT/scripts/dispatch-issue.sh $ISSUE --round N
+
+The primary checkout stays on main permanently; never switch it to an issue
+branch and never run a dispatch in it." 8
+  fi
   die "on branch '$CURRENT', expected '$BRANCH'.
 Start the issue with:  git switch -c $BRANCH
 Or switch back with:   git switch $BRANCH" 8
