@@ -271,3 +271,11 @@ extension BlameLine: Encodable {
         case summary, isBoundary, content
     }
 }
+
+// MARK: - §6 exit class (#0147)
+
+/// A malformed or truncated blame record is a repository-state failure —
+/// guide §6 code 6.
+extension BlameParser.Failure: ExitClassCarrying {
+    public var exitClass: ExitClass { .repositoryError }
+}

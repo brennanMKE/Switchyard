@@ -215,3 +215,104 @@ extension ExitClassWireTests {
         }
     }
 }
+
+// MARK: - #0147: the parser and template failure enums
+
+extension ExitClassWireTests {
+
+    /// `WorktreeTemplate.Failure`: all three cases are repository-state
+    /// failures — §6 code 6: the template file in the repository is
+    /// unreadable, versioned wrong, or carries an invalid entry.
+    @Test func worktreeTemplateFailureCasesAreRepositoryErrors() {
+        let failures: [WorktreeTemplate.Failure] = [
+            .unreadable(path: "/x/.switchyard/worktree-template.json", detail: "not JSON"),
+            .unsupportedVersion(99),
+            .invalidEntry(index: 0, reason: "unknown action"),
+        ]
+        #expect(failures.count == 3)
+        for failure in failures {
+            #expect(failure.exitClass == .repositoryError)
+            #expect(ExitCode(rawValue: Int(failure.exitClass.rawValue)) == .repositoryError)
+        }
+    }
+
+    /// `ConflictParser.Failure`: both cases are repository-state failures —
+    /// §6 code 6, and not an 8: `blockedOnConflicts` is a mutating operation
+    /// refusing to proceed over an unmerged index (M2), and *reading*
+    /// conflicts is how an agent gets unblocked.
+    @Test func conflictParserFailureCasesAreRepositoryErrors() {
+        let failures: [ConflictParser.Failure] = [
+            .truncatedRecord("u UU N..."),
+            .unrecognizedKind(xy: "XY", path: "a.txt"),
+        ]
+        #expect(failures.count == 2)
+        for failure in failures {
+            #expect(failure.exitClass == .repositoryError)
+            #expect(ExitCode(rawValue: Int(failure.exitClass.rawValue)) == .repositoryError)
+        }
+    }
+
+    /// `HunkParser.Failure`: all three refusals are repository-state
+    /// failures — §6 code 6.
+    @Test func hunkParserFailureCasesAreRepositoryErrors() {
+        let failures: [HunkParser.Failure] = [
+            .quotedPath("\"a\\tb.txt\""),
+            .malformedFileHeader("diff --git"),
+            .malformedHunkHeader("@@ bad @@"),
+        ]
+        #expect(failures.count == 3)
+        for failure in failures {
+            #expect(failure.exitClass == .repositoryError)
+            #expect(ExitCode(rawValue: Int(failure.exitClass.rawValue)) == .repositoryError)
+        }
+    }
+
+    /// `BlameParser.Failure`: all four cases are repository-state failures —
+    /// §6 code 6.
+    @Test func blameParserFailureCasesAreRepositoryErrors() {
+        let failures: [BlameParser.Failure] = [
+            .quotedPath("\"a\\tb.txt\""),
+            .malformedEntryHeader("not-hex 1 1 1"),
+            .missingCommitHeader(oid: String(repeating: "a", count: 40)),
+            .truncatedEntry(oid: String(repeating: "a", count: 40)),
+        ]
+        #expect(failures.count == 4)
+        for failure in failures {
+            #expect(failure.exitClass == .repositoryError)
+            #expect(ExitCode(rawValue: Int(failure.exitClass.rawValue)) == .repositoryError)
+        }
+    }
+
+    /// `RevListParser.Failure`: a malformed rev-list line is a
+    /// repository-state failure — §6 code 6.
+    @Test func revListParserFailureCasesAreRepositoryErrors() {
+        let failures: [RevListParser.Failure] = [
+            .malformedLine("not-an-oid"),
+        ]
+        #expect(failures.count == 1)
+        for failure in failures {
+            #expect(failure.exitClass == .repositoryError)
+            #expect(ExitCode(rawValue: Int(failure.exitClass.rawValue)) == .repositoryError)
+        }
+    }
+
+    /// The five #0147 conformances are reachable through the protocol from an
+    /// untyped `any Error` — the shape a generic catch site uses. A runtime
+    /// cast, so removing `: ExitClassCarrying` while keeping an `exitClass`
+    /// property is red here, not silently absorbed.
+    @Test func parserAndTemplateConformancesAreReachableThroughAnyError() {
+        let failures: [any Error] = [
+            WorktreeTemplate.Failure.unsupportedVersion(99),
+            ConflictParser.Failure.truncatedRecord("u"),
+            HunkParser.Failure.malformedFileHeader("diff --git"),
+            BlameParser.Failure.truncatedEntry(oid: String(repeating: "a", count: 40)),
+            RevListParser.Failure.malformedLine("not-an-oid"),
+        ]
+        #expect(failures.count == 5)
+        for failure in failures {
+            #expect(
+                failure is any ExitClassCarrying,
+                "\(type(of: failure)) does not declare its §6 exit class")
+        }
+    }
+}

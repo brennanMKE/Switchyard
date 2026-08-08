@@ -210,3 +210,11 @@ extension GraphRow: Encodable {
         case oid, parents, lane, parentLanes
     }
 }
+
+// MARK: - §6 exit class (#0147)
+
+/// A malformed rev-list line is a repository-state failure — guide §6
+/// code 6.
+extension RevListParser.Failure: ExitClassCarrying {
+    public var exitClass: ExitClass { .repositoryError }
+}

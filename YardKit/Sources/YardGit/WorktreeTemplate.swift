@@ -313,3 +313,12 @@ extension WorktreeTemplate.Report.Outcome: Encodable {
         }
     }
 }
+
+// MARK: - §6 exit class (#0147)
+
+/// Every case is a repository-state failure — guide §6 code 6: the
+/// template file in the repository is unreadable, versioned wrong, or
+/// carries an invalid entry.
+extension WorktreeTemplate.Failure: ExitClassCarrying {
+    public var exitClass: ExitClass { .repositoryError }
+}

@@ -388,3 +388,11 @@ extension FileDiff: Encodable {
         case path, oldMode, newMode, isBinary, headerText, hunks
     }
 }
+
+// MARK: - §6 exit class (#0147)
+
+/// A path or header this parser refuses to mis-parse is a repository-state
+/// failure — guide §6 code 6.
+extension HunkParser.Failure: ExitClassCarrying {
+    public var exitClass: ExitClass { .repositoryError }
+}

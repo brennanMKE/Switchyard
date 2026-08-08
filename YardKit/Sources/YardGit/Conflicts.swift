@@ -210,3 +210,13 @@ extension ConflictedFile.StageEntry: Encodable {
         case oid, mode
     }
 }
+
+// MARK: - §6 exit class (#0147)
+
+/// A malformed porcelain record is a repository-state failure — guide §6
+/// code 6. Not an 8: `blockedOnConflicts` is a *mutating* operation refusing
+/// to proceed over an unmerged index (M2), and reading conflicts is how an
+/// agent gets unblocked, so it must not itself report 8.
+extension ConflictParser.Failure: ExitClassCarrying {
+    public var exitClass: ExitClass { .repositoryError }
+}

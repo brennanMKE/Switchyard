@@ -159,7 +159,9 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-08-07 | #0139 | Fable planning pass, GCResult struct (F) | 148,576 | $2.38 |
 | 2026-08-07 | #0139 | Dispatch round 1 (stashed its own work; recovered) | 56,260 | $0.45 |
 | 2026-08-07 | #0146 | Fable planning pass + filed #0147 (F) | 154,778 | $2.48 |
-| | | **Total measured** | **10,420,368** | **$112.31** |
+| 2026-08-07 | #0146 | Dispatch round 1 (accepted) | 55,482 | $0.44 |
+| 2026-08-07 | #0147 | Dispatch round 1 (accepted) | 51,957 | $0.42 |
+| | | **Total measured** | **10,527,807** | **$113.17** |
 
 ## What this total does and does not cover
 
