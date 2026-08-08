@@ -439,13 +439,34 @@ CHANGED_COUNT=$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')
   else
     SUMMARY="#$ISSUE round $ROUND"
     if [[ -f "$REPORT" ]]; then
-      # Truncate on a word boundary. `cut -c1-64` cut mid-word -- #0129 round 2
-      # produced "...with a private Codin".
+      # Normalise the subject here rather than asking the model to remember.
+      #
+      # AGENTS.md Rule 4b asks for an imperative line under 60 characters with
+      # no trailing period. Three consecutive rounds ignored some part of that,
+      # the third even with a worked example directly above the rule. It is
+      # mechanically checkable, so the harness does it: prose lost three times.
       FIRST=$(grep -m1 -v '^[[:space:]]*$' "$REPORT" | sed 's/^#\{1,6\} *//')
-      if (( ${#FIRST} > 64 )); then
-        FIRST="${FIRST[1,64]}"
-        FIRST="${FIRST% *}…"
+      SUBJ_FIXED=0
+      # A trailing period reads wrong in a subject line.
+      if [[ "$FIRST" == *. ]]; then FIRST="${FIRST%.}"; SUBJ_FIXED=1; fi
+      if (( ${#FIRST} > 60 )); then
+        # Prefer cutting at a comma: "Add X and tests for A, B, C" becomes
+        # "Add X and tests for A", which is a real subject rather than a
+        # sentence with its tail sawn off.
+        if [[ "$FIRST" == *,* ]]; then
+          HEAD_PART="${FIRST%%,*}"
+          (( ${#HEAD_PART} >= 20 && ${#HEAD_PART} <= 60 )) && FIRST="$HEAD_PART"
+        fi
       fi
+      if (( ${#FIRST} > 60 )); then
+        FIRST="${FIRST[1,60]}"
+        FIRST="${FIRST% *}…"
+        SUBJ_FIXED=1
+      fi
+      (( SUBJ_FIXED )) && print -u2 \
+"dispatch: NOTE -- the report's first line was not a usable commit subject and
+dispatch: was normalised. AGENTS.md Rule 4b: imperative, under 60 characters,
+dispatch: no trailing period. The body is where detail belongs."
       [[ -n "$FIRST" ]] && SUMMARY="#$ISSUE round $ROUND: $FIRST"
     fi
     {
