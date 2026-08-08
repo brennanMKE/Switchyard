@@ -189,3 +189,22 @@ public enum WorktreeListError: Swift.Error, CustomStringConvertible, Sendable {
         }
     }
 }
+
+// MARK: - Wire encoding (#0130)
+
+/// `WorktreeEntry` is a `schemaVersion: 1` payload: it encodes through
+/// `YardKit`'s `Envelope` via `EncodableResult` (`Encodable & Sendable`).
+/// Plain-stdlib `Encodable` — the engine still imports nothing.
+extension WorktreeEntry: Encodable {
+    /// The stable wire keys. Identical to the member names on purpose: the
+    /// enum exists so a member rename becomes a compile error here instead of
+    /// a silent wire change. No case carries a raw value — the case name IS
+    /// the wire key, and `WorktreeIdentityWireTests` pins the encoded bytes.
+    private enum CodingKeys: String, CodingKey {
+        case path, head, branch
+        case locked, lockReason
+        case bare, detached
+        case prunable, prunableReason
+        case isMainWorktree
+    }
+}
