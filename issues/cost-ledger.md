@@ -202,7 +202,9 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-08-08 | #0172 | Dispatch r1 + review (O) | 60,037 | $0.96 |
 | 2026-08-08 | #0173 | Ornith r1 local, notional | 276,430 | $0.00 |
 | 2026-08-08 | #0173 | Dispatch r1 + review (O) | 59,906 | $0.96 |
-| | | **Total measured** | **19,920,967** | **$182.44** |
+| 2026-08-08 | #0031 | Ornith r1 local, notional | 348,981 | $0.00 |
+| 2026-08-08 | #0031 | Dispatch r1 + review (O) | 69,312 | $1.11 |
+| | | **Total measured** | **20,339,260** | **$183.55** |
 
 ## What this total does and does not cover
 
