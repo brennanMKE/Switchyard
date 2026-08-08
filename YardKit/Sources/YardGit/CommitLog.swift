@@ -87,6 +87,28 @@ public struct CommitLogEntry: Equatable {
     public let message: String     // the full commit body, verbatim (first non-empty line = subject)
     /// Parsed trailer lines from the commit message, in order.
     public let trailers: [Trailer]
+
+    /// Public memberwise initializer (#0133). Declaring it replaces the
+    /// compiler-provided memberwise init, which is internal — the wire tests
+    /// construct entries from a non-`@testable` import, the same way any
+    /// public caller would (#0116 failure class).
+    public init(
+        oid: String,
+        parents: [String],
+        author: String,
+        refs: String,
+        signatureStatus: SignatureStatus,
+        message: String,
+        trailers: [Trailer]
+    ) {
+        self.oid = oid
+        self.parents = parents
+        self.author = author
+        self.refs = refs
+        self.signatureStatus = signatureStatus
+        self.message = message
+        self.trailers = trailers
+    }
 }
 
 /// Configuration that changes what `CommitLog.run` returns. Built as a single
@@ -335,6 +357,64 @@ extension CommitLog {
     /// Parse output without range filtering. Exposed for testability; production code uses `run(path:rangeArguments:)`.
     static func parseClean(output: String) -> [CommitLogEntry] {
         return CommitLog.parse(output: output, options: [])
+    }
+}
+
+// MARK: - Wire encoding (#0133)
+
+/// `SignatureStatus` has no raw type (#0127) and no associated values, so its
+/// wire form is a **declared** case-name string (#0129 Decision 5, middle
+/// clause) — a single JSON string per case, written by an explicit
+/// `encode(to:)`. Synthesis would NOT produce this: SE-0295 synthesis for a
+/// payload-free enum encodes `{"good":{}}`, an object, not `"good"`.
+extension SignatureStatus: Encodable {
+    /// The stable wire vocabulary, one literal per case. Renaming a case is a
+    /// compile error at this switch while the literal — the wire string —
+    /// stays put; `LogGraphWireTests` pins all nine. Never replace this with
+    /// `String(describing: self)`: that derives the string from the case name
+    /// and a rename would silently change the wire.
+    private var wireName: String {
+        switch self {
+        case .noSig: "noSig"
+        case .good: "good"
+        case .goodUntrusted: "goodUntrusted"
+        case .bad: "bad"
+        case .expiredSignature: "expiredSignature"
+        case .expiredKey: "expiredKey"
+        case .revokedKey: "revokedKey"
+        case .cannotCheck: "cannotCheck"
+        case .unknown: "unknown"
+        }
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(wireName)
+    }
+}
+
+/// A trailer rides the wire as `{"key":…,"value":…}`. The computed
+/// `description` is not encoded (#0129 Decision 7).
+extension Trailer: Encodable {
+    /// Stable wire keys, identical to the member names; no raw values.
+    private enum CodingKeys: String, CodingKey {
+        case key, value
+    }
+}
+
+/// `CommitLogEntry` is a `schemaVersion: 1` payload: it encodes through
+/// `YardKit`'s `Envelope` via `EncodableResult` (`Encodable & Sendable`).
+/// Plain-stdlib `Encodable` — the engine still imports nothing. `Sendable` is
+/// added here too: public structs get no implicit `Sendable` across module
+/// boundaries, and `EncodableResult`'s bound needs it.
+extension CommitLogEntry: Encodable, Sendable {
+    /// Stable wire keys, identical to the stored-member names; no raw values.
+    /// The computed `subject` / `shortOid` / `hasProvenance` are not encoded
+    /// (#0129 Decision 7) — all three are derivable from `message`, `oid`,
+    /// and `trailers`. The enum is rename-safety; `LogGraphWireTests` pins
+    /// the bytes.
+    private enum CodingKeys: String, CodingKey {
+        case oid, parents, author, refs, signatureStatus, message, trailers
     }
 }
 

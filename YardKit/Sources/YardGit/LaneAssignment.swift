@@ -196,3 +196,17 @@ public func graphRows(
     let output = try git.run(arguments, workingDirectory: path)
     return LaneAssigner.assign(try RevListParser().parse(output.text))
 }
+
+// MARK: - Wire encoding (#0133)
+
+/// `GraphRow` is a `schemaVersion: 1` payload component: `graphRows(at:)`
+/// returns `[GraphRow]`, which rides as a JSON array in `result`. Plain-stdlib
+/// `Encodable` — the engine still imports nothing. (`GraphNode` is parser
+/// input, not a payload, and gets no conformance.)
+extension GraphRow: Encodable {
+    /// Stable wire keys, identical to the member names; no raw values. The
+    /// enum is rename-safety; `LogGraphWireTests` pins the bytes.
+    private enum CodingKeys: String, CodingKey {
+        case oid, parents, lane, parentLanes
+    }
+}
