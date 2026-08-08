@@ -184,102 +184,135 @@ public enum JournalRestore {
         git: GitProcess = GitProcess()
     ) throws -> Report {
         try JournalLock(context: context).withLock(timeout: lockTimeout) {
-            let base = context.topLevel ?? context.gitDir
-
-            // 1. The journal, decoded once: the target, its snapshot, and
-            // the scoped chain nodes.
-            let entries = try JournalAnchor.list(in: context, git: git)
-            guard let entry = entries.first(where: { $0.id == id }) else {
-                throw Error.entryNotFound(id)
-            }
-            var nodes: [JournalWorktreeScope.Node] = []
-            var targetMetadata: JournalEntryMetadata?
-            for listed in entries {
-                let decoded = try JournalEntryMetadata(
-                    serialized: JournalAnchor.metadata(for: listed.id, in: context, git: git))
-                nodes.append(.init(node: decoded.chainNode, worktree: decoded.worktree.name))
-                if listed.id == id { targetMetadata = decoded }
-            }
-            guard let metadata = targetMetadata else {
-                throw Error.entryNotFound(id)
-            }
-            let recorded = try refsSnapshot(of: id, at: base, git: git)
-
-            // 2. The worktree gate — before everything else (#0044).
-            guard metadata.worktree.name == context.worktreeName else {
-                // `worktrees/<name>/HEAD` resolves while the recorded
-                // worktree's administrative entry survives — including
-                // prunable, directory-gone worktrees, whose claim git's own
-                // porcelain still honors — and stops resolving once
-                // `git worktree prune` releases it (measured).
-                let recordedStillExists = try context.resolveRef(
-                    "HEAD", inWorktree: metadata.worktree.name, git: git) != nil
-                throw Error.differentWorktree(
-                    recordedName: metadata.worktree.name,
-                    recordedPath: metadata.worktree.path,
-                    calling: context.worktreeName,
-                    recordedStillExists: recordedStillExists)
-            }
-
-            // 3. One capture of the present.
-            let current = try RefSnapshot.capture(in: context, git: git)
-
-            // 4. The cross-tool guard, against the cursor's snapshot. A
-            // cursor naming a pruned entry (possible only once its chain's
-            // protection expired, #0044 decision 5) has no snapshot left to
-            // verify and degrades to the present case.
-            if !bypassGuard,
-               let cursor = try JournalWorktreeScope.state(
-                   of: nodes, in: context.worktreeName).cursor,
-               entries.contains(where: { $0.id == cursor }) {
-                let believed = try refsSnapshot(of: cursor, at: base, git: git)
-                let divergences = CrossToolGuard.diff(recorded: believed, current: current)
-                guard divergences.isEmpty else {
-                    throw CrossToolGuard.Error.repositoryChanged(divergences: divergences)
-                }
-            }
-
-            // 5. The sibling-disturbance check, on the snapshot being
-            // applied, regardless of bypassGuard.
-            let disturbances = WorktreeDisturbance.disturbances(
-                restoring: recorded,
-                current: current,
-                worktrees: try worktreeList(path: base, git: git),
-                callerPath: context.topLevel)
-            guard disturbances.isEmpty else {
-                throw WorktreeDisturbance.Error.wouldDisturb(disturbances: disturbances)
-            }
-
-            // 6. Every recorded oid must still exist, or the refusal comes
-            // after HEAD has already moved (measured — see the type comment).
-            let missing = try missingObjects(in: recorded, at: base, git: git)
-            guard missing.isEmpty else {
-                throw Error.unrestorableObjects(missing: missing)
-            }
-
-            // 7. The pre-restore entry, from the same capture the checks ran
-            // against. `writeEntry`, not `checkpoint`: a nested `withLock`
-            // self-deadlocks (measured), and a second capture could describe
-            // a state the guard never saw.
-            let checkpoint = try JournalCheckpoint.writeEntry(
-                capturing: current,
+            try restoreAssumingLock(
+                id,
                 operation: operation,
                 command: command,
                 agent: agent,
                 traversal: traversal,
+                bypassGuard: bypassGuard,
                 in: context,
                 git: git)
-
-            // 8. Apply.
-            try recorded.restore(in: context, git: git)
-
-            // 9. Report honestly.
-            return Report(
-                entry: entry,
-                restored: [.refs, .head],
-                notRestored: omissions(of: metadata.captured),
-                checkpoint: checkpoint)
         }
+    }
+
+    /// The restore flow's steps 1–9, assuming the caller already holds the
+    /// journal lock (#0032).
+    ///
+    /// The seam exists for undo/redo (#0169), which resolve a step's target
+    /// from the chain and apply it under one lock acquisition. Traversal
+    /// cannot call `restore` for either half of that: a nested `withLock` on
+    /// the journal's lock file self-deadlocks until its timeout — `flock(2)`
+    /// denies a second exclusive lock through a second descriptor even in
+    /// the same process (measured on macOS: `EWOULDBLOCK`, #0168 Given 1) —
+    /// and resolving a target outside the lock would let another process
+    /// move the chain between the resolution and the restore it was
+    /// resolved for.
+    static func restoreAssumingLock(
+        _ id: JournalEntryID,
+        operation: String = "restore",
+        command: String? = nil,
+        agent: JournalEntryMetadata.Agent? = nil,
+        traversal: JournalChain.Traversal? = nil,
+        bypassGuard: Bool = false,
+        in context: WorktreeContext,
+        git: GitProcess = GitProcess()
+    ) throws -> Report {
+        let base = context.topLevel ?? context.gitDir
+
+        // 1. The journal, decoded once: the target, its snapshot, and
+        // the scoped chain nodes.
+        let entries = try JournalAnchor.list(in: context, git: git)
+        guard let entry = entries.first(where: { $0.id == id }) else {
+            throw Error.entryNotFound(id)
+        }
+        var nodes: [JournalWorktreeScope.Node] = []
+        var targetMetadata: JournalEntryMetadata?
+        for listed in entries {
+            let decoded = try JournalEntryMetadata(
+                serialized: JournalAnchor.metadata(for: listed.id, in: context, git: git))
+            nodes.append(.init(node: decoded.chainNode, worktree: decoded.worktree.name))
+            if listed.id == id { targetMetadata = decoded }
+        }
+        guard let metadata = targetMetadata else {
+            throw Error.entryNotFound(id)
+        }
+        let recorded = try refsSnapshot(of: id, at: base, git: git)
+
+        // 2. The worktree gate — before everything else (#0044).
+        guard metadata.worktree.name == context.worktreeName else {
+            // `worktrees/<name>/HEAD` resolves while the recorded
+            // worktree's administrative entry survives — including
+            // prunable, directory-gone worktrees, whose claim git's own
+            // porcelain still honors — and stops resolving once
+            // `git worktree prune` releases it (measured).
+            let recordedStillExists = try context.resolveRef(
+                "HEAD", inWorktree: metadata.worktree.name, git: git) != nil
+            throw Error.differentWorktree(
+                recordedName: metadata.worktree.name,
+                recordedPath: metadata.worktree.path,
+                calling: context.worktreeName,
+                recordedStillExists: recordedStillExists)
+        }
+
+        // 3. One capture of the present.
+        let current = try RefSnapshot.capture(in: context, git: git)
+
+        // 4. The cross-tool guard, against the cursor's snapshot. A
+        // cursor naming a pruned entry (possible only once its chain's
+        // protection expired, #0044 decision 5) has no snapshot left to
+        // verify and degrades to the present case.
+        if !bypassGuard,
+           let cursor = try JournalWorktreeScope.state(
+               of: nodes, in: context.worktreeName).cursor,
+           entries.contains(where: { $0.id == cursor }) {
+            let believed = try refsSnapshot(of: cursor, at: base, git: git)
+            let divergences = CrossToolGuard.diff(recorded: believed, current: current)
+            guard divergences.isEmpty else {
+                throw CrossToolGuard.Error.repositoryChanged(divergences: divergences)
+            }
+        }
+
+        // 5. The sibling-disturbance check, on the snapshot being
+        // applied, regardless of bypassGuard.
+        let disturbances = WorktreeDisturbance.disturbances(
+            restoring: recorded,
+            current: current,
+            worktrees: try worktreeList(path: base, git: git),
+            callerPath: context.topLevel)
+        guard disturbances.isEmpty else {
+            throw WorktreeDisturbance.Error.wouldDisturb(disturbances: disturbances)
+        }
+
+        // 6. Every recorded oid must still exist, or the refusal comes
+        // after HEAD has already moved (measured — see the type comment).
+        let missing = try missingObjects(in: recorded, at: base, git: git)
+        guard missing.isEmpty else {
+            throw Error.unrestorableObjects(missing: missing)
+        }
+
+        // 7. The pre-restore entry, from the same capture the checks ran
+        // against. `writeEntry`, not `checkpoint`: a nested `withLock`
+        // self-deadlocks (measured), and a second capture could describe
+        // a state the guard never saw.
+        let checkpoint = try JournalCheckpoint.writeEntry(
+            capturing: current,
+            operation: operation,
+            command: command,
+            agent: agent,
+            traversal: traversal,
+            in: context,
+            git: git)
+
+        // 8. Apply.
+        try recorded.restore(in: context, git: git)
+
+        // 9. Report honestly.
+        return Report(
+            entry: entry,
+            restored: [.refs, .head],
+            notRestored: omissions(of: metadata.captured),
+            checkpoint: checkpoint)
     }
 
     // MARK: - Pieces
