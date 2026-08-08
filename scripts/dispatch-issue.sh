@@ -475,12 +475,26 @@ dispatch: no trailing period. The body is where detail belongs."
       if [[ -f "$REPORT" ]]; then
         cat "$REPORT"
       else
+        # #0137 round 1 wrote its report to 0136-round1.report.md -- the wrong
+        # issue number -- so the harness silently fell back to the log tail and
+        # the commit got a generic subject. Say when that has probably happened.
+        STRAYS=( $LOG_DIR/*-round$ROUND.report.md(N) )
+        if (( ${#STRAYS} )); then
+          print -u2 "dispatch: NOTE -- $REPORT is missing, but these exist:"
+          print -u2 "  ${STRAYS[@]}"
+          print -u2 "dispatch: a mis-numbered report is the likely cause; the commit"
+          print -u2 "dispatch: subject fell back to the generic form."
+        fi
         print -r -- "The round wrote no $REPORT. Last 40 lines of its log:"
         print -r -- ""
         tail -40 "$LOG" | sed 's/^/    /'
       fi
       print -r -- ""
       print -r -- "Round commit made by scripts/dispatch-issue.sh, not by the model."
+      print -r -- "The body above is the model's own account of the round and is"
+      print -r -- "NOT verified. #0137 round 1's report claimed files it never"
+      print -r -- "touched and a layer it never created, while its actual diff was"
+      print -r -- "correct -- read the diff, not the narrative."
       print -r -- "Not reviewed. Suite: ${SUITE_LINE:-not captured}"
     } | git commit -q -F - 2>/dev/null && COMMIT_SHA=$(git rev-parse --short HEAD)
     if [[ -n "$COMMIT_SHA" ]]; then

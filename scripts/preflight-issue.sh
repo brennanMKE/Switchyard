@@ -208,22 +208,53 @@ else
   pass "Module is set ($MODULE_RAW)"
 fi
 
-# --- Check 4b (WARN) — the stated baseline matches main's real count --------
+# --- Check 4b (HARD) — the stated baseline matches main's real count --------
 # #0096 round 1 was reviewed against a baseline of 216 when main was 225. A
 # stale number hides a small increase, and can make an unmoved count read as
 # progress. docs/test-baseline.txt is rewritten whenever main's suite is run.
+#
+# Escalated from a warning to a hard failure after #0137 round 1. A stale
+# absolute does not merely fail to help -- it actively misleads. That round
+# measured the correct 488, compared it against the issue's stale 453, decided
+# its own measurement was wrong, and spent the back half of the round chasing a
+# phantom "caching issue", including an `rm -rf ~/.cache/org.swift.swiftpm`
+# that the sandbox correctly rejected. The issue text even said "trust the
+# delta, not the absolute", and the model trusted the absolute anyway. On a
+# project that merges a dozen times a day, refreshing the number costs one
+# edit; not refreshing it cost eight tool calls and a rejected command.
 if [[ -f docs/test-baseline.txt ]]; then
   REAL=$(<docs/test-baseline.txt)
   # $SPEC is a FILE holding the spec text, not the text itself.
   # The phrase often wraps across a line break in the issue text, so flatten
   # whitespace before matching -- the first version missed every wrapped one
   # and printed nothing, which read as "no baseline stated".
-  STATED=$(tr '\n' ' ' < "$SPEC" | grep -oE 'reported +[0-9]+ +on' | grep -oE '[0-9]+' | head -1 || true)
-  if [[ -n "$STATED" && -n "$REAL" && "$STATED" != "$REAL" ]]; then
-    warn "issue states a baseline of $STATED, but main's suite is $REAL" \
-"A stale baseline hides a small increase. Update the issue before dispatching."
+  #
+  # The first extractor matched only the literal phrase "reported N on", so it
+  # was silent for every issue that phrased its baseline any other way -- which
+  # is how #0137 reached dispatch carrying a stale 453. Escalating that check to
+  # hard would have changed nothing, because it never fired. It now collects
+  # EVERY plausible baseline number in the spec and fails if any disagrees with
+  # main, because a stale absolute anywhere in the text is what the model reads.
+  FLAT=$(tr '\n' ' ' < "$SPEC")
+  STATED=$(print -r -- "$FLAT" | grep -oE '(read|reported|reads|was|is) +\*{0,2}[0-9]{2,4}\*{0,2}( |$)|Test run with [0-9]{2,4} tests|baseline[^.]{0,40}?[0-9]{2,4}|[0-9]{2,4} +to +.?Test run' \
+    | grep -oE '[0-9]{2,4}' | sort -u || true)
+  STALE=""
+  for n in ${(f)STATED}; do
+    # Only numbers in a plausible suite-count range are baselines; a year or a
+    # line number is not.
+    (( n >= 100 && n <= 9999 )) || continue
+    [[ "$n" == "$REAL" ]] || STALE+="$n "
+  done
+  if [[ -n "${STALE// /}" && -n "$REAL" ]]; then
+    STATED="${STALE% }"
+    if true; then
+    fail "issue states a baseline of $STATED, but main's suite is $REAL" \
+"Refresh the number in issues/$ISSUE.md before dispatching. A stale absolute
+sends the round chasing a phantom -- #0137 round 1 lost eight tool calls to
+exactly this, deciding its own correct measurement must be wrong."
+    fi
   elif [[ -n "$STATED" ]]; then
-    pass "stated baseline $STATED matches main"
+    pass "every stated suite count matches main ($REAL)"
   fi
 fi
 
