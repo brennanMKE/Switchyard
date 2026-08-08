@@ -231,3 +231,30 @@ preflight rather than assuming:
 **Current state: the host is loaded at `PARALLEL 4`.** `opencode-ornith.sh` still passes
 `--parallel 2`, so re-running that script reverts to 2 — reconcile the script with whichever
 setting is adopted, or the next prep run will silently undo it.
+
+---
+
+## Adopted policy, 2026-08-07
+
+**Host stays at `--parallel 4`; Switchyard dispatches one round at a time.**
+
+The recommendation above is about capacity and it stands. The policy on top of it is different,
+because the number that matters to this queue is **per-round latency, not aggregate throughput**:
+
+- Decode is **52.4 tok/s solo against 21.7 at 4-way**. A serialised round lands ~2.4x sooner.
+- Measured slot occupancy over a real four-hour window of dispatches was **0.44 of 2 slots** — the
+  ceiling was never binding. 1.8 hours of model time spread across 4 hours of wall clock.
+- The real constraint is **planning**: every issue needs a Fable pass of 10–20 minutes before a
+  dispatch of 5–9 minutes. Dispatch is the short leg. Fable has no ceiling, so throughput comes from
+  running planners ahead of the queue.
+- Review is serial regardless — one reviewer, running mutations and merging — so four rounds
+  finishing together would queue behind it anyway.
+
+The host is left at 4 so the capacity is available without a reload, and because a reload kills any
+in-flight round (#0029 round 1 died exactly that way).
+
+**Consequences already applied:** `DISPATCH_CEILING=1` in `preflight-issue.sh`; watchdogs back to
+`TIMEOUT=1800` / `STALL=420` / `QUIET_LIMIT=450`, since the 2.3x contention penalty they compensated
+for no longer applies and a slack timeout means a hung round burns 70 minutes instead of 30.
+
+**If the ceiling ever goes back above 1, raise all three watchdogs with it.**

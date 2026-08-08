@@ -33,7 +33,7 @@ fi
 
 BUDGET=${BUDGET:-540}     # seconds per call; the foreground tool limit is 600
 POLL=10
-QUIET_LIMIT=${QUIET_LIMIT:-950}   # this issue's own output silent this long = over
+QUIET_LIMIT=${QUIET_LIMIT:-450}   # this issue's own output silent this long = over
 PATTERN="dispatch-issue.sh ${ISSUE}"
 
 # `pgrep -f` alone is not a reliable liveness test, and this cost two dispatchers
@@ -58,10 +58,11 @@ PATTERN="dispatch-issue.sh ${ISSUE}"
 # survive.
 #
 # THIS VALUE IS COUPLED TO dispatch-issue.sh's STALL AND MUST STAY ABOVE IT.
-# When STALL went 420 -> 900 for PARALLEL 4, a QUIET_LIMIT left at 450 would
-# have declared a live round finished in the middle of a 239s prefill — the
-# exact false-completion this file was rewritten to eliminate. Keep roughly
-# STALL + 50.
+# Keep roughly STALL + 50, and move it whenever STALL moves. It went 450 -> 950
+# when STALL went 420 -> 900 for PARALLEL 4, and back to 450 when the dispatch
+# ceiling dropped to 1. Left low against a high STALL it would declare a live
+# round finished mid-prefill — the exact false-completion this file exists to
+# eliminate.
 
 running_by_pattern() { pgrep -f "$PATTERN" >/dev/null 2>&1 }
 

@@ -93,7 +93,8 @@ Checks read the **spec only** — everything above the first `## Review`, `## Wo
 | 4 | Does it name a verification command whose output can be pasted as proof? | hard for code modules | #0011 r1 |
 | 5 | Does it depend on a branch that is not an ancestor of `HEAD`? | hard | #0090 r1 |
 | 6 | Does it ask the implementer to *discover* a fact rather than applying one? | warn | #0070 r2 |
-| 7 | Are all dispatch slots already busy? The ceiling is read live from `lms ps` (4 as of 2026-08-07); a request beyond it queues **silently** — no error, just latency indistinguishable from a slow round. | warn | tooling |
+| 7 | Is a dispatch already running? We serialise deliberately — `DISPATCH_CEILING` is **1**, though the host allows 4 — because a solo round decodes 2.4x faster and occupancy was never the constraint. | warn | tooling |
+| 7b | Does the **loaded** `PARALLEL` match `EXPECTED_SLOTS`? Changing it needs a reload, and a reload lands on top of any in-flight round. #0029 r1 died `Model unloaded` this way while preflight read `PARALLEL 1` and passed, because check 7 only asks whether a slot is free. | hard | #0029 r1 |
 | 8 | Round > 1 with an issue file unchanged since the last round, or with no `## Review` section. | hard (in `dispatch-issue.sh`) | #0070 r2 |
 | 9 | Does the verification criterion state a baseline the count must exceed? | warn | #0086 r1 |
 | 10 | **Does the issue plus the harness's mandated reading fit the context window?** Estimate `issue bytes / 4` plus the prompt floor against `limit.context − limit.output`. An issue that cannot be held alongside its own instructions will be compacted, and **compaction eats the verbatim source block first**. | hard | #0017 r1 |

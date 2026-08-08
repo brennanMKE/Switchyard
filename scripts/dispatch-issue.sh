@@ -24,19 +24,20 @@ REPO_ROOT="${0:A:h:h}"
 cd "$REPO_ROOT"
 
 MAX_ROUNDS=3
-# Raised from 1800 when the host went to PARALLEL 4 (docs/lm-studio-concurrency.md).
-# A round that converges in 800s solo lands near 1840s at 4-way contention, so the
-# old value would have started killing healthy rounds and filing them as
-# `environment`. 4200 is the measured ~2.3x penalty with margin.
-TIMEOUT=4200
+# Back to 1800 now that we dispatch ONE round at a time (2026-08-07). The 4200
+# value existed to absorb the ~2.3x per-round penalty of 4-way contention; with
+# no contention there is none to absorb, and a slack timeout is a real cost --
+# at 4200 a genuinely hung round burns 70 minutes before the watchdog fires.
+# If the dispatch ceiling ever goes back above 1, raise this WITH it.
+TIMEOUT=1800
 # Kill a round that has written nothing to its log for this long. A working
 # round appends constantly; silence this long means a hung request.
 #
-# Raised from 420 with the move to PARALLEL 4. Prefill emits nothing, and the
-# last of four concurrent 49k-token rounds sits silent for 239s per turn --
-# and with cacheR=0 that is paid every turn, not once per round. 420 left only
-# 1.8x margin and shrinks as contexts approach the 65,536 ceiling.
-STALL=900
+# Back to 420 alongside TIMEOUT, for the same reason: the 900 value covered the
+# 239s silent prefill of the LAST of four concurrent rounds. A solo round's
+# prefill is 107.7s, so 420 restores the original ~4x margin.
+# COUPLED: await-dispatch.sh's QUIET_LIMIT must stay above this.
+STALL=420
 STALL_POLL=30
 # Which implementer. `ornith` is the local model and the default; `sonnet` is
 # billed and is for the work Ornith has repeatedly failed at -- Package.swift,

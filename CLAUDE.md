@@ -239,18 +239,28 @@ round; squash-merge and push `main` the moment an issue resolves. Do not batch. 
 committed but unpushed is invisible, and invisible work is indistinguishable from no work — this has
 already happened once, with seven finished branches sitting unpushed while `main` looked idle.
 
-**Concurrency ceiling: 4.** The model host is loaded `--parallel 4`, measured 2026-08-07 —
-`docs/lm-studio-concurrency.md` has the numbers. Aggregate throughput saturates exactly there:
-4 → 8 buys nothing while per-round latency keeps degrading, so **never go past 4.**
+**Two different numbers, and conflating them cost a round.**
 
-The cost is per-round latency, roughly 2.3x solo at 4-way, so `dispatch-issue.sh`'s watchdogs were
-raised in the same change — `TIMEOUT` 1800 → 4200, `STALL` 420 → 900. Raising concurrency without
-them converts a throughput win into a timeout-kill rate, and the failures get misfiled as
-`environment`. `await-dispatch.sh`'s `QUIET_LIMIT` is coupled to `STALL` and must stay above it.
+- **The host is loaded `--parallel 4`** — that is capacity. `docs/lm-studio-concurrency.md` has the
+  measurements. Never raise it past 4: aggregate throughput is flat from 4 to 8 while per-round
+  latency keeps degrading.
+- **We dispatch ONE round at a time** — that is policy, `DISPATCH_CEILING` in
+  `scripts/preflight-issue.sh`. Decided 2026-08-07.
 
-Preflight reads the live ceiling from `lms ps` rather than hardcoding it, because
-`~/Developer/LM Studio/opencode-ornith.sh` sets it at load time and re-running that script silently
-changes it under a running queue.
+Serialising looks backwards and is not. Decode is **52.4 tok/s solo against 21.7 at 4-way**, so a
+single round lands about 2.4x sooner, and measured slot occupancy over a real four-hour window was
+**0.44 of 2** — concurrency was never the constraint. **Planning is.** Fable has no ceiling, so the
+way to go faster is more planning agents running ahead of the queue, not more rounds contending for
+one model.
+
+Because we serialise, the watchdogs are back at their solo values: `TIMEOUT=1800`, `STALL=420`, and
+`await-dispatch.sh`'s `QUIET_LIMIT=450`. **`QUIET_LIMIT` is coupled to `STALL` and must stay above
+it** — move them together or `await` will call a live round finished mid-prefill. If the dispatch
+ceiling ever rises above 1, raise all three with it.
+
+Preflight checks both numbers: occupancy against `DISPATCH_CEILING`, and the **loaded** `PARALLEL`
+against `EXPECTED_SLOTS`. The second exists because #0029 round 1 died with `Model unloaded` when a
+reload landed on top of it, and preflight had read `PARALLEL 1` and passed anyway.
 
 **Output ceiling:** `~/.config/opencode/opencode.json` sets the model's `limit.output`. It was `8192`,
 which silently truncated any `write` tool call carrying a large file — the `content` key never

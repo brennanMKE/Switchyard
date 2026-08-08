@@ -263,13 +263,21 @@ deciding its own correct measurement must be wrong."
 fi
 
 # --- Check 7 (WARN) — concurrency headroom ----------------------------------
-# Requests beyond the slot count queue SILENTLY -- no 429, no error, just
-# latency indistinguishable from a slow round. The ceiling is a load-time flag,
-# so ask the host rather than hardcoding it: opencode-ornith.sh and the running
-# instance have disagreed before, and re-running that script silently reverts
-# the setting. Falls back to 4 if lms is unavailable.
-# Never raise past 4 -- aggregate throughput is flat from 4 to 8 while
-# per-round latency keeps degrading. See docs/lm-studio-concurrency.md.
+# TWO DIFFERENT NUMBERS, deliberately separated after they were conflated:
+#
+#   DISPATCH_CEILING - how many rounds WE run at once. Policy. Currently 1.
+#   EXPECTED_SLOTS   - how the host is loaded. Capability. Currently 4.
+#
+# The host stays at 4 so the capacity is there, but we dispatch one at a time,
+# because per-round latency is what actually matters to the queue: decode is
+# 52.4 tok/s solo against 21.7 at 4-way, so a serialised round finishes about
+# 2.4x faster. Measured occupancy over a real 4-hour window was 0.44 of 2 slots
+# -- concurrency was never the constraint; planning was. Serialising costs
+# almost nothing and makes each round land sooner.
+#
+# Requests beyond the host's slot count queue SILENTLY -- no 429, no error, just
+# latency indistinguishable from a slow round. See docs/lm-studio-concurrency.md.
+DISPATCH_CEILING=${DISPATCH_CEILING:-1}
 RUNNING=$(pgrep -f 'opencode run' 2>/dev/null | grep -c . || true)
 # Parse by position relative to the CONTEXT value, not by offset from either
 # end: `lms ps` prints SIZE as two fields ("37.73 GB") and TTL may be empty, so
@@ -308,11 +316,12 @@ Then re-run preflight. See docs/lm-studio-concurrency.md."
 else
   pass "LM Studio loaded PARALLEL $SLOTS as intended"
 fi
-if (( RUNNING >= SLOTS )); then
-  warn "$RUNNING dispatches already running (LM Studio is PARALLEL $SLOTS)" \
-"Another would queue silently rather than run. Wait for a slot."
+if (( RUNNING >= DISPATCH_CEILING )); then
+  warn "$RUNNING dispatch(es) running; our ceiling is $DISPATCH_CEILING (host allows $SLOTS)" \
+"We serialise deliberately: a solo round decodes at 52.4 tok/s against 21.7 at
+4-way, so one at a time lands sooner. Wait for it to finish."
 else
-  pass "$RUNNING/$SLOTS dispatch slots in use"
+  pass "$RUNNING/$DISPATCH_CEILING dispatch slots in use (host allows $SLOTS)"
 fi
 
 # --- Check 10 (HARD) — the issue fits the context window --------------------
