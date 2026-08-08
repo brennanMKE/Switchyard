@@ -77,6 +77,29 @@ public enum WorktreePrune {
 
     // MARK: - Public surface
 
+    /// The full result of a `gc` run: everything reported, plus git's own
+    /// account of what a prune reaped. A nominal type (not a tuple) so the
+    /// whole `wt gc` response can encode to the `schemaVersion: 1` envelope.
+    public struct GCResult: Sendable, Equatable {
+
+        /// All prunable and abandoned-session worktrees, exactly as
+        /// `report(from:)` returns them, in porcelain order.
+        public let reports: [Report]
+
+        /// The verbatim stderr lines from `git worktree prune -v` — on a
+        /// successful prune, one `Removing worktrees/<id>: <reason>` line per
+        /// reaped entry, where `<id>` is the administrative directory name
+        /// under `$GIT_DIR/worktrees`, not the working-tree path. Git's
+        /// wording rides verbatim, never paraphrased. Empty when `prune` was
+        /// false or nothing was reaped.
+        public let pruned: [String]
+
+        public init(reports: [Report], pruned: [String]) {
+            self.reports = reports
+            self.pruned = pruned
+        }
+    }
+
     /// The prefix every agent lock reason begins with, so a non-agent-locked
     /// worktree is reported as a plain lock rather than an abandoned session.
     public static let agentLockReasonPrefix = "switchyard-agent:"
@@ -146,14 +169,14 @@ public enum WorktreePrune {
         repositoryPath: String,
         prune: Bool = false,
         git: GitProcess = GitProcess()
-    ) throws -> (reports: [Report], pruned: [String]) {
+    ) throws -> GCResult {
         let reports = try report(from: repositoryPath, git: git)
 
         if prune {
             let pruned = try runPrune(repositoryPath: repositoryPath, git: git)
-            return (reports, pruned)
+            return GCResult(reports: reports, pruned: pruned)
         } else {
-            return (reports, [])
+            return GCResult(reports: reports, pruned: [])
         }
     }
 
@@ -193,5 +216,20 @@ extension WorktreePrune.Report: Encodable {
     /// reap the entry.
     private enum CodingKeys: String, CodingKey {
         case path, type, reason, lockReason, removable
+    }
+}
+
+// MARK: - Wire encoding (#0139)
+
+/// `WorktreePrune.GCResult` is the `schemaVersion: 1` payload for `wt gc`:
+/// `gc(repositoryPath:prune:)` returns it, and it rides whole in `result` —
+/// both halves, what was reported and what was actually pruned, in one
+/// response. Plain-stdlib `Encodable` — the engine still imports nothing.
+extension WorktreePrune.GCResult: Encodable {
+    /// Stable wire keys, identical to the stored-member names; no raw values.
+    /// Both members are non-optional arrays, so both keys are always present
+    /// on the wire — `"pruned":[]` for a report-only run, never omitted.
+    private enum CodingKeys: String, CodingKey {
+        case reports, pruned
     }
 }
