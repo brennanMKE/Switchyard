@@ -406,6 +406,41 @@ issues/\$ISSUE.md."
   fi
 fi
 
+# A `grep -c '<pattern>'` criterion whose expected count was written from memory
+# rather than measured. #0170 specified 1 for a string appearing twice (doc
+# comment plus call site); #0151 did the identical thing with GIT_INDEX_FILE.
+# Both were harmless because review caught them, but a presence criterion is a
+# gate — a wrong one either passes a defect or fails a correct round.
+#
+# ADVISORY, not hard: the count is compared against the issue's own pasted
+# fenced blocks, which is the right denominator only when the issue pastes the
+# whole file. When it pastes a region, a mismatch is expected and fine.
+PRESENCE_WARN=()
+while IFS= read -r line; do
+  [[ -n "$line" ]] || continue
+  pat=${line#*grep -c }
+  pat=${pat#[\'\"]}
+  quote=${line#*grep -c }
+  quote=${quote[1]}
+  pat=${pat%%${quote}*}
+  [[ -n "$pat" ]] || continue
+  # The expected count: the last small integer on the line.
+  want=$(print -r -- "$line" | grep -oE '[0-9]+' | tail -1 || true)
+  [[ "$want" == <-> ]] || continue
+  (( want <= 5 )) || continue
+  got=$(awk '/^```/{f=!f; next} f' "$SPEC" | grep -cF -- "$pat" || true)
+  [[ "$got" == "$want" ]] || PRESENCE_WARN+=("$pat  says $want, pasted blocks contain $got")
+done < <(grep -E "grep -c ['\"][^'\"]+['\"].*[0-9]" "$SPEC" || true)
+if (( ${#PRESENCE_WARN} )); then
+  warn "a grep -c criterion may not match the pasted block" \
+"${(F)PRESENCE_WARN}
+Run the grep against the pasted block and use its real count. Expected only when
+the issue pastes a region rather than a whole file. #0170 and #0151 both shipped
+a criterion that could not be satisfied as written."
+else
+  pass "grep -c criteria agree with the pasted blocks"
+fi
+
 # A pasted `@Test func` name that ALREADY EXISTS in the test module will not
 # compile: top-level test function names share the module namespace. The issue
 # has been advising planners of this in prose all night; #0043 proves prose is
