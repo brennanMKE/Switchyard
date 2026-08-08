@@ -66,5 +66,32 @@ PY
     CURRENT)  print "refresh-baseline: #$ISSUE already states $CURRENT" ;;
     *)        print "refresh-baseline: #$ISSUE  $BEFORE → $CURRENT" ;;
   esac
+
+  # Rewriting the anchor is not the whole job, and #0167 proved it: the refresh
+  # moved the anchor 663 → 674 and left the round-2 TARGET at the scratch tree's
+  # stale 673 further down. A transcribing round would have measured 684 against
+  # a stated 673 with no way to know which was wrong, and preflight's own check
+  # passed because it only reads the anchor. Those other figures cannot be
+  # rewritten safely — a target is baseline PLUS a delta, and some are
+  # deliberately historical — so surface them and let a human decide.
+  python3 - "$FILE" "$CURRENT" <<'PY'
+import re, sys
+path, current = sys.argv[1], sys.argv[2]
+cur = int(current)
+suspect = []
+for n, line in enumerate(open(path), 1):
+    for m in re.finditer(r'Test run with \*{0,2}(\d{3,4})', line):
+        v = int(m.group(1))
+        # Plausibly a stale suite figure: near the current baseline but not a
+        # sane target (baseline + a small delta). Wide net, human adjudicates.
+        if v != cur and not (cur < v <= cur + 60):
+            suspect.append((n, v, line.strip()[:88]))
+if suspect:
+    print(f"refresh-baseline: WARNING — other suite figures in {path} that are not {current}:")
+    for n, v, s in suspect:
+        print(f"    line {n}: {v}   {s}")
+    print("    A target should be the baseline plus this issue's delta. Check each is")
+    print("    intended as history rather than a stale number a round would measure against.")
+PY
 done
 exit $RC
