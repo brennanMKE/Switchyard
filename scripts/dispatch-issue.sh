@@ -293,7 +293,19 @@ BASE_SHA=$(git rev-parse HEAD)
 # zsh glob that matches nothing is a fatal error, not an empty list. Round 1
 # never has a prior record, so without (N) this line killed every first
 # dispatch. Caught by a control, one edit after being written.
-rm -f $LOG_DIR/$ISSUE-round*.done(N)
+#
+# ARCHIVE rather than delete. Deleting satisfied `await` but destroyed the only
+# durable account of how the earlier round went: #0170's round-1 record was gone
+# by the time its review was written, surviving only because the reviewer had
+# copied it out of `await`'s output in the turn it appeared. `.done` carries the
+# round's exit, wall time, sandbox rejects, changed-path count, base sha, model
+# and suite line — none of which is recoverable from git afterwards.
+#
+# Renaming keeps `await`'s invariant intact, because its glob requires the name
+# to END in `.done`, which an archived record no longer does.
+for prior in $LOG_DIR/$ISSUE-round*.done(N); do
+  mv -f "$prior" "${prior}.archived-$(date +%Y%m%dT%H%M%S)"
+done
 
 STATUS=0
 ELAPSED=0
