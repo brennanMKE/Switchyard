@@ -263,14 +263,30 @@ deciding its own correct measurement must be wrong."
 fi
 
 # --- Check 7 (WARN) — concurrency headroom ----------------------------------
-# LM Studio is PARALLEL 2. A third dispatch queues silently and is
-# indistinguishable from a very slow round.
+# Requests beyond the slot count queue SILENTLY -- no 429, no error, just
+# latency indistinguishable from a slow round. The ceiling is a load-time flag,
+# so ask the host rather than hardcoding it: opencode-ornith.sh and the running
+# instance have disagreed before, and re-running that script silently reverts
+# the setting. Falls back to 4 if lms is unavailable.
+# Never raise past 4 -- aggregate throughput is flat from 4 to 8 while
+# per-round latency keeps degrading. See docs/lm-studio-concurrency.md.
 RUNNING=$(pgrep -f 'opencode run' 2>/dev/null | grep -c . || true)
-if (( RUNNING >= 2 )); then
-  warn "$RUNNING dispatches already running (LM Studio is PARALLEL 2)" \
-"A third would queue silently rather than run. Wait for a slot."
+# Parse by position relative to the CONTEXT value, not by offset from either
+# end: `lms ps` prints SIZE as two fields ("37.73 GB") and TTL may be empty, so
+# both $5 and $(NF-2) land on the wrong column. $(NF-2) yielded 65536 -- the
+# context -- and the check then "passed" with a ceiling of 65536, which would
+# have allowed unlimited concurrent dispatches. A guard that reads a plausible
+# number from the wrong column is worse than no guard.
+SLOTS=$(lms ps 2>/dev/null | awk '/ornith/ {
+  for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]{4,6}$/) { print $(i+1); exit }
+}' | head -1)
+# Sanity-clamp: anything outside 1-8 means the parse drifted again.
+[[ "$SLOTS" == <-> ]] && (( SLOTS >= 1 && SLOTS <= 8 )) || SLOTS=4
+if (( RUNNING >= SLOTS )); then
+  warn "$RUNNING dispatches already running (LM Studio is PARALLEL $SLOTS)" \
+"Another would queue silently rather than run. Wait for a slot."
 else
-  pass "$RUNNING/2 dispatch slots in use"
+  pass "$RUNNING/$SLOTS dispatch slots in use"
 fi
 
 # --- Check 10 (HARD) — the issue fits the context window --------------------

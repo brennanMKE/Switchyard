@@ -33,7 +33,7 @@ fi
 
 BUDGET=${BUDGET:-540}     # seconds per call; the foreground tool limit is 600
 POLL=10
-QUIET_LIMIT=${QUIET_LIMIT:-450}   # this issue's own output silent this long = over
+QUIET_LIMIT=${QUIET_LIMIT:-950}   # this issue's own output silent this long = over
 PATTERN="dispatch-issue.sh ${ISSUE}"
 
 # `pgrep -f` alone is not a reliable liveness test, and this cost two dispatchers
@@ -54,7 +54,14 @@ PATTERN="dispatch-issue.sh ${ISSUE}"
 # `NNNN-roundN-suite.txt` while it captures the suite afterwards. If neither has
 # been touched for QUIET_LIMIT seconds, the round is over — and that is safe to
 # assert because the harness's own stall watchdog kills any round whose log goes
-# silent for 420s, so a live round cannot be quieter than that and survive.
+# silent for STALL seconds, so a live round cannot be quieter than that and
+# survive.
+#
+# THIS VALUE IS COUPLED TO dispatch-issue.sh's STALL AND MUST STAY ABOVE IT.
+# When STALL went 420 -> 900 for PARALLEL 4, a QUIET_LIMIT left at 450 would
+# have declared a live round finished in the middle of a 239s prefill — the
+# exact false-completion this file was rewritten to eliminate. Keep roughly
+# STALL + 50.
 
 running_by_pattern() { pgrep -f "$PATTERN" >/dev/null 2>&1 }
 

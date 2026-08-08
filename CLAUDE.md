@@ -239,8 +239,18 @@ round; squash-merge and push `main` the moment an issue resolves. Do not batch. 
 committed but unpushed is invisible, and invisible work is indistinguishable from no work — this has
 already happened once, with seven finished branches sitting unpushed while `main` looked idle.
 
-Concurrency ceiling: LM Studio is configured `PARALLEL 2`, so a third simultaneous dispatch queues
-rather than running. Two rounds at a time is the real limit until that is raised.
+**Concurrency ceiling: 4.** The model host is loaded `--parallel 4`, measured 2026-08-07 —
+`docs/lm-studio-concurrency.md` has the numbers. Aggregate throughput saturates exactly there:
+4 → 8 buys nothing while per-round latency keeps degrading, so **never go past 4.**
+
+The cost is per-round latency, roughly 2.3x solo at 4-way, so `dispatch-issue.sh`'s watchdogs were
+raised in the same change — `TIMEOUT` 1800 → 4200, `STALL` 420 → 900. Raising concurrency without
+them converts a throughput win into a timeout-kill rate, and the failures get misfiled as
+`environment`. `await-dispatch.sh`'s `QUIET_LIMIT` is coupled to `STALL` and must stay above it.
+
+Preflight reads the live ceiling from `lms ps` rather than hardcoding it, because
+`~/Developer/LM Studio/opencode-ornith.sh` sets it at load time and re-running that script silently
+changes it under a running queue.
 
 **Output ceiling:** `~/.config/opencode/opencode.json` sets the model's `limit.output`. It was `8192`,
 which silently truncated any `write` tool call carrying a large file — the `content` key never
