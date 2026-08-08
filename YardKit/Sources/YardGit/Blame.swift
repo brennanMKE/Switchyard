@@ -253,3 +253,21 @@ public func blameFile(
     let output = try git.run(arguments, workingDirectory: path)
     return try BlameParser().parse(output.text)
 }
+
+// MARK: - Wire encoding (#0132)
+
+/// `BlameLine` is a `schemaVersion: 1` payload: it encodes through `YardKit`'s
+/// `Envelope` via `EncodableResult` (`Encodable & Sendable`). Plain-stdlib
+/// `Encodable` — the engine still imports nothing.
+extension BlameLine: Encodable {
+    /// The stable wire keys. Identical to the stored-member names on purpose;
+    /// no raw values — the case name IS the wire key, and `DiffBlameWireTests`
+    /// pins the encoded bytes. The computed `isUncommitted` is not encoded
+    /// (#0129 Decision 7): a reader derives it from `oid` being the 40-zero
+    /// uncommitted constant, which the wire carries verbatim.
+    private enum CodingKeys: String, CodingKey {
+        case oid, finalLine, originalLine, originalPath
+        case author, authorEmail, authorTime, authorTimeZone
+        case summary, isBoundary, content
+    }
+}

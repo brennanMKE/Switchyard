@@ -363,3 +363,28 @@ public func listHunks(
     let output = try git.run(arguments, workingDirectory: path)
     return try HunkParser().parse(output.text)
 }
+
+// MARK: - Wire encoding (#0132)
+
+/// `Hunk` is a `schemaVersion: 1` payload component: it encodes through
+/// `YardKit`'s `Envelope` via `EncodableResult` (`Encodable & Sendable`).
+/// Plain-stdlib `Encodable` — the engine still imports nothing.
+extension Hunk: Encodable {
+    /// The stable wire keys. Identical to the stored-member names on purpose;
+    /// no raw values — the case name IS the wire key, and `DiffBlameWireTests`
+    /// pins the encoded bytes. The computed `patchText` is not encoded
+    /// (#0129 Decision 7): it is a pure join of `header` and `body`, which
+    /// both ride the wire, so a reader can reconstruct it losslessly.
+    private enum CodingKeys: String, CodingKey {
+        case id, path, oldStart, oldCount, newStart, newCount, header, body
+    }
+}
+
+extension FileDiff: Encodable {
+    /// Stable wire keys, identical to the stored-member names; no raw values.
+    /// An empty `hunks` array (binary or mode-only change) encodes as `[]`,
+    /// never omitted — only nil optionals (`oldMode`, `newMode`) are omitted.
+    private enum CodingKeys: String, CodingKey {
+        case path, oldMode, newMode, isBinary, headerText, hunks
+    }
+}
