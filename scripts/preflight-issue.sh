@@ -236,23 +236,27 @@ if [[ -f docs/test-baseline.txt ]]; then
   # EVERY plausible baseline number in the spec and fails if any disagrees with
   # main, because a stale absolute anywhere in the text is what the model reads.
   FLAT=$(tr '\n' ' ' < "$SPEC")
-  STATED=$(print -r -- "$FLAT" | grep -oE '(read|reported|reads|was|is) +\*{0,2}[0-9]{2,4}\*{0,2}( |$)|Test run with [0-9]{2,4} tests|baseline[^.]{0,40}?[0-9]{2,4}|[0-9]{2,4} +to +.?Test run' \
-    | grep -oE '[0-9]{2,4}' | sort -u || true)
+  # Only numbers presented as the CURRENT baseline count. An expected *result*
+  # ("the result here is 486") legitimately differs from main and must not be
+  # flagged -- the first widened version failed two issues for exactly that,
+  # because it treated every suite-sized number as a claim about main.
+  #
+  # Anchors, all meaning "what main is right now":
+  #   docs/test-baseline.txt read/reads N
+  #   main is N  /  main's suite is N  /  main reported N
+  STATED=$(print -r -- "$FLAT" \
+    | grep -oE '(test-baseline\.txt[^0-9]{0,30}|main([^0-9.]{0,20}(is|reported|suite is))[^0-9]{0,10})\*{0,2}[0-9]{2,4}' \
+    | grep -oE '[0-9]{2,4}$' | sort -u || true)
   STALE=""
   for n in ${(f)STATED}; do
-    # Only numbers in a plausible suite-count range are baselines; a year or a
-    # line number is not.
     (( n >= 100 && n <= 9999 )) || continue
     [[ "$n" == "$REAL" ]] || STALE+="$n "
   done
   if [[ -n "${STALE// /}" && -n "$REAL" ]]; then
-    STATED="${STALE% }"
-    if true; then
-    fail "issue states a baseline of $STATED, but main's suite is $REAL" \
-"Refresh the number in issues/$ISSUE.md before dispatching. A stale absolute
-sends the round chasing a phantom -- #0137 round 1 lost eight tool calls to
-exactly this, deciding its own correct measurement must be wrong."
-    fi
+    fail "issue states main's suite is ${STALE% }, but it is $REAL" \
+"Refresh the number in $FILE before dispatching. A stale absolute sends the
+round chasing a phantom -- #0137 round 1 lost eight tool calls to exactly this,
+deciding its own correct measurement must be wrong."
   elif [[ -n "$STATED" ]]; then
     pass "every stated suite count matches main ($REAL)"
   fi
