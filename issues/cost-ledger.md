@@ -179,7 +179,10 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-08-08 | #0030 | Fable planning pass + filed #0164 (F) | 236,059 | $3.78 |
 | 2026-08-08 | #0028 | Ornith r1+r2 local, notional | 1,125,463 | $0.00 |
 | 2026-08-08 | #0028 | Dispatch r1+r2 + review (O) | 81,851 | $1.31 |
-| | | **Total measured** | **14,664,191** | **$159.94** |
+| 2026-08-08 | #0030 | Ornith r1 local, notional | 226,246 | $0.00 |
+| 2026-08-08 | #0030 | Dispatch r1 + review (O) | 52,592 | $0.84 |
+| 2026-08-08 | #0034 | Fable planning: umbrella + filed #0165-#0171 (F) | 280,785 | $4.49 |
+| | | **Total measured** | **15,223,814** | **$165.27** |
 
 ## What this total does and does not cover
 
