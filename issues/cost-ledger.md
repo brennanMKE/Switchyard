@@ -169,7 +169,8 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-08-07 | #0042 | Fable planning pass + filed #0153/#0154 (F) | 189,902 | $3.04 |
 | 2026-08-07 | #0029 | Dispatch round 1 re-run (accepted) | 60,369 | $0.48 |
 | 2026-08-07 | #0028 | Fable planning pass + filed #0155/#0156/#0157 (F) | 229,612 | $3.67 |
-| | | **Total measured** | **11,807,607** | **$132.81** |
+| 2026-08-07 | #0031 | Fable planning pass, union-comparison guard (F) | 221,254 | $3.54 |
+| | | **Total measured** | **12,028,861** | **$136.35** |
 
 ## What this total does and does not cover
 

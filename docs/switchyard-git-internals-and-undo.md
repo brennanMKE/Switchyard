@@ -179,7 +179,7 @@ honest about which store is authoritative.
   "worktree": { "id": "agent-a", "path": "/Users/b/src/proj-agent-a" },
   "captured": { "refs": true, "head": true, "index": true, "worktree": "stash", "untracked": true },
   "snapshotRef": "refs/switchyard/journal/01J8X...",
-  "guard": { "HEAD": "abc123...", "refs/heads/main": "def456..." },
+  "guard": { "HEAD": "abc123...", "refs/heads/main": "def456..." },   // display only -- see the correction under "The cross-tool guard": the engine compares the UNION of recorded and current refs, not this subset
   "agent": { "name": "claude-code", "session": "01J8W..." }
 }
 ```
@@ -190,9 +190,25 @@ honest about which store is authoritative.
 ### The cross-tool guard
 
 An agent will run `git` directly in the same repository between two `switchyard` commands. Constantly.
-Before restoring, compare every ref in `guard` against its current value. On mismatch, refuse with
-exit 4 and name the ref, the expected value, and the actual one. Offer `--force` for the human,
-never for a scripted caller.
+Before restoring, compare the recorded ref state against a fresh capture, and on mismatch refuse,
+naming each ref with its expected and actual value. Offer `--force` for the human, never for a
+scripted caller.
+
+> **Corrected 2026-08-07, twice — this section had a design bug and a wrong exit code.**
+>
+> **Compare the union, not the recorded subset.** The `"guard"` map sketched above is a per-entry
+> subset, and *"compare every ref in `guard`"* cannot see a ref that did not exist at capture. Restore
+> **deletes** refs created since the snapshot, so a branch another agent made after the checkpoint
+> would be silently clobbered by a restore the guard had just approved. The comparison must run over
+> the **union** of recorded and current ref names, plus `HEAD`. A subset map structurally cannot
+> detect the case that matters most.
+>
+> **Exit 6, not 4.** #0141 closed the engine's exit vocabulary to **6, 8 and 9**; codes 1–5 and 7 are
+> decided above the engine, which cannot see transport or CLI concerns. A cross-tool divergence is
+> `ExitClass.repositoryError` (6).
+>
+> Both found while planning #0031, by an agent working from this document and checking it rather than
+> implementing it.
 
 ### Pruning
 
