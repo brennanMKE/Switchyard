@@ -165,7 +165,8 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-08-07 | #0027 | Fable planning pass + filed #0151/#0152 (F) | 243,167 | $3.89 |
 | 2026-08-07 | #0029 | Dispatch round 1 FAILED — model reloaded mid-round | 44,296 | $0.35 |
 | 2026-08-07 | #0032 | Fable planning pass, flock design (F) | 167,213 | $2.68 |
-| | | **Total measured** | **11,148,465** | **$122.75** |
+| 2026-08-07 | #0036 | Fable planning pass, keyless signing verification (F) | 179,259 | $2.87 |
+| | | **Total measured** | **11,327,724** | **$125.62** |
 
 ## What this total does and does not cover
 
