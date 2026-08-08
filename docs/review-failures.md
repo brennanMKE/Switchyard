@@ -141,6 +141,21 @@ Worth reaching for before recording something as untestable. All measured in thi
 The pattern: the thing that seems to need a secret usually needs only the *protocol* the secret
 would have produced.
 
+#### Mutate the FIXTURE to prove an emptiness assertion is load-bearing
+
+A test asserting `report.isEmpty` — that some condition is deliberately *excluded* — passes for
+free if the setup never created the condition in the first place. No mutation of the production
+code can tell the two apart: absent behaviour and absent input produce the same green.
+
+So mutate the **fixture**, not the source. #0173's `aDetachedSiblingHoldsNoBranchAndIsNeverDisturbed`
+asserts a detached sibling worktree raises no disturbance. Review deleted the `git checkout --detach`
+line from the test's own setup; the test went red, proving the emptiness assertion depends on the
+detachment rather than on an empty report arriving by accident. Restored afterwards.
+
+Use this wherever a test's claim is "nothing happens": deliberate exclusions, allow-lists, no-op
+paths, guard clauses that skip. The question to answer is not "does the code do nothing here?" but
+"would this test notice if the case it names never occurred?"
+
 ### Judgment — read the issue and answer honestly
 
 0. **For every mutation-table row: has the mutation been applied and the named test observed going
