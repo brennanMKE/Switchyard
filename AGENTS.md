@@ -127,6 +127,26 @@ correct and was lost with it.
 - If neither path works, **stop and say which tool failed and how**. That is a useful round. Twenty
   minutes of identical retries is not.
 
+## Rule 5c — Never `cat >` onto a file that already exists.
+
+A heredoc is the right way to create a **new** file: six rounds have written 100-to-300-line new
+Swift files that way with no truncation, and it sidesteps the `write` tool's output ceiling entirely.
+
+**But `>` truncates before the heredoc streams.** If the heredoc is cut short, the original file is
+already gone, and you are now repairing damage instead of doing the work. #0134 ran
+`cat > YardKit/Sources/YardGit/WorktreeAdd.swift` on a 249-line existing file, the heredoc cut off
+mid-file, and the file was destroyed. The repair attempt — another `cat >` — truncated again. Roughly
+25 of that round's 29 shell calls were recovery, and it cost triple the tokens of its neighbours.
+
+So:
+
+- **New file** → `cat > path <<'SWIFT'` is fine and preferred. If it truncates you lose nothing: the
+  compiler tells you immediately.
+- **Existing file, adding to the end** → `cat >> path <<'SWIFT'`. Append cannot destroy what is
+  already there, and it is what made the extension-collision traps in #0130 and #0131 unhittable.
+- **Existing file, changing something in place** → the `edit` tool. That is what it is for.
+- **Never** `cat >` onto an existing file. There is no case where it is the right instrument.
+
 ## Rule 6 — Every scratch file goes in `build/`, inside the worktree.
 
 Your sandbox auto-rejects writes to `/tmp`, `/var/tmp`, and anything outside the working directory.
