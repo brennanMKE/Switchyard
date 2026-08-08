@@ -61,3 +61,16 @@ public func siblingWorktree(
         isCurrent: current == holder
     )
 }
+
+// MARK: - Wire encoding (#0130)
+
+/// `SiblingWorktree` is a `schemaVersion: 1` payload: it encodes through
+/// `YardKit`'s `Envelope` via `EncodableResult` (`Encodable & Sendable`).
+/// Plain-stdlib `Encodable` — the engine still imports nothing.
+extension SiblingWorktree: Encodable {
+    /// Stable wire keys, identical to the member names; no raw values. The
+    /// enum is rename-safety; `WorktreeIdentityWireTests` pins the bytes.
+    private enum CodingKeys: String, CodingKey {
+        case path, branch, head, isMainWorktree, isCurrent
+    }
+}
