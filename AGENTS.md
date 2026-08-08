@@ -80,8 +80,11 @@ Could not test the reftable variant -- the fixture helper does not build one.
 MD
 ```
 
-**The first line becomes the commit subject**, so make it one plain sentence saying what the round
-did. Everything after it is the body. Say what you changed, what you ran, what it printed, and what
+**The first line becomes the commit subject**, so make it **short and imperative** — under about
+sixty characters, like a commit subject, not a summary sentence. #0129 round 2 wrote a full sentence
+and it was truncated mid-word. `Add Encodable conformance to WhereAmI` is right; *"Added the Encodable
+conformance to WhereAmI with a private CodingKeys enum and three wire tests"* is not. Everything after
+the first line is the body, and that is where the detail belongs. Say what you changed, what you ran, what it printed, and what
 you could not do — the same report you would have written anyway, in a file instead of only in the
 transcript.
 

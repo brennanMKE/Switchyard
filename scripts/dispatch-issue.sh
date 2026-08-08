@@ -163,9 +163,20 @@ BASE_SHA=$(git rev-parse HEAD)
 # stranded for over an hour each on 2026-08-07 by the first; the second is a
 # heuristic that replaced it.
 #
-# This file's existence IS the answer. It is removed at start, so a stale one
-# from a previous run of the same round cannot be mistaken for this one.
-rm -f "$DONE"
+# This file's existence IS the answer.
+#
+# Every round's record for this issue is cleared at start, not just this one's.
+# The first version removed only "$DONE", so round 1's record survived into
+# round 2 -- and `await-dispatch.sh` globs `NNNN-round*.done`, matched the stale
+# one, and reported "no dispatch running" twice while round 2 was demonstrably
+# live. A dispatcher following it would have reviewed an empty tree and called
+# the round failed. At most one record per issue exists at any time, and it
+# always describes the latest round.
+# The (N) qualifier is load-bearing: this script runs under ERR_EXIT, and a
+# zsh glob that matches nothing is a fatal error, not an empty list. Round 1
+# never has a prior record, so without (N) this line killed every first
+# dispatch. Caught by a control, one edit after being written.
+rm -f $LOG_DIR/$ISSUE-round*.done(N)
 
 STATUS=0
 ELAPSED=0
@@ -175,8 +186,17 @@ write_done() {
   local code=$1
   # `git status` can fail here (a mid-flight index lock); a completion record
   # that throws is worse than one with an empty field.
+  #
+  # CHANGED_COUNT is captured *before* the round commit stages anything. The
+  # first version counted here, after staging, so it read 0 on every successful
+  # round -- and 0 was the no-changes signal, which is exactly the wrong thing
+  # to say about a round that worked.
   local changed
-  changed=$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ') || changed=""
+  if [[ -n "${CHANGED_COUNT:-}" ]]; then
+    changed="$CHANGED_COUNT"
+  else
+    changed=$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ') || changed=""
+  fi
   {
     print -r -- "{"
     print -r -- "  \"issue\": \"$ISSUE\","
@@ -396,6 +416,7 @@ git diff --stat
 # above, and its emptiness stays a loud failure rather than becoming a commit.
 REPORT="$LOG_DIR/$ISSUE-round$ROUND.report.md"
 COMMIT_SHA=""
+CHANGED_COUNT=$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')
 {
   # Stage exactly what git says changed, by path, never -A. -z because a path
   # can contain anything, and this project counts NUL-terminated fields
@@ -418,7 +439,13 @@ COMMIT_SHA=""
   else
     SUMMARY="#$ISSUE round $ROUND"
     if [[ -f "$REPORT" ]]; then
-      FIRST=$(grep -m1 -v '^[[:space:]]*$' "$REPORT" | sed 's/^#\{1,6\} *//' | cut -c1-64)
+      # Truncate on a word boundary. `cut -c1-64` cut mid-word -- #0129 round 2
+      # produced "...with a private Codin".
+      FIRST=$(grep -m1 -v '^[[:space:]]*$' "$REPORT" | sed 's/^#\{1,6\} *//')
+      if (( ${#FIRST} > 64 )); then
+        FIRST="${FIRST[1,64]}"
+        FIRST="${FIRST% *}…"
+      fi
       [[ -n "$FIRST" ]] && SUMMARY="#$ISSUE round $ROUND: $FIRST"
     fi
     {

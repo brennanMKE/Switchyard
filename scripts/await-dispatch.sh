@@ -63,9 +63,13 @@ running_by_pattern() { pgrep -f "$PATTERN" >/dev/null 2>&1 }
 # exit path including a timeout kill and the no-changes exit 7 — and it is
 # removed at start, so it can only describe the current round. Everything below
 # this is inference; this is a fact.
+# Newest first: `om` orders by mtime. Belt and braces alongside
+# dispatch-issue.sh clearing every prior round's record at start -- a stale
+# record from round 1 once made this report round 2 as finished before it had
+# even begun.
 done_file() {
   local -a f
-  f=( .switchyard-runs/${ISSUE}-round*.done(N) )
+  f=( .switchyard-runs/${ISSUE}-round*.done(Nom) )
   (( ${#f} )) && print -r -- "${f[1]}"
 }
 
