@@ -103,17 +103,23 @@ STALE_UNKNOWN=""
 if ! git rev-parse --verify -q main >/dev/null 2>&1; then
   STALE_UNKNOWN="cannot resolve 'main' from this worktree"
 else
-  for path in "issues/$ISSUE.md" docs/test-baseline.txt; do
-    if ! BEHIND=$(git log --format=%H HEAD..main -- "$path" 2>/dev/null); then
-      STALE_UNKNOWN="git log HEAD..main -- $path could not run"
+  # NOT `for path` — in zsh `path` is the array TIED TO `PATH`. Using it as a
+  # loop variable overwrites the command search path with the first item, so
+  # every later exec fails with ENOENT: git, then preflight, then opencode. It
+  # broke EVERY dispatch from every worktree, and the symptoms all pointed
+  # elsewhere ("command not found: git", "env: zsh: No such file or directory"),
+  # which I misread as a sandbox restriction. `zsh -x` showed `path=issues/0030.md`.
+  for GITPATH in "issues/$ISSUE.md" docs/test-baseline.txt; do
+    if ! BEHIND=$(git log --format=%H HEAD..main -- "$GITPATH" 2>/dev/null); then
+      STALE_UNKNOWN="git log HEAD..main -- $GITPATH could not run"
       break
     fi
     [[ -n "$BEHIND" ]] || continue
-    if ! AHEAD=$(git log --format=%H main..HEAD -- "$path" 2>/dev/null); then
-      STALE_UNKNOWN="git log main..HEAD -- $path could not run"
+    if ! AHEAD=$(git log --format=%H main..HEAD -- "$GITPATH" 2>/dev/null); then
+      STALE_UNKNOWN="git log main..HEAD -- $GITPATH could not run"
       break
     fi
-    [[ -z "$AHEAD" ]] && STALE+=("$path")
+    [[ -z "$AHEAD" ]] && STALE+=("$GITPATH")
   done
 fi
 if [[ -n "$STALE_UNKNOWN" ]]; then
