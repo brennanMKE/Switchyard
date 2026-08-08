@@ -406,9 +406,51 @@ issues/\$ISSUE.md."
   fi
 fi
 
+# A pasted `@Test func` name that ALREADY EXISTS in the test module will not
+# compile: top-level test function names share the module namespace. The issue
+# has been advising planners of this in prose all night; #0043 proves prose is
+# not enough. It was planned against a scratch copy of an older `main`, #0042
+# landed two colliding names while it waited, and its pasted block could not
+# have compiled as written. The round renamed both correctly — but the issue's
+# own Expected behavior ("all eleven test functions named as pasted") was
+# unsatisfiable, and three mutation rows named a now-ambiguous test.
+#
+# This is mechanical, so it is a check rather than a lesson.
+CLASH=()
+for name in ${(f)"$(grep -oE '@Test[[:space:]]+func[[:space:]]+[A-Za-z_][A-Za-z0-9_]*' "$SPEC" 2>/dev/null | awk '{print $NF}' | sort -u)"}; do
+  [[ -n "$name" ]] || continue
+  # Present in the tree already, and NOT in a file this issue says it creates?
+  EXISTING=$(grep -rlE "@Test[[:space:]]+func[[:space:]]+${name}\\b" YardKit/Tests 2>/dev/null || true)
+  [[ -n "$EXISTING" ]] || continue
+  # If the issue names that same file as its own deliverable, it is a rewrite,
+  # not a clash.
+  OWN=0
+  # An array, not a string subscript: `${${(f)VAR}[1]}` indexes the first
+  # CHARACTER, so the clash message printed a bare "Y" instead of the path.
+  typeset -a HITS
+  HITS=(${(f)EXISTING})
+  for f in $HITS; do
+    grep -qF "$f" "$SPEC" && OWN=1
+  done
+  (( OWN )) || CLASH+=("$name -> $HITS[1]")
+done
+if (( ${#CLASH} )); then
+  fail "pastes @Test name(s) that already exist in YardKit/Tests" \
+"Top-level @Test function names share the module namespace, so the pasted block
+will not compile:
+
+  ${(F)CLASH}
+
+Rename in the issue before dispatching. #0043 hit this when a concurrent issue
+landed colliding names after its planning scratch was taken."
+else
+  pass "no pasted @Test name collides with the test module"
+fi
+
 if (( FAILED )); then
   print -u2 "preflight: FAILED — fix $FILE, commit the planning update, then dispatch."
   exit 9
 fi
+
 say "preflight: ok"
 exit 0
