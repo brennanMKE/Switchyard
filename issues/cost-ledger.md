@@ -139,7 +139,8 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-08-07 | #0131 | Fable planning pilot, Decision 6 verdict (F) | 157,109 | $2.51 |
 | 2026-08-07 | #0134 | Fable planning pilot, Decision 5 verdict + filed #0137 (F) | 194,573 | $3.11 |
 | 2026-08-07 | #0131 | Dispatch round 1 (accepted) | 56,305 | $0.45 |
-| | | **Total measured** | **8,280,510** | **$83.52** |
+| 2026-08-07 | #0130 | Dispatch round 1 (accepted) | 57,397 | $0.46 |
+| | | **Total measured** | **8,337,907** | **$83.98** |
 
 ## What this total does and does not cover
 

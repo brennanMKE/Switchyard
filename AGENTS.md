@@ -80,8 +80,15 @@ Could not test the reftable variant -- the fixture helper does not build one.
 MD
 ```
 
-**The first line becomes the commit subject**, so make it **short and imperative** — under about
-sixty characters, like a commit subject, not a summary sentence. #0129 round 2 wrote a full sentence
+**The first line becomes the commit subject. Write it as a commit subject:**
+
+- **Imperative mood** — `Add`, not `Added`, not `Adding`.
+- **Under 60 characters.** Longer is truncated with an ellipsis and reads badly.
+- **No trailing period.**
+- **Not a summary sentence.** The detail goes in the body, which is everything after line one.
+
+Two consecutive rounds wrote a past-tense summary here and both subjects truncated mid-thought, so
+this is spelled out rather than left to judgement. #0129 round 2 wrote a full sentence
 and it was truncated mid-word. `Add Encodable conformance to WhereAmI` is right; *"Added the Encodable
 conformance to WhereAmI with a private CodingKeys enum and three wire tests"* is not. Everything after
 the first line is the body, and that is where the detail belongs. Say what you changed, what you ran, what it printed, and what
