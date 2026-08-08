@@ -136,7 +136,8 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-08-07 | #0129 | Dispatch round 1 FAILED — no anthropic provider (0 model tokens) | 43,819 | $0.35 |
 | 2026-08-07 | #0130 | Fable planning pilot for the wire-encoding family (F) | 125,631 | $2.01 |
 | 2026-08-07 | #0129 | Dispatch round 2 on Ornith (accepted) | 73,228 | $0.59 |
-| | | **Total measured** | **7,872,523** | **$77.45** |
+| 2026-08-07 | #0131 | Fable planning pilot, Decision 6 verdict (F) | 157,109 | $2.51 |
+| | | **Total measured** | **8,029,632** | **$79.96** |
 
 ## What this total does and does not cover
 
