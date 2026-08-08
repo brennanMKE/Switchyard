@@ -99,3 +99,16 @@ public enum WorktreeRepair {
     }
 }
 
+// MARK: - Wire encoding (#0135)
+
+/// `WorktreeRepair.Repaired` is a `schemaVersion: 1` payload component:
+/// `run(repositoryPath:atPaths:)` returns `[Repaired]`, which rides as a JSON
+/// array in `result`. Plain-stdlib `Encodable` — the engine still imports
+/// nothing. (`WorktreeRepair.Error` is thrown, not a payload member, and gets
+/// no conformance — error-envelope mapping is an M3 registration concern.)
+extension WorktreeRepair.Repaired: Encodable {
+    /// Stable wire keys, identical to the member names; no raw values.
+    private enum CodingKeys: String, CodingKey {
+        case reason, path
+    }
+}

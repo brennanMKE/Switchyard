@@ -175,3 +175,23 @@ extension WorktreePrune.Report {
     var isPrunable: Bool { type == .prunable }
     var isAbandonedSession: Bool { type == .abandonedSession }
 }
+
+// MARK: - Wire encoding (#0135)
+
+/// String-raw enum: encodes as its raw value, a single JSON string (#0129
+/// Decision 5) — here the raw values are the case names themselves.
+extension WorktreePrune.Report.Reportable: Encodable {}
+
+/// `WorktreePrune.Report` is a `schemaVersion: 1` payload component:
+/// `report(from:)` returns `[Report]`, which rides as a JSON array in
+/// `result`. Plain-stdlib `Encodable` — the engine still imports nothing.
+extension WorktreePrune.Report: Encodable {
+    /// Stable wire keys, identical to the stored-member names; no raw values.
+    /// The computed `description` is not encoded (#0129 Decision 7).
+    /// `removable` IS stored (derived once in `init`) and rides the wire —
+    /// it is the field an agent branches on to know whether `--prune` would
+    /// reap the entry.
+    private enum CodingKeys: String, CodingKey {
+        case path, type, reason, lockReason, removable
+    }
+}
