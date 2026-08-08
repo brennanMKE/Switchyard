@@ -36,6 +36,26 @@ POLL=10
 QUIET_LIMIT=${QUIET_LIMIT:-450}   # this issue's own output silent this long = over
 PATTERN="dispatch-issue.sh ${ISSUE}"
 
+# WHERE THE ROUND'S OUTPUT ACTUALLY IS. `dispatch-issue.sh` runs in the issue's
+# worktree and writes `.switchyard-runs/` THERE. This script previously globbed
+# that path relative to the caller's cwd, so calling it from the primary checkout
+# — which is the natural thing to do, and what the dispatcher prompt said —
+# found no files at all, reported `silent for 999999s`, and after the 180s
+# start-up grace declared a round finished that ran for another 105 seconds.
+# #0033's dispatcher caught it only by falling back to the live opencode PID;
+# trusting it would have meant reviewing an empty worktree and calling the round
+# a failure.
+# Pick the directory that actually holds THIS ISSUE's files, not merely the
+# first directory that exists. The primary checkout has its own
+# `.switchyard-runs` full of other issues' rounds, so an existence test alone
+# still resolves to the wrong place and reproduces the original bug.
+RUNS_DIR=".switchyard-runs"
+for candidate in ".switchyard-runs" "${0:A:h:h:h}/switchyard-${ISSUE}/.switchyard-runs"; do
+  typeset -a probe
+  probe=( ${candidate}/${ISSUE}-round*(N) )
+  (( ${#probe} )) && { RUNS_DIR="$candidate"; break }
+done
+
 # `pgrep -f` alone is not a reliable liveness test, and this cost two dispatchers
 # more than an hour each on 2026-08-07 (#0019 and #0016). When the round is
 # started as a background tool call, a wrapper process keeps the whole command
@@ -77,7 +97,7 @@ running_by_pattern() { pgrep -f "$PATTERN" >/dev/null 2>&1 }
 # even begun.
 done_file() {
   local -a f
-  f=( .switchyard-runs/${ISSUE}-round*.done(Nom) )
+  f=( ${RUNS_DIR}/${ISSUE}-round*.done(Nom) )
   (( ${#f} )) && print -r -- "${f[1]}"
 }
 
@@ -85,7 +105,7 @@ done_file() {
 # seconds. 999999 when neither exists yet.
 output_age() {
   local -a files
-  files=( .switchyard-runs/${ISSUE}-round*.log(N) .switchyard-runs/${ISSUE}-round*-suite.txt(N) )
+  files=( ${RUNS_DIR}/${ISSUE}-round*.log(N) ${RUNS_DIR}/${ISSUE}-round*-suite.txt(N) )
   (( ${#files} )) || { print 999999; return }
   local newest=0 m
   for f in $files; do
@@ -104,10 +124,22 @@ running() {
   running_by_pattern || return 1
   local age; age=$(output_age)
   if (( age == 999999 )); then
-    # No output yet. The round is still starting up — give it a grace window
-    # rather than declaring a just-launched dispatch dead.
+    # No output found. Two very different situations share this symptom, and
+    # conflating them is what produced the false completion on #0033:
+    #
+    #   (a) the round has not written anything yet — genuinely starting up;
+    #   (b) we are looking in the wrong directory, or the files were removed.
+    #
+    # In case (b) a live round is invisible to us. Since `running_by_pattern`
+    # already told us a matching process EXISTS, absence of output is evidence
+    # about our search path, not about the round. Never conclude "finished"
+    # from it — keep waiting and say why. Only the `.done` record, checked
+    # above, may end the wait when a process is still matching.
     (( SECONDS < 180 )) && return 0
-    return 1
+    print -u2 "await: #$ISSUE — a matching process is alive but NO output was found in
+       '$RUNS_DIR'. That is a search-path problem, not a finished round.
+       Still waiting. Run this script from the issue's worktree if it persists."
+    return 0
   fi
   (( age < QUIET_LIMIT )) && return 0
   return 1
