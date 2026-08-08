@@ -170,6 +170,22 @@ An issue is ready when an implementer could follow it without a judgement call. 
 The counter-risk is real and has cost rounds: **a code sample written from memory propagates silently**
 (#0093, #0114). Everything pasted into an issue must have been run, and the issue must say so.
 
+### A planner commits early and refines in place
+
+**Commit the issue file as soon as it is structurally complete, then keep editing it.** Do not hold
+the finished artifact in context until every mutation has been run and commit once at the end.
+
+A dispatch externalises its state continuously — `dispatch-issue.sh` commits each round to the branch
+and writes its `.done` record from an `EXIT` trap — so a round killed at any point leaves something
+readable behind. A planning pass that commits only at the end has no such property, and the
+difference is not theoretical: an API session limit killed a dispatcher and two planners
+simultaneously on 2026-08-08. The dispatch resumed from its round commit with nothing lost; both
+planners lost the entire pass, including scratch trees whose code had already been compiled and
+mutation-tested.
+
+The measurements are the expensive part and they are the last thing produced, so they are exactly
+what a late commit puts at risk. Commit the skeleton, then commit again as each block is verified.
+
 ### The `swift-guidance` skill is used in all three roles
 
 `~/.claude/skills/swift-guidance` encodes Brennan's expectations for Swift code and project
