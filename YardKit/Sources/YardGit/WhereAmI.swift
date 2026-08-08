@@ -104,6 +104,26 @@ public struct WhereAmI: Sendable, Equatable {
     }
 }
 
+// MARK: - Wire encoding (#0129)
+
+/// `WhereAmI` is a `schemaVersion: 1` payload: it encodes through `YardKit`'s
+/// `Envelope` via `EncodableResult`, which requires `Encodable & Sendable`.
+/// The conformance lives here, in the engine, as plain-stdlib `Encodable` —
+/// the engine still imports nothing (the arrow `YardKit -/-> YardGit` is
+/// asserted by `LayeringTests` in both directions).
+extension WhereAmI: Encodable {
+    /// The stable wire keys. Identical to the member names on purpose: the
+    /// enum exists so a member rename becomes a compile error here instead of
+    /// a silent wire change. No case carries a raw value — the case name IS
+    /// the wire key, and `WhereAmIWireTests` pins the encoded bytes.
+    private enum CodingKeys: String, CodingKey {
+        case branch, upstream, ahead, behind
+        case isMidRebase, isMidMerge, isMidCherryPick
+        case stashCount, untrackedCount, unstagedCount, stagedCount
+        case hasConflicts, conflictCount, headOID, rawHead
+    }
+}
+
 /// Resolves every piece of "where am I" state for a repository rooted at `path`.
 ///
 /// Shells out to `git` for each field, using `WorktreeContext` and the

@@ -55,6 +55,16 @@ let package = Package(
             dependencies: ["YardUI"],
             path: "Tests/YardUITests"
         ),
+        // Wire-shape tests: engine payloads encoding through YardKit's
+        // envelope (#0129). The one test target that depends on both sides of
+        // the boundary, on purpose. Imports are NOT @testable: the wire is a
+        // public-caller contract, and @testable would mask a conformance that
+        // silently dropped to internal (the #0116 failure class).
+        .testTarget(
+            name: "YardWireTests",
+            dependencies: ["YardGit", "YardKit"],
+            path: "Tests/YardWireTests"
+        ),
         // Tests in this target import YardGit WITHOUT @testable so that any
         // member which silently drops back to internal is caught at compile-time
         // rather than passing in @testable-masked code. If this target doesn't
