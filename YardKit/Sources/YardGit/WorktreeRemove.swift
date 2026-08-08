@@ -283,3 +283,12 @@ extension WorktreeRemoveError: Encodable {
     }
 }
 
+// MARK: - §6 exit class (#0141)
+
+/// Every refusal here is a repository-state failure — guide §6 code 6.
+/// `unclean` is dirty files, not unresolved conflicts, so it is a 6 and not
+/// an 8; 8 is reserved for operations blocked on an unmerged index (M2).
+extension WorktreeRemoveError: ExitClassCarrying {
+    public var exitClass: ExitClass { .repositoryError }
+}
+

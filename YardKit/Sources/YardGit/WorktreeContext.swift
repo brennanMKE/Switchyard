@@ -211,3 +211,11 @@ public struct WorktreeContext: Sendable, Equatable {
         }
     }
 }
+
+// MARK: - §6 exit class (#0141)
+
+/// Both cases are repository-state failures — the path is not a repository,
+/// or git could not resolve a repo-relative path — guide §6 code 6.
+extension WorktreeContext.Error: ExitClassCarrying {
+    public var exitClass: ExitClass { .repositoryError }
+}
