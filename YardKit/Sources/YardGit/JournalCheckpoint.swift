@@ -54,40 +54,72 @@ public enum JournalCheckpoint {
         git: GitProcess = GitProcess()
     ) throws -> JournalAnchor.Entry {
         try JournalLock(context: context).withLock(timeout: lockTimeout) {
-            let base = context.topLevel ?? context.gitDir
-            let snapshot = try RefSnapshot.capture(in: context, git: git)
-
-            let hashed = try git.run(
-                ["hash-object", "-w", "--stdin"],
-                workingDirectory: base,
-                standardInput: snapshot.serialized())
-            guard let refsBlob = hashed.lines.first, !refsBlob.isEmpty else {
-                throw JournalAnchor.Error.malformedPlumbingOutput(
-                    command: "hash-object", line: "")
-            }
-
-            // The newest existing id makes same-millisecond writes — and a
-            // clock stepping backwards — still produce ascending ids.
-            let id = JournalEntryID.generate(
-                after: try JournalAnchor.list(in: context, git: git).last?.id)
-
-            let metadata = JournalEntryMetadata(
-                id: id,
+            try writeEntry(
+                capturing: RefSnapshot.capture(in: context, git: git),
                 operation: operation,
-                command: command,
                 label: label,
-                timestamp: Date(),
-                worktree: .init(name: context.worktreeName, path: base),
-                captured: .refsOnly,
+                command: command,
                 agent: agent,
-                traversal: traversal)
-
-            let contents = JournalAnchor.Contents(
-                metadataJSON: try metadata.serialized(),
-                refsBlob: refsBlob,
-                keepAlive: try keepAliveParents(of: snapshot, at: base, git: git))
-            return try JournalAnchor.write(contents, id: id, in: context, git: git)
+                traversal: traversal,
+                in: context,
+                git: git)
         }
+    }
+
+    /// Writes one entry recording `snapshot` as the captured state, assuming
+    /// the caller already holds the journal lock (#0032).
+    ///
+    /// The seam exists for the restore flow (#0168), which must write its
+    /// pre-restore entry inside its own lock and from the same capture its
+    /// guard ran against. It cannot call `checkpoint` for either half of
+    /// that: a nested `withLock` on the journal's lock file self-deadlocks
+    /// until its timeout — `flock(2)` denies a second exclusive lock taken
+    /// through a second descriptor even in the same process (measured on
+    /// macOS: `EWOULDBLOCK`) — and a second `RefSnapshot.capture` taken after
+    /// the guard's would let the entry describe a state the guard never
+    /// checked.
+    static func writeEntry(
+        capturing snapshot: RefSnapshot,
+        operation: String,
+        label: String? = nil,
+        command: String? = nil,
+        agent: JournalEntryMetadata.Agent? = nil,
+        traversal: JournalChain.Traversal? = nil,
+        in context: WorktreeContext,
+        git: GitProcess = GitProcess()
+    ) throws -> JournalAnchor.Entry {
+        let base = context.topLevel ?? context.gitDir
+
+        let hashed = try git.run(
+            ["hash-object", "-w", "--stdin"],
+            workingDirectory: base,
+            standardInput: snapshot.serialized())
+        guard let refsBlob = hashed.lines.first, !refsBlob.isEmpty else {
+            throw JournalAnchor.Error.malformedPlumbingOutput(
+                command: "hash-object", line: "")
+        }
+
+        // The newest existing id makes same-millisecond writes — and a
+        // clock stepping backwards — still produce ascending ids.
+        let id = JournalEntryID.generate(
+            after: try JournalAnchor.list(in: context, git: git).last?.id)
+
+        let metadata = JournalEntryMetadata(
+            id: id,
+            operation: operation,
+            command: command,
+            label: label,
+            timestamp: Date(),
+            worktree: .init(name: context.worktreeName, path: base),
+            captured: .refsOnly,
+            agent: agent,
+            traversal: traversal)
+
+        let contents = JournalAnchor.Contents(
+            metadataJSON: try metadata.serialized(),
+            refsBlob: refsBlob,
+            keepAlive: try keepAliveParents(of: snapshot, at: base, git: git))
+        return try JournalAnchor.write(contents, id: id, in: context, git: git)
     }
 
     /// The commit OIDs the snapshot commit must carry as parents so captured
