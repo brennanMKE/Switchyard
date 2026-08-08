@@ -303,16 +303,29 @@ SLOTS=$(lms ps 2>/dev/null | awk '/ornith/ {
 # either the reload has not happened yet or something re-loaded with the old
 # flag (opencode-ornith.sh does exactly that if re-run).
 EXPECTED_SLOTS=${EXPECTED_SLOTS:-4}
-if (( SLOTS != EXPECTED_SLOTS )); then
-  fail "LM Studio is loaded PARALLEL $SLOTS, expected $EXPECTED_SLOTS" \
-"The loaded instance does not match the intended concurrency. Changing it needs
-a reload, and a reload lands on top of any in-flight round -- #0029 round 1 died
-with 'Model unloaded' exactly this way.
+# Two different questions, and the first version conflated them:
+#
+#   Is the host SUFFICIENT?  SLOTS >= DISPATCH_CEILING. Hard -- dispatching more
+#                            rounds than there are slots queues them silently.
+#   Does it match INTENT?    SLOTS == EXPECTED_SLOTS. A warning. Drift is worth
+#                            knowing about, but it does not block work.
+#
+# Asserting equality blocked a dispatch when the host was at PARALLEL 2 and we
+# only ever run 1 round -- perfectly adequate, refused anyway. The host reverts
+# to 2 on its own repeatedly (a TTL unload followed by a JIT reload from a
+# stored default is the likely mechanism), so an equality check here would keep
+# stopping the queue for a difference that does not affect it.
+if (( SLOTS < DISPATCH_CEILING )); then
+  fail "LM Studio has $SLOTS slot(s); we dispatch $DISPATCH_CEILING at a time" \
+"Requests beyond the slot count queue silently -- no error, just latency
+indistinguishable from a slow round. Reload with at least $DISPATCH_CEILING:
 
   lms unload --all
-  lms load ornith-1.0-35b-mlx-oq8 --context-length 65536 --parallel $EXPECTED_SLOTS -y
-
-Then re-run preflight. See docs/lm-studio-concurrency.md."
+  lms load ornith-1.0-35b-mlx-oq8 --context-length 65536 --parallel $EXPECTED_SLOTS -y"
+elif (( SLOTS != EXPECTED_SLOTS )); then
+  warn "LM Studio is loaded PARALLEL $SLOTS, intent is $EXPECTED_SLOTS" \
+"Sufficient for our ceiling of $DISPATCH_CEILING, so not blocking. The host
+reverts on its own; reload it if you want the intended capacity back."
 else
   pass "LM Studio loaded PARALLEL $SLOTS as intended"
 fi
