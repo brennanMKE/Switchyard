@@ -148,6 +148,23 @@ would have produced.
    exercise the branch the mutation moved. **A mutation table asserting anything else is decoration.**
    This check sits first because it is the one that catches the failure this whole file is about.
 
+0b. **Does any mutation row kill the test that covers the issue's HEADLINE claim?** Not "is every
+    row applied and red" — check 0 already asks that, and #0166 passed it completely. Ask which
+    test proves the *thing the issue exists to establish*, then find the row that reddens it. If
+    no row does, the mutation evidence is decorating the periphery.
+
+    #0166's whole argument is that the undo cursor resolves **by order comparison, not adjacency**,
+    which is what lets it survive pruning holes. Its eight-row table was fully applied and fully
+    red — and **not one row touched `aCursorOnAPrunedEntryStillResolvesByOrder`**, because a pruned
+    id sits outside every comparison those rows perturb. The reviewer had to invent the mutation
+    (swap order comparison for index adjacency — precisely the design the issue argues against) to
+    show the test was load-bearing. It was. But the issue could not demonstrate that itself.
+
+    A mutation table is written by perturbing the code in front of you, so it drifts toward the
+    lines that are easy to perturb. The claim is in the *design*, and nothing forces a row to aim
+    at it. Write that row deliberately: state the wrong implementation the design rejects, then
+    mutate toward it.
+
 9. **Is there exactly one deliverable?** Not one theme — one file, one behaviour, one thing that is
    either done or not. If the Expected behavior names more than one new production file, it is more
    than one issue.
