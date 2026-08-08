@@ -147,6 +147,11 @@ So:
 - **Existing file, changing something in place** → the `edit` tool. That is what it is for.
 - **Never** `cat >` onto an existing file. There is no case where it is the right instrument.
 
+The `write` tool on an existing file is **not** covered by this rule and is fine. It fails
+atomically: a rejected call writes nothing, which is what #0014 hit — 188 rejections and an intact
+file. `cat >` fails *partially*, leaving a truncated file behind. The distinction is destructive-on-
+failure versus safe-on-failure, not shell versus tool.
+
 ## Rule 6 — Every scratch file goes in `build/`, inside the worktree.
 
 Your sandbox auto-rejects writes to `/tmp`, `/var/tmp`, and anything outside the working directory.
