@@ -54,8 +54,19 @@ t = open(path).read()
 # "exactly" is a delta being described, not a baseline being stated.
 ANCHOR = re.compile(
     r'(test-baseline\.txt[^0-9]{0,30}|main(?:[^0-9.]{0,20}(?:is|reported|suite is))[^0-9]{0,10})'
-    r'(\*{0,2})(?<!by \*\*)(?<!exactly )(?<!exactly \*\*)([0-9]{3,4})'
+    # NOT preceded by '#': `#0043` is an ISSUE REFERENCE, not a suite count, and
+    # the script rewrote one as `#761` in #0181 — mangling a cross-reference.
+    # NOT zero-padded for the same reason: suite counts are never `0761`.
+    r'(\*{0,2})(?<!by \*\*)(?<!exactly )(?<!exactly \*\*)(?<![#0-9])([1-9][0-9]{2,3})'
 )
+# KNOWN LIMITATION, shared with preflight check 4b: both look for the number
+# AFTER the `test-baseline.txt` mention. #0181 wrote "The suite on `main`
+# currently reads **737** tests (`docs/test-baseline.txt` is the anchor…)" —
+# baseline first, anchor second — so neither tool could see the stale 737, and
+# the anchor match landed on the following `#0043` instead. Guarded now against
+# rewriting the wrong token, but a baseline stated BEFORE the anchor still needs
+# a human. Planners are told to put the current baseline first in the sentence;
+# this is the cost of that instruction being followed too literally.
 found = list(ANCHOR.finditer(t))
 if not found:
     print("NOANCHOR"); raise SystemExit
