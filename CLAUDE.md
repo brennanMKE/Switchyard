@@ -545,8 +545,14 @@ invocation, and every path lookup goes through it. It exists from M1 for this re
   the objects become unreachable and ordinary maintenance reclaims them on its own schedule.
 - **The `reference-transaction` hook fires on the journal's own ref writes.** Set an environment
   marker in `switchyard` and have the hook skip its own transactions, or the journal records itself
-  recording itself. The hook must also return 0 immediately in the `preparing` and `prepared`
-  states — a non-zero exit there aborts the user's transaction. Do real work only on `committed`.
+  recording itself. **Do real work only on `committed`; return 0 immediately in every other state.**
+
+  The states git 2.50.1 actually emits are **`prepared`, `committed`, `aborted`** — measured, by
+  installing a hook that logs `$1` and running a real commit. There is **no `preparing` state**;
+  this file and the internals document both named one until 2026-08-07. A non-zero exit in
+  `prepared` aborts the user's transaction — also measured: `[ "$1" = prepared ] && exit 1` yields
+  `fatal: ref updates aborted by hook`, exit 128, and the ref is never created. Treat any state
+  that is not `committed` as do-nothing, so a future git that adds one cannot break a repository.
 - **`git write-tree` refuses an unmerged index.** When conflicts are present, snapshot the index
   file itself as a blob and restore it byte-for-byte. That is the one place where reading a git file
   directly is correct, because the file *is* the state.

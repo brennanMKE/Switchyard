@@ -210,7 +210,20 @@ and forward them to the app over XPC if it is attached.
 
 Two cautions:
 
-- <cite index="30-1">The hook's exit status is ignored except in the "preparing" and "prepared" states, where a non-zero exit causes the transaction to be aborted.</cite> So the handler must be fast and must never fail in those states. Do the real work on `committed`, return 0 immediately otherwise.
+- The hook's exit status is ignored **except in `prepared`**, where a non-zero exit aborts the
+  transaction. So the handler must be fast and must never fail there. Do the real work on
+  `committed`, return 0 immediately otherwise.
+
+  **Corrected 2026-08-07 by measurement.** The paragraph above, and the citation with it, named a
+  `preparing` state. git 2.50.1 emits **`prepared`, `committed`, `aborted`** and nothing else — a
+  hook logging `$1` through a real commit shows `prepared`, `committed`, and `aborted` (git emits a
+  routine zero→zero `AUTO_MERGE` transaction that aborts on every commit). The abort behaviour was
+  demonstrated rather than assumed: `[ "$1" = prepared ] && exit 1` gives `fatal: ref updates
+  aborted by hook`, exit 128, ref never created, on both `files` and `reftable` repositories.
+
+  The safe reading is unchanged and is what the handler should implement: **`committed` does the
+  work, everything else returns 0 immediately** — which is also robust to a future git adding a
+  state this document does not know about.
 - The hook runs on every ref update including the journal's own writes. Set an environment marker in `switchyard` and have the hook skip its own transactions, or the journal records itself recording itself.
 
 **`post-rewrite`** complements it with the mapping git will not give you any other way. <cite index="30-1">It is invoked by commands that rewrite commits, currently `git commit --amend` and `git rebase`, and receives on stdin a list of `<old-object-name> SP <new-object-name>` lines. For squash and fixup operations, all squashed commits are listed as rewritten to the squashed commit, so several lines may share the same new object name, and commits are listed in the order rebase processed them.</cite>
