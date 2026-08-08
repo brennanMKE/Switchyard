@@ -230,3 +230,56 @@ private func canonicalize(_ path: String) -> String {
     // `/private`, while the other resolves with `realpath(3)` and keeps it.
     WorktreeContext.canonicalize(path)
 }
+
+// MARK: - Wire encoding (#0137)
+
+/// `WorktreeRemoveResult` is a `schemaVersion: 1` payload: it encodes through
+/// `YardKit`'s `Envelope` via `EncodableResult` (`Encodable & Sendable`).
+/// Plain-stdlib `Encodable` — the engine still imports nothing.
+extension WorktreeRemoveResult: Encodable {
+    /// Stable wire keys, identical to the stored-member names; no raw values.
+    /// The computed `success` / `refusal` / `lockReleased` / `hadToForce` are
+    /// not encoded — the stored `lockedRelease` and `forced` are the wire
+    /// truth. `WorktreeRemoveWireTests` pins the bytes.
+    private enum CodingKeys: String, CodingKey {
+        case worktreePath, lockedRelease, forced, error
+    }
+}
+
+/// A structured refusal encodes as an object with a stable `code` plus
+/// `message` (= `description`), plus the case's associated values as named
+/// detail fields — an agent acting on the dirty paths must not have to parse
+/// them out of `message` prose. Hand-written because associated-value enums
+/// get no useful synthesis; `code` and `description` are reused, not restated.
+extension WorktreeRemoveError: Encodable {
+    /// Wire keys: `code` and `message` on every case, then per-case detail.
+    /// `unknownFailure`'s associated `code:` (the git exit status) rides as
+    /// `exitCode` — the `code` key is taken by the stable case string.
+    private enum CodingKeys: String, CodingKey {
+        case code, message
+        case paths, path, inside, target, detail
+        case exitCode, stderr
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(code, forKey: .code)
+        try container.encode(description, forKey: .message)
+        switch self {
+        case let .unclean(paths):
+            try container.encode(paths, forKey: .paths)
+        case let .unknown(path):
+            try container.encode(path, forKey: .path)
+        case let .nested(inside, target):
+            try container.encode(inside, forKey: .inside)
+            try container.encode(target, forKey: .target)
+        case let .unknownFailure(exitCode, stderr):
+            try container.encode(exitCode, forKey: .exitCode)
+            try container.encode(stderr, forKey: .stderr)
+        case let .lockFailed(path, detail):
+            try container.encode(path, forKey: .path)
+            try container.encode(detail, forKey: .detail)
+        }
+    }
+}
+
