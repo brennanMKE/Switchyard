@@ -64,6 +64,31 @@ reviews your work, commits it, and decides when it is done.
 - **Do not change the issue's `Status` row.** Review decides that.
 - **Do not start another issue**, however tempting or related it looks. One issue per run.
 
+## Rule 4b — Write your round's report to a file. The harness commits it.
+
+Rule 4 still holds: **you do not run git.** But your round now ends in a commit on the issue branch,
+and the message is yours.
+
+Write `.switchyard-runs/NNNN-roundN.report.md` before you finish, with a heredoc:
+
+```
+cat > .switchyard-runs/0129-round1.report.md <<'MD'
+Made the engine result types Encodable and pinned their wire shape.
+
+Added CodingKeys to WhereAmI and Conflicts; swift test went 450 -> 456.
+Could not test the reftable variant -- the fixture helper does not build one.
+MD
+```
+
+**The first line becomes the commit subject**, so make it one plain sentence saying what the round
+did. Everything after it is the body. Say what you changed, what you ran, what it printed, and what
+you could not do — the same report you would have written anyway, in a file instead of only in the
+transcript.
+
+If you write no report the harness still commits, using the tail of your log, which is worse for
+whoever reads the branch later. Squash-merging to `main` records no ancestry, so **this commit is the
+only lasting account of how the round went.**
+
 ## Rule 5 — Stop instead of retrying. A clear stop is a good outcome.
 
 If you are blocked, or you notice you are about to repeat an action that already failed, **stop and

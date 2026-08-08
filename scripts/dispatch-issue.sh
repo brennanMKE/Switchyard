@@ -174,6 +174,7 @@ write_done() {
     print -r -- "  \"changedPaths\": ${changed:-0},"
     print -r -- "  \"baseSha\": \"$BASE_SHA\","
     print -r -- "  \"model\": \"${MODEL:-unknown}\","
+    print -r -- "  \"roundCommit\": \"${COMMIT_SHA:-}\","
     print -r -- "  \"suiteLine\": \"${SUITE_LINE//\"/\\\"}\""
     print -r -- "}"
   } > "$DONE"
@@ -231,8 +232,14 @@ Rules for this run, which override anything in the issue that disagrees:
      file the issue did not name, stop and ask whether you already have what
      you need.
 
-Finish with a short report: what you changed, what you ran, what it printed,
-and anything you could not do.
+Finish by writing your report to \`$LOG_DIR/$ISSUE-round$ROUND.report.md\`:
+what you changed, what you ran, what it printed, and anything you could not do.
+Write it with a heredoc (\`cat > path <<'MD' ... MD\`). Its first line becomes
+the subject of this round's commit, so make that line a single plain sentence
+saying what the round did. The harness makes the commit; you must still not run
+git yourself.
+
+Then say the same thing briefly in your final message.
 EOF
 
 print "dispatch: issue $ISSUE, round $ROUND/$MAX_ROUNDS, model ${MODEL:-unknown} (${MODEL_CHOICE}), timeout ${TIMEOUT}s, stall ${STALL}s"
@@ -354,3 +361,71 @@ fi
 git status --short
 print ""
 git diff --stat
+
+# --- The round commit -------------------------------------------------------
+#
+# One commit per round on the issue branch, made by the harness rather than by
+# the model. Decided by Brennan 2026-08-07.
+#
+# Why the harness and not the model: a commit is the clearest possible "this
+# round is done", and squash-merging to `main` records no ancestry, so the
+# branch is the only surviving account of how the work went. But letting the
+# model run git re-opens the hole `AGENTS.md` Rule 4 exists to close — #0011
+# round 1c edited CLAUDE.md mid-round, and a `git add -A` would sweep a round's
+# own scratch files (#0023's mutation run left two behind). Staging here, by
+# explicit path, makes the scope guarantee structural instead of a rule the
+# model has to remember.
+#
+# The message body is the model's own words: it is asked to write
+# `<LOG_DIR>/NNNN-roundN.report.md`, and the last 40 log lines stand in when it
+# does not. A round that produced nothing never reaches here — that path exits 7
+# above, and its emptiness stays a loud failure rather than becoming a commit.
+REPORT="$LOG_DIR/$ISSUE-round$ROUND.report.md"
+COMMIT_SHA=""
+{
+  # Stage exactly what git says changed, by path, never -A. -z because a path
+  # can contain anything, and this project counts NUL-terminated fields
+  # everywhere else for the same reason.
+  #
+  # `git ls-files`, not `git status --porcelain`: porcelain prefixes each entry
+  # with a status code that has to be stripped, and the obvious way to strip it
+  # -- `sed -z` -- does not exist in BSD sed, which is what this Mac has. The
+  # first version of this block used it, staged nothing, and made no commit
+  # while still exiting 0. `ls-files` emits bare NUL-separated paths, so there
+  # is nothing to strip and nothing to get wrong.
+  typeset -a CHANGED
+  CHANGED=("${(0)$(git ls-files -z --modified --others --deleted --exclude-standard)}")
+  CHANGED=(${CHANGED:#})
+  if (( ${#CHANGED} )); then
+    git add -- "${CHANGED[@]}" 2>/dev/null || true
+  fi
+  if git diff --cached --quiet 2>/dev/null; then
+    print "dispatch: nothing staged — no round commit made."
+  else
+    SUMMARY="#$ISSUE round $ROUND"
+    if [[ -f "$REPORT" ]]; then
+      FIRST=$(grep -m1 -v '^[[:space:]]*$' "$REPORT" | sed 's/^#\{1,6\} *//' | cut -c1-64)
+      [[ -n "$FIRST" ]] && SUMMARY="#$ISSUE round $ROUND: $FIRST"
+    fi
+    {
+      print -r -- "$SUMMARY"
+      print -r -- ""
+      if [[ -f "$REPORT" ]]; then
+        cat "$REPORT"
+      else
+        print -r -- "The round wrote no $REPORT. Last 40 lines of its log:"
+        print -r -- ""
+        tail -40 "$LOG" | sed 's/^/    /'
+      fi
+      print -r -- ""
+      print -r -- "Round commit made by scripts/dispatch-issue.sh, not by the model."
+      print -r -- "Not reviewed. Suite: ${SUITE_LINE:-not captured}"
+    } | git commit -q -F - 2>/dev/null && COMMIT_SHA=$(git rev-parse --short HEAD)
+    if [[ -n "$COMMIT_SHA" ]]; then
+      print "\ndispatch: round committed as $COMMIT_SHA on $(git rev-parse --abbrev-ref HEAD)"
+      print "dispatch: NOT reviewed and NOT merged — that is the reviewer's job."
+    else
+      print -u2 "\ndispatch: round commit FAILED; the work is staged but uncommitted."
+    fi
+  fi
+} || true
