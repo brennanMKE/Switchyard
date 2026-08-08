@@ -152,7 +152,7 @@ public enum JournalRestore {
                     + "which no longer exists"
             case let .unrestorableObjects(missing):
                 let details = missing
-                    .map { "\($0.ref) -> \($0.oid)" }
+                    .map { "\($0.ref) → \($0.oid)" }
                     .joined(separator: "; ")
                 return "cannot restore: \(missing.count) recorded object(s) no longer "
                     + "exist in the repository (reclaimed by maintenance after their "
