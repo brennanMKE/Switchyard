@@ -133,7 +133,8 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-08-07 | #0026 | Dispatch round 1 (accepted) | 64,950 | $0.52 |
 | 2026-08-07 | #0128 | Dispatch round 1 (accepted) | 46,991 | $0.38 |
 | 2026-08-07 | #0129 | Fable planning pass + filed #0130-#0136 (F) | 181,156 | $2.90 |
-| | | **Total measured** | **7,629,845** | **$74.50** |
+| 2026-08-07 | #0129 | Dispatch round 1 FAILED — no anthropic provider (0 model tokens) | 43,819 | $0.35 |
+| | | **Total measured** | **7,673,664** | **$74.85** |
 
 ## What this total does and does not cover
 
