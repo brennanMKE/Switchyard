@@ -146,7 +146,8 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-08-07 | #0133 | Dispatch round 1 (accepted) | 62,430 | $0.50 |
 | 2026-08-07 | #0136 | Fable planning pass, signing payloads (F) | 160,045 | $2.56 |
 | 2026-08-07 | #0137 | Dispatch round 1 (accepted) | 63,018 | $0.50 |
-| | | **Total measured** | **9,051,368** | **$93.90** |
+| 2026-08-07 | #0134 | Dispatch round 1 (accepted; heredoc thrash, 1.8M local tokens) | 61,778 | $0.49 |
+| | | **Total measured** | **9,113,146** | **$94.39** |
 
 ## What this total does and does not cover
 
