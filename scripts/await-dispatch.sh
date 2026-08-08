@@ -33,12 +33,71 @@ fi
 
 BUDGET=${BUDGET:-540}     # seconds per call; the foreground tool limit is 600
 POLL=10
+QUIET_LIMIT=${QUIET_LIMIT:-450}   # this issue's own output silent this long = over
 PATTERN="dispatch-issue.sh ${ISSUE}"
 
-running() { pgrep -f "$PATTERN" >/dev/null 2>&1 }
+# `pgrep -f` alone is not a reliable liveness test, and this cost two dispatchers
+# more than an hour each on 2026-08-07 (#0019 and #0016). When the round is
+# started as a background tool call, a wrapper process keeps the whole command
+# string — including "dispatch-issue.sh 0016" — in its argv after the real round
+# has exited. `running()` then never goes false and the agent loops forever on a
+# round that finished, while its worktree sits ready for review.
+#
+# So liveness needs a second, independent signal, and it must be **this issue's**
+# signal. A global `pgrep -f 'opencode run'` will not do: a concurrent round on
+# another issue keeps it true, which is precisely the cross-issue coupling this
+# script was written to avoid — #0100 once waited nine minutes on #0099. That
+# mistake was made again while fixing this and caught by a control.
+#
+# The per-issue signal is the round's own output. `dispatch-issue.sh` writes
+# `.switchyard-runs/NNNN-roundN.log` while the model runs and
+# `NNNN-roundN-suite.txt` while it captures the suite afterwards. If neither has
+# been touched for QUIET_LIMIT seconds, the round is over — and that is safe to
+# assert because the harness's own stall watchdog kills any round whose log goes
+# silent for 420s, so a live round cannot be quieter than that and survive.
+
+running_by_pattern() { pgrep -f "$PATTERN" >/dev/null 2>&1 }
+
+# Newest mtime across this issue's round log and suite capture, as an age in
+# seconds. 999999 when neither exists yet.
+output_age() {
+  local -a files
+  files=( .switchyard-runs/${ISSUE}-round*.log(N) .switchyard-runs/${ISSUE}-round*-suite.txt(N) )
+  (( ${#files} )) || { print 999999; return }
+  local newest=0 m
+  for f in $files; do
+    m=$(stat -f %m "$f" 2>/dev/null) || continue
+    (( m > newest )) && newest=$m
+  done
+  (( newest )) || { print 999999; return }
+  print $(( $(date +%s) - newest ))
+}
+
+# Returns 0 while the round still looks alive.
+running() {
+  running_by_pattern || return 1
+  local age; age=$(output_age)
+  if (( age == 999999 )); then
+    # No output yet. The round is still starting up — give it a grace window
+    # rather than declaring a just-launched dispatch dead.
+    (( SECONDS < 180 )) && return 0
+    return 1
+  fi
+  (( age < QUIET_LIMIT )) && return 0
+  return 1
+}
+
+finished_note() {
+  if running_by_pattern; then
+    print "await: #$ISSUE — this issue's own output has been silent for $(output_age)s."
+    print "       The dispatch process pattern still matches, but that is a"
+    print "       stale wrapper argv, not a live round. Treating it as finished."
+  fi
+}
 
 if ! running; then
   print "await: no dispatch running for #$ISSUE — it has finished (or never started)."
+  finished_note
   exit 0
 fi
 
@@ -49,9 +108,11 @@ while (( elapsed < BUDGET )); do
   elapsed=$(( elapsed + POLL ))
   if ! running; then
     print "await: #$ISSUE finished after ~${elapsed}s of this call. Verify now."
+    finished_note
     exit 0
   fi
 done
 
 print "await: #$ISSUE still running after ${BUDGET}s. CALL THIS SCRIPT AGAIN — do not report yet."
+print "await: (this issue's output has been idle $(output_age)s; limit ${QUIET_LIMIT}s)"
 exit 75
