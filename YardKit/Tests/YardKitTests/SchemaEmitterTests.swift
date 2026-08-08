@@ -76,6 +76,7 @@ struct SchemaEmitterTests {
             "summary": Self.sampleSpec.summary,
             "schemaVersion": EnvelopeSchema.v1.rawValue,
             "flags": [],
+            "envelope": [String: Any](),
             "exitCodes": [],
             "command": Self.sampleSpec.name,
             "schemaName": Self.sampleSpec.schemaName,
@@ -153,6 +154,7 @@ struct SchemaEmitterTests {
             "summary": Self.sampleSpec.summary,
             "schemaVersion": EnvelopeSchema.v1.rawValue,
             "flags": [],
+            "envelope": [String: Any](),
             "exitCodes": [],
             "command": Self.sampleSpec.name,
             "schemaName": Self.sampleSpec.schemaName,
@@ -344,7 +346,7 @@ struct SchemaEmitterTests {
 
         // Verify keys are sorted at top level.
         let keys = Array(decoded.keys).sorted()
-        #expect(keys == ["command", "exitCodes", "flags", "schemaName", "schemaVersion", "summary"])
+        #expect(keys == ["command", "envelope", "exitCodes", "flags", "schemaName", "schemaVersion", "summary"])
 
         // Verify top-level fields.
         #expect(decoded["command"] as? String == "diff")
