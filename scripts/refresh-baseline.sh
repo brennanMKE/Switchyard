@@ -43,9 +43,18 @@ t = open(path).read()
 # preflight kept failing on the second, which reads as the script not working.
 # The check scans them all, so they must all be current or none of them may use
 # this phrasing.
+# THREE-to-four digits, never two. preflight's own reader accepts {2,4}, but it
+# only READS; this REWRITES, so it must be strictly more conservative. #0040
+# phrased its criterion as "the count in `docs/test-baseline.txt`, by **exactly
+# 13**" — the anchor matched, the delta was two digits, and the script rewrote
+# the DELTA as 724, destroying the round's actual criterion. Suite counts here
+# are in the hundreds; deltas are one or two digits. That is the discriminator.
+#
+# The negative lookbehind is the second guard: a number introduced by "by" or
+# "exactly" is a delta being described, not a baseline being stated.
 ANCHOR = re.compile(
     r'(test-baseline\.txt[^0-9]{0,30}|main(?:[^0-9.]{0,20}(?:is|reported|suite is))[^0-9]{0,10})'
-    r'(\*{0,2})([0-9]{2,4})'
+    r'(\*{0,2})(?<!by \*\*)(?<!exactly )(?<!exactly \*\*)([0-9]{3,4})'
 )
 found = list(ANCHOR.finditer(t))
 if not found:
