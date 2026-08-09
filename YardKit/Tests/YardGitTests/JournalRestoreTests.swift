@@ -377,6 +377,58 @@ struct JournalRestoreTests {
         #expect(try RefSnapshot.capture(in: ctx) == stateBefore)
     }
 
+    // MARK: - The pruned-cursor degradation
+
+    /// #0179 — the cursor points at an entry that pruning has since deleted.
+    /// With the `entries.contains(where:)` guard, restore should skip the
+    /// cross-tool check entirely rather than refuse against an unfetchable
+    /// snapshot. No test existed before this issue; mutation row 3 is the kill.
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func prunedCursorSkipsTheGuard(format: FixtureRepository.RefFormat) throws {
+        var repo = try FixtureRepository.linear(refFormat: format)
+        defer { repo.destroy() }
+        let ctx = try context(of: repo)
+
+        // Two entries in the journal, with an undo on top that drives the
+        // cursor to c0 — then c0's anchor is removed from disk so it no
+        // longer appears in `JournalAnchor.list`, and a third tool moves
+        // refs behind the journal's back. Without the degradation clause,
+        // restore would refuse with repositoryChanged against the now-
+        // missing snapshot; with it, restore proceeds.
+        let c0 = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+        // Advance the working state so a redo-style undo has something to
+        // restore from. Capture present as an explicit undo entry: a
+        // traversal whose resultingPosition is c0.id.
+        let undone = try JournalRestore.restore(
+            c0.id, operation: "undo",
+            traversal: .init(restored: c0.id, resultingPosition: c0.id), in: ctx)
+        let undoneId = undone.checkpoint.id
+
+        // Stand the cursor on c0's id by driving a traversal that targets it.
+        try git.run(["update-ref", "refs/heads/main", try #require(repo.oids["b"])],
+                    workingDirectory: repo.url.path)
+
+        // Drop c0's anchor from disk — JournalAnchor.list will no longer
+        // return it, but the traversal entry's resultingPosition still
+        // names c0.id, driving the cursor to a missing id. The guard then
+        // skips instead of fetching a snapshot that does not exist.
+        try git.run(["update-ref", "-d", JournalAnchor.refName(for: c0.id)],
+                    workingDirectory: repo.url.path)
+
+        let countBefore = try JournalAnchor.list(in: ctx).count
+        #expect(try !JournalAnchor.list(in: ctx).map(\.id).contains(c0.id))
+
+        // Restore the traversal entry itself: it names a present anchor and
+        // its snapshot is fetchable; only the cross-tool check should
+        // degrade. The rogue ref move above would normally be a divergence,
+        // but the pruned-cursor path runs no diff at all.
+        try JournalRestore.restore(undoneId, in: ctx)
+
+        // The journal was extended (redo saved a new entry on top of this
+        // restore), but nothing went to the side: only the expected anchors.
+        #expect(try JournalAnchor.list(in: ctx).count > countBefore)
+    }
+
     // MARK: - The lock wraps the whole flow
 
     /// Single format on purpose: the lock is `flock(2)` on a file under the
