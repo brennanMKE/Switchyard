@@ -111,6 +111,34 @@ what makes it usable for snapshotting.
 > untracked files on restore without saying so, which is exactly the silent data-loss failure this
 > section opens by warning about.
 
+> **Second correction, verified 2026-08-08 on git 2.50.1 while planning #0152 — and this one
+> retires the mechanism, not just a flag.** `git stash create` **cannot capture a conflicted
+> worktree.** It prints the unmerged stage lines plus `Cannot save the current index state` and
+> exits **1**. On an intent-to-add entry it fails differently: `Entry 'ita.txt' not uptodate. Cannot
+> merge.` On a clean or untracked-only worktree it prints nothing at exit 0.
+>
+> The conflicted case is precisely the state M2's exit criterion names — *"undo round-trips every
+> mutating command, **including with an unmerged index**"* — so the mechanism this section
+> prescribed cannot do the job it exists for. `git stash apply` on a replacement artifact is no help
+> either: it answers `fatal: '…' is not a stash-like commit`, exit 128, and no applyable commit is
+> constructible for the unmerged case, because its index-commit parent is exactly what `write-tree`
+> refuses.
+>
+> **What `WorktreeSnapshot` (#0152, merged) actually does**: copy the index to a temp file, then
+> `add -u` + `write-tree` + `commit-tree` against **the copy** — the copy is load-bearing, because
+> `add -u` against the *real* conflicted index silently resolves the conflict, three unmerged
+> entries becoming zero at exit 0 — plus a separate untracked tree from
+> `ls-files --others --exclude-standard` through a temporary `GIT_INDEX_FILE`. That also captures
+> intent-to-add file contents, which the paragraph above leaves open.
+>
+> The wire value in `JournalEntryMetadata` is still `"stash"`. It now names **the artifact** — a
+> stash-form worktree-state commit — rather than the command that builds it. #0155's pinned
+> vocabulary is unchanged.
+>
+> **Read `YardKit/Sources/YardGit/WorktreeSnapshot.swift` rather than this paragraph.** It is
+> authoritative; the text above is kept as the record of what was originally designed. Restore is
+> its `restore`, not `git stash apply`.
+
 Restore with `git stash apply <oid>`, or `git read-tree` plus `git checkout-index` for a harder
 reset — plus an explicit restore of the untracked tree.
 
