@@ -30,57 +30,36 @@ cd "$REPO_ROOT"
 LEDGER="issues/cost-ledger.md"
 [[ -f "$LEDGER" ]] || { print -u2 "update-cost-ledger: $LEDGER not found"; exit 1 }
 
-TALLY=$(./scripts/ornith-tally.sh) || {
-  print -u2 "update-cost-ledger: ornith-tally.sh failed; leaving the ledger untouched."
-  exit 1
-}
+# The Ornith figures live in issues/ornith-tally.md, which ornith-tally.sh
+# regenerates in full. Refresh it rather than mirroring anything into the ledger.
+./scripts/ornith-tally.sh --write >/dev/null
 
-python3 - "$LEDGER" "$TALLY" <<'PY'
+python3 - "$LEDGER" <<'PY'
 import re, sys, pathlib
-ledger, tally = pathlib.Path(sys.argv[1]), sys.argv[2]
-
-m = re.search(r"^TOTAL\s+(\d+)\s+([\d,]+)\s+([\d,]+)\s+([\d,]+)\s+\$([\d,.]+)", tally, re.M)
-if not m:
-    print("update-cost-ledger: could not parse the tally's TOTAL row; ledger untouched.",
-          file=sys.stderr)
-    raise SystemExit(1)
-sessions, tin, tout, ttot, hosted = m.groups()
-
+ledger = pathlib.Path(sys.argv[1])
 t = ledger.read_text()
 
-# Recompute the billed total from the rows that are actually present, so a
-# hand-added row is picked up and a hand-edited one cannot silently disagree
-# with the sum beneath it.
+# Recompute the billed total from the rows actually present, so a hand-added row
+# is picked up and a hand-edited one cannot silently disagree with the sum.
 tok = cost = 0
 for line in t.split("\n"):
     r = re.match(r"^\| \d{4}-\d{2}-\d{2} \| .*? \| .*? \| ([\d,]+) \| \$([\d.]+) \|$", line)
     if r:
         tok += int(r.group(1).replace(",", ""))
         cost += float(r.group(2))
+
+stray = [l for l in t.split("\n")
+         if re.match(r"^\| \d{4}-\d{2}-\d{2} \|", l) and "Ornith" in l]
+if stray:
+    print(f"update-cost-ledger: WARNING — {len(stray)} per-issue Ornith row(s) are back in the",
+          file=sys.stderr)
+    print("    ledger. Those belong in issues/ornith-tally.md; mirroring them here double-counts.",
+          file=sys.stderr)
+
 t = re.sub(r"^\| \| \| \*\*Total measured\*\* \| \*\*[\d,]+\*\* \| \*\*\$[\d.]+\*\* \|$",
            f"| | | **Total measured** | **{tok:,}** | **${cost:.2f}** |",
            t, count=1, flags=re.M)
-
-rows = f"""| | |
-|---|---|
-| Sessions | **{sessions}** |
-| Input tokens | **{tin}** |
-| Output tokens | **{tout}** |
-| Total tokens | **{ttot}** |
-| Actual cost | **$0.00** |
-| If hosted on Sonnet 5 at list price | **${hosted}** |"""
-
-# Replace the existing generated block, identified by its header row.
-pat = re.compile(r"\| \| \|\n\|---\|---\|\n\| Sessions \|.*?\| If hosted on Sonnet 5 at list price \| \*\*\$[\d,.]+\*\* \|",
-                 re.S)
-if pat.search(t):
-    t = pat.sub(rows, t, count=1)
-else:
-    print("update-cost-ledger: no Ornith block found to replace — add one first.",
-          file=sys.stderr)
-    raise SystemExit(1)
-
 ledger.write_text(t)
 print(f"cost-ledger: billed {tok:,} tokens, ${cost:.2f}")
-print(f"cost-ledger: ornith {ttot} tokens across {sessions} sessions (${hosted} if hosted)")
+print("ornith-tally: regenerated from OpenCode's database")
 PY
