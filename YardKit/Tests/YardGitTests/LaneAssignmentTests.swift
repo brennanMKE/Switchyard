@@ -337,3 +337,67 @@ func unbornRepositoryThrows(format: FixtureRepository.RefFormat) throws {
     #expect(d.lane == 0)
     #expect(maxLane(rows) == 2)
 }
+
+// MARK: - Journal refs stay out of the graph (#0157)
+
+/// Builds a snapshot commit reachable ONLY through `refs/switchyard/*`, the
+/// shape `JournalAnchor` creates. Raw plumbing on purpose: this test is about
+/// ref enumeration, not about the journal API.
+private func anchorASnapshot(in repo: FixtureRepository, git: GitProcess) throws -> String {
+    let head = try repo.revParse("HEAD")
+    let tree = try #require(try git.run(
+        ["rev-parse", "HEAD^{tree}"], workingDirectory: repo.url.path).lines.first)
+    let snapshot = try #require(try git.run(
+        ["commit-tree", tree, "-p", head, "-m", "snapshot"],
+        workingDirectory: repo.url.path).lines.first)
+    try git.run(["update-ref", RefSnapshot.switchyardNamespace + "journal/01PROBE", snapshot],
+                workingDirectory: repo.url.path)
+    return snapshot
+}
+
+/// `rev-list --all` reaches anchored snapshot commits — measured — so the graph
+/// leaks journal bookkeeping the moment a caller passes `--all`, which the M3
+/// graph view will. `graphRows` appends `--exclude` for exactly this.
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func journalAnchorsAreExcludedFromTheGraph(format: FixtureRepository.RefFormat) throws {
+    let repo = try FixtureRepository.linear(refFormat: format)
+    defer { repo.destroy() }
+    let git = GitProcess()
+    let snapshot = try anchorASnapshot(in: repo, git: git)
+
+    // Wreck-took-effect: git itself must reach the snapshot under --all, or
+    // the absence assertion below would pass on a repository that never had
+    // one.
+    #expect(try git.run(["rev-list", "--all"],
+                        workingDirectory: repo.url.path).lines.contains(snapshot),
+            "fixture must actually make the snapshot reachable via --all")
+
+    let rows = try graphRows(at: repo.url.path, revisions: ["--all"])
+    #expect(!rows.map(\.oid).contains(snapshot),
+            "journal anchors must never appear in the graph")
+    // Absence is only meaningful if the ordinary history is present.
+    #expect(rows.count == 3)
+    #expect(rows.map(\.oid).contains(try repo.revParse("HEAD")))
+}
+
+/// `%D` does not decorate custom namespaces on git 2.50.1, so `CommitLog`'s
+/// `refs` field is clean today — and unpinned. If a future git starts
+/// decorating them, journal refs would surface in the UI and nothing would
+/// notice. This test is regression detection, not a bug fix.
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func commitLogDecorationsNeverCarryJournalRefs(format: FixtureRepository.RefFormat) throws {
+    let repo = try FixtureRepository.linear(refFormat: format)
+    defer { repo.destroy() }
+    let git = GitProcess()
+    let head = try repo.revParse("HEAD")
+    // Anchor pointing AT HEAD: the case most likely to decorate.
+    try git.run(["update-ref", RefSnapshot.switchyardNamespace + "journal/01DECOR", head],
+                workingDirectory: repo.url.path)
+
+    let entries = try CommitLog.run(path: repo.url.path, rangeArguments: ["-1", "HEAD"])
+    let entry = try #require(entries.first)
+    #expect(entry.refs.contains("main"), "the branch decoration must still be present")
+    #expect(!entry.refs.contains("switchyard"),
+            "journal refs must not appear in %D decorations")
+}
+

@@ -191,6 +191,15 @@ public func graphRows(
     if let limit {
         arguments.append("--max-count=\(limit)")
     }
+
+    // Journal refs are engine bookkeeping and must never appear in the graph.
+    // `--exclude` applies only to a FOLLOWING `--all`/`--branches`/`--tags`/
+    // `--remotes`, so this is a measured no-op for the default `["HEAD"]` and
+    // takes effect exactly when a caller passes `--all` — which the M3 graph
+    // view will. Unconditional on purpose: a conditional would have to inspect
+    // the revisions array and would miss `--branches`, `--tags`, `--remotes`.
+    arguments.append("--exclude=\(RefSnapshot.switchyardNamespace)*")
+
     arguments += revisions
     arguments.append("--")
     let output = try git.run(arguments, workingDirectory: path)
