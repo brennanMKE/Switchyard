@@ -223,3 +223,40 @@ func aChainedHookFailureStillAbortsTheTransaction(format: FixtureRepository.RefF
     let failedJSON = String(decoding: try encoder.encode(failed), as: UTF8.self)
     #expect(failedJSON == #"{"hook":"post-rewrite","outcome":{"code":"failed","detail":"disk full"}}"#)
 }
+
+// MARK: - Non-executable foreign hook
+
+/// Git does not run a non-executable hook, so the wrapper's `[ -x "$chained" ]`
+/// tests must not either (#0041 Given 7 asserted this and nothing covered it).
+///
+/// The negative half — "it did not run" — passes for free if the hook was
+/// never going to run anyway, so the positive half is asserted in the same
+/// fixture: the bytes and the non-executable mode both survive the rename.
+/// The mutation for this is a FIXTURE mutation; see the table.
+@Test func aNonExecutableForeignHookIsPreservedButNeverRun() throws {
+    var repo = try FixtureRepository()
+    defer { repo.destroy() }
+    try repo.build([.init("a")])
+    let log = repo.url.appendingPathComponent("theirs.log").path
+    let hooks = try hooksDirectory(repo)
+    let body = loggerHook(to: log)
+    try writeHook("reference-transaction", in: hooks, content: body, mode: 0o644)
+
+    let reports = try installReports(repo)
+    #expect(reports.first?.outcome == .chained)
+
+    // Positive half: the foreign hook survived the rename, byte-for-byte and
+    // mode-for-mode.
+    let chained = hooks + "/reference-transaction" + HookInstall.chainedSuffix
+    #expect(try String(contentsOfFile: chained, encoding: .utf8) == body)
+    let mode = try #require(
+        FileManager.default.attributesOfItem(atPath: chained)[.posixPermissions] as? NSNumber)
+    #expect(mode.intValue & 0o111 == 0, "the non-executable bit must survive")
+
+    // Negative half: a ref transaction runs the wrapper, and the chained hook
+    // must stay silent because git would not have run it either.
+    let result = try updateRef("refs/heads/probe", in: repo)
+    #expect(result.exitCode == 0)
+    #expect(!FileManager.default.fileExists(atPath: log),
+            "a non-executable chained hook must not be executed")
+}
