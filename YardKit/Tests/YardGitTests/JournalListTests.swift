@@ -270,4 +270,57 @@ struct JournalListTests {
         }
         #expect(try JournalAnchor.list(in: context) == [entry])
     }
+
+    /// Plants an arbitrary oid at an entry's anchor ref. #0030 measured that
+    /// `update-ref` accepts a blob for a ref in a custom namespace, which is
+    /// how the `anchorNotACommit` defect is constructed without file surgery.
+    private static func plantAnchor(
+        _ oid: String, id: JournalEntryID, in context: WorktreeContext
+    ) throws {
+        try GitProcess().run(
+            ["update-ref", JournalAnchor.refName(for: id), oid],
+            workingDirectory: context.topLevel ?? context.gitDir)
+    }
+
+    /// #0030's id-BEARING defects — an anchor that is not a commit — must fold
+    /// into the listing as items in id order, carrying their defect, exactly
+    /// as the decode-failure defects do. Deleting that fold, or the sort,
+    /// leaves every other test green: a repository whose snapshot commit was
+    /// garbage-collected would list as though the entry never existed, which
+    /// is the failure skip-and-report exists to prevent.
+    @Test(arguments: FixtureRepository.RefFormat.supported(git: GitProcess()))
+    func anAnchorThatIsNotACommitListsInIdOrderWithItsDefect(
+        format: FixtureRepository.RefFormat
+    ) throws {
+        let repo = try FixtureRepository.linear(refFormat: format)
+        defer { repo.destroy() }
+        let context = try WorktreeContext.resolve(path: repo.url.path)
+
+        // Plant the DEFECTIVE entry first, so a listing that drops it also
+        // loses the earlier id — proving order, not just presence.
+        let badID = try Self.id("01")
+        let blob = try #require(try GitProcess().run(
+            ["hash-object", "-w", "--stdin"],
+            workingDirectory: repo.url.path,
+            standardInput: Data("not a snapshot commit".utf8)).lines.first)
+        try Self.plantAnchor(blob, id: badID, in: context)
+        let good = try Self.writeEntry(try Self.id("02"), worktree: nil, in: context)
+
+        let listing = try JournalList.list(in: context)
+
+        #expect(listing.items.count == 2)
+        let first = try #require(listing.items.first)
+        #expect(first.entry.id == badID)
+        #expect(first.metadata == nil)
+        #expect(first.position == nil)
+        #expect(try #require(first.defect).contains("not a snapshot commit"))
+
+        let second = try #require(listing.items.last)
+        #expect(second.entry == good)
+        #expect(second.defect == nil)
+        // The healthy entry is still placed on the chain: one broken anchor
+        // must not sink the listing an agent uses to diagnose the breakage.
+        #expect(second.position != nil)
+        #expect(listing.foreignRefs.isEmpty)
+    }
 }
