@@ -449,7 +449,7 @@ path yourself, resolve it the same way — with `realpath(3)`.
 which normalises in the opposite direction. It looks like the right call and silently does nothing
 useful here.
 
-### Every file path you write must be worktree-relative. Never absolute.
+### Every file path you use must be worktree-relative. Never absolute. Reads included.
 
 Write `YardKit/Sources/YardKit/CommandLineRunner.swift`, not
 `/Users/brennan/Developer/brennanMKE/Git/switchyard-0124/YardKit/…`.
@@ -469,6 +469,16 @@ edit, leaving the tree non-compiling with the work half-applied.
 
 A relative path cannot be mistyped this way, because it is short and the parts you would get wrong are
 not there.
+
+**This applies to reads, and to your very first tool call.** The rule said "write" until 2026-08-08,
+when a third round died the same way — `tensorshare` in place of `brennanMKE` — while **reading the
+issue file itself**. One tool call, 21 seconds, nothing written, nothing attempted. The string
+`tensorshare` appears nowhere in this repository; it was reproduced from memory and corrupted, which
+is the same failure as the other two and simply landed earlier.
+
+So: **read `issues/NNNN.md`, not `/Users/…/switchyard-NNNN/issues/NNNN.md`.** You are already in the
+worktree when the round starts. There is never a reason to type the absolute prefix, and the only
+thing typing it can do is end the round before it begins.
 
 ## Rule 10 — `swift build` does not compile the tests. Only `swift test` does.
 
