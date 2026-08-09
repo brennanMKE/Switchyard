@@ -126,7 +126,8 @@ issue attached.
 | #0177 | 1 | 432,514 | 3,050 | 435,564 | $1.34 |
 | #0181 | 1 | 458,396 | 4,637 | 463,033 | $1.44 |
 | #0182 | 1 | 575,446 | 7,492 | 582,938 | $1.84 |
-| **Total** | **169** | **167,772,684** | **1,445,473** | **169,218,157** | **$525.00** |
+| #0185 | 1 | 598,433 | 3,090 | 601,523 | $1.84 |
+| **Total** | **170** | **168,371,117** | **1,448,563** | **169,819,680** | **$526.84** |
 
 Actual cost: **$0.00**. Ornith runs locally in LM Studio; the hosted column is what the
 same traffic would have cost on Sonnet 5 at list price ($3/MTok in, $15/MTok out), which is
