@@ -161,17 +161,43 @@ from the failure-learning loop in `docs/review-failures.md` — rule 8, rule 9 a
 each came from a specific failed round. Serial rounds let round N+1 carry round N's lesson. Four
 parallel rounds reproduce the same defect four times before any lesson lands.
 
-## The real bottleneck is `cacheR=0`, not concurrency
+## `cacheR=0` is a reporting gap, not a cache miss — do not "fix" it
 
-From #0124: **438,301 input tokens for a context that never exceeded 49k**, `cacheR=0` on every
-turn. At the measured 458 tok/s uncached prefill that is **~957 seconds** — more than half the
-1800s round budget spent re-ingesting the same context twelve times.
+An earlier revision of this document claimed `cacheR=0` meant prefixes were being re-ingested every
+turn, costing ~850s per round, and called it the highest-leverage fix available. **That was wrong.**
+LM Studio's own server log settles it. Every request emits a line like:
 
-Working prefix reuse would collapse that to roughly one full prefill (~107s) plus per-turn deltas:
-about **850s recovered per round**, against a ±27–40% swing from any concurrency setting. The
-prefix-cache artifact documented above is direct evidence the server *does* reuse cached prefixes,
-so this is client-side in how OpenCode structures its requests. **Fix this before tuning
-`--parallel` further; it is worth more than every concurrency option combined.**
+    [coordinator][INFO]: Prompt cache restore: cached_tokens=37464 uncached_tokens=19
+                          lifetime_efficiency=90.58%
+
+Over the 12 hours to 2026-08-08 19:46, across **502 cache-restore events** covering 34 dispatch
+rounds:
+
+| | |
+|---|---|
+| Cached tokens served | 14,048,586 |
+| Uncached tokens processed | 1,163,423 |
+| **Hit rate** | **92.35%** |
+| `lifetime_efficiency` range | 87.64% – 94.35% |
+| Median uncached tokens per request | **183** |
+
+The server reuses prefixes aggressively. OpenCode's `tokens_cache_read` column is `0` on all 34
+sessions because the OpenAI-compatible endpoint returns no `cached_tokens` field for the client to
+record — **the counter is unpopulated, not zero**. The `438,301 input tokens` figure in #0124 is a
+count of tokens *submitted*, not tokens *processed*.
+
+A whole-window time budget confirms it, and is the reason to trust the log over the client:
+
+| | |
+|---|---|
+| Uncached prefill (1,163,423 tok @ 458 tok/s) | 2,540s |
+| Decode (188,535 tok @ 54 tok/s) | 3,491s |
+| **Modeled busy time** | **6,032s** |
+| **Measured busy time** (log stream timings) | **6,884s** |
+
+Within 12%, with the remainder in tokenization and sampling overhead. Had the cache genuinely been
+cold, the same traffic would have required **30,674s (8.5 hours) of additional prefill** — which
+does not fit in a 12-hour window that was only 16% busy. **There is nothing to fix here.**
 
 ## The slot count costs nothing when it is not used
 
