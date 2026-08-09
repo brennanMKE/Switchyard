@@ -135,7 +135,6 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-08-07 | #0129 | Fable planning pass + filed #0130-#0136 (F) | 181,156 | $2.90 |
 | 2026-08-07 | #0129 | Dispatch round 1 FAILED — no anthropic provider (0 model tokens) | 43,819 | $0.35 |
 | 2026-08-07 | #0130 | Fable planning pilot for the wire-encoding family (F) | 125,631 | $2.01 |
-| 2026-08-07 | #0129 | Dispatch round 2 on Ornith (accepted) | 73,228 | $0.59 |
 | 2026-08-07 | #0131 | Fable planning pilot, Decision 6 verdict (F) | 157,109 | $2.51 |
 | 2026-08-07 | #0134 | Fable planning pilot, Decision 5 verdict + filed #0137 (F) | 194,573 | $3.11 |
 | 2026-08-07 | #0131 | Dispatch round 1 (accepted) | 56,305 | $0.45 |
@@ -177,61 +176,41 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-08-07 | #0037 | Fable planning pass + filed #0163 decision (F) | 169,693 | $2.72 |
 | 2026-08-08 | #0033 | Fable planning pass, prune ordering invariant (F) | 241,452 | $3.86 |
 | 2026-08-08 | #0030 | Fable planning pass + filed #0164 (F) | 236,059 | $3.78 |
-| 2026-08-08 | #0028 | Ornith r1+r2 local, notional | 1,125,463 | $0.00 |
 | 2026-08-08 | #0028 | Dispatch r1+r2 + review (O) | 81,851 | $1.31 |
-| 2026-08-08 | #0030 | Ornith r1 local, notional | 226,246 | $0.00 |
 | 2026-08-08 | #0030 | Dispatch r1 + review (O) | 52,592 | $0.84 |
 | 2026-08-08 | #0034 | Fable planning: umbrella + filed #0165-#0171 (F) | 280,785 | $4.49 |
-| 2026-08-08 | #0030 | Ornith r2 local, notional | 232,730 | $0.00 |
 | 2026-08-08 | #0030 | Dispatch r2 + review (O) | 101,422 | $1.62 |
-| 2026-08-08 | #0165 | Ornith r1 local, notional | 200,437 | $0.00 |
 | 2026-08-08 | #0165 | Dispatch r1 + review (O) | 58,793 | $0.94 |
-| 2026-08-08 | #0165 | Ornith cumulative r1+r2, notional (supersedes r1 row) | 460,682 | $0.00 |
 | 2026-08-08 | #0165 | Dispatch r2 + review (O) | 52,545 | $0.84 |
-| 2026-08-08 | #0166 | Ornith r1 local, notional | 227,567 | $0.00 |
 | 2026-08-08 | #0166 | Dispatch r1 + review (O) | 61,931 | $0.99 |
-| 2026-08-08 | #0032 | Ornith r1 local, notional | 400,270 | $0.00 |
 | 2026-08-08 | #0032 | Dispatch r1 + review (O) | 66,724 | $1.07 |
 | 2026-08-08 | #0155 | Fable planning: re-author to code level (F) | 192,559 | $3.08 |
-| 2026-08-08 | #0033 | Ornith r1 local, notional | 190,302 | $0.00 |
 | 2026-08-08 | #0033 | Dispatch r1 + review (O) | 81,945 | $1.31 |
 | 2026-08-08 | #0044 | Fable planning: umbrella + filed #0172, #0173 (F) | 259,409 | $4.15 |
-| 2026-08-08 | #0155 | Ornith r1+r2 local, notional | 1,305,043 | $0.00 |
 | 2026-08-08 | #0155 | Dispatch r1+r2 + review (O) | 77,907 | $1.25 |
-| 2026-08-08 | #0172 | Ornith r1 local, notional | 330,514 | $0.00 |
 | 2026-08-08 | #0172 | Dispatch r1 + review (O) | 60,037 | $0.96 |
-| 2026-08-08 | #0173 | Ornith r1 local, notional | 276,430 | $0.00 |
 | 2026-08-08 | #0173 | Dispatch r1 + review (O) | 59,906 | $0.96 |
-| 2026-08-08 | #0031 | Ornith r1 local, notional | 348,981 | $0.00 |
 | 2026-08-08 | #0031 | Dispatch r1 + review (O) | 69,312 | $1.11 |
 | 2026-08-08 | #0167 | Fable planning: re-author to code level (F) | 219,108 | $3.51 |
-| 2026-08-08 | #0042 | Ornith r1 local, notional | 2,896,943 | $0.00 |
 | 2026-08-08 | #0042 | Dispatch r1 + review (O) | 71,873 | $1.15 |
 | 2026-08-08 | #0168 | Fable planning: re-author + filed #0175 (F) | 301,011 | $4.82 |
-| 2026-08-08 | #0167 | Ornith r1+r2 local, notional | 423,817 | $0.00 |
 | 2026-08-08 | #0167 | Dispatch r1+r2 + review (O) | 75,611 | $1.21 |
-| 2026-08-08 | #0041 | Ornith r1 local, notional | 550,445 | $0.00 |
 | 2026-08-08 | #0041 | Dispatch r1 + review (O) | 72,098 | $1.15 |
 | 2026-08-08 | #0170 | Fable planning: re-author to code level (F) | 268,440 | $4.30 |
-| 2026-08-08 | #0168 | Ornith r1+r2 local, notional | 726,594 | $0.00 |
 | 2026-08-08 | #0168 | Dispatch r1+r2 + review (O) | 118,488 | $1.90 |
 | 2026-08-08 | #0169 | Fable planning: re-author to code level (F) | 292,247 | $4.68 |
-| 2026-08-08 | #0170 | Ornith r1+r2 local, notional | 1,237,541 | $0.00 |
 | 2026-08-08 | #0170 | Dispatch r1+r2 + review (O) | 80,548 | $1.29 |
-| 2026-08-08 | #0169 | Ornith r1+r2 local, notional | 762,808 | $0.00 |
 | 2026-08-08 | #0169 | Dispatch r1+r2 + review (O) | 96,364 | $1.54 |
-| 2026-08-08 | #0040 | Ornith r1 local, notional | 316,767 | $0.00 |
 | 2026-08-08 | #0040 | Dispatch r1 + review (O) | 77,021 | $1.23 |
 | 2026-08-08 | #0181 | Fable planning: author to code level (F) | 154,773 | $2.48 |
-| 2026-08-08 | #0043 | Ornith r1 local, notional | 553,886 | $0.00 |
 | 2026-08-08 | #0043 | Dispatch r1 + review (O) | 86,092 | $1.38 |
 | 2026-08-08 | #0151 | Fable planning: author to code level (F) | 278,794 | $4.46 |
-| 2026-08-08 | #0151 | Ornith r1+r2 local, notional | 719,501 | $0.00 |
 | 2026-08-08 | #0151 | Dispatch r1+r2 + review (O) | 86,127 | $1.38 |
-| 2026-08-08 | #0181 | Ornith r1 local, notional | 463,033 | $0.00 |
 | 2026-08-08 | #0181 | Dispatch r1 + review (O) | 78,108 | $1.25 |
 | 2026-08-08 | #0182 | Fable planning: re-author + filed #0185 (F) | 199,317 | $3.19 |
-| | | **Total measured** | **31,546,615** | **$224.47** |
+| 2026-08-08 | #0036 | Dispatch r1 + review (O) | 84,049 | $1.34 |
+| 2026-08-08 | #0152 | Fable planning: re-author + filed #0186 (F) | 254,722 | $4.08 |
+| | | **Total measured** | **17,836,158** | **$229.30** |
 
 ## What this total does and does not cover
 
@@ -265,3 +244,29 @@ context is already lost.
 Tracked separately in **[ornith-tally.md](ornith-tally.md)**, regenerated by
 `./scripts/ornith-tally.sh --write`. This file covers the hosted side — authoring and review in Opus
 tokens, which is the number that is not zero.
+
+## Ornith — local implementation, $0.00
+
+**Not itemised per issue, deliberately.** Twenty-six per-issue Ornith rows were removed from the
+table above on 2026-08-08: they contradicted this file's own stated policy, and reconciling them
+against `./scripts/ornith-tally.sh` found two issues **double-counted** (#0030, #0165, because a
+later cumulative row was added without removing the earlier per-round one), one issue short by
+513,723 tokens, and **seventy-five issues missing entirely**. A hand-maintained mirror of a
+regenerable source drifts, and this one drifted within a day.
+
+**`./scripts/ornith-tally.sh` is the source of truth.** It reads OpenCode's SQLite database, which
+survives the session, so this section can be regenerated at any time — unlike the dispatcher figures
+above, which are reported once and then gone forever. That asymmetry is the whole reason the two are
+kept differently.
+
+Regenerate with `./scripts/update-cost-ledger.sh`. As of **2026-08-08**:
+
+| | |
+|---|---|
+| Sessions | **162** |
+| Input tokens | **165,411,435** |
+| Output tokens | **1,413,942** |
+| Total tokens | **166,825,377** |
+| Actual cost | **$0.00** |
+| If hosted on Sonnet 5 at list price | **$517.44** |
+
