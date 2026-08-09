@@ -110,7 +110,7 @@ public struct JournalMetadataCache: Sendable {
         try write(kept)
     }
 
-    private func write(_ entries: [Row]) throws {
+    internal func write(_ entries: [Row]) throws {
         let directory = fileURL.deletingLastPathComponent()
         do {
             try FileManager.default.createDirectory(
@@ -138,4 +138,63 @@ public struct JournalMetadataCache: Sendable {
 
 extension JournalMetadataCache.Error: ExitClassCarrying {
     public var exitClass: ExitClass { .repositoryError }
+}
+
+extension JournalMetadataCache {
+
+    /// One entry that could not be turned into a cache row.
+    public struct RowDefect: Equatable, Sendable, CustomStringConvertible {
+        public let id: JournalEntryID
+        public let reason: String
+
+        public init(id: JournalEntryID, reason: String) {
+            self.id = id
+            self.reason = reason
+        }
+
+        public var description: String { "journal entry \(id): \(reason)" }
+    }
+
+    /// The outcome of rewriting the cache from a rebuild.
+    public struct RewriteResult: Equatable, Sendable {
+        public let written: [Row]
+        /// Entries whose metadata would not decode. **Reported, never
+        /// invented**: a row we cannot build is a row the caller must know is
+        /// missing, and #0030's own defects are carried through separately.
+        public let defects: [RowDefect]
+
+        public init(written: [Row], defects: [RowDefect]) {
+            self.written = written
+            self.defects = defects
+        }
+    }
+
+    /// Rewrites the cache in full from a `JournalRebuild.Result`.
+    ///
+    /// This is the composition the M2 criterion gestures at: #0030 recovers
+    /// every entry from the anchor refs alone and deliberately neither reads
+    /// nor writes this file — a rebuild consulting the cache would derive the
+    /// cache from itself — so the rewrite lands here.
+    ///
+    /// **Replaces rather than merges.** The rebuild is the authority on what
+    /// the journal contains; a merge would preserve rows for entries the refs
+    /// no longer have, which is precisely the over-reporting #0033's invariant
+    /// forbids.
+    @discardableResult
+    public func rewrite(from result: JournalRebuild.Result) throws -> RewriteResult {
+        var rows: [Row] = []
+        var defects: [RowDefect] = []
+        for entry in result.entries {
+            do {
+                let metadata = try JournalEntryMetadata(serialized: entry.metadataJSON)
+                rows.append(Row(metadata: metadata,
+                                snapshotRef: JournalAnchor.refName(for: entry.id)))
+            } catch {
+                defects.append(RowDefect(id: entry.id, reason: String(describing: error)))
+            }
+        }
+        rows.sort { $0.metadata.id < $1.metadata.id }
+        try write(rows)
+        return RewriteResult(written: rows, defects: defects)
+    }
 }
