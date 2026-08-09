@@ -339,4 +339,53 @@ struct IndexSnapshotTests {
         #expect(unwritable.description.contains("denied"))
         #expect(malformed.description.contains("hash-object"))
     }
+
+    /// #0151 pinned the `$GIT_DIR` rule on the CAPTURE side only: its row 6
+    /// concatenates `.git/index` in `capture` and dies here. The mirror
+    /// mutation in `restore` left all 13 tests green, because no test ever
+    /// took the RAW path inside a linked worktree — capture there returns
+    /// `.tree`. #0171 composes exactly that path, and an unmerged index in an
+    /// agent worktree is what M2's criterion names.
+    ///
+    /// Measured: in a linked worktree `.git` is a FILE, so a concatenated
+    /// `.git/index` is unreachable (`ENOTDIR`) rather than wrongly reachable.
+    @Test func rawRestoreInALinkedWorktreeWritesItsOwnIndex() throws {
+        var repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let wt = try repo.addWorktree(named: "agent-b", branch: "agent-b-branch")
+        defer { try? FileManager.default.removeItem(at: wt) }
+
+        // Force the raw path: skip-worktree makes `ls-files -v` print `S`,
+        // which #0151 treats as raw even though write-tree would succeed.
+        try "raw path\n".write(to: wt.appendingPathComponent("skipped.txt"),
+                                atomically: true, encoding: .utf8)
+        try git.run(["add", "skipped.txt"], workingDirectory: wt.path)
+        try git.run(["update-index", "--skip-worktree", "skipped.txt"],
+                    workingDirectory: wt.path)
+
+        let ctx = try WorktreeContext.resolve(path: wt.path)
+        let snapshot = try IndexSnapshot.capture(in: ctx)
+        guard case .raw = snapshot else {
+            Issue.record("expected a raw capture, got \(snapshot)")
+            return
+        }
+
+        let wtIndexPath = try ctx.path(for: "index", git: git)
+        let before = try Data(contentsOf: URL(fileURLWithPath: wtIndexPath))
+        let mainCtx = try WorktreeContext.resolve(path: repo.url.path)
+        let mainIndexPath = try mainCtx.path(for: "index", git: git)
+        let mainBefore = try Data(contentsOf: URL(fileURLWithPath: mainIndexPath))
+
+        // Wreck the linked worktree's index, and prove the wreck took effect.
+        try git.run(["read-tree", "--empty"], workingDirectory: wt.path)
+        #expect(try git.run(["ls-files"], workingDirectory: wt.path).text.isEmpty)
+
+        try snapshot.restore(in: ctx)
+
+        #expect(try Data(contentsOf: URL(fileURLWithPath: wtIndexPath)) == before)
+        #expect(try git.run(["ls-files", "-v"], workingDirectory: wt.path)
+            .text.contains("S skipped.txt"))
+        // The main worktree's index must be untouched by any of this.
+        #expect(try Data(contentsOf: URL(fileURLWithPath: mainIndexPath)) == mainBefore)
+    }
 }
