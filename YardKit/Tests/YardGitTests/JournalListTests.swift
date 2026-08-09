@@ -270,7 +270,7 @@ struct JournalListTests {
         }
         #expect(try JournalAnchor.list(in: context) == [entry])
     }
-}
+
     /// Plants an arbitrary oid at an entry's anchor ref. #0030 measured that
     /// `update-ref` accepts a blob for a ref in a custom namespace, which is
     /// how the `anchorNotACommit` defect is constructed without file surgery.
@@ -323,4 +323,4 @@ struct JournalListTests {
         #expect(second.position != nil)
         #expect(listing.foreignRefs.isEmpty)
     }
-
+}
