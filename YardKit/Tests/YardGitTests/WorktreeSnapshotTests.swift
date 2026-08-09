@@ -391,11 +391,19 @@ struct WorktreeSnapshotTests {
 
         // The pinned anonymous author line, not the machine's identity.
         let showOutput = try GitProcess().run(
-            ["show", "-s", "--format=%an <%ae> %ad --date=iso-strict",
+            ["show", "-s", "--format=%an <%ae> %ad", "--date=iso-strict",
              first.commit],
             workingDirectory: repo.url.path).text
         #expect(showOutput.contains("switchyard <journal@switchyard.invalid>"),
                 "snapshot commits must be authored as switchyard, not the user")
+
+        // The PINNED DATE is what actually carries the dedup claim (#0152
+        // decision 3, binding on #0171). The equality above passes even with
+        // the environment dropped, because two captures a fraction of a
+        // second apart still share a wall-clock timestamp — so without this
+        // assertion the determinism half proves identity and nothing else.
+        #expect(showOutput.contains("2000-01-01"),
+                "the author date must be pinned, or the oid is time-dependent")
 
         let realName = try GitProcess().run(
             ["config", "user.name"],
