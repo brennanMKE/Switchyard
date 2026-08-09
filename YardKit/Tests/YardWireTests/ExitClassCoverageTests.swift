@@ -63,6 +63,8 @@ struct ExitClassCoverageTests {
             Row("WorktreeDisturbance.Error", WorktreeDisturbance.Error.wouldDisturb(disturbances: []), .repositoryError),
             Row("StagingError", StagingError.unknownHunkIDs(ids: ["h-nope"], area: .unstaged), .repositoryError),
             Row("IndexSnapshot.Error", IndexSnapshot.Error.malformedPlumbingOutput(command: "hash-object"), .repositoryError),
+            // #0152: asserted in WorktreeSnapshotTests.
+            Row("WorktreeSnapshot.Error", WorktreeSnapshot.Error.malformedPlumbingOutput(command: "write-tree"), .repositoryError),
         ]
     }
 
