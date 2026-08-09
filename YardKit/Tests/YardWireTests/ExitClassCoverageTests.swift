@@ -120,42 +120,16 @@ struct ExitClassCoverageTests {
             .deletingLastPathComponent()   // repo root
     }
 
-    private struct Scan {
-        var conformers: Set<String> = []
-        var protocolDeclarations = 0
-        var unrecognized: [String] = []
-    }
-
-    /// Scans every Swift source under `YardKit/Sources` for lines naming
-    /// `ExitClassCarrying`. Exactly three shapes are recognized — the
-    /// protocol declaration, a conformance written `extension Name: ...
-    /// ExitClassCarrying`, and a comment line — and anything else is
-    /// reported as unrecognized, so a conformance shape this scanner cannot
-    /// parse is a red test rather than a silently missed conformer.
-    private func scanSources() throws -> Scan {
-        let extensionConformance = /^extension\s+([A-Za-z_][A-Za-z0-9_.]*)\s*:[^{]*\bExitClassCarrying\b/
-        let protocolDeclaration = /^(?:public\s+)?protocol\s+ExitClassCarrying\b/
-        var scan = Scan()
-        let root = repoRoot.appendingPathComponent("YardKit/Sources")
-        let enumerator = try #require(
-            FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil),
-            "cannot enumerate \(root.path)")
-        for case let url as URL in enumerator where url.pathExtension == "swift" {
-            let source = try String(contentsOf: url, encoding: .utf8)
-            let lines = source.split(separator: "\n", omittingEmptySubsequences: false)
-            for (index, line) in lines.enumerated() where line.contains("ExitClassCarrying") {
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                if trimmed.hasPrefix("//") { continue }
-                if let match = trimmed.firstMatch(of: extensionConformance) {
-                    scan.conformers.insert(String(match.1))
-                } else if trimmed.firstMatch(of: protocolDeclaration) != nil {
-                    scan.protocolDeclarations += 1
-                } else {
-                    scan.unrecognized.append("\(url.lastPathComponent):\(index + 1): \(trimmed)")
-                }
-            }
-        }
-        return scan
+    /// The scan half lives in `ConformanceScan` (#0182/#0185), parameterised
+    /// by protocol name and shared with `DescriptionCoverageTests`. This
+    /// guard keeps #0181's convention: `ExitClassCarrying` is adopted via
+    /// top-level extensions only, so a declaration-site conformance is
+    /// refused by `scannerRecognizesEveryConformanceSite` rather than
+    /// silently folded in.
+    private func scanSources() throws -> ConformanceScan.Result {
+        try ConformanceScan.scan(
+            for: "ExitClassCarrying",
+            under: repoRoot.appendingPathComponent("YardKit/Sources"))
     }
 
     // MARK: - The guard
@@ -167,14 +141,15 @@ struct ExitClassCoverageTests {
     /// here, not silently absorbed.
     @Test func everySourceConformerHasARegistryRow() throws {
         let scan = try scanSources()
+        let conformers = Set(scan.extensionSites.map(\.name))
         try #require(
-            !scan.conformers.isEmpty,
+            !conformers.isEmpty,
             "the source scan found no ExitClassCarrying conformers at all — the scanner or its path is broken")
 
         let registered = Set(try registry().map(\.name))
         let allowed = Set(allowList.keys)
 
-        let missing = scan.conformers.subtracting(registered).subtracting(allowed)
+        let missing = conformers.subtracting(registered).subtracting(allowed)
         #expect(
             missing.isEmpty,
             """
@@ -184,7 +159,7 @@ struct ExitClassCoverageTests {
             allow-list entry whose reason cites an issue.
             """)
 
-        let stale = registered.union(allowed).subtracting(scan.conformers)
+        let stale = registered.union(allowed).subtracting(conformers)
         #expect(
             stale.isEmpty,
             """
@@ -207,6 +182,15 @@ struct ExitClassCoverageTests {
         #expect(
             scan.protocolDeclarations == 1,
             "expected exactly one ExitClassCarrying protocol declaration, found \(scan.protocolDeclarations)")
+        #expect(
+            scan.declarationSites.isEmpty,
+            """
+            ExitClassCarrying must be adopted via a top-level `extension \
+            Name: ExitClassCarrying` (#0181 decision 3), not at the type \
+            declaration: \(scan.declarationSites.sorted().map(\.label).joined(separator: ", "))
+            """)
+        #expect(scan.duplicates.isEmpty,
+                "duplicate conformance sites: \(scan.duplicates.joined(separator: ", "))")
         #expect(
             scan.unrecognized.isEmpty,
             """
