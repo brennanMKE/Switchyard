@@ -642,3 +642,15 @@ dispatch: no trailing period. The body is where detail belongs."
     fi
   fi
 } || true
+
+# EXIT WITH THE STATUS WE COMPUTED. The EXIT trap records `$?`, not `$STATUS`,
+# and nothing here exited with it — so setting `STATUS=11` on an empty suite
+# line changed a variable no artifact ever read. #0157's round shipped a test
+# file that did not compile and recorded `"exit": 0`, with the compile error
+# sitting in the suite capture nobody had reason to open.
+#
+# That is the THIRD guard of mine to be inert in the same way: a check that
+# computes the right answer and puts it somewhere nothing looks is
+# indistinguishable from no check. The round commit above still happens first,
+# so a failed round keeps its work on the branch.
+exit $STATUS
