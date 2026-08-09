@@ -313,10 +313,85 @@ func unbornRepositoryThrows(format: FixtureRepository.RefFormat) throws {
     let nodes = try RevListParser().parse("")
     #expect(nodes.isEmpty)
 }
+// MARK: - Journal refs exclusion from graph (#0157)
+
+/// Build a snapshot commit that `refs/switchyard/*` makes reachable via
+/// `--all`, and write it to refs/switchyard/journal/<id>. No JournalAnchor
+/// API is exercised — only raw git commands to instrument the repo state.
+private func buildJournalSnapshot(in repo: FixtureRepository, id: JournalEntryID) throws -> String {
+    let git = GitProcess()
+
+    // Need a tree with at least the transaction file + metadata.json. The
+    // simplest route is to modify HEAD's working tree temporarily so the
+    // snapshot commit gets a non-trivial shape.
+    try repo.writeUntracked(["transaction.md": "journal target\n"])
+
+    let transactionBlob = try git.run(
+        ["hash-object", "-w", "--stdin"],
+        workingDirectory: repo.url.path,
+        standardInput: Data("journal target\n".utf8))
+
+    // Build metadata blob the way a real snapshot would.
+    let metaBlob = try git.run(
+        ["hash-object", "-w", "--stdin"],
+        workingDirectory: repo.url.path,
+        standardInput: Data("{\"schemaVersion\":1,\"operation\":\"probe\"}\n".utf8))
+
+    // Tree with both files: mode + hash + filename \t path\n
+    let treeInput = "100644 blob \(transactionBlob.lines.first.map(String.init) ?? "")\ttransaction.md\n100644 blob \(metaBlob.lines.first.map(String.init) ?? "")\tmetadata.json\n"
+    let tree = try git.run(["mktree"], workingDirectory: repo.url.path,
+                           standardInput: Data(treeInput.utf8))
+
+    let parentArgs = ["-p", try repo.revParse("HEAD")]
+    let snapshotOid = try git.run(
+        ["commit-tree", tree.lines.first.map(String.init)!, "-m", "snapshot \(id.string)", parentArgs].joined(separator: " "),
+        workingDirectory: repo.url.path,
+        extraEnvironment: ["GIT_AUTHOR_NAME": "v", "GIT_AUTHOR_EMAIL": "v@invalid",
+                           "GIT_COMMITTER_NAME": "v", "GIT_COMMITTER_EMAIL": "v@invalid"])
+    .lines.first.map(String.init).map { $0 } ?? ""
+
+    try git.run(["update-ref", JournalAnchor.refPrefix + "journal/" + id.string, snapshotOid],
+                workingDirectory: repo.url.path)
+
+    
+
+    return snapshotOid
+}
 
 @Test func allocationTakesTheLeftmostFreeLane() throws {
+
+
+
+
+
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func journalSnapshotIsExcludedFromAll(format: FixtureRepository.RefFormat) throws {
+    var repo = try FixtureRepository(refFormat: format)
+    defer { repo.destroy() }
+    try repo.build([FixtureRepository.Commit("a"), FixtureRepository.Commit("b")])
+
+    let id = JournalEntryID.generate()
+    let snapshotOid = try buildJournalSnapshot(in: repo, id: id)
+
+    let rows = try graphRows(at: repo.url.path, revisions: ["--all"])
+    let rowOids = rows.map(\.oid)
+
+    #expect(!rowOids.contains(snapshotOid),
+            "snapshot commit \(snapshotOid) must not appear in --all output")
+
+    let ordinaryOids = try #require(repo.oids["a"], repo.oids["b"])
+    #expect(rowOids.contains(ordinaryOids[0]), "first ordinary commit must appear in --all")
+    #expect(rowOids.contains(ordinaryOids[1]), "second ordinary commit must appear in --all")
+}
+
+
+AllocationTakesTheLeftmostFreeLane() throws {
+
     // Rules 2 and 4 both say a lane is taken from the *leftmost* free slot.
     // Every other fixture here has at most one hole at a time, so leftmost
+
+
     // and rightmost coincide and the choice is unpinned. This one opens two
     // holes simultaneously: tips a, b and c take lanes 0, 1 and 2; pa and pb
     // are roots, so lanes 0 and 1 both free while lane 2 stays occupied by
