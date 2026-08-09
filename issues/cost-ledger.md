@@ -213,7 +213,8 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-08-08 | #0176 #0177 | Fable planning: both authored to code level (F) | 210,849 | $3.37 |
 | 2026-08-08 | #0152 | Dispatch r1+r2 + review (O) | 98,394 | $1.57 |
 | 2026-08-08 | #0176 #0177 | Dispatch (3 rounds) + review (O) | 117,130 | $1.87 |
-| | | **Total measured** | **18,262,531** | **$236.11** |
+| 2026-08-08 | #0182 | Dispatch r1 + review, in-context (O) | 46,000 | $0.74 |
+| | | **Total measured** | **18,308,531** | **$236.85** |
 
 ## What this total does and does not cover
 
