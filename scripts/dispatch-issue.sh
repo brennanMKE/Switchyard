@@ -516,7 +516,15 @@ if [[ -d YardKit ]]; then
       print ""
     fi
   else
+    # EXIT NON-ZERO. Printing a warning here is not enough: the reviewer reads
+    # the `.done` record, not the round log, and #0180 shipped a test target
+    # that did not compile behind `exit 0` with an empty suiteLine. An empty
+    # capture is indistinguishable from an unread one, so the record has to
+    # carry the failure itself.
+    (( STATUS )) || STATUS=11
     print "NO 'Test run with N tests' LINE. The suite did not build, or a test is blocking."
+    print "This round is being recorded as FAILED (exit 11) — an empty suite line"
+    print "is a failed round, not a quiet one. See docs/review-failures.md, #0180."
     print "First error:"
     grep -m1 -E '^/.*error:' "$LOG_DIR/$ISSUE-round$ROUND-suite.txt" || print "  (none found — see $LOG_DIR/$ISSUE-round$ROUND-suite.txt)"
   fi
