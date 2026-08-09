@@ -86,8 +86,18 @@ struct ExitClassCoverageTests {
         ]
     }
 
+    /// Conformers added after #0181 landed. Each asserts its own exit class in
+    /// its own test file; the row here is what keeps the source scan and the
+    /// registry in agreement. `CommitCreate.Failure` (#0036) asserts exit 9 in
+    /// `CommitCreateTests.signingFailureCarriesExitClassNine`.
+    private func addedSinceTheGuard() throws -> [Row] {
+        [
+            Row("CommitCreate.Failure", CommitCreate.Failure.signingFailed(reason: "x"), .signingFailed),
+        ]
+    }
+
     private func registry() throws -> [Row] {
-        try alreadyAsserted() + newlyAsserted()
+        try alreadyAsserted() + newlyAsserted() + addedSinceTheGuard()
     }
 
     /// Deliberate omissions: conformer name → the recorded reason, which must
