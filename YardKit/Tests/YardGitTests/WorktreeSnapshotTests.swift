@@ -359,4 +359,52 @@ struct WorktreeSnapshotTests {
         #expect(unremovable.description.contains("denied"))
         #expect(bare.description.contains("/r/bare.git"))
     }
+
+    // MARK: - #0187 — extraEnvironment actually reaches git
+
+    /// #0152 decision 3 claims an unchanged worktree dedupes because the
+    /// snapshot commit's oid is a pure function of its tree. That holds only
+    /// while the identity and both dates are pinned. Dropping
+    /// `extraEnvironment: Self.commitEnvironment` from the `commit-tree` call
+    /// leaves the whole suite green — measured in #0152's review: `ca60e77…`
+    /// then `93d3b18…` for the same unchanged tree, versus `897ebfb…` twice
+    /// as shipped — while authoring the commit with the machine's real git
+    /// identity, which a --mirror clone then carries.
+    ///
+    /// This asserts the observable effect — determinism of the oid across
+    /// two captures and the pinned anonymous author line, not that a
+    /// dictionary was passed.
+    @Test func theSnapshotCommitIsDeterministicAndAnonymous() throws {
+        let repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let context = try WorktreeContext.resolve(path: repo.url.path)
+
+        // First capture — make a real change so the snapshot has content.
+        let filepath = repo.url.appendingPathComponent("a.txt")
+        try "initial\n".write(to: filepath, atomically: true, encoding: .utf8)
+        let first = try WorktreeSnapshot.capture(in: context)
+
+        // Second capture — identical tree, deterministic oid.
+        let second = try WorktreeSnapshot.capture(in: context)
+        #expect(first.commit == second.commit,
+                "an unchanged worktree must produce the same commit oid")
+
+        // The pinned anonymous author line, not the machine's identity.
+        let showOutput = try GitProcess().run(
+            ["show", "-s", "--format=%an <%ae> %ad --date=iso-strict",
+             first.commit],
+            workingDirectory: repo.url.path).text
+        #expect(showOutput.contains("switchyard <journal@switchyard.invalid>"),
+                "snapshot commits must be authored as switchyard, not the user")
+
+        let realName = try GitProcess().run(
+            ["config", "user.name"],
+            workingDirectory: repo.url.path).text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(!realName.isEmpty,
+                "the fixture must set user.name; else the check below is vacuous")
+
+        #expect(!showOutput.contains(realName),
+                "the machine's real identity must not appear on the snapshot commit")
+    }
 }
