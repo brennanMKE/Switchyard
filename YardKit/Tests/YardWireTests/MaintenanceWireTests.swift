@@ -108,4 +108,19 @@ struct MaintenanceWireTests {
         let result = try #require(object["result"] as? [[String: Any]])
         #expect(result.first?["reason"] as? String == ".git file broken")
     }
+
+    /// #0168 decision 8: a missing object rides the structured error payload
+    /// and agents branch on `ref`/`oid`, so the shape is contract. The
+    /// conformance is SYNTHESISED — a renamed or reordered member changes the
+    /// wire silently, and a round-trip test cannot see it because both
+    /// directions move together. Golden bytes, per #0155.
+    @Test func missingObjectEncodesItsPinnedBytes() throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let bytes = try encoder.encode(JournalRestore.MissingObject(
+            ref: "refs/tags/probe-tag", oid: "0123456789abcdef0123456789abcdef01234567"))
+        #expect(String(decoding: bytes, as: UTF8.self) == """
+            {"oid":"0123456789abcdef0123456789abcdef01234567","ref":"refs/tags/probe-tag"}
+            """)
+    }
 }
