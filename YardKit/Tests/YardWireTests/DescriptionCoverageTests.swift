@@ -115,6 +115,10 @@ struct DescriptionCoverageTests {
                 JournalAnchor.Error.malformedPlumbingOutput(command: "update-ref",
                                                             line: "probe bad line"),
                 .carries(["update-ref", "probe bad line"])),
+            Row("JournalMetadataCache.swift", "JournalMetadataCache.RowDefect",
+                JournalMetadataCache.RowDefect(
+                    id: JournalEntryID("01000000000000000000000042")!, reason: "probe reason"),
+                .carries(["01000000000000000000000042", "probe reason"])),
             Row("JournalMetadataCache.swift", "JournalMetadataCache.Error",
                 JournalMetadataCache.Error.unsupportedSchema(version: 2, path: "/probe/journal.json"),
                 .carries(["/probe/journal.json", "schema version 2", "rebuild it from refs"])),
