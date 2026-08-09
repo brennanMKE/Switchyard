@@ -217,7 +217,8 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-08-08 | #0185 | Dispatch r1 + review, in-context (O, estimated) | 38,000 | $0.61 |
 | 2026-08-08 | #0184 | Plan + dispatch + review, in-context (O, estimated) | 55,000 | $0.88 |
 | 2026-08-08 | #0183 | Plan + dispatch + review, in-context (O, estimated) | 52,000 | $0.83 |
-| | | **Total measured** | **18,453,531** | **$239.17** |
+| 2026-08-08 | #0180 | Plan + dispatch + review + hand-fix, in-context (O, estimated) | 68,000 | $1.09 |
+| | | **Total measured** | **18,521,531** | **$240.26** |
 
 ## What this total does and does not cover
 
