@@ -225,7 +225,8 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-08-08 | #0157 | Plan + 3 failed rounds + hand-written tests (O, estimated) | 96,000 | $1.54 |
 | 2026-08-09 | #0156 | Written and verified in-context (O, estimated) | 88,000 | $1.41 |
 | 2026-08-09 | #0164 | Written and verified in-context (O, estimated) | 74,000 | $1.18 |
-| | | **Total measured** | **19,031,531** | **$248.42** |
+| 2026-08-09 | #0174 | Written and verified in-context (O, estimated) | 92,000 | $1.47 |
+| | | **Total measured** | **19,123,531** | **$249.89** |
 
 ## What this total does and does not cover
 
