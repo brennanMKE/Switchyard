@@ -359,4 +359,43 @@ struct WorktreeListTests {
         #expect(le.locked == true)
         #expect(le.lockReason == "debugging #123")
     }
+
+    // MARK: - The prunable flag (#0148)
+
+    /// #0130 pins `prunable`/`prunableReason` on the wire, but from
+    /// CONSTRUCTED `WorktreeEntry` values. Nothing drove the parser against
+    /// real porcelain carrying a `prunable` line, so blanking that branch left
+    /// the entire suite green — encoding verified, parsing not.
+    ///
+    /// Measured: removing a worktree's directory makes git report
+    /// `prunable gitdir file points to non-existent location`. That is the
+    /// reason-bearing form; the bare `prunable` branch is not reachable this
+    /// way and is deliberately not asserted here.
+    @Test func parserReadsARealPrunableLineAndItsReason() throws {
+        var repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let gone = try repo.addWorktree(named: "gone", branch: "gone-branch")
+        let alive = try repo.addWorktree(named: "alive", branch: "alive-branch")
+        defer { try? FileManager.default.removeItem(at: alive) }
+
+        // Make it genuinely prunable, and prove the wreck took effect: git
+        // must actually report the flag, or this test passes on a healthy
+        // worktree and asserts nothing.
+        try FileManager.default.removeItem(at: gone)
+        #expect(try git.run(["worktree", "list", "--porcelain"],
+                            workingDirectory: repo.url.path).text.contains("prunable"))
+
+        let entries = try worktreeList(path: repo.url.path)
+        let prunedPath = gone.resolvingSymlinksInPath().path
+        #expect(try entries.contains(where: { $0.path == prunedPath }))
+        let pruned = try #require(entries.first(where: { $0.path == prunedPath }))
+        #expect(pruned.prunable)
+        #expect(pruned.prunableReason == "gitdir file points to non-existent location")
+
+        // The surviving worktrees must not be marked prunable — a parser that
+        // sets the flag unconditionally would otherwise pass everything above.
+        let others = entries.filter { $0.path != prunedPath }
+        #expect(!others.isEmpty)
+        #expect(others.allSatisfy { !$0.prunable && $0.prunableReason == nil })
+    }
 }
