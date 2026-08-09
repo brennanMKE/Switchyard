@@ -325,3 +325,22 @@ func postRewriteGitProcessInvocationsCarryTheMarkerIntoTheHook(
     #expect(values.allSatisfy { $0 == "1" },
             "every GitProcess invocation must carry \(GitProcess.markerVariable)=1; saw \(values)")
 }
+
+/// Completeness, at the unit level. Every existing `parse` test feeds input
+/// yielding exactly one rewrite, so a parser truncated to `prefix(1)` or
+/// `suffix(1)` satisfies all of them — #0043's review measured that both
+/// truncations are caught, but ONLY by the two end-to-end rebase tests. A
+/// mapping that silently loses commits is worse than none: the journal and
+/// the UI both trust it to follow a commit across a rewrite.
+@Test func parseReturnsEveryRewriteNotJustTheFirstOrLast() throws {
+    let stdin = "\(oidA) \(oidB)\n\(oidB) \(oidC)\n\(oidC) \(oidS)\n"
+    let result = PostRewrite.parse(Data(stdin.utf8))
+
+    #expect(result.malformedLineCount == 0)
+    #expect(result.rewrites.count == 3)
+    #expect(result.rewrites == [
+        PostRewrite.Rewrite(oldOid: oidA, newOid: oidB),
+        PostRewrite.Rewrite(oldOid: oidB, newOid: oidC),
+        PostRewrite.Rewrite(oldOid: oidC, newOid: oidS),
+    ])
+}
