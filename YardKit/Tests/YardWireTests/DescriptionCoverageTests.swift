@@ -119,6 +119,10 @@ struct DescriptionCoverageTests {
                 JournalMetadataCache.RowDefect(
                     id: JournalEntryID("01000000000000000000000042")!, reason: "probe reason"),
                 .carries(["01000000000000000000000042", "probe reason"])),
+            Row("SequencerSnapshot.swift", "SequencerSnapshot.Error",
+                SequencerSnapshot.Error.directoryUnreadable(
+                    path: "/probe/rebase-merge", detail: "probe detail"),
+                .carries(["/probe/rebase-merge", "probe detail"])),
             Row("JournalMetadataCache.swift", "JournalMetadataCache.Error",
                 JournalMetadataCache.Error.unsupportedSchema(version: 2, path: "/probe/journal.json"),
                 .carries(["/probe/journal.json", "schema version 2", "rebuild it from refs"])),

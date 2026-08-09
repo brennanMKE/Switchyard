@@ -77,6 +77,7 @@ struct ExitClassCoverageTests {
         let later = try #require(JournalEntryID("01BX5ZZKBKACTAV9WEVGEMMVRZ"))
         return [
             Row("HookInstall.Failure", HookInstall.Failure.hooksPathManaged(path: "/x/hooks"), .repositoryError),
+            Row("SequencerSnapshot.Error", SequencerSnapshot.Error.malformedPlumbingOutput(command: "mktree"), .repositoryError),
             Row("JournalMetadataCache.Error", JournalMetadataCache.Error.unsupportedSchema(version: 2, path: "/probe/journal.json"), .repositoryError),
             Row("JournalAnchor.Error", JournalAnchor.Error.foreignRef("refs/heads/main"), .repositoryError),
             Row("JournalChain.Error", JournalChain.Error.unordered(previous: later, next: earlier), .repositoryError),
