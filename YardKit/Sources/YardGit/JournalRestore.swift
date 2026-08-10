@@ -304,14 +304,46 @@ public enum JournalRestore {
             in: context,
             git: git)
 
-        // 8. Apply.
+        // 8. Apply — refs and HEAD, then the index, then the worktree.
+        //
+        // **The order between the index and the worktree is NOT load-bearing**,
+        // and it is worth saying so rather than implying a constraint that does
+        // not exist: `WorktreeSnapshot.restore` aims every index-mutating
+        // command at a temporary index via `GIT_INDEX_FILE`, so it cannot
+        // clobber the index just restored. Swapping the two changes nothing,
+        // and no mutation catches it — measured, not assumed.
         try recorded.restore(in: context, git: git)
 
-        // 9. Report honestly.
+        var restored: [Piece] = [.refs, .head]
+        let slots = try anchoredSlots(of: entry, at: base, git: git)
+        switch metadata.captured.index {
+        case .tree:
+            if let oid = slots[JournalAnchor.indexTreeEntryName] {
+                try IndexSnapshot.tree(oid: oid).restore(in: context, git: git)
+                restored.append(.index)
+            }
+        case .raw:
+            if let blob = slots[JournalAnchor.indexBlobTreeEntryName] {
+                try IndexSnapshot.raw(blob: blob).restore(in: context, git: git)
+                restored.append(.index)
+            }
+        case .notCaptured:
+            break
+        }
+        if metadata.captured.worktree != .notCaptured,
+           let untracked = slots[JournalAnchor.untrackedTreeEntryName],
+           let commit = try worktreeCommit(of: entry, at: base, git: git) {
+            try WorktreeSnapshot(commit: commit, untrackedTree: untracked)
+                .restore(in: context, git: git)
+            restored.append(.worktree)
+            if metadata.captured.untracked { restored.append(.untracked) }
+        }
+
+        // 9. Report honestly — only what was NOT put back.
         return Report(
             entry: entry,
-            restored: [.refs, .head],
-            notRestored: omissions(of: metadata.captured),
+            restored: restored,
+            notRestored: omissions(of: metadata.captured, restored: restored),
             checkpoint: checkpoint)
     }
 
@@ -371,16 +403,63 @@ public enum JournalRestore {
     /// beyond that is `.restoreUnavailable`, a piece it never captured is
     /// `.notCaptured`, and the sequencer is `.notCaptured` on every entry
     /// until #0174 exists to capture it.
-    static func omissions(of captured: JournalEntryMetadata.Captured) -> [Omission] {
-        [
-            Omission(piece: .index,
-                     reason: captured.index == .notCaptured ? .notCaptured : .restoreUnavailable),
-            Omission(piece: .worktree,
-                     reason: captured.worktree == .notCaptured ? .notCaptured : .restoreUnavailable),
-            Omission(piece: .untracked,
-                     reason: captured.untracked ? .restoreUnavailable : .notCaptured),
-            Omission(piece: .sequencer, reason: .notCaptured),
-        ]
+    /// The anchor commit's tree entries, keyed by name. The artifacts ride
+    /// in the tree beside `metadata.json`, so reading them back is one
+    /// `ls-tree` rather than a second capture.
+    static func anchoredSlots(
+        of entry: JournalAnchor.Entry, at base: String, git: GitProcess
+    ) throws -> [String: String] {
+        let listing = try git.run(["ls-tree", entry.commit], workingDirectory: base)
+        var slots: [String: String] = [:]
+        for line in listing.lines where !line.isEmpty {
+            guard let tab = line.firstIndex(of: "\t") else { continue }
+            let fields = line[..<tab].split(separator: " ")
+            guard fields.count >= 3 else { continue }
+            slots[String(line[line.index(after: tab)...])] = String(fields[2])
+        }
+        return slots
+    }
+
+    /// The worktree snapshot's commit, recorded as a parent of the anchor so
+    /// it stays reachable (#0171). The first parent is the entry's own
+    /// keep-alive head; the worktree commit is appended last.
+    static func worktreeCommit(
+        of entry: JournalAnchor.Entry, at base: String, git: GitProcess
+    ) throws -> String? {
+        let parents = try git.run(
+            ["rev-list", "--parents", "-n", "1", entry.commit],
+            workingDirectory: base).text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: " ").map(String.init)
+        return parents.count > 1 ? parents.last : nil
+    }
+
+    /// What the caller did **not** get back, and why. A piece that was
+    /// restored is absent from this list entirely — reporting it as an
+    /// omission alongside its own restoration is how a report starts lying.
+    static func omissions(
+        of captured: JournalEntryMetadata.Captured,
+        restored: [Piece] = []
+    ) -> [Omission] {
+        var result: [Omission] = []
+        if !restored.contains(.index) {
+            result.append(Omission(
+                piece: .index,
+                reason: captured.index == .notCaptured ? .notCaptured : .restoreUnavailable))
+        }
+        if !restored.contains(.worktree) {
+            result.append(Omission(
+                piece: .worktree,
+                reason: captured.worktree == .notCaptured ? .notCaptured : .restoreUnavailable))
+        }
+        if !restored.contains(.untracked) {
+            result.append(Omission(
+                piece: .untracked,
+                reason: captured.untracked ? .restoreUnavailable : .notCaptured))
+        }
+        // #0174 built the primitive; nothing captures it yet.
+        result.append(Omission(piece: .sequencer, reason: .notCaptured))
+        return result
     }
 }
 

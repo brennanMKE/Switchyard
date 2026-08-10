@@ -82,8 +82,11 @@ struct JournalUndoTests {
         #expect(undone.map(\.entry.id) == [c1.id])
         #expect(try RefSnapshot.capture(in: ctx) == atCheckpoint)
         #expect(try ctx.resolveRef("refs/heads/feature", inWorktree: nil) == nil)
-        // Refs-only honesty rides through each step's report (#0034 dec. 3).
-        #expect(undone[0].notRestored.map(\.piece) == [.index, .worktree, .untracked, .sequencer])
+        // Honesty rides through each step's report. Since #0171 the index and
+        // worktree ARE captured and restored, so only the sequencer is left.
+        #expect(undone[0].notRestored.map(\.piece) == [.sequencer])
+        #expect(undone[0].restored.contains(.index))
+        #expect(undone[0].restored.contains(.worktree))
 
         let redone = try JournalUndo.redo(in: ctx)
         #expect(redone.count == 1)

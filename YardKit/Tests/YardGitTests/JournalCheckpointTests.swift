@@ -78,8 +78,13 @@ struct JournalCheckpointTests {
         #expect(meta.agent == nil)
         #expect(meta.traversal == nil)
         #expect(meta.worktree.name == nil)
-        // Honest about the refs-only reality until #0171 flips the flags.
-        #expect(meta.captured == .refsOnly)
+        // #0171 flipped the flags: a checkpoint captures the index and the
+        // worktree too, and `captured` must say so or restore's report lies.
+        #expect(meta.captured.refs)
+        #expect(meta.captured.head)
+        #expect(meta.captured.index != .notCaptured)
+        #expect(meta.captured.worktree == .stash)
+        #expect(meta.captured.untracked)
     }
 
     @Test(arguments: FixtureRepository.RefFormat.supported())

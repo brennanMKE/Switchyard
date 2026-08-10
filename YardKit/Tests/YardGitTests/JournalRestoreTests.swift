@@ -132,13 +132,17 @@ struct JournalRestoreTests {
 
         let report = try JournalRestore.restore(entry.id, in: ctx)
 
-        #expect(report.restored == [.refs, .head])
+        // #0171 flipped these flags: a checkpoint now captures the index and
+        // the worktree, so restore puts them back and the report says so. Only
+        // the sequencer remains uncaptured — #0174 built the primitive and
+        // nothing wires it yet.
+        #expect(report.restored == [.refs, .head, .index, .worktree, .untracked])
         #expect(report.notRestored == [
-            .init(piece: .index, reason: .notCaptured),
-            .init(piece: .worktree, reason: .notCaptured),
-            .init(piece: .untracked, reason: .notCaptured),
             .init(piece: .sequencer, reason: .notCaptured),
         ])
+        // A restored piece must NOT also appear as an omission: a report that
+        // claims both is how honesty degrades into noise.
+        #expect(Set(report.restored).isDisjoint(with: Set(report.notRestored.map(\.piece))))
         #expect(report.checkpoint.id > entry.id)
         #expect(try JournalAnchor.list(in: ctx).map(\.id) == [entry.id, report.checkpoint.id])
     }
