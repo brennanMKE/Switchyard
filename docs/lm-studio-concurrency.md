@@ -270,8 +270,8 @@ because the number that matters to this queue is **per-round latency, not aggreg
 - Decode is **52.4 tok/s solo against 21.7 at 4-way**. A serialised round lands ~2.4x sooner.
 - Measured slot occupancy over a real four-hour window of dispatches was **0.44 of 2 slots** — the
   ceiling was never binding. 1.8 hours of model time spread across 4 hours of wall clock.
-- The real constraint is **planning**: every issue needs a Fable pass of 10–20 minutes before a
-  dispatch of 5–9 minutes. Dispatch is the short leg. Fable has no ceiling, so throughput comes from
+- The real constraint is **planning**: every issue needs a planning pass of 10–20 minutes before a
+  dispatch of 5–9 minutes. Dispatch is the short leg. Planning has no host ceiling, so throughput comes from
   running planners ahead of the queue.
 - Review is serial regardless — one reviewer, running mutations and merging — so four rounds
   finishing together would queue behind it anyway.

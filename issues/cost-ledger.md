@@ -11,7 +11,10 @@ not written down here at the moment it was measured is unrecoverable.
 **85% input / 15% output** = **$8.00 per million combined tokens**. The assumption is stated wherever
 a figure derived from it appears.
 
-**Fable 5 planning** runs bill at $10.00 per million input and $50.00 per million output; the
+**Planning moved to Opus 5 on 2026-08-09** (Brennan's instruction), so planning rows now bill at
+the Opus rate above and carry `(O)`. Rows marked `(F)` predate the change.
+
+**Fable 5**, used for planning until then, billed at $10.00 per million input and $50.00 per million output; the
 same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using it are marked `(F)`.
 
 **Local implementation via Ornith/LM Studio is $0.00** at any volume and is not listed here.

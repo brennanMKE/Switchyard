@@ -1216,11 +1216,11 @@ specifically, while landing single-file Swift repairs first time.
 
 | role | model | scope |
 |---|---|---|
-| Planning | **Fable 5** | Authors down to the code: exact paths, pasted signatures, literal lines, measured before-and-after values |
+| Planning | **Opus 5** | Authors down to the code: exact paths, pasted signatures, literal lines, measured before-and-after values |
 | Implementation, pure code | **Ornith**, local, $0.00 | Ordinary Swift against a target the issue already measured |
 | Implementation, structural | **Sonnet 5**, billed | `Package.swift`, the Xcode project, build settings, the environment, the harness |
 | Issue review | **Opus 5** | Re-runs verification, runs mutations, reads every test. Also reviews umbrella issues once their children resolve |
-| Milestone review | **Fable 5** | Runs when a milestone's issues are all `resolved`; checks guide §9 exit criteria only |
+| Milestone review | **Opus 5** | Runs when a milestone's issues are all `resolved`; checks guide §9 exit criteria only |
 
 `scripts/dispatch-issue.sh` takes `--model ornith|sonnet`, defaults to local, and says plainly when a
 round is billed.
@@ -1256,7 +1256,7 @@ path at all, which preflight check 3 rejects outright.
 
 ### 6.6 Milestone exit criteria, and why not umbrella issues
 
-Every milestone in guide §9 now states its exit criteria as a checklist, and the Fable review reads
+Every milestone in guide §9 now states its exit criteria as a checklist, and the milestone review reads
 those and only those. Two bounds make it terminate: it may file issues **only** against a stated
 criterion, and **two consecutive clean reviews close the milestone**.
 

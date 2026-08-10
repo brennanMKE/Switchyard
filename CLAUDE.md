@@ -95,11 +95,11 @@ context resumes without needing the previous conversation.
 
 | role | model | what it does |
 |---|---|---|
-| **Planning** | Fable 5 | Authors the issue **down to the code**: exact paths, exact signatures, the literal lines to change, measured before-and-after values. Not a description of the work — a colour-by-numbers of it. |
+| **Planning** | Opus 5 | Authors the issue **down to the code**: exact paths, exact signatures, the literal lines to change, measured before-and-after values. Not a description of the work — a colour-by-numbers of it. |
 | **Implementation, pure code** | Ornith 1.0 35B-A3B, local, $0.00 | One file, or a few files of ordinary Swift, against a target the issue has already measured. |
 | **Implementation, structural** | Ornith when the edit is **pasted**; Sonnet when it needs **design** | `Package.swift`, the Xcode project, build settings, the environment. Amended 2026-08-07 — see below. |
 | **Issue review** | Opus 5 | Re-runs the verification, runs the mutations, reads every new test. Unchanged — this is where the catches happen. |
-| **Milestone review** | Fable 5 | Runs when every issue in a milestone is `resolved`. See below. |
+| **Milestone review** | Opus 5 | Runs when every issue in a milestone is `resolved`. See below. |
 
 Dispatch with `scripts/dispatch-issue.sh NNNN --round N [--model ornith|sonnet]`. **`ornith` is the
 default**; `sonnet` prints a billed-round warning. Everything else about the loop is unchanged: a
@@ -120,6 +120,13 @@ machine has **no `anthropic` provider configured** — `opencode models` lists l
 and opencode. `--model sonnet` fails in one second with an opaque `UnknownError`, and that branch of
 `dispatch-issue.sh` had never been exercised, so this table documented a capability that did not
 exist. The script now probes before dispatching.
+
+**Planning and milestone review moved from Fable 5 to Opus 5 on 2026-08-09**, by Brennan's
+instruction. Two consequences worth stating: planning becomes **cheaper**, not dearer — Opus bills
+$5/$25 per million against Fable's $10/$50, so the same pass costs roughly half — and the reviewing
+and planning roles now share a model, which removes the one structural reason a planner and its
+reviewer disagreed about a fact. The `(F)` marker in `issues/cost-ledger.md` applies only to rows
+dated before this change; new planning rows are `(O)`.
 
 ### Why the split, in numbers
 
@@ -145,7 +152,7 @@ The backlog was written before this standard existed. **An issue authored under 
 not ready** — most name no source path at all, which is preflight check 3, and the ones that do name
 paths get details wrong.
 
-So the first step for any issue is a **Fable planning update**, even when the issue looks complete.
+So the first step for any issue is an **Opus 5 planning update**, even when the issue looks complete.
 The first two passes proved the point: #0109's Givens said `GitProcess.run(_:at:)` when the label is
 `workingDirectory:` — the exact wrong-label class that cost #0116 its clock — and claimed a detached
 worktree merely omits `branch`, when it also carries an explicit `detached` line. #0108's criterion
@@ -205,7 +212,7 @@ and it will bury the one finding that mattered.
 
 ### Milestone review
 
-When every issue in a milestone is `resolved`, a **Fable** subagent reviews the milestone as a whole
+When every issue in a milestone is `resolved`, an **Opus 5** subagent reviews the milestone as a whole
 against the exit criteria in guide §9 — not issue by issue, which is what per-issue review already
 does and cannot substitute for.
 
@@ -265,7 +272,7 @@ already happened once, with seven finished branches sitting unpushed while `main
 
 Serialising looks backwards and is not. Decode is **52.4 tok/s solo against 21.7 at 4-way**, so a
 single round lands about 2.4x sooner, and measured slot occupancy over a real four-hour window was
-**0.44 of 2** — concurrency was never the constraint. **Planning is.** Fable has no ceiling, so the
+**0.44 of 2** — concurrency was never the constraint. **Planning is.** Planning has no host ceiling, so the
 way to go faster is more planning agents running ahead of the queue, not more rounds contending for
 one model.
 
