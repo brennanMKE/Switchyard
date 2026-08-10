@@ -231,7 +231,8 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-08-09 | #0174 | Written and verified in-context (O, estimated) | 92,000 | $1.47 |
 | 2026-08-09 | #0175 | Filter half written and verified in-context (O, estimated) | 61,000 | $0.98 |
 | 2026-08-09 | #0171 | Written and verified in-context (O, estimated) | 105,000 | $1.68 |
-| | | **Total measured** | **19,289,531** | **$252.55** |
+| 2026-08-09 | #0035 | Written and verified in-context (O, estimated) | 79,000 | $1.26 |
+| | | **Total measured** | **19,368,531** | **$253.81** |
 
 ## What this total does and does not cover
 
