@@ -70,6 +70,26 @@ public struct RefSnapshot: Sendable, Equatable {
     public let head: Head
     public let refs: [Entry]
 
+    /// The three namespaces that are **per-worktree** despite starting with
+    /// `refs/`. Measured: `for-each-ref` lists them under plain names and only
+    /// in the worktree that owns them, so a snapshot taken in one worktree
+    /// carries another's private refs — and restoring it elsewhere would both
+    /// create them there and delete that worktree's own as "extras".
+    ///
+    /// Same-worktree restore must NOT filter these: they are exactly the state
+    /// an in-progress bisect or rebase needs back.
+    public static let perWorktreeNamespaces = [
+        "refs/worktree/", "refs/bisect/", "refs/rewritten/",
+    ]
+
+    /// This snapshot with every per-worktree ref removed, for applying in a
+    /// worktree other than the one that captured it (#0175).
+    public var withoutPerWorktreeRefs: RefSnapshot {
+        RefSnapshot(head: head, refs: refs.filter { entry in
+            !Self.perWorktreeNamespaces.contains { entry.name.hasPrefix($0) }
+        })
+    }
+
     public init(head: Head, refs: [Entry]) {
         self.head = head
         self.refs = refs
