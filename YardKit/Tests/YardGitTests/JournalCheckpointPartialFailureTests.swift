@@ -93,11 +93,21 @@ struct JournalCheckpointPartialFailureTests {
         let unreachable = try git.run(["fsck", "--unreachable", "--no-progress"],
                                       workingDirectory: repo.url.path)
         let orphanCommits = unreachable.lines.filter { $0.hasPrefix("unreachable commit ") }
-        #expect(orphanCommits.count == 1)
+        // TWO since #0171: the snapshot commit, and the worktree-state commit
+        // it would have carried as a keep-alive parent. Both are unreachable,
+        // which is the property under test — a failed checkpoint leaves
+        // objects behind but nothing DISCOVERABLE.
+        #expect(orphanCommits.count == 2)
         #expect(unreachable.lines.contains("unreachable blob \(refsBlob)"))
-        let orphan = try #require(orphanCommits.first?.split(separator: " ").last.map(String.init))
-        let tree = try git.run(["ls-tree", orphan], workingDirectory: repo.url.path)
-        #expect(tree.lines.contains("100644 blob \(refsBlob)\t\(JournalAnchor.refsTreeEntryName)"))
+        // Find the snapshot commit specifically — with two orphans, `first` is
+        // whichever fsck happened to print, which is not a property to rely on.
+        let oids = orphanCommits.compactMap { $0.split(separator: " ").last.map(String.init) }
+        let snapshotTrees = try oids.map {
+            try git.run(["ls-tree", $0], workingDirectory: repo.url.path).lines
+        }
+        #expect(snapshotTrees.contains {
+            $0.contains("100644 blob \(refsBlob)\t\(JournalAnchor.refsTreeEntryName)")
+        })
 
         // And nothing discovers it: not the listing, and not a rebuild —
         // no entry, and no defect either. A half-written checkpoint is

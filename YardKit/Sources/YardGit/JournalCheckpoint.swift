@@ -56,6 +56,8 @@ public enum JournalCheckpoint {
         try JournalLock(context: context).withLock(timeout: lockTimeout) {
             try writeEntry(
                 capturing: RefSnapshot.capture(in: context, git: git),
+                index: try IndexSnapshot.capture(in: context, git: git),
+                worktree: try WorktreeSnapshot.capture(in: context, git: git),
                 operation: operation,
                 label: label,
                 command: command,
@@ -80,6 +82,8 @@ public enum JournalCheckpoint {
     /// checked.
     static func writeEntry(
         capturing snapshot: RefSnapshot,
+        index: IndexSnapshot? = nil,
+        worktree: WorktreeSnapshot? = nil,
         operation: String,
         label: String? = nil,
         command: String? = nil,
@@ -111,14 +115,35 @@ public enum JournalCheckpoint {
             label: label,
             timestamp: Date(),
             worktree: .init(name: context.worktreeName, path: base),
-            captured: .refsOnly,
+            captured: JournalEntryMetadata.Captured(
+                refs: true, head: true,
+                index: index?.captured ?? .notCaptured,
+                worktree: worktree == nil ? .notCaptured : .stash,
+                untracked: worktree != nil),
             agent: agent,
             traversal: traversal)
+
+        var keepAlive = try keepAliveParents(of: snapshot, at: base, git: git)
+        // The worktree snapshot's commit is reachable from no ref, so it must
+        // be a parent or ordinary maintenance may reclaim it — the same reason
+        // captured ref tips are parents.
+        if let worktree { keepAlive.append(worktree.commit) }
+
+        var indexTree: String?
+        var indexBlob: String?
+        switch index {
+        case let .tree(oid): indexTree = oid
+        case let .raw(blob): indexBlob = blob
+        case nil: break
+        }
 
         let contents = JournalAnchor.Contents(
             metadataJSON: try metadata.serialized(),
             refsBlob: refsBlob,
-            keepAlive: try keepAliveParents(of: snapshot, at: base, git: git))
+            indexTree: indexTree,
+            indexBlob: indexBlob,
+            untrackedTree: worktree?.untrackedTree,
+            keepAlive: keepAlive)
         return try JournalAnchor.write(contents, id: id, in: context, git: git)
     }
 
