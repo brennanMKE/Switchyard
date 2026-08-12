@@ -5,5 +5,8 @@ xcuserdata/
 .switchyard-runs/
 YardKit/.build/
 
+# OpenCode
+.opencode/
+
 # Coverage artifact left by `swift test` in the working directory.
 default.profraw
