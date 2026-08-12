@@ -350,28 +350,6 @@ extension JournalEntryID: Codable {
     }
 }
 
-/// The chain's own traversal record is the wire type, hand-conformed here
-/// (synthesis cannot cross files): `restored` required, `resultingPosition`
-/// absent when the cursor returned to present.
-extension JournalChain.Traversal: Codable {
-    private enum CodingKeys: String, CodingKey {
-        case restored, resultingPosition
-    }
-
-    public init(from decoder: any Decoder) throws {
-        let container = try decoder.container(keyedBy: CodingKeys.self)
-        self.init(
-            restored: try container.decode(JournalEntryID.self, forKey: .restored),
-            resultingPosition: try container.decodeIfPresent(
-                JournalEntryID.self, forKey: .resultingPosition))
-    }
-
-    public func encode(to encoder: any Encoder) throws {
-        var container = encoder.container(keyedBy: CodingKeys.self)
-        try container.encode(restored, forKey: .restored)
-        try container.encodeIfPresent(resultingPosition, forKey: .resultingPosition)
-    }
-}
 
 // MARK: - §6 exit class (#0141)
 
