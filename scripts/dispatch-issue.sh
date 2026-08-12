@@ -402,7 +402,11 @@ the subject of this round's commit, so make that line a single plain sentence
 saying what the round did. The harness makes the commit; you must still not run
 git yourself.
 
-Then say the same thing briefly in your final message.
+Then say the same thing briefly in your final message. **The turn ends when
+your response contains no tool calls.** Keep issuing tool calls until you are
+done, then report. Do not end a turn with prose and no follow-up tool call —
+that is stopping, and it leaves the queue idle.
+
 EOF
 
 print "dispatch: issue $ISSUE, round $ROUND/$MAX_ROUNDS, model ${MODEL:-unknown} (${MODEL_CHOICE}), timeout ${TIMEOUT}s, stall ${STALL}s"
