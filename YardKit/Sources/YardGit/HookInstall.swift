@@ -207,7 +207,7 @@ public enum HookInstall {
         return ObservedHook.allCases.map { install($0, in: location.directory) }
     }
 
-    static func install(_ hook: ObservedHook, in directory: String) -> Report {
+    internal static func install(_ hook: ObservedHook, in directory: String) -> Report {
         let fm = FileManager.default
         let base = URL(fileURLWithPath: directory)
         let url = base.appendingPathComponent(hook.rawValue)
