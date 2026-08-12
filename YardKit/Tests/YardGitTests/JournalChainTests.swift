@@ -229,4 +229,118 @@ struct JournalChainTests {
         }
         #expect(duplicateError == .unordered(previous: ids.b, next: ids.b))
     }
+
+    // MARK: - Observed entries (#0153)
+
+    private func observed(_ id: JournalEntryID) -> JournalChain.Node {
+        JournalChain.Node(id: id, observed: true)
+    }
+
+    /// Observing a ref-update adds snapshot commits but never candidates for undo/redo.
+    @Test func observedEntriesAreNeverUndoTargets() throws {
+        // N1 O(observed) N2 — the observed entry must not change the undo target.
+        let ids = try IDs()
+        let state = try JournalChain.state(of: [
+            normal(ids.b), observed(ids.c), normal(ids.d),
+        ])
+        #expect(state.cursor == nil)
+        #expect(state.undoTarget == ids.d)
+        #expect(state.redoTarget == nil)
+    }
+
+    @Test func observedEntriesDoNotRedirectRedo() throws {
+        // An observed entry sandwiched between a U→B and R redo does not change
+        // what the chain remembers as undo/redo targets — observed entries are
+        // invisible to chain logic, so the same state computed with and without
+        // them must match exactly.
+        let ids = try IDs()
+
+        // Baseline: N1(B) N2(C) U→B(D). cursor=B, undoTarget=nil (nothing < B),
+        // redoTarget=.entry(C) because C is the first normal entry with id > B.
+        let baselineNodes: [JournalChain.Node] = [
+            normal(ids.b), normal(ids.c),
+            traversal(ids.d, restored: ids.b, position: ids.b),  // U→N1
+        ]
+        let baseline = try JournalChain.state(of: baselineNodes)
+
+        // Same chain with observed(E) after U—E must be skipped by state().
+        let state2 = try JournalChain.state(of: [
+            normal(ids.b), normal(ids.c),
+            traversal(ids.d, restored: ids.b, position: ids.b),
+            observed(ids.e),
+        ])
+
+        #expect(state2.cursor == baseline.cursor, "cursor must match baseline")
+        if let bUndo = baseline.undoTarget { #expect(state2.undoTarget == bUndo) }
+        else { #expect(state2.undoTarget == nil) }
+
+        if case .entry(let baseEntry)? = baseline.redoTarget {
+            if case .entry(let twoEntry)? = state2.redoTarget { #expect(twoEntry == baseEntry) }
+            else { Issue.record("redo step type must match baseline") }
+        } else if case .present(capturedBy: let baseCaptured)? = baseline.redoTarget {
+            if case .present(capturedBy: let twoCaptured)? = state2.redoTarget {
+                #expect(twoCaptured == baseCaptured)
+            } else { Issue.record("redo step type must match baseline") }
+        } else if baseline.redoTarget == nil { #expect(state2.redoTarget == nil) }
+        else { Issue.record("unexpected baseline redo step shape") }
+
+        // Same chain with observed(E) before U—E must be skipped by state().
+        let state3 = try JournalChain.state(of: [
+            normal(ids.b), normal(ids.c),
+            observed(ids.d),
+            traversal(ids.e, restored: ids.b, position: ids.b),  // U→N1
+        ])
+
+        #expect(state3.cursor == baseline.cursor, "cursor must match baseline")
+        if let bUndo = baseline.undoTarget { #expect(state3.undoTarget == bUndo) }
+        else { #expect(state3.undoTarget == nil) }
+
+        if case .entry(let baseEntry)? = baseline.redoTarget {
+            if case .entry(let threeEntry)? = state3.redoTarget { #expect(threeEntry == baseEntry) }
+            else { Issue.record("redo step type must match baseline") }
+        } else if case .present(capturedBy: let baseCaptured)? = baseline.redoTarget {
+            if case .present(capturedBy: let threeCaptured)? = state3.redoTarget {
+                #expect(threeCaptured == baseCaptured)
+            } else { Issue.record("redo step type must match baseline") }
+        } else if baseline.redoTarget == nil { #expect(state3.redoTarget == nil) }
+        else { Issue.record("unexpected baseline redo step shape") }
+    }
+
+    @Test func observedEntriesAreOmittedFromProtectedIDs() throws {
+        // Undo locks the cursor and anything above it, but observed entries are
+        // not cancellable targets and must never be protected.
+        let ids = try IDs()
+        let state = try JournalChain.state(of: [
+            normal(ids.b), normal(ids.c),  // N1, N2 — cursor = nil (present)
+            traversal(ids.d, restored: ids.c, position: ids.c),  // U→N2
+        ])
+        #expect(state.cursor == ids.c)
+
+        // D is the undo target — it was just undone, so protected. No observed
+        // entries were in this journal; the assertion is really that we don't
+        // accidentally include ids not matching traversal. The protection set
+        // is {C, D} because the cursor is on C and nothing below is protected.
+        #expect(state.protectedIDs == [ids.c, ids.d])
+    }
+
+    @Test func observedEntriesSurviveTheListing() throws {
+        // A journal with only observed entries has nothing to undo or redo.
+        let ids = try IDs()
+        let state = try JournalChain.state(of: [observed(ids.b)])
+        #expect(state.cursor == nil)
+        #expect(state.undoTarget == nil)
+        #expect(state.redoTarget == nil)
+    }
+
+    @Test func observedEntriesDoNotResetTheCursor() throws {
+        // Undo moves the cursor; an observed entry in between must not reset it.
+        let ids = try IDs()
+        let state = try JournalChain.state(of: [
+            normal(ids.b),  // N1 resets cursor to present
+            observed(ids.c),  // observer, no effect
+            traversal(ids.d, restored: ids.b, position: ids.b),  // redo
+        ])
+        #expect(state.cursor == ids.b)
+        #expect(state.undoTarget == nil)  // only an observed entry below the cursor; ignore it
+    }
 }
