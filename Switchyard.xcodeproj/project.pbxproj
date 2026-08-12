@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		26BA44853026752800DDB2E9 /* YardGit in Frameworks */ = {isa = PBXBuildFile; productRef = 26BA44843026752800DDB2E9 /* YardGit */; };
 		26BA44873026752800DDB2E9 /* YardKit in Frameworks */ = {isa = PBXBuildFile; productRef = 26BA44863026752800DDB2E9 /* YardKit */; };
+		A1B2C3D4E5F60001 /* YardUI in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D4E5F60000 /* YardUI */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -59,6 +60,7 @@
 			files = (
 				26BA44853026752800DDB2E9 /* YardGit in Frameworks */,
 				26BA44873026752800DDB2E9 /* YardKit in Frameworks */,
+				A1B2C3D4E5F60001 /* YardUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -651,6 +653,10 @@
 		26BA44863026752800DDB2E9 /* YardKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = YardKit;
+		};
+		A1B2C3D4E5F60000 /* YardUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = YardUI;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
