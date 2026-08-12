@@ -166,6 +166,16 @@ public struct HunkParser {
                                    headerLines: [line])
                 continue
             }
+            if line.hasPrefix("diff --cc ") {
+                // A combined diff — an unmerged path. It has no stable ids
+                // and is not stageable; close the open file so none of its
+                // lines (`--- a/…`, `@@@ …`, `++<<<<<<<`) are mis-attributed
+                // to a neighbouring file. Measured: git prints all `diff
+                // --cc` blocks ahead of every `diff --git` block, but
+                // correctness here must not depend on that ordering.
+                closeFile()
+                continue
+            }
             guard file != nil else { continue }  // preamble; git emits none
 
             if let open = hunk {
@@ -203,6 +213,12 @@ public struct HunkParser {
                     file?.path = path
                 }
                 file?.headerLines.append(line)
+            } else if line.hasPrefix("* Unmerged path ") {
+                // `git diff --cached` prints this at the unmerged path's
+                // sorted position, so it can land between two file blocks.
+                // Appended to headerText it poisons the reconstructed patch:
+                // measured, `git apply` refuses it with "patch with only
+                // garbage". It belongs to no file; drop it.
             } else if !line.isEmpty {
                 // index lines, similarity scores, and anything else git adds.
                 file?.headerLines.append(line)
