@@ -121,19 +121,26 @@ Two rules come out of that, and neither is checkable from the issue text:
 
 The number you are chasing is almost never worth what you would spend to get it.
 
-## Rule 5 — Stop instead of retrying. A clear stop is a good outcome.
+## Rule 5 — Solve the problem. Stop only when you have exhausted every approach.
 
-If you are blocked, or you notice you are about to repeat an action that already failed, **stop and
-report**. Say what you tried, what happened, and what you think is needed. That report is genuinely
-useful — it becomes the feedback that makes the next round work.
+When you encounter a problem, **dedicate sustained time and effort to solving it before stopping.** Every compiler error, every build failure, every unexpected behavior is a problem to work on — not a reason to give up and ask for help. You are the agent, and you keep working until the problem is solved or you have genuinely no more ideas.
 
-Repeating a failing command with small variations is the one failure mode that wastes the most time
-here, because the run is on a wall-clock timeout and gets killed with nothing to show. If two
-attempts at the same thing have failed, the third will not succeed; write the report instead.
+A stop is only justified when:
+- You have tried every reasonable approach and none work, AND you have documented exactly what you tried so the next agent can continue
+- The problem is genuinely ambiguous (e.g., a design decision with no correct answer) — but even then, pick the best option and implement it
 
-Finish every run with: what you changed, what you ran, what it printed, and what you could not do.
+A stop is **NOT** justified when:
+- You hit an unexpected error (compiler errors, runtime failures, tool rejections) — these are problems to solve
+- You have not yet tried multiple diagnostic or recovery approaches
+- You are "out of time" — finish the work, not the clock
 
-## Rule 5b — A tool call that failed the same way twice will not succeed on the third try.
+The cost of a premature stop is measured in human lives when this project touches safety-critical systems. Every time you stop instead of solving, someone else pays for your surrender with their time, their work, or worse. Never make that choice lightly.
+
+Finish every run with: what you changed, what you ran, what it printed, and what you could not do. But only "could not do" applies when you have genuinely exhausted every avenue.
+
+**The turn ends when your response contains no tool calls.** If you are still working on a problem, keep issuing tool calls — `read`, `edit`, `bash` — even if you have already reported what you tried. Do not end a turn with prose and no follow-up tool call while still investigating; that is a stop. Continue until the problem is resolved or genuinely blocked, then report once covering everything.
+
+## Rule 5b — Identical retries waste time, but investigation does not.
 
 Rule 5 covers shell commands. This is the same rule for **tool mechanics**, and it has cost a whole
 round: a `write` call was emitted with no `content` key, rejected, and re-emitted **188 times over
@@ -147,7 +154,7 @@ correct and was lost with it.
   the methods. A partial file that compiles can be finished; a 300-line write that never lands leaves
   nothing behind.
 - If neither path works, **stop and say which tool failed and how**. That is a useful round. Twenty
-  minutes of identical retries is not.
+  minutes of identical retries is not. **But diagnostic investigation and trying different approaches** to the same tool failure are NOT "identical retries" — use `python3` scripts, `swiftc -parse`, and other diagnostic commands to investigate the problem before stopping. Only stop when you have exhausted every reasonable way to diagnose and recover from the tool failure.
 
 ## Rule 5c — Never `cat >` onto a file that already exists.
 
@@ -292,6 +299,8 @@ If something is genuinely ambiguous:
 
 An unanswered question at the end of a finished round is useful. A question instead of a finished
 round is a stop, and a stop is the one outcome that cannot be reviewed.
+
+**The turn ends when your response contains no tool calls.** Prose alone does not keep the queue running. If you have more work to do, issue tool calls — `read`, `edit`, `bash` — even if the prose is short. If you are done, then emit the final report and stop.
 
 ## Rule 9b — Your context is small. Read the issue and nothing else.
 

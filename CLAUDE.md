@@ -46,13 +46,12 @@ a queue designed not to need one.
 
 **When blocked, do not stop — reroute.** Move to the next unblocked issue and collect blockers into
 one batched question at the end of the session. One question with five items beats five
-interruptions.
+interruptions. **But diagnostic investigation is NOT "rerouting"** — if you hit an opaque error,
+try multiple different diagnostic approaches before moving on. Investigate the problem; don't just
+skip to a different issue.
 
 **A progress report between issues is a stop.** Emitting text ends the turn, so "here is what I
-found, next I will do X" is functionally quitting, however it is phrased. Do not narrate transitions
-between issues. Findings belong in `docs/` and in the issue files — that is the report, and it
-persists. Keep taking tool calls until the queue is exhausted or genuinely blocked, then report once
-covering everything.
+found, next I will do X" is functionally quitting, however it is phrased. **Do not narrate transitions** between issues or stand up to report on completed work. Findings belong in `docs/` and in the issue files — that is the report, and it persists. Keep taking tool calls until you are genuinely blocked, then report once covering everything at the end of the queue.
 
 **Never fake progress to avoid stopping.** The verification rules still hold: tests must actually
 run, and an unverified issue stays open. Reporting an issue resolved to keep momentum is worse than
