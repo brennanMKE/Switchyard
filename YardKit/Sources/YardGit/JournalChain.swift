@@ -39,7 +39,7 @@ public enum JournalChain {
     /// metadata. Explicit rather than derived: `resultingPosition` could be
     /// recomputed from `restored`'s kind, but only while `restored` survives
     /// pruning — the explicit field keeps replay working over holes.
-    public struct Traversal: Sendable, Equatable {
+    public struct Traversal: Sendable, Equatable, Codable {
         /// The entry whose snapshot the traversal restored.
         public let restored: JournalEntryID
         /// Where the cursor stood after it: a normal entry's id, or nil for
@@ -58,9 +58,15 @@ public enum JournalChain {
         public let id: JournalEntryID
         public let traversal: Traversal?
 
-        public init(id: JournalEntryID, traversal: Traversal? = nil) {
+        /// Observed entries are created by `JournalObserved.write(_:)` to
+        /// record foreign reference transactions. They anchor snapshot commits
+        /// but are never candidates for undo/redo, so they need a flag here.
+        public let observed: Bool
+
+        public init(id: JournalEntryID, traversal: Traversal? = nil, observed: Bool = false) {
             self.id = id
             self.traversal = traversal
+            self.observed = observed
         }
     }
 
@@ -135,6 +141,13 @@ public enum JournalChain {
                 throw Error.unordered(previous: previous, next: node.id)
             }
             previous = node.id
+
+            // Observed entries are never candidates for undo/redo — they
+            // anchor foreign `reference-transaction` snapshots. They also never
+            // reset the cursor, so treat them as invisible to chain logic: any
+            // traversal or normal entry before them may still compute a target.
+            guard !node.observed else { continue }
+
             if let traversal = node.traversal {
                 if cursor == nil { presentCapture = node.id }
                 cursor = traversal.resultingPosition
@@ -146,8 +159,8 @@ public enum JournalChain {
         let undoTarget: JournalEntryID?
         let redoTarget: RedoStep?
         if let cursor {
-            undoTarget = nodes.last { $0.traversal == nil && $0.id < cursor }?.id
-            if let next = nodes.first(where: { $0.traversal == nil && $0.id > cursor }) {
+            undoTarget = nodes.last { !$0.observed && $0.traversal == nil && $0.id < cursor }?.id
+            if let next = nodes.first(where: { !$0.observed && $0.traversal == nil && $0.id > cursor }) {
                 redoTarget = .entry(next.id)
             } else if let presentCapture {
                 redoTarget = .present(capturedBy: presentCapture)
@@ -157,12 +170,12 @@ public enum JournalChain {
                 redoTarget = nil
             }
         } else {
-            undoTarget = nodes.last { $0.traversal == nil }?.id
+            undoTarget = nodes.last { !$0.observed && $0.traversal == nil }?.id
             redoTarget = nil
         }
 
         let protectedIDs: Set<JournalEntryID> = cursor.map { c in
-            Set(nodes.lazy.map(\.id).filter { $0 >= c })
+            Set(nodes.lazy.filter({ !$0.observed }).map(\.id).filter { $0 >= c })
         } ?? []
 
         return State(
@@ -181,3 +194,4 @@ public enum JournalChain {
 extension JournalChain.Error: ExitClassCarrying {
     public var exitClass: ExitClass { .repositoryError }
 }
+
