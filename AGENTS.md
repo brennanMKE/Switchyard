@@ -509,6 +509,36 @@ raw output and read the first `error:` in them.
 Do not treat an empty grep as inconclusive. An expected line that is absent is a finding, not a
 missing view of one.
 
+## Issue Workflow — worktree per issue, squash merge to main
+
+Each issue is worked in its own worktree and branch so the main branch stays clean, builds never
+race each other across issues, and work is self-contained until done.
+
+1. **Create a worktree + branch for the issue.** Branch name is `issue-NNNN`. Make sure no other
+   worktree currently holds that branch and the local `main` is up-to-date with its remote.
+2. **Do all edits, builds, and tests inside that worktree.** The agent round still writes its
+   report to `.switchyard-runs/NNNN-roundN.report.md` — paths stay relative.
+3. **Build and tests must pass before merge.** Red work does not go to main; fix it in the
+   worktree first. A `swift test` run with no `Test run with N tests` line is a failure, so treat
+   that as the hard gate.
+4. **Squash merge to main.** One clean commit per issue, imperative-first-line message (Rule 4b).
+   After merge: delete the branch and drop the worktree.
+
+```sh
+# Example sequence — run from the repo root
+git worktree add ../switchyard-issue-0153 -b issue-0153 main
+# work inside ../switchyard-issue-0153 …
+git -C ../switchyard-issue-0153 push   # if the branch needs to land somewhere
+# From main, after round is done:
+git merge --squash issue-0153 && git commit -m "Issue 0153: <title>"
+git branch -d issue-0153
+git worktree remove ../switchyard-issue-0153
+```
+
+**Do not squash anything that is red.** If a round produced work that still does not build or fails
+tests, state what failed in the report and leave it for the next agent — do not try to surface red
+work into main via a squashed commit.
+
 ## Build commands
 
 ```sh
