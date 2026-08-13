@@ -160,10 +160,18 @@ public struct HunkParser {
         for lineSub in text.split(separator: "\n", omittingEmptySubsequences: false) {
             let line = String(lineSub)
 
-            if line.hasPrefix("diff --git ") {
+            if line.hasPrefix("diff --git ") || line.hasPrefix("diff --cc ") {
                 closeFile()
-                file = FileBuilder(path: try Self.pathFromDiffGitLine(line),
-                                   headerLines: [line])
+                if line.hasPrefix("diff --git ") {
+                    file = FileBuilder(path: try Self.pathFromDiffGitLine(line),
+                                       headerLines: [line])
+                } else {
+                    // Combined diff block — skip it entirely. The path and
+                    // markers inside are part of a different file's block that
+                    // has not yet been opened, so we must not let them leak
+                    // into the currently open file's header.
+                    file = nil
+                }
                 continue
             }
             if line.hasPrefix("diff --cc ") {
@@ -221,7 +229,13 @@ public struct HunkParser {
                 // garbage". It belongs to no file; drop it.
             } else if !line.isEmpty {
                 // index lines, similarity scores, and anything else git adds.
-                file?.headerLines.append(line)
+                // `* Unmerged path P` lines are emitted by `git diff --cached`
+                // during a merge at the sorted position of the unmerged file —
+                // they must not be appended to the previous file's headerText,
+                // because that corrupts the reconstructed patch. Skip them.
+                if !line.hasPrefix("* Unmerged path ") {
+                    file?.headerLines.append(line)
+                }
             }
         }
         closeFile()
