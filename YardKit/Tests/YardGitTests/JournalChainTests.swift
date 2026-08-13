@@ -252,58 +252,48 @@ struct JournalChainTests {
         // An observed entry sandwiched between a U→B and R redo does not change
         // what the chain remembers as undo/redo targets — observed entries are
         // invisible to chain logic, so the same state computed with and without
-        // them must match exactly.
+        // them must match exactly (except protectedIDs which includes the
+        // traversal entries that exist in each variant).
         let ids = try IDs()
 
-        // Baseline: N1(B) N2(C) U→B(D). cursor=B, undoTarget=nil (nothing < B),
-        // redoTarget=.entry(C) because C is the first normal entry with id > B.
+        // Baseline: N1(B) N2(C) U→B(D).
         let baselineNodes: [JournalChain.Node] = [
             normal(ids.b), normal(ids.c),
             traversal(ids.d, restored: ids.b, position: ids.b),  // U→N1
         ]
-        let baseline = try JournalChain.state(of: baselineNodes)
 
         // Same chain with observed(E) after U—E must be skipped by state().
-        let state2 = try JournalChain.state(of: [
+        let withObservedAfter = try JournalChain.state(of: [
             normal(ids.b), normal(ids.c),
             traversal(ids.d, restored: ids.b, position: ids.b),
             observed(ids.e),
         ])
 
-        #expect(state2.cursor == baseline.cursor, "cursor must match baseline")
-        if let bUndo = baseline.undoTarget { #expect(state2.undoTarget == bUndo) }
-        else { #expect(state2.undoTarget == nil) }
-
-        if case .entry(let baseEntry)? = baseline.redoTarget {
-            if case .entry(let twoEntry)? = state2.redoTarget { #expect(twoEntry == baseEntry) }
-            else { Issue.record("redo step type must match baseline") }
-        } else if case .present(capturedBy: let baseCaptured)? = baseline.redoTarget {
-            if case .present(capturedBy: let twoCaptured)? = state2.redoTarget {
-                #expect(twoCaptured == baseCaptured)
-            } else { Issue.record("redo step type must match baseline") }
-        } else if baseline.redoTarget == nil { #expect(state2.redoTarget == nil) }
-        else { Issue.record("unexpected baseline redo step shape") }
-
         // Same chain with observed(E) before U—E must be skipped by state().
-        let state3 = try JournalChain.state(of: [
+        let withObservedBefore = try JournalChain.state(of: [
             normal(ids.b), normal(ids.c),
             observed(ids.d),
             traversal(ids.e, restored: ids.b, position: ids.b),  // U→N1
         ])
 
-        #expect(state3.cursor == baseline.cursor, "cursor must match baseline")
-        if let bUndo = baseline.undoTarget { #expect(state3.undoTarget == bUndo) }
-        else { #expect(state3.undoTarget == nil) }
+        let baseline = try JournalChain.state(of: baselineNodes)
 
-        if case .entry(let baseEntry)? = baseline.redoTarget {
-            if case .entry(let threeEntry)? = state3.redoTarget { #expect(threeEntry == baseEntry) }
-            else { Issue.record("redo step type must match baseline") }
-        } else if case .present(capturedBy: let baseCaptured)? = baseline.redoTarget {
-            if case .present(capturedBy: let threeCaptured)? = state3.redoTarget {
-                #expect(threeCaptured == baseCaptured)
-            } else { Issue.record("redo step type must match baseline") }
-        } else if baseline.redoTarget == nil { #expect(state3.redoTarget == nil) }
-        else { Issue.record("unexpected baseline redo step shape") }
+        // Cursor, undoTarget, and redoTarget must match — observed entries
+        // are invisible to chain logic.
+        #expect(withObservedAfter.cursor == baseline.cursor)
+        #expect(withObservedAfter.undoTarget == baseline.undoTarget)
+        #expect(withObservedAfter.redoTarget == baseline.redoTarget)
+
+        #expect(withObservedBefore.cursor == baseline.cursor)
+        #expect(withObservedBefore.undoTarget == baseline.undoTarget)
+        #expect(withObservedBefore.redoTarget == baseline.redoTarget)
+
+        // protectedIDs differs because the traversal entries differ, but both
+        // must contain the cursor and all normal entries above it.
+        #expect(withObservedAfter.protectedIDs.contains(ids.b))
+        #expect(withObservedAfter.protectedIDs.contains(ids.c))
+        #expect(withObservedBefore.protectedIDs.contains(ids.b))
+        #expect(withObservedBefore.protectedIDs.contains(ids.c))
     }
 
     @Test func observedEntriesAreOmittedFromProtectedIDs() throws {

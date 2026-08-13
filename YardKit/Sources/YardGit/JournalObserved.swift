@@ -44,7 +44,7 @@ public enum JournalObserved {
 
         private enum CodingKeys: String, CodingKey {
             case payloadSchemaVersion
-            case updates = "updates"
+            case updates
         }
 
         public init(
