@@ -229,4 +229,5 @@ struct JournalChainTests {
         }
         #expect(duplicateError == .unordered(previous: ids.b, next: ids.b))
     }
+
 }
