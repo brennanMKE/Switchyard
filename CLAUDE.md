@@ -174,6 +174,12 @@ The prompt carries, and nothing more:
   claims — that a bounded loop **terminates**, that a call **succeeds** — and give any deadline in a
   test a generous value. Production defaults stay small; a CLI is one process making one call.
 
+**Never run `swift test` in the primary checkout while a subagent is running it there.** They share
+`YardKit/.build`, and two concurrent builds clobber each other's products — the failures that
+produces look like real test failures and are not. Run the review's own suite in a throwaway
+worktree (`git worktree add -d ../sy-check <rev>`) when a review agent is working in the primary
+checkout, and remove it afterwards.
+
 **Merge `main` into the branch when the round is not running.** Doing it mid-round changes files
 under a subagent that is reading and testing them; it happened once on 2026-08-17 and was harmless
 only because the incoming commits touched `issues/` and `docs/`. Merge before dispatching, or after
