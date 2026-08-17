@@ -45,7 +45,25 @@ public enum StagingError: Error, Equatable, CustomStringConvertible, Sendable {
 /// An empty `ids` array is a no-op: nothing to resolve, and `git apply` on
 /// an empty patch is an error (`No valid patches in input`, exit 128), so
 /// git is not invoked at all.
+///
+/// **Writes exactly one journal entry per call (#0212)**, via
+/// `JournalCheckpoint.around`, so `undo` works after staging directly. This
+/// is the entry point everything outside this file must call.
 public func stageHunks(
+    ids: [String],
+    at path: String,
+    git: GitProcess = GitProcess()
+) throws {
+    try JournalCheckpoint.around(operation: "stage", at: path, git: git) {
+        try stageHunksWithoutCheckpoint(ids: ids, at: path, git: git)
+    }
+}
+
+/// The non-checkpointing primitive. Writes no journal entry of its own —
+/// `commitHunks` below calls this, not `stageHunks`, so composing staging
+/// with a commit inside one `JournalCheckpoint.around` produces exactly one
+/// entry rather than two (#0212, the trap #0209 was scoped around).
+func stageHunksWithoutCheckpoint(
     ids: [String],
     at path: String,
     git: GitProcess = GitProcess()
@@ -153,7 +171,7 @@ public func commitHunks(
     }
     return try JournalCheckpoint.around(
         operation: "commit", at: path, git: git) {
-        try stageHunks(ids: ids, at: path, git: git)
+        try stageHunksWithoutCheckpoint(ids: ids, at: path, git: git)
         return try CommitCreate.run(
             message: message,
             signing: signing,

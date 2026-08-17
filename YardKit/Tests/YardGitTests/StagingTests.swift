@@ -268,3 +268,54 @@ private func hunk(path: String, header: String, body: [String]) -> Hunk {
     let error = StagingError.unknownHunkIDs(ids: ["abc"], area: .unstaged)
     #expect(error.exitClass == .repositoryError)
 }
+
+// MARK: - #0212: stageHunks writes exactly one journal entry per call, so
+// undo works after staging directly.
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func stageHunksWritesExactlyOneJournalEntry(format: FixtureRepository.RefFormat) throws {
+    let repo = try twoHunkRepo(format)
+    defer { repo.destroy() }
+    let ctx = try WorktreeContext.resolve(path: repo.url.path)
+    let before = try JournalAnchor.list(in: ctx).count
+
+    let first = try #require(try listedHunks(in: repo, area: .unstaged).first)
+    try stageHunks(ids: [first.id], at: repo.url.path)
+
+    let after = try JournalAnchor.list(in: ctx).count
+    #expect(after - before == 1,
+            "stageHunks called directly must write exactly one journal entry")
+}
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func undoAfterStageHunksRestoresThePreStageState(format: FixtureRepository.RefFormat) throws {
+    let repo = try twoHunkRepo(format)
+    defer { repo.destroy() }
+    let ctx = try WorktreeContext.resolve(path: repo.url.path)
+
+    let beforeStages = try GitProcess().run(
+        ["ls-files", "-s"], workingDirectory: repo.url.path).text
+    let before = try JournalAnchor.list(in: ctx).count
+
+    let first = try #require(try listedHunks(in: repo, area: .unstaged).first)
+    try stageHunks(ids: [first.id], at: repo.url.path)
+
+    let afterEntries = try JournalAnchor.list(in: ctx)
+    #expect(afterEntries.count == before + 1)
+    // `JournalAnchor.list` is creation-ordered oldest-first, so the entry
+    // stageHunks just wrote is the last one.
+    let checkpointEntry = try #require(afterEntries.last)
+
+    let wreckedStages = try GitProcess().run(
+        ["ls-files", "-s"], workingDirectory: repo.url.path).text
+    #expect(wreckedStages != beforeStages,
+            "the stage must actually change the index, or this proves nothing")
+
+    let report = try JournalRestore.restore(checkpointEntry.id, in: ctx)
+    #expect(report.restored.contains(.index))
+
+    let afterStages = try GitProcess().run(
+        ["ls-files", "-s"], workingDirectory: repo.url.path).text
+    #expect(afterStages == beforeStages,
+            "index stages must round-trip back to before the stage")
+}
