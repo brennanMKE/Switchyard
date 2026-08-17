@@ -27,6 +27,9 @@ public enum RepositoryLayout {
     /// The repository identity file, relative to `$GIT_COMMON_DIR`.
     public static let repositoryIDRelativePath = stateDirectoryName + "/repository-id"
 
+    /// The journal metadata cache file, relative to `$GIT_COMMON_DIR`.
+    public static let journalMetadataRelativePath = stateDirectoryName + "/journal.json"
+
     /// Absolute path of our state directory for a resolved context.
     public static func stateDirectory(in context: WorktreeContext) -> String {
         context.commonDir + "/" + stateDirectoryName

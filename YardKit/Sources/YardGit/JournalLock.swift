@@ -67,7 +67,7 @@ public struct JournalLock: Sendable {
     /// the same `commonDir` — the main worktree and every linked worktree —
     /// resolve the same lock file.
     public init(context: WorktreeContext) {
-        self.lockFilePath = context.commonDir + "/switchyard/" + Self.fileName
+        self.lockFilePath = RepositoryLayout.stateDirectory(in: context) + "/" + Self.fileName
     }
 
     /// Runs `body` while holding the repository's exclusive journal lock,

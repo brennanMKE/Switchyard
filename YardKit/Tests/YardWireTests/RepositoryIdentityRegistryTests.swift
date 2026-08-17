@@ -22,6 +22,8 @@ struct RepositoryIdentityRegistryTests {
         #expect(RepositoryLayout.stateDirectoryName == ServiceNames.repoStateDirectoryName)
         #expect(ServiceNames.journalMetadataRelativePath
             .hasPrefix(RepositoryLayout.stateDirectoryName + "/"))
+        #expect(RepositoryLayout.journalMetadataRelativePath
+            == ServiceNames.journalMetadataRelativePath)
     }
 
     @Test func aMovedRepositoryUpdatesItsRegistryRowInsteadOfAddingOne() throws {
