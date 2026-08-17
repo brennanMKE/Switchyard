@@ -16,6 +16,8 @@ let package = Package(
         // Views for the macOS app. Hosted in a package so they can be tested with
         // `swift test`, since UI tests cannot run under CLI-driven xcodebuild.
         .library(name: "YardUI", targets: ["YardUI"]),
+        // Linked by the app; deliberately NOT a dependency of `switchyard`.
+        .library(name: "YardCommands", targets: ["YardCommands"]),
         .executable(name: "switchyard", targets: ["switchyard"]),
     ],
     targets: [
@@ -35,6 +37,16 @@ let package = Package(
             path: "Sources/YardUI",
             swiftSettings: [.defaultIsolation(MainActor.self)]
         ),
+        // Engine-backed command arms. Depends on BOTH the engine and the
+        // envelope layer, and is linked by the app alone — guide §11 decision
+        // 15. It exists so a command that opens a repository can be reached
+        // from `swift test`: it cannot live in YardKit, which the CLI links,
+        // and code in the app target has no test that can run here.
+        .target(
+            name: "YardCommands",
+            dependencies: ["YardGit", "YardKit"],
+            path: "Sources/YardCommands"
+        ),
         .executableTarget(
             name: "switchyard",
             dependencies: ["YardKit"],
@@ -49,6 +61,11 @@ let package = Package(
             name: "YardKitTests",
             dependencies: ["YardKit"],
             path: "Tests/YardKitTests"
+        ),
+        .testTarget(
+            name: "YardCommandsTests",
+            dependencies: ["YardCommands"],
+            path: "Tests/YardCommandsTests"
         ),
         .testTarget(
             name: "YardUITests",
