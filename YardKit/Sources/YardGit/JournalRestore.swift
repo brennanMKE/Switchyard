@@ -358,6 +358,17 @@ public enum JournalRestore {
             try SequencerSnapshot(layout: layout, tree: oid, autoMerge: nil)
                 .restore(in: context, git: git)
             restored.append(.sequencer)
+        } else if metadata.captured.sequencer == .notCaptured,
+                  try SequencerSnapshot.clear(in: context, git: git) {
+            // 8c. The target never captured a sequencer, but one is
+            // standing — left in place it describes an operation the
+            // just-restored refs no longer match: `git rebase --continue`
+            // fails to lock the ref, and the only clean exit, `--abort`,
+            // silently reverts the restore (#0205, measured). Safe to
+            // clear because step 7's pre-restore entry, written above,
+            // already captured this live sequencer (#0200) — the
+            // mid-rebase state stays recoverable by restoring it.
+            restored.append(.sequencer)
         }
 
         // 9. Report honestly — only what was NOT put back.
