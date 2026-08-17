@@ -288,6 +288,38 @@ struct JournalRestoreTests {
         #expect(try RefSnapshot.capture(in: mainCtx) == stateBefore)
     }
 
+    /// Pins #0044 decision 3: the worktree gate (step 2) must run before the
+    /// cross-tool guard (step 4). Composes `standingOnAnEntryWithARogueRef`
+    /// — the main worktree stands on a non-nil scoped cursor, with a rogue
+    /// ref planted by plumbing that the guard would catch — with a linked
+    /// worktree carrying a foreign entry, as `crossWorktreeFixture` sets up.
+    /// A foreign entry restored without `allowDifferentWorktree` must report
+    /// `differentWorktree` even when the guard's own divergence is present
+    /// and, under the gate/guard reorder this issue exists to catch, would
+    /// otherwise fire first and report `repositoryChanged` instead — an error
+    /// the caller cannot act on, naming neither worktree.
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func aForeignEntryStillReportsTheWorktreeGateEvenWhenTheGuardWouldFire(
+        format: FixtureRepository.RefFormat
+    ) throws {
+        let (repo, ctx, _, _, _) = try standingOnAnEntryWithARogueRef(format: format)
+        defer { repo.destroy() }
+
+        let wtURL = try repo.addWorktree(named: "agent", branch: "agent-branch")
+        let wtCtx = try WorktreeContext.resolve(path: wtURL.path)
+        let name = try #require(wtCtx.worktreeName)
+        let path = try #require(wtCtx.topLevel)
+        let entry = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: wtCtx)
+
+        let thrown = #expect(throws: JournalRestore.Error.self) {
+            try JournalRestore.restore(entry.id, in: ctx)
+        }
+        let error = try #require(thrown)
+        #expect(error == .differentWorktree(
+            recordedName: name, recordedPath: path,
+            calling: nil, recordedStillExists: true))
+    }
+
     @Test(arguments: FixtureRepository.RefFormat.supported())
     func aDeadRecordedWorktreeIsReportedAsGone(format: FixtureRepository.RefFormat) throws {
         let repo = try FixtureRepository.linear(refFormat: format)
