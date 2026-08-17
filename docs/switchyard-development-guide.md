@@ -848,31 +848,6 @@ a feature at any milestone on the grounds that GitUp had it.
    stays readable in a terminal. A `--json` flag on `--help` may later return the structured spec;
    nothing depends on it yet.
 
-### Still open
-
-Decide these with Brennan, do not decide them in code.
-
-1. **Rebase engine scope.** GitUp wrote its own. How much of one does M5 actually require, and
-   can `absorb` and `split` be built on narrower primitives?
-2. **Domain and App Store name.** Not checked. The App Store name no longer
-   matters given the distribution decision above; the domain still does, for the docs site.
-
----
-
-## Reference material
-
-Paths below are relative to the **repository root**, not to this file.
-
-- `docs/switchyard-git-internals-and-undo.md` — the companion: journal mechanics, hooks, worktrees
-- `CLAUDE.md` — working agreements for agents: licensing rules, signing safety, build commands, traps
-- `README.md` — the public description of the project
-- `issues/` — the task breakdown for the milestones in [Section 9](#9-milestones)
-- `../../RemoteControl/docs/README.md` — the XPC pattern, written to be reused in another app
-- `../../RemoteControl/FINDINGS.md` — whether XPC was worth it, and why
-- `../../RemoteControl/docs/cli-embedding-and-install.md` — embedding and installing the CLI binary
-- `../GitUp` — concepts only, per [Section 2](#2-licensing-constraint-read-this-first)
-- libgit2 commit API: https://libgit2.org/docs/reference/main/commit/index.html
-
 7. **`switchyard status` does not report copies.** `git status` has no copy detection — verified,
    `--porcelain=v2 -C` fails with ``unknown switch `C` ``, and the only similarity option it accepts
    is `-M` / `--find-renames`. Copy detection lives on `git diff -C`. If copies are ever wanted they
@@ -954,3 +929,45 @@ Paths below are relative to the **repository root**, not to this file.
 
     `RefSnapshot` already filters the whole `refs/switchyard/` namespace, so capture and restore are
     unaffected either way.
+
+
+### Still open
+
+Decide these with Brennan, do not decide them in code.
+
+1. **Rebase engine scope.** GitUp wrote its own. How much of one does M5 actually require, and
+   can `absorb` and `split` be built on narrower primitives?
+2. **Domain and App Store name.** Not checked. The App Store name no longer
+   matters given the distribution decision above; the domain still does, for the docs site.
+3. **Does M1 criterion 4 cover payload shapes, or only the envelope frame?** Filed as **#0194** by the
+   2026-08-17 M1 milestone review. `Schemas/README.md` promises that `schemaVersion: 1` covers *"each
+   command's result payload shape"* and that renaming *"any key an agent can currently read, in the
+   envelope or in a payload"* is breaking — but no artifact records a single payload shape, and
+   `CommandSpec` has no field that could hold one. Either the emitter grows payload shapes, or the
+   criterion is narrowed and the promise corrected. **The README as it stands should not survive
+   either answer.**
+4. **Do the §6 field sets belong to a milestone?** §6 says `whereami` includes a `worktree` object,
+   signing config and dirty paths; `WhereAmI` has none of them. §6 describes `wt list` as a superset
+   carrying dirty state, ahead/behind, in-progress operation, agent session and journal depth;
+   `WorktreeEntry` carries the porcelain parse plus `isMainWorktree`, and `lockReason` covers only the
+   agent session. M1's criteria ask that the engine function exist and encode; M3's ask that the
+   command run. **Nothing asks for those fields**, so today they are documentation of an intention.
+5. **Does `GitProcess` get a wall-clock timeout, and where?** **#0163**, still needing a pick among
+   its three options. The termination semantics it depends on were measured 2026-08-17 and are recorded
+   in the issue, so whichever option is chosen is now cheap to author.
+
+---
+
+## Reference material
+
+Paths below are relative to the **repository root**, not to this file.
+
+- `docs/switchyard-git-internals-and-undo.md` — the companion: journal mechanics, hooks, worktrees
+- `CLAUDE.md` — working agreements for agents: licensing rules, signing safety, build commands, traps
+- `README.md` — the public description of the project
+- `issues/` — the task breakdown for the milestones in [Section 9](#9-milestones)
+- `../../RemoteControl/docs/README.md` — the XPC pattern, written to be reused in another app
+- `../../RemoteControl/FINDINGS.md` — whether XPC was worth it, and why
+- `../../RemoteControl/docs/cli-embedding-and-install.md` — embedding and installing the CLI binary
+- `../GitUp` — concepts only, per [Section 2](#2-licensing-constraint-read-this-first)
+- libgit2 commit API: https://libgit2.org/docs/reference/main/commit/index.html
