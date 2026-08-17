@@ -950,6 +950,11 @@ a feature at any milestone on the grounds that GitUp had it.
     test in `Tests/YardWireTests` — the one target that imports both — pins them against each other so
     a rename on either side fails loudly. Migrating the two existing literals is **#0199**.
 
+    **And never resolve one of these paths through `git rev-parse --git-path`.** Measured: for a
+    subpath git does not know, `--git-path` answers *per-worktree*, so a linked worktree would resolve
+    `switchyard/repository-id` under `$GIT_DIR/worktrees/<name>/` and two worktrees would disagree
+    about the repository's identity. Address them from `WorktreeContext.commonDir`.
+
 14. **A restore clears a sequencer the target never captured.** Decided 2026-08-17 in Brennan's absence
     under the standing instruction — reversible, flagged, and taken on measurement rather than taste
     (#0205). Leaving it was not a neutral default: a repository whose refs and worktree have been
@@ -963,10 +968,6 @@ a feature at any milestone on the grounds that GitUp had it.
     restore path acceptable here, and it is the reason this is not a precedent for deleting anything the
     journal does not hold.
 
-    **And never resolve one of these paths through `git rev-parse --git-path`.** Measured: for a
-    subpath git does not know, `--git-path` answers *per-worktree*, so a linked worktree would resolve
-    `switchyard/repository-id` under `$GIT_DIR/worktrees/<name>/` and two worktrees would disagree
-    about the repository's identity. Address them from `WorktreeContext.commonDir`.
 
 
 ### Still open
