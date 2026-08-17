@@ -922,10 +922,13 @@ a feature at any milestone on the grounds that GitUp had it.
     case so observed entries do not list as defective. #0157 had just shown how a filter that must be
     applied everywhere gets missed.
 
-    **The cost is explicit and is now #0190**: `JournalRebuild` scans `JournalAnchor.refPrefix`, so a
-    rebuild does not recover observed entries unless it learns the second namespace. They record
-    *foreign* activity, so losing them to a rebuild may well be acceptable — but that is a decision to
-    take deliberately, not to discover.
+    **The cost was #0190 and is now decided there, 2026-08-17: a rebuild does not read them, and
+    should not.** `JournalRebuild` reconstructs the undo/redo chain from `JournalAnchor.refPrefix`, and
+    observed entries are by design not on that chain; they are also not lost, since they keep their own
+    refs and `JournalObserved.list` reads them directly. The risk worth guarding turned out to be the
+    opposite of the one this paragraph originally named: if rebuild's scan were ever widened to all of
+    `refs/switchyard/`, every observed entry would surface as a `Defect` and a healthy repository would
+    report itself partial, once per foreign transaction. #0190 pins that with a test.
 
     `RefSnapshot` already filters the whole `refs/switchyard/` namespace, so capture and restore are
     unaffected either way.
