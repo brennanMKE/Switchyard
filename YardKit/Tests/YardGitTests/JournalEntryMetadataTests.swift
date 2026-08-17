@@ -94,6 +94,27 @@ struct JournalEntryMetadataTests {
         #expect(decoded.id.string == "01K1H8R100W7CBVX5TRJJEDDVM")
     }
 
+    /// The third wire value. `.apply` and `.merge` restore to DIFFERENT
+    /// directories (`rebase-apply` vs `rebase-merge`), so a capture that
+    /// encodes one as the other resumes the rebase in the wrong place — and
+    /// nothing caught that until this test existed: encoding `.apply` as
+    /// `"merge"` left the whole suite green.
+    @Test func theSequencerCaptureRoundTripsAllThreeWireValues() throws {
+        for (value, wire) in [
+            (JournalEntryMetadata.SequencerCapture.notCaptured, "false"),
+            (.merge, #""merge""#),
+            (.apply, #""apply""#),
+        ] {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+            let bytes = try encoder.encode(value)
+            #expect(String(decoding: bytes, as: UTF8.self) == wire)
+            let back = try JSONDecoder().decode(
+                JournalEntryMetadata.SequencerCapture.self, from: bytes)
+            #expect(back == value)
+        }
+    }
+
     /// `resultingPosition` present when the cursor landed on an entry, and
     /// absent — not null — when a traversal returned it to present.
     @Test func traversalEntriesSerializeToThePinnedBytes() throws {
