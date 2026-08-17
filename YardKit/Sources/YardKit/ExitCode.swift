@@ -59,6 +59,18 @@ public enum ExitCode: Int, Sendable {
     /// correct the config without retrying the same thing.
     case signingFailed = 9
 
+    /// Maps the `Int32` exit code the app returns over XPC (`NSXPCInterface`
+    /// will not carry a Swift enum, so the wire uses `Int32` — see guide §11
+    /// decision 15 and ``AppServiceProtocol/perform(arguments:workingDirectory:reply:)``)
+    /// to a known case.
+    ///
+    /// A value this build does not recognize — an older CLI talking to a
+    /// newer app that has grown a case this build predates — lands on
+    /// `.requestFailed` rather than trapping on `ExitCode(rawValue:)!`.
+    public init(fromAppReply value: Int32) {
+        self = ExitCode(rawValue: Int(value)) ?? .requestFailed
+    }
+
     /// Stable string value used in error envelopes and test assertions.
     public var codeLabel: String {
         switch self {

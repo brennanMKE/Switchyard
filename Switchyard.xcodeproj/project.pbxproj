@@ -195,6 +195,7 @@
 			packageProductDependencies = (
 				26BA44843026752800DDB2E9 /* YardGit */,
 				26BA44863026752800DDB2E9 /* YardKit */,
+				CCCCCCCCCCCCCCCCCCCCCCCC /* YardCommands */,
 			);
 			productName = Switchyard;
 			productReference = 26B64D3430251BCE00EB4FD0 /* Switchyard.app */;
@@ -819,6 +820,10 @@
 		A81B5573CF0B3AD6AD1C5675 /* YardKit */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = YardKit;
+		};
+		CCCCCCCCCCCCCCCCCCCCCCCC /* YardCommands */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = YardCommands;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
