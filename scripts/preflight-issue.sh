@@ -122,7 +122,11 @@ fi
 # The strongest signal in the whole failure log: every code round that failed
 # named zero source paths; every one that converged in a single round named
 # exactly one. Hard for code modules, advisory elsewhere.
-NAMED=$(grep -oE '(YardKit/)?(Sources|Tests)/[A-Za-z0-9_/]+\.swift' "$SPEC" \
+# App-target files live outside the package -- Switchyard/, BrokerAgent/,
+# SwitchyardTests/ -- and the first pattern matched only Sources/ and Tests/, so
+# an issue that named Switchyard/AppXPCServer.swift in full read as naming no
+# path at all. #0047's planning update tripped it. Widened 2026-08-17.
+NAMED=$(grep -oE '(YardKit/)?(Sources|Tests)/[A-Za-z0-9_/]+\.swift|(Switchyard|BrokerAgent|SwitchyardTests|SwitchyardUITests)/[A-Za-z0-9_/]+\.swift' "$SPEC" \
   | grep -v '/main\.swift$' | sort -u || true)
 if [[ -n "$NAMED" ]]; then
   pass "names $(print -r -- "$NAMED" | grep -c . || true) source file(s)"
