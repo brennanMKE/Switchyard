@@ -82,9 +82,10 @@ public struct Fixup: Equatable, Sendable {
         }
     }
 
-    /// Runs the two git invocations that do the actual work, assuming the
-    /// ancestor and staged-index guards already passed and the checkpoint is
-    /// already written.
+    /// Runs the git invocation that creates the `fixup!` commit for the
+    /// staged-index mode, then hands off to the shared rebase step. Assumes
+    /// the ancestor and staged-index guards already passed and the
+    /// checkpoint is already written.
     private static func performFixup(
         target: String,
         signing: CommitCreate.Signing,
@@ -113,6 +114,23 @@ public struct Fixup: Equatable, Sendable {
             )
         }
 
+        return try autosquashRebase(
+            target: target, signing: signing, at: path, git: git, extraEnvironment: extraEnvironment)
+    }
+
+    /// The rebase step shared by both fixup modes (#0039's staged-index mode
+    /// and #0214's existing-commit mode): both have, by this point, already
+    /// landed a `fixup!`-labelled commit at `HEAD` by one mechanism or
+    /// another, and this runs the same `git rebase --autosquash` and the
+    /// same conflict-versus-signing classification of a non-zero exit for
+    /// either.
+    private static func autosquashRebase(
+        target: String,
+        signing: CommitCreate.Signing,
+        at path: String,
+        git: GitProcess,
+        extraEnvironment: [String: String]
+    ) throws -> Fixup {
         // 5. `git rebase --autosquash <base>`, non-interactively (measured:
         //    no `-i`, no sequence editor needed on git 2.50.1). `<base>` is
         //    `target^`, except when `target` is the root commit, where that
@@ -221,12 +239,168 @@ public struct Fixup: Equatable, Sendable {
     }
 }
 
+// MARK: - Existing-commit mode (#0214)
+
+extension Fixup {
+    /// Squashes an existing commit into an older ancestor — the other half
+    /// of guide §6's `fixup` from #0039, which fixes up the **staged
+    /// index** instead of an already-made commit.
+    ///
+    /// The mechanism differs from #0039's: there is no index to build a
+    /// `fixup!` commit from, because the commit already exists. Instead
+    /// `source`'s own message is rewritten in place to `fixup! <target's
+    /// subject>` with `git commit --amend --fixup=<target> --no-edit`
+    /// (measured: this keeps `source`'s content, changes only its message),
+    /// and then the same autosquash rebase #0039 runs folds it in.
+    /// `--no-edit` is required — without it git opens an editor, and while
+    /// `GitProcess` pins `GIT_EDITOR=false` so that would fail rather than
+    /// hang, passing `--no-edit` avoids relying on that.
+    ///
+    /// - Parameter source: the commit to fold in. Defaults to `HEAD`; only
+    ///   `HEAD` is supported by this issue — folding a commit that is not
+    ///   the tip needs an interactive todo list built by hand, which is
+    ///   #0062/#0063's territory. Anything else throws
+    ///   `.unsupportedSource(source:)` rather than doing something
+    ///   approximate.
+    /// - Parameter target: the ancestor commit `source` is squashed into.
+    /// - Parameter signing: forwarded exactly as #0039's `run(target:…)`
+    ///   forwards it — see that overload's doc comment.
+    /// - Throws: `.unsupportedSource` when `source` is not `HEAD`;
+    ///   `.targetNotAncestor` when `target` is not an ancestor of `source`;
+    ///   `.sourceEqualsTarget` when `source` and `target` resolve to the
+    ///   same commit; `.indexNotClean` when the index has staged changes —
+    ///   measured: `git commit --amend --fixup=` silently sweeps a dirty
+    ///   index into the amended commit, so this guard exists to refuse
+    ///   rather than lose staged work silently. This is the mirror image of
+    ///   `.nothingStaged` above: `Fixup.run(target:…)` fixes up the index
+    ///   and requires it non-empty; this mode fixes up a commit and
+    ///   requires the index empty. `.blockedOnConflicts` and
+    ///   `.signingFailed` are exactly as #0039's `run(target:…)` documents
+    ///   them — the rebase step is shared, not duplicated.
+    public static func run(
+        source: String = "HEAD",
+        target: String,
+        signing: CommitCreate.Signing = .config,
+        at path: String,
+        git: GitProcess = GitProcess(),
+        extraEnvironment: [String: String] = [:]
+    ) throws -> Fixup {
+        // Only HEAD is supported in this issue. Checked first, and without
+        // a git call, since it needs none.
+        guard source == "HEAD" else {
+            throw FixupError.unsupportedSource(source: source)
+        }
+
+        // Guards, in order: source resolves; target is an ancestor of
+        // source; source != target; the index is clean.
+
+        // 1. `source` resolves. `.run` throws on a non-zero exit, which is
+        //    exactly "does not resolve" here.
+        let sourceOid = try git.run(
+            ["rev-parse", source], workingDirectory: path, extraEnvironment: extraEnvironment
+        ).lines.first ?? ""
+
+        // 2. `target` is an ancestor of `source` — same probe #0039 uses,
+        //    read with `capture` since a non-zero exit here is information,
+        //    not a launch failure.
+        let ancestorCheck = try git.capture(
+            ["merge-base", "--is-ancestor", target, source],
+            workingDirectory: path,
+            extraEnvironment: extraEnvironment
+        )
+        guard ancestorCheck.exitCode == 0 else {
+            throw FixupError.targetNotAncestor(target: target)
+        }
+
+        // 3. `source != target`, compared by oid so an equivalent ref name
+        //    (e.g. `target: "HEAD"`) is still caught.
+        let targetOid = try git.run(
+            ["rev-parse", target], workingDirectory: path, extraEnvironment: extraEnvironment
+        ).lines.first ?? ""
+        guard sourceOid != targetOid else {
+            throw FixupError.sourceEqualsTarget
+        }
+
+        // 4. The index must be clean — the opposite sense of #0039's
+        //    `.nothingStaged` guard; see this method's doc comment.
+        let staged = try git.run(
+            ["diff", "--cached", "--name-only"],
+            workingDirectory: path,
+            extraEnvironment: extraEnvironment
+        ).lines
+        guard staged.isEmpty else {
+            throw FixupError.indexNotClean(paths: staged)
+        }
+
+        // 5. Everything past this point is one checkpoint for the pair,
+        //    exactly as #0039's `run(target:…)`.
+        return try JournalCheckpoint.around(operation: "fixup", at: path, git: git) { git in
+            try performFixupExisting(
+                target: target,
+                signing: signing,
+                at: path,
+                git: git,
+                extraEnvironment: extraEnvironment
+            )
+        }
+    }
+
+    /// Rewrites `HEAD`'s own message to `fixup! <target's subject>` in
+    /// place, then hands off to the same `autosquashRebase` #0039's
+    /// staged-index mode uses — the one piece of the mechanism that is
+    /// actually shared between the two modes.
+    private static func performFixupExisting(
+        target: String,
+        signing: CommitCreate.Signing,
+        at path: String,
+        git: GitProcess,
+        extraEnvironment: [String: String]
+    ) throws -> Fixup {
+        let commitArguments = ["commit", "--amend", "--fixup=\(target)", "--no-edit"]
+            + CommitCreate.arguments(for: signing)
+        let commitOutput = try git.capture(
+            commitArguments,
+            workingDirectory: path,
+            extraEnvironment: extraEnvironment
+        )
+        guard commitOutput.exitCode == 0 else {
+            throw try classifiedCommitFailure(
+                output: commitOutput,
+                arguments: commitArguments,
+                signing: signing,
+                at: path,
+                git: git,
+                extraEnvironment: extraEnvironment
+            )
+        }
+
+        return try autosquashRebase(
+            target: target, signing: signing, at: path, git: git, extraEnvironment: extraEnvironment)
+    }
+}
+
 /// Why `Fixup.run` refused, or could not finish.
 public enum FixupError: Error, Equatable, Sendable, CustomStringConvertible {
-    /// `target` is not an ancestor of `HEAD`.
+    /// `target` is not an ancestor of `source` (`HEAD` in the staged-index
+    /// mode; whatever `source` resolved to in the existing-commit mode).
     case targetNotAncestor(target: String)
-    /// The index has nothing staged to fix up.
+    /// The index has nothing staged to fix up. Only thrown by the
+    /// staged-index mode (`Fixup.run(target:…)`), which fixes up **the
+    /// index** and so requires it non-empty.
     case nothingStaged
+    /// The index holds staged changes. Only thrown by the existing-commit
+    /// mode (`Fixup.run(source:target:…)`), which fixes up **a commit** and
+    /// so requires the index empty — otherwise `git commit --amend
+    /// --fixup=` silently sweeps the staged work into the amended commit.
+    /// This is `.nothingStaged`'s mirror image: same check, opposite sense,
+    /// because the two modes fix up different things.
+    case indexNotClean(paths: [String])
+    /// `source` and `target` resolved to the same commit.
+    case sourceEqualsTarget
+    /// `source` was not `HEAD`. Folding a commit that is not the tip needs
+    /// an interactive todo list built by hand (#0062/#0063's territory),
+    /// which this issue does not implement.
+    case unsupportedSource(source: String)
     /// The autosquash rebase could not apply cleanly. The rebase is left in
     /// progress, resumable.
     case blockedOnConflicts(files: [ConflictedFile])
@@ -240,6 +414,14 @@ public enum FixupError: Error, Equatable, Sendable, CustomStringConvertible {
             "\(target) is not an ancestor of HEAD"
         case .nothingStaged:
             "nothing staged to fix up"
+        case let .indexNotClean(paths):
+            "refusing to fix up an existing commit: the index already holds staged changes in "
+                + paths.joined(separator: ", ")
+                + " — commit or unstage that work first, then retry"
+        case .sourceEqualsTarget:
+            "source and target are the same commit"
+        case let .unsupportedSource(source):
+            "\(source) is not HEAD — folding a non-tip commit needs a hand-built todo list, not yet supported"
         case let .blockedOnConflicts(files):
             "fixup blocked on conflicts in "
                 + files.map(\.path).joined(separator: ", ")
@@ -254,7 +436,8 @@ public enum FixupError: Error, Equatable, Sendable, CustomStringConvertible {
 extension FixupError: ExitClassCarrying {
     public var exitClass: ExitClass {
         switch self {
-        case .targetNotAncestor, .nothingStaged: .repositoryError
+        case .targetNotAncestor, .nothingStaged, .indexNotClean, .sourceEqualsTarget, .unsupportedSource:
+            .repositoryError
         case .blockedOnConflicts: .blockedOnConflicts
         case .signingFailed: .signingFailed
         }
