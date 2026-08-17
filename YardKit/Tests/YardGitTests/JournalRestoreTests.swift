@@ -101,6 +101,8 @@ struct JournalRestoreTests {
         // The union restore deleted the branch that did not exist at capture.
         #expect(try ctx.resolveRef("refs/heads/created-after", inWorktree: nil) == nil)
         #expect(report.entry == entry)
+        // No sibling in sight -- HEAD adopts, and nothing was given up.
+        #expect(report.detachedFrom == nil)
     }
 
     @Test(arguments: FixtureRepository.RefFormat.supported())
@@ -520,11 +522,22 @@ struct JournalRestoreTests {
         let report = try JournalRestore.restore(entry.id, allowDifferentWorktree: true, in: mainCtx)
         #expect(report.entry == entry)
 
-        // The shared refs match the recorded snapshot, and the caller's HEAD
-        // applies as recorded.
+        // The shared refs match the recorded snapshot. Before #0211, HEAD
+        // applied as recorded -- symbolic to `agent-branch` -- which dual-
+        // claimed the branch, because `crossWorktreeFixture`'s "agent"
+        // worktree is still live and holds it. Now HEAD detaches at the
+        // recorded branch's oid instead of adopting it (#0211, guide §11
+        // decision 16): the recorded commit is reached either way, but only
+        // one worktree ends up claiming the branch.
+        // Compare `.refs` only: `withoutPerWorktreeRefs` carries `head`
+        // through unchanged, and head is exactly what this issue changes.
         let after = try RefSnapshot.capture(in: mainCtx)
-        #expect(after.withoutPerWorktreeRefs == recorded.withoutPerWorktreeRefs)
-        #expect(after.head == recorded.head)
+        #expect(after.withoutPerWorktreeRefs.refs == recorded.withoutPerWorktreeRefs.refs)
+        let branchOid = try #require(
+            recorded.refs.first(where: { $0.name == "refs/heads/agent-branch" })?.oid)
+        #expect(after.head == .detached(oid: branchOid))
+        // The report names what was given up, rather than doing it silently.
+        #expect(report.detachedFrom == "refs/heads/agent-branch")
 
         // The caller's own refs/worktree/probe-main still exists with its
         // original oid — untouched by a cross-worktree application.
@@ -608,6 +621,114 @@ struct JournalRestoreTests {
         // Nothing was written, even under the cross-worktree override.
         #expect(try JournalAnchor.list(in: mainCtx).count == countBefore)
         #expect(try RefSnapshot.capture(in: mainCtx) == stateBefore)
+    }
+
+    // MARK: - Detach on collision, not only under the override (#0211)
+
+    /// Caller stands on `feature`, checkpoints, moves off; a sibling then
+    /// checks out `feature`; the caller restores its own checkpoint. No
+    /// `allowDifferentWorktree` override in sight -- this is the collision
+    /// #0211 measured same-worktree, and it is the test that proves the fix
+    /// keys on a live holder, not on the override.
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func aLiveSiblingCheckingOutOurOwnRecordedBranchDetachesInsteadOfDualClaiming(
+        format: FixtureRepository.RefFormat
+    ) throws {
+        var repo = try FixtureRepository.linear(refFormat: format)
+        defer { repo.destroy() }
+        let ctx = try context(of: repo)
+
+        try repo.branch("feature")
+        try repo.checkout("feature")
+        let featureOid = try #require(
+            try git.run(["rev-parse", "feature"], workingDirectory: repo.url.path).lines.first)
+
+        let entry = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+
+        // The caller moves off `feature` -- restoring back onto it is what
+        // undoing its own operation IS, not a sibling casualty.
+        try repo.checkout("main")
+
+        // A sibling checks out the SAME branch the caller's checkpoint
+        // recorded -- an existing branch, not `-b`, so no exclusivity
+        // conflict at add time.
+        let siblingPath = repo.url.deletingLastPathComponent()
+            .appendingPathComponent("\(repo.url.lastPathComponent)-wt-sibling")
+        try git.run(["worktree", "add", "-q", siblingPath.path, "feature"],
+                    workingDirectory: repo.url.path)
+        defer { try? FileManager.default.removeItem(at: siblingPath) }
+
+        let report = try JournalRestore.restore(entry.id, in: ctx)
+        #expect(report.entry == entry)
+
+        // HEAD comes back at the recorded commit, detached -- not the dual
+        // claim git's own porcelain refuses to create.
+        let after = try RefSnapshot.capture(in: ctx)
+        #expect(after.head == .detached(oid: featureOid))
+        // The report names what was given up, rather than doing it silently.
+        #expect(report.detachedFrom == "refs/heads/feature")
+
+        // `feature` itself is untouched: the sibling still holds it, alone.
+        let branchOid = try #require(
+            try git.run(["rev-parse", "refs/heads/feature"],
+                        workingDirectory: repo.url.path).lines.first)
+        #expect(branchOid == featureOid)
+    }
+
+    /// The dead-agent recovery case #0175 exists for, exercised end to end
+    /// through `JournalRestore` rather than only through the pure function:
+    /// the worktree that recorded the checkpoint has its directory removed
+    /// WITHOUT `git worktree remove` or `git worktree prune` -- so porcelain
+    /// still lists it, with `prunable`, exactly like
+    /// `aDeadRecordedWorktreeIsReportedAsGone`'s first stage. It holds
+    /// nothing live, so HEAD adopts `agent-branch` as recorded --
+    /// `detachedFrom` stays nil, the ordinary case. (Running `git worktree
+    /// prune` first would drop the entry from the listing entirely and let
+    /// this pass for the wrong reason -- the mutation below is what proves
+    /// the `prunable` guard, not just entry absence, is load-bearing here.)
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func aPrunedRecordingWorktreeStillAdoptsItsBranchOnRestore(
+        format: FixtureRepository.RefFormat
+    ) throws {
+        let (repo, mainCtx, wtCtx, entry, recorded, _) = try crossWorktreeFixture(format: format)
+        defer { repo.destroy() }
+        let wtPath = try #require(wtCtx.topLevel)
+
+        // The agent's directory vanishes without `git worktree remove`. Its
+        // administrative entry -- and its claim on `agent-branch` -- survive
+        // until `git worktree prune`, so porcelain still lists it as
+        // `prunable` rather than dropping it.
+        try FileManager.default.removeItem(at: URL(fileURLWithPath: wtPath))
+
+        let report = try JournalRestore.restore(
+            entry.id, allowDifferentWorktree: true, in: mainCtx)
+        #expect(report.entry == entry)
+        #expect(report.detachedFrom == nil)
+
+        // HEAD adopts the recorded branch -- the prunable claim is not a
+        // live one.
+        let after = try RefSnapshot.capture(in: mainCtx)
+        #expect(after.head == recorded.head)
+    }
+
+    /// End to end: after such a restore, `git worktree list` shows the
+    /// recorded branch claimed exactly once. The wreckage in #0211's
+    /// reproduction was visible exactly here -- `git worktree list` showing
+    /// BOTH worktrees as `[agent-branch]`.
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func aRestoredBranchIsClaimedByExactlyOneWorktreeAfterward(
+        format: FixtureRepository.RefFormat
+    ) throws {
+        let (repo, mainCtx, _, entry, _, _) = try crossWorktreeFixture(format: format)
+        defer { repo.destroy() }
+
+        try JournalRestore.restore(entry.id, allowDifferentWorktree: true, in: mainCtx)
+
+        let base = try #require(mainCtx.topLevel)
+        let listing = try git.run(
+            ["worktree", "list", "--porcelain"], workingDirectory: base)
+        let claims = listing.lines.filter { $0 == "branch refs/heads/agent-branch" }
+        #expect(claims.count == 1)
     }
 
     // MARK: - The lock wraps the whole flow

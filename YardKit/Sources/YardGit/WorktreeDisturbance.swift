@@ -162,6 +162,48 @@ public enum WorktreeDisturbance {
             throw Error.wouldDisturb(disturbances: found)
         }
     }
+
+    // MARK: - Detach on collision (#0211, guide §11 decision 16)
+
+    /// The snapshot to apply, with `HEAD` detached when its branch is checked out
+    /// by a live sibling.
+    ///
+    /// Returns the branch that was given up, or nil when nothing changed, so the
+    /// caller can say what it did rather than doing it silently.
+    ///
+    /// Rules, in order:
+    ///
+    /// 1. `snapshot.head` must be `.symbolic(target:)`; a `.detached` head is
+    ///    returned unchanged.
+    /// 2. Some entry in `worktrees` must have `prunable == false`, a
+    ///    canonicalized `path != callerPath`, and `"refs/heads/" + branch ==
+    ///    target`. A prunable sibling holds nothing — adopting its branch is
+    ///    the dead-agent recovery case #0175 exists for, so this keys on
+    ///    liveness, never on `allowDifferentWorktree`.
+    /// 3. The oid comes from `snapshot.refs` under that name. If the snapshot
+    ///    does not carry the branch, it is returned unchanged and the existing
+    ///    checks speak — fabricating a detached head from an oid the snapshot
+    ///    never recorded would be inventing state.
+    public static func detachingHeldHead(
+        in snapshot: RefSnapshot,
+        worktrees: [WorktreeEntry],
+        callerPath: String?
+    ) -> (snapshot: RefSnapshot, detachedFrom: String?) {
+        guard case let .symbolic(target) = snapshot.head else {
+            return (snapshot, nil)
+        }
+        let heldByLiveSibling = worktrees.contains { entry in
+            guard !entry.prunable, let rawPath = entry.path, let branch = entry.branch
+            else { return false }
+            let path = WorktreeContext.canonicalize(rawPath)
+            return path != callerPath && "refs/heads/" + branch == target
+        }
+        guard heldByLiveSibling else { return (snapshot, nil) }
+        guard let oid = snapshot.refs.first(where: { $0.name == target })?.oid else {
+            return (snapshot, nil)
+        }
+        return (RefSnapshot(head: .detached(oid: oid), refs: snapshot.refs), target)
+    }
 }
 
 // MARK: - §6 exit class (#0141)
