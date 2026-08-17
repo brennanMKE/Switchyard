@@ -76,24 +76,36 @@ struct YardBinaryContractTests {
         }
     }
 
-    // MARK: - Failure path -- app unreachable for an unrecognized command
+    // MARK: - Failure path -- app unreachable for a known remote command
     //
-    // A command `runYard` does not know locally (see `isAnsweredLocally` in
-    // CommandLineRunner.swift) is no longer answered with a local "usage"
-    // failure by the compiled binary: `main.swift` now runs everything else
-    // through `dispatch`, which tries to reach the app (guide §11 decision
-    // 15, #0124). Spawning the real binary with a bogus subcommand would
-    // therefore try to reach the real broker/app on whatever machine runs
-    // this suite -- on a machine with the broker registered that can mean
-    // actually launching Switchyard.app, which this suite must never do
-    // (see CLAUDE.md's Code signing / "never launch the app" boundaries).
-    // So this test, and the four below it that also used to spawn
-    // `switchyard bogus-command`, call `dispatch` in-process with an
-    // injected connector that always throws, instead of spawning a
-    // subprocess. The local-only paths elsewhere in this file (root
-    // command, noop, binary-exists) are unaffected: those commands are
-    // always answered locally and never touch the connector, subprocess or
-    // not.
+    // A *known* command `runYard` cannot answer on its own -- one named in
+    // `CommandRegistry.all`, currently only "whereami" -- is routed through
+    // `dispatch` to the app (guide §11 decision 15, #0124, `route(_:)` in
+    // CommandLineRunner.swift). Spawning the real binary with that command
+    // would therefore try to reach the real broker/app on whatever machine
+    // runs this suite -- on a machine with the broker registered that can
+    // mean actually launching Switchyard.app, which this suite must never
+    // do (see CLAUDE.md's Code signing / "never launch the app"
+    // boundaries). So this test, and the four below it, call `dispatch`
+    // in-process with an injected connector that always throws, instead of
+    // spawning a subprocess.
+    //
+    // These tests deliberately do NOT use a genuinely unknown/typo'd
+    // command such as "bogus-command": as of #0124 round 3, `route(_:)`
+    // classifies that as `.unknown` rather than `.remote`, and `dispatch`
+    // answers `.unknown` the same way it answers `.local` -- straight from
+    // `runYard`, without ever touching `connect` at all. Using a bogus
+    // command here would test the wrong path (and would pass for the wrong
+    // reason, since a usage envelope is also `ok: false` with a
+    // `schemaVersion`). "whereami" is used instead because it is a real,
+    // registered command that genuinely needs the app -- see
+    // `DispatchTests.unknownCommandNeverCallsConnectAndExitsWithUsage` for
+    // the `.unknown` case's own dedicated test, including the assertion
+    // that the connector is never invoked.
+    //
+    // The local-only paths elsewhere in this file (root command, noop,
+    // binary-exists) are unaffected: those commands are always answered
+    // locally and never touch the connector, subprocess or not.
 
     /// Always fails, deterministically, without ever touching a broker, a
     /// launch agent, or `NSWorkspace` -- the seam `dispatch` exists to make
@@ -102,10 +114,10 @@ struct YardBinaryContractTests {
         throw AppConnectionError.appUnavailable
     }
 
-    @Test("unrecognized command routes to the app and exits 3 when it is unreachable")
-    func unknownSubcommandRoutesToUnreachableApp() async throws {
+    @Test("a known remote command routes to the app and exits 3 when it is unreachable")
+    func remoteCommandRoutesToUnreachableApp() async throws {
         let result = await dispatch(
-            arguments: ["bogus-command"], workingDirectory: "/", connect: unreachableAppConnector)
+            arguments: ["whereami"], workingDirectory: "/", connect: unreachableAppConnector)
 
         #expect(result.exitCode == .appUnavailable)
 
@@ -152,7 +164,7 @@ struct YardBinaryContractTests {
 
     @Test("failure stdout is pure JSON") func failureNoNonJsonPrefixOrSuffix() async throws {
         let result = await dispatch(
-            arguments: ["bogus-command"], workingDirectory: "/", connect: unreachableAppConnector)
+            arguments: ["whereami"], workingDirectory: "/", connect: unreachableAppConnector)
         let stdout = Data(result.stdout.utf8)
         #expect(!stdout.isEmpty, "failure stdout was empty")
 
@@ -177,7 +189,7 @@ struct YardBinaryContractTests {
 
     @Test("stderr carries the error line on failure") func stderrCarriesErrorLineOnFailure() async throws {
         let result = await dispatch(
-            arguments: ["bogus-command"], workingDirectory: "/", connect: unreachableAppConnector)
+            arguments: ["whereami"], workingDirectory: "/", connect: unreachableAppConnector)
         let text = result.stderr
 
         #expect(!text.isEmpty, "stderr must not be empty on failure")
@@ -190,7 +202,7 @@ struct YardBinaryContractTests {
 
     @Test("failure stderr uses wire code not Swift case name") func failureStderrUsesWireCode() async throws {
         let result = await dispatch(
-            arguments: ["bogus-command"], workingDirectory: "/", connect: unreachableAppConnector)
+            arguments: ["whereami"], workingDirectory: "/", connect: unreachableAppConnector)
         let text = result.stderr
 
         #expect(!text.isEmpty, "stderr must not be empty on failure")
@@ -227,7 +239,7 @@ struct YardBinaryContractTests {
 
     @Test("app-unreachable failure emits schemaVersion and ok=false") func appUnreachableEmitsSchemaVersionAndOkFalse() async throws {
         let result = await dispatch(
-            arguments: ["bogus-command"], workingDirectory: "/", connect: unreachableAppConnector)
+            arguments: ["whereami"], workingDirectory: "/", connect: unreachableAppConnector)
         let stdout = Data(result.stdout.utf8)
         #expect(!stdout.isEmpty, "stdout was empty on failure")
 

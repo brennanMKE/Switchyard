@@ -2,15 +2,22 @@
 
 import Foundation
 
-/// Decides whether `arguments` can be answered locally and, if not, runs it
-/// through the app. `connect` is injectable so the decision is testable
-/// without an app, a broker, or a launch agent.
+/// Decides how `arguments` should be answered and, for the one case that
+/// needs it, runs the command through the app. `connect` is injectable so
+/// the decision is testable without an app, a broker, or a launch agent.
 ///
-/// "Locally" is derived from `isAnsweredLocally(_:)` in
-/// `CommandLineRunner.swift` — the same predicate `runYard` itself uses —
-/// rather than a second, hand-maintained list of command names next to
-/// `CommandRegistry`. Two lists drift silently; one predicate consulted
-/// twice cannot.
+/// The decision is `route(_:)` in `CommandLineRunner.swift` — a three-way
+/// classification (`.local`, `.remote`, `.unknown`), not a single boolean.
+/// The three-way split matters: `connect`'s production implementation
+/// launches the app if it is not already running, so only a *known*
+/// command (`.remote`) may reach it. Collapsing `.remote` and `.unknown`
+/// into one "not local" case — the two-way split this function used before
+/// — means a typo (`wehreami`) launches a GUI application to be told
+/// "unknown subcommand" it could have been told locally, for free.
+/// `.unknown` is answered exactly like `.local`: by calling `runYard`
+/// directly, which produces the same usage envelope for a name it does not
+/// recognize either, without this function building a second copy of that
+/// shape.
 ///
 /// The remote path writes back exactly what the app sent: `AppConnection
 /// .perform` already returns `runYard`'s own bytes unmodified (see guide
@@ -23,22 +30,24 @@ public func dispatch(
     workingDirectory: String,
     connect: () async throws -> AppConnection = { try await AppConnection.connect() }
 ) async -> (stdout: String, stderr: String, exitCode: ExitCode) {
-    guard !isAnsweredLocally(arguments) else {
+    switch route(arguments) {
+    case .local, .unknown:
         return runYard(arguments: arguments)
-    }
 
-    do {
-        let app = try await connect()
-        defer { app.close() }
-        let (data, exitCode) = try await app.perform(
-            arguments: arguments, workingDirectory: workingDirectory)
-        return (stdout: String(decoding: data, as: UTF8.self), stderr: "", exitCode: ExitCode(fromAppReply: exitCode))
-    } catch let error as AppConnectionError {
-        return connectionFailureResult(exitCode: error.exitCode, message: String(describing: error))
-    } catch let error as CLIError {
-        return connectionFailureResult(exitCode: error.exitCode, message: String(describing: error))
-    } catch {
-        return connectionFailureResult(exitCode: .requestFailed, message: String(describing: error))
+    case .remote:
+        do {
+            let app = try await connect()
+            defer { app.close() }
+            let (data, exitCode) = try await app.perform(
+                arguments: arguments, workingDirectory: workingDirectory)
+            return (stdout: String(decoding: data, as: UTF8.self), stderr: "", exitCode: ExitCode(fromAppReply: exitCode))
+        } catch let error as AppConnectionError {
+            return connectionFailureResult(exitCode: error.exitCode, message: String(describing: error))
+        } catch let error as CLIError {
+            return connectionFailureResult(exitCode: error.exitCode, message: String(describing: error))
+        } catch {
+            return connectionFailureResult(exitCode: .requestFailed, message: String(describing: error))
+        }
     }
 }
 

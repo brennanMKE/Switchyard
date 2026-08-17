@@ -12,8 +12,44 @@ private actor ConnectCallCounter {
     func increment() { count += 1 }
 }
 
-@Suite("dispatch: local vs. remote")
+@Suite("dispatch: local vs. remote vs. unknown")
 struct DispatchTests {
+
+    // MARK: - route(_:) classifies every case, switched over exhaustively
+
+    /// One row per `Route` case, including the edge case that motivated the
+    /// enum: `CommandRegistry.all` contains `switchyardSpec`, whose name is
+    /// the literal string "switchyard" -- a naive "is this name anywhere in
+    /// the registry?" check would misclassify `switchyard switchyard` as
+    /// `.remote`, when it is not an invocable subcommand at all. `wehreami`
+    /// is the coordinator's own example of the exact typo this issue exists
+    /// to stop from launching the app.
+    @Test(
+        "route classifies local, remote, and unknown commands",
+        arguments: [
+            (["--help"], "local"),
+            (["--version"], "local"),
+            (["-v"], "local"),
+            (["schema"], "local"),
+            (["noop"], "local"),
+            ([], "local"),
+            (["whereami"], "remote"),
+            (["switchyard"], "unknown"),
+            (["bogus-command"], "unknown"),
+            (["wehreami"], "unknown"),
+        ] as [([String], String)]
+    )
+    func routeClassifiesArguments(arguments: [String], expected: String) {
+        // Switched exhaustively: a case added to `Route` without a branch
+        // here is a compile error, not a silently-skipped row.
+        let classification: String
+        switch route(arguments) {
+        case .local: classification = "local"
+        case .remote: classification = "remote"
+        case .unknown: classification = "unknown"
+        }
+        #expect(classification == expected, "route(\(arguments)) should be \(expected), got \(classification)")
+    }
 
     // MARK: - The assertion that matters: a local command never reaches for the connector
 
@@ -72,6 +108,35 @@ struct DispatchTests {
         #expect(object["ok"] as? Bool == false)
         let error = try #require(object["error"] as? [String: Any])
         #expect(error["code"] as? String == "app_unavailable")
+    }
+
+    // MARK: - An unknown command (a typo) must never reach the connector
+
+    /// The assertion that catches a regression into launching the app for a
+    /// misspelling: `connect`'s production implementation is
+    /// `AppConnection.connect()`, which launches Switchyard.app if it is
+    /// not already running. A command this build has never heard of --
+    /// "wehreami", not "whereami" -- must be answered locally with the
+    /// usage envelope, exit 1, the same way `runYard` has always answered
+    /// an unrecognized subcommand, and must never touch `connect` at all.
+    @Test func unknownCommandNeverCallsConnectAndExitsWithUsage() async throws {
+        let counter = ConnectCallCounter()
+        let result = await dispatch(arguments: ["wehreami"], workingDirectory: "/") {
+            await counter.increment()
+            throw AppConnectionError.appUnavailable
+        }
+
+        let calls = await counter.count
+        #expect(calls == 0, "an unknown command must never reach for the connector")
+        #expect(result.exitCode == .usage)
+        #expect(result.stdout == runYard(arguments: ["wehreami"]).stdout,
+                "the unknown path must produce exactly what runYard produces on its own")
+
+        let object = try #require(
+            try JSONSerialization.jsonObject(with: Data(result.stdout.utf8)) as? [String: Any])
+        #expect(object["ok"] as? Bool == false)
+        let error = try #require(object["error"] as? [String: Any])
+        #expect(error["code"] as? String == "usage")
     }
 
     // MARK: - The connection-failure exit-code table, reused from #0048's own mapping
