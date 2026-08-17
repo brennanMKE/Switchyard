@@ -167,6 +167,19 @@ The prompt carries, and nothing more:
   The round does not run git at all; its first line becomes the commit subject.
 - **Stop at the issue's scope.** No edits to `CLAUDE.md`, `AGENTS.md`, the issue file, or any file
   the issue does not name.
+- **Never assert wall-clock elapsed time.** The package runs seventy suites in parallel and most of
+  them block in `git` subprocesses, so a `Task.sleep` can fire tens of seconds late and a reply can
+  arrive long after a five-second deadline. Two tests asserting elapsed time cost #0048 a round, and
+  five more with a five-second XPC deadline turned `main` red an hour later. Assert what the criterion
+  claims — that a bounded loop **terminates**, that a call **succeeds** — and give any deadline in a
+  test a generous value. Production defaults stay small; a CLI is one process making one call.
+
+**Merge `main` into the branch before believing the round's count.** A round's number is a fact
+about its branch; `main` moves under it while it runs. The habit that makes the baseline safe is
+`git merge main` in the worktree, then run the suite there, then squash — and it is the same habit
+that catches a semantic conflict between two rounds before it reaches `main`. **And re-run the suite
+on `main` after the squash**: #0048 was green three times in its own worktree and red on `main` five
+minutes later, because the merge raised the parallel load past what its deadlines tolerated.
 
 **The orchestrator commits the round the moment it returns**, using that report as the message —
 before reviewing it, not after. The script used to do this from an `EXIT` trap; now nobody does it
