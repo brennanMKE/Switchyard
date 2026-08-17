@@ -933,6 +933,28 @@ a feature at any milestone on the grounds that GitUp had it.
     `RefSnapshot` already filters the whole `refs/switchyard/` namespace, so capture and restore are
     unaffected either way.
 
+13. **Per-repository layout constants live in `YardGit`; `ServiceNames` keeps app, CLI and XPC
+    identifiers.** Decided 2026-08-17 during #0149's planning pass, as an ordinary layering choice —
+    recorded here because #0149 asked for it to be, and because the same tension recurs for every
+    file switchyard puts inside a repository.
+
+    `YardGit` must not import `YardKit` (the #0141 shape), so a per-repository path constant in
+    `ServiceNames` is unreachable from the code that uses it. The code had already resolved this by
+    duplication: `JournalLock` builds `commonDir + "/switchyard/" + …` from a literal, and
+    `JournalMetadataCache`'s comment admits it holds *"a copy of
+    `ServiceNames.journalMetadataRelativePath`"*. Two unpinned copies is the status quo the
+    alternative preserves.
+
+    So `RepositoryLayout` in `YardGit` owns where things sit **inside a repository**, `ServiceNames`
+    owns the bundle identifier, Mach service name, agent plist, URL scheme and log subsystem, and a
+    test in `Tests/YardWireTests` — the one target that imports both — pins them against each other so
+    a rename on either side fails loudly. Migrating the two existing literals is **#0199**.
+
+    **And never resolve one of these paths through `git rev-parse --git-path`.** Measured: for a
+    subpath git does not know, `--git-path` answers *per-worktree*, so a linked worktree would resolve
+    `switchyard/repository-id` under `$GIT_DIR/worktrees/<name>/` and two worktrees would disagree
+    about the repository's identity. Address them from `WorktreeContext.commonDir`.
+
 
 ### Still open
 
