@@ -16,10 +16,11 @@ func registryHasAtLeastTwoEntries() {
     #expect(!list.isEmpty)
 
     let names = Set(list.map(\.name))
-    // The two documented commands must exist. If someone adds a third later,
+    // The documented commands must exist. If someone adds another later,
     // this assertion continues to hold rather than silently failing.
     #expect(names.contains("switchyard"))
     #expect(names.contains("noop"))
+    #expect(names.contains("whereami"))
 
     // Every spec must have a non-empty name, a non-empty schemaName, and at least
     // one documented exit code. Empty fields or no exit codes would indicate broken
@@ -31,12 +32,12 @@ func registryHasAtLeastTwoEntries() {
     }
 }
 
-@Test("registry reports exactly two entries")
-func registryHasExactlyTwoEntries() {
-    #expect(CommandRegistry.all.count == 2)
+@Test("registry reports exactly three entries")
+func registryHasExactlyThreeEntries() {
+    #expect(CommandRegistry.all.count == 3)
 
     let names: [String] = CommandRegistry.all.map(\.name)
-    #expect(Set(names).count == 2, "Names must be distinct so lookup returns the right spec.")
+    #expect(Set(names).count == 3, "Names must be distinct so lookup returns the right spec.")
 }
 
 @Test("registry lookup by name returns the matching spec")
