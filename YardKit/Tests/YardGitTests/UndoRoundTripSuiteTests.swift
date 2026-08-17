@@ -291,4 +291,62 @@ struct UndoRoundTripSuiteTests {
         #expect(restoredBack.untracked == dirty.untracked,
                 "untracked files must round-trip through a restore of a restore")
     }
+
+    // MARK: - #0204: the traversal entry undo writes must itself capture
+    // the sequencer, not just index and worktree — otherwise redo restores
+    // refs, index and worktree but the interrupted rebase is gone, with no
+    // entry holding it (the same gap #0200 closed, one piece over).
+
+    /// Steps back to before a rebase was attempted — so the traversal entry
+    /// undo writes is the only place the interrupted rebase can still come
+    /// from — then redoes and proves it the real way: `git rebase
+    /// --continue` must still work afterward, the way
+    /// `midRebaseSequencerRoundTripsThroughCheckpointAndRestore` proves it
+    /// for plain checkpoint/restore.
+    @Test func undoThenRedoRoundTripsMidRebaseSequencer() throws {
+        let repo = try repositoryStoppedMidRebase()
+        defer { repo.destroy() }
+        let ctx = try WorktreeContext.resolve(path: repo.url.path)
+
+        // Step back to before the rebase was attempted and checkpoint
+        // there — the normal entry undo will target — then recreate the
+        // identical conflict, so undo has a mid-rebase state to step away
+        // from.
+        try git.run(["rebase", "--abort"], workingDirectory: repo.url.path)
+        let beforeRebase = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+        let beforeMeta = try JournalEntryMetadata(
+            serialized: JournalAnchor.metadata(for: beforeRebase.id, in: ctx))
+        #expect(beforeMeta.captured.sequencer == .notCaptured,
+                "no rebase is active yet, so there is nothing to capture")
+
+        _ = try? git.run(["rebase", "main"], workingDirectory: repo.url.path)
+        let sequencerDirectory = try ctx.path(for: "rebase-merge")
+        #expect(FileManager.default.fileExists(atPath: sequencerDirectory),
+                "the rebase must actually be interrupted again, or this proves nothing")
+
+        // Undo steps back to `beforeRebase`. The traversal entry it writes
+        // — from the state undo is about to overwrite — must hold the
+        // interrupted rebase, or redo has nothing to hand back.
+        let undone = try JournalUndo.undo(in: ctx)
+        let undoCheckpoint = try #require(undone.first).checkpoint
+        let undoMeta = try JournalEntryMetadata(
+            serialized: JournalAnchor.metadata(for: undoCheckpoint.id, in: ctx))
+        #expect(undoMeta.captured.sequencer != .notCaptured)
+
+        // Redo restores that traversal entry's snapshot — the interrupted
+        // rebase — and it must actually resume.
+        let redone = try JournalUndo.redo(in: ctx)
+        let redoneReport = try #require(redone.first)
+        #expect(redoneReport.restored.contains(.sequencer))
+
+        try repo.writeUntracked(["shared.txt": "resolved\n"])
+        try git.run(["add", "shared.txt"], workingDirectory: repo.url.path)
+        let resumed = try git.run(["rebase", "--continue"],
+                                  workingDirectory: repo.url.path,
+                                  extraEnvironment: ["GIT_EDITOR": "true"])
+        #expect(resumed.exitCode == 0)
+        #expect(try git.run(["status", "--porcelain=v2", "--branch"],
+                            workingDirectory: repo.url.path)
+            .text.contains("branch.head side"))
+    }
 }
