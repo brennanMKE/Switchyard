@@ -174,6 +174,18 @@ The prompt carries, and nothing more:
   claims — that a bounded loop **terminates**, that a call **succeeds** — and give any deadline in a
   test a generous value. Production defaults stay small; a CLI is one process making one call.
 
+**Never `git add -A` in the primary checkout, and never let a review agent mutate it.** On
+2026-08-17 the #0044 umbrella review was running mutations against `JournalRestore.swift` in the
+primary checkout to find out which of that issue's decisions were pinned. One of its mutations was
+sitting in the working tree when I ran `git add -A` for a work-log commit, so **a bookkeeping commit
+silently shipped a deleted line of production code** — decision 4's per-worktree carry-through — and
+the next `git add -A` shipped the restoration. In between I bisected the resulting red suite, blamed
+the wrong issue, filed #0229, and dispatched a round to chase it.
+
+Two rules, both cheap: **name the paths you commit** (`git add issues/0150.md docs/…`), and **a review
+that mutates source works from `git archive HEAD` into the scratchpad**, never in a checkout anything
+else commits from.
+
 **Never run `swift test` in the primary checkout while a subagent is running it there.** They share
 `YardKit/.build`, and two concurrent builds clobber each other's products — the failures that
 produces look like real test failures and are not. Run the review's own suite in a throwaway
