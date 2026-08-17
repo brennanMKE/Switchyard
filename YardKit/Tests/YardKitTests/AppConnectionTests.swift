@@ -13,6 +13,22 @@ private final class FakeAppService: NSObject, AppServiceProtocol {
     func appPing(reply: @escaping @Sendable (String) -> Void) {
         reply("pong")
     }
+
+    /// Mirrors the real app's implementation in
+    /// `Switchyard/AppXPCServer.swift` exactly: calls `runYard` and hands
+    /// back its stdout bytes and exit code unmodified. The app target is not
+    /// `@testable import`able from a Swift package test target, so this is
+    /// the same object the app exports in every way that matters for this
+    /// wire — same protocol, same interface, same underlying call.
+    func perform(
+        arguments: [String],
+        workingDirectory: String,
+        reply: @escaping @Sendable (Data, Int32) -> Void
+    ) {
+        let result = runYard(arguments: arguments)
+        let data = result.stdout.data(using: .utf8) ?? Data()
+        reply(data, Int32(result.exitCode.rawValue))
+    }
 }
 
 private final class AppListenerDelegate: NSObject, NSXPCListenerDelegate {
@@ -310,5 +326,55 @@ struct AppConnectionTests {
     @Test func undecodableResponseRowMapsToExitCodeFour() {
         let error = AppConnectionError.undecodableResponse
         #expect(error.exitCode == .requestFailed)
+    }
+
+    // MARK: - perform round-trips runYard's own output, byte for byte
+
+    /// Argv values to exercise `perform` against, paired with a name for the
+    /// test's own bookkeeping. `runYard` already has dedicated tests for the
+    /// shape of each of these outputs — this suite only cares that `perform`
+    /// delivers the exact same bytes and exit code back across the wire.
+    private static let performArgvCases: [[String]] = [
+        ["schema"],
+        ["noop"],
+        ["--version"],
+        ["bogus-command-that-does-not-exist"],
+    ]
+
+    @Test("perform round-trips runYard's bytes exactly", arguments: performArgvCases)
+    func performRoundTripsBytesExactly(arguments: [String]) async throws {
+        let fake = FakeAppListener()
+        defer { fake.listener.invalidate() }
+        let app = fake.connect()
+        defer { app.close() }
+
+        let expected = runYard(arguments: arguments)
+        let expectedData = Data(expected.stdout.utf8)
+        #expect(!expectedData.isEmpty)
+
+        let (data, exitCode) = try await app.perform(
+            arguments: arguments,
+            workingDirectory: "/",
+            timeout: testTimeout)
+
+        #expect(data == expectedData)
+        #expect(exitCode == Int32(expected.exitCode.rawValue))
+    }
+
+    // MARK: - Unknown exit codes map to requestFailed, never trap
+
+    @Test func unknownExitCodeValueMapsToRequestFailed() {
+        let mapped = ExitCode(fromAppReply: 123)
+        #expect(mapped == .requestFailed)
+    }
+
+    @Test func negativeExitCodeValueMapsToRequestFailed() {
+        let mapped = ExitCode(fromAppReply: -1)
+        #expect(mapped == .requestFailed)
+    }
+
+    @Test func knownExitCodeValueMapsThrough() {
+        let mapped = ExitCode(fromAppReply: 3)
+        #expect(mapped == .appUnavailable)
     }
 }

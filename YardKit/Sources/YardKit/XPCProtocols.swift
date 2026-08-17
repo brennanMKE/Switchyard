@@ -33,15 +33,46 @@ import Foundation
 
 /// What the app exposes to a CLI over the direct connection.
 ///
-/// Scoped to a liveness check only. The app's listener declines every
-/// connection until #0215 exports a real service interface, so nothing here
-/// is reachable end to end yet — this issue tests it against an in-process
-/// listener instead. `perform`/`startSession` shapes belong with the command
-/// wiring (#0115, #0124) and the session work (#0213).
+/// `appPing` is a liveness check; `perform` is the real wire — argv in, a
+/// rendered envelope out. See guide §11 decision 15 for why the shape is
+/// argv-in/envelope-out rather than a typed request/response per command:
+/// this needs no per-command payload schema, so a new CLI command is not a
+/// protocol change. Session state (`startSession` and friends) is #0213,
+/// deliberately after this.
 @objc public protocol AppServiceProtocol {
     /// Liveness check on the app itself, distinct from `brokerPing`: this one
     /// only answers when the direct connection is live.
     func appPing(reply: @escaping @Sendable (String) -> Void)
+
+    /// Runs a CLI invocation and replies with exactly what the CLI should
+    /// write to stdout, and the process exit code.
+    ///
+    /// - Parameters:
+    ///   - arguments: `CommandLine.arguments` after the executable name —
+    ///     the same array `runYard(arguments:)` takes.
+    ///   - workingDirectory: the CLI process's working directory, explicit
+    ///     and never inferred. The app's own working directory is meaningless
+    ///     to a CLI invoked in some other repository, and passing it is what
+    ///     lets one running app serve CLIs in many repositories at once
+    ///     (guide §11 decision 15). Unused for now — `runYard` does not take
+    ///     a working directory yet; wiring an engine-backed command that
+    ///     needs it is #0124.
+    ///   - reply: `Data` is the JSON envelope exactly as the CLI must print
+    ///     it — `NSXPCInterface` cannot carry a Swift `String` with
+    ///     guaranteed encoding fidelity across the boundary the way `Data`
+    ///     does, and the CLI parses none of it. `Int32` is the exit code —
+    ///     `ExitCode` is `Int`-backed, so `NSXPCInterface` (which will not
+    ///     carry a Swift enum) needs an explicit `Int32` conversion on both
+    ///     sides. This signature carries no `stderr`: it is pinned exactly
+    ///     as guide §11 decision 15 states it, and `runYard`'s stderr text is
+    ///     always a human-readable duplicate of information already present
+    ///     in the stdout envelope's `error` object, so nothing is lost by
+    ///     not carrying it separately over this wire.
+    func perform(
+        arguments: [String],
+        workingDirectory: String,
+        reply: @escaping @Sendable (Data, Int32) -> Void
+    )
 }
 
 /// `NSXPCInterface` values for ``BrokerProtocol`` and ``AppServiceProtocol``.

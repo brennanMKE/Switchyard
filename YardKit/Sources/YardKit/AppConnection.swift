@@ -153,6 +153,24 @@ public final class AppConnection: @unchecked Sendable {
         }
     }
 
+    /// Sends `arguments` and `workingDirectory` to the app and returns
+    /// exactly what it sent back: the envelope bytes and the raw exit code
+    /// value. Nothing here decodes, re-encodes, or trims the bytes — the
+    /// caller (the CLI) writes `stdout` to its own stdout unmodified and
+    /// converts `exitCode` with ``ExitCode/init(fromAppReply:)``. See guide
+    /// §11 decision 15.
+    public func perform(
+        arguments: [String],
+        workingDirectory: String,
+        timeout: Duration = .seconds(5)
+    ) async throws -> (stdout: Data, exitCode: Int32) {
+        try await call(timeout: timeout) { app, complete in
+            app.perform(arguments: arguments, workingDirectory: workingDirectory) { data, exitCode in
+                complete(.success((data, exitCode)))
+            }
+        }
+    }
+
     private func call<T: Sendable>(
         timeout: Duration,
         _ invoke: @escaping @Sendable (any AppServiceProtocol, @escaping @Sendable (Result<T, any Error>) -> Void) -> Void

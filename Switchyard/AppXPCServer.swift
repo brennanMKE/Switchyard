@@ -198,4 +198,18 @@ private nonisolated final class AppService: NSObject, AppServiceProtocol {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
         reply(version ?? "unknown")
     }
+
+    /// Runs `runYard` and replies with its stdout bytes and exit code,
+    /// unmodified — no re-encoding, no pretty-printing. `runYard` does not
+    /// take a working directory yet, so `workingDirectory` passes through
+    /// unused until an engine-backed command needs it (#0124).
+    func perform(
+        arguments: [String],
+        workingDirectory: String,
+        reply: @escaping @Sendable (Data, Int32) -> Void
+    ) {
+        let result = runYard(arguments: arguments)
+        let data = result.stdout.data(using: .utf8) ?? Data()
+        reply(data, Int32(result.exitCode.rawValue))
+    }
 }
