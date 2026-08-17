@@ -338,3 +338,36 @@ func aChainedHookFailureStillAbortsTheTransaction(format: FixtureRepository.RefF
     #expect(!fm.fileExists(atPath: hook + HookInstall.chainedSuffix),
             "a failed install rolls back the backup copy, so a retry is not blocked")
 }
+
+/// #0192: a failure at the very end of `write` -- the final `replaceItemAt`
+/// -- must not leave the staging file behind. The injection marks the HOOK
+/// itself immutable, which lets the copy aside and the staging write both
+/// succeed and fails only `replaceItemAt`, leaving the staging path an
+/// ordinary removable file. That is the opposite fixture from the test
+/// above, where the STAGING path is immutable and unremovable by design --
+/// there, asserting the staging file's absence would test the fixture, not
+/// the production code. Here it is exactly what pins the `defer` in
+/// `HookInstall.write`.
+@Test func aFailureAtTheFinalReplaceLeavesNoStagingFileBehind() throws {
+    let fm = FileManager.default
+    var repo = try FixtureRepository()
+    defer { repo.destroy() }
+    try repo.build([.init("a")])
+    let hooks = try hooksDirectory(repo)
+    let hook = hooks + "/reference-transaction"
+    let body = loggerHook(to: repo.url.appendingPathComponent("theirs.log").path)
+    try writeHook("reference-transaction", in: hooks, content: body, mode: 0o755)
+
+    try fm.setAttributes([.immutable: true], ofItemAtPath: hook)
+    defer { try? fm.setAttributes([.immutable: false], ofItemAtPath: hook) }
+
+    let report = try #require(try installReports(repo).first)
+    guard case .failed = report.outcome else {
+        Issue.record("expected .failed, got \(report.outcome)")
+        return
+    }
+
+    let staging = hook + ".switchyard-installing"
+    #expect(!fm.fileExists(atPath: staging),
+            "the defer in HookInstall.write must remove the staging file on every path out")
+}
