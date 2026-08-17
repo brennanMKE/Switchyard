@@ -977,7 +977,15 @@ Decide these with Brennan, do not decide them in code.
    `WorktreeEntry` carries the porcelain parse plus `isMainWorktree`, and `lockReason` covers only the
    agent session. M1's criteria ask that the engine function exist and encode; M3's ask that the
    command run. **Nothing asks for those fields**, so today they are documentation of an intention.
-5. **Does `GitProcess` get a wall-clock timeout, and where?** **#0163**, still needing a pick among
+5. **Are bare repositories supported at all?** Surfaced by the #0034 umbrella review, 2026-08-17.
+   `JournalCheckpoint.checkpoint` now **fails in a bare repository**: #0171 made the
+   `WorktreeSnapshot.capture` call unconditional, and it throws `noWorktree(gitDir:)` when
+   `context.topLevel` is nil (`WorktreeSnapshot.swift:126-128`). Checkpointing a bare repo previously
+   succeeded refs-only. `WorktreeContext.isBare` exists and `JournalRebuild` is tested against a bare
+   mirror clone, so parts of the engine clearly expect them — but nothing states whether the mutating
+   half should. Either capture degrades gracefully when there is no worktree, or bare repositories are
+   out of scope and say so.
+6. **Does `GitProcess` get a wall-clock timeout, and where?** **#0163**, still needing a pick among
    its three options. The termination semantics it depends on were measured 2026-08-17 and are recorded
    in the issue, so whichever option is chosen is now cheap to author.
 
