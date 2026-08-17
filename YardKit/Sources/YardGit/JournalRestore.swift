@@ -255,8 +255,14 @@ public enum JournalRestore {
                 recordedStillExists: recordedStillExists)
         }
 
-        // 3. One capture of the present.
+        // 3. One capture of the present — refs, index, worktree and
+        // sequencer together, so the pre-restore entry written at step 7
+        // from these same values can never describe less than what undo,
+        // redo and explicit restore are about to overwrite (#0200).
         let current = try RefSnapshot.capture(in: context, git: git)
+        let currentIndex = try IndexSnapshot.capture(in: context, git: git)
+        let currentWorktree = try WorktreeSnapshot.capture(in: context, git: git)
+        let currentSequencer = try SequencerSnapshot.capture(in: context, git: git)
 
         // 4. The cross-tool guard, against the cursor's snapshot. A
         // cursor naming a pruned entry (possible only once its chain's
@@ -297,6 +303,9 @@ public enum JournalRestore {
         // a state the guard never saw.
         let checkpoint = try JournalCheckpoint.writeEntry(
             capturing: current,
+            index: currentIndex,
+            worktree: currentWorktree,
+            sequencer: currentSequencer,
             operation: operation,
             command: command,
             agent: agent,

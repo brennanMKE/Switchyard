@@ -201,7 +201,13 @@ struct JournalRestoreTests {
         #expect(undoMeta.command == "switchyard undo")
         #expect(undoMeta.agent == .init(name: "claude-code", session: "s-1"))
         #expect(undoMeta.traversal == traversal)
-        #expect(undoMeta.captured == .refsOnly)
+        // #0200: the pre-restore entry now captures index and worktree
+        // alongside refs, at the same step-3 moment the restore's own
+        // checks run against — no longer refsOnly, since undo/redo/restore
+        // are about to overwrite exactly those pieces.
+        #expect(undoMeta.captured == JournalEntryMetadata.Captured(
+            refs: true, head: true, index: .tree, worktree: .stash,
+            untracked: true, sequencer: .notCaptured))
 
         // An explicit restore writes a NORMAL entry — the truncation that
         // resets this worktree's cursor to present (#0034 decision 2). The

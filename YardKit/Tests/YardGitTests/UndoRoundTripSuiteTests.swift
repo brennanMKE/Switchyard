@@ -197,4 +197,98 @@ struct UndoRoundTripSuiteTests {
         let report = try JournalRestore.restore(entry.id, in: ctx)
         #expect(!report.notRestored.map(\.piece).contains(.sequencer))
     }
+
+    // MARK: - #0200: the pre-restore entry must capture index and worktree
+    // too, not refs alone — every undo, redo and explicit restore writes
+    // one, and until it captures everything it overwrites, the work it
+    // clobbers has nowhere to come back from.
+
+    /// Dirties both the index (staged) and the worktree (unstaged) on the
+    /// same file, undoes back to an earlier checkpoint — which overwrites
+    /// that work — then redoes. Redo must restore the dirtied state
+    /// byte-exact, which is only possible if undo's own traversal entry
+    /// captured the index and worktree it was about to clobber.
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func undoThenRedoRoundTripsStagedAndUnstagedIndexAndWorktree(
+        format: FixtureRepository.RefFormat
+    ) throws {
+        let repo = try FixtureRepository.linear(refFormat: format)
+        defer { repo.destroy() }
+        let ctx = try WorktreeContext.resolve(path: repo.url.path)
+
+        // The checkpoint undo will step back to.
+        _ = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+
+        // Dirty the index and the worktree — staged, then modified again
+        // unstaged — plus an untracked file, before undo runs.
+        try repo.writeUntracked(["mix.txt": "staged\n", "loose.txt": "unstaged only\n"])
+        try git.run(["add", "mix.txt"], workingDirectory: repo.url.path)
+        try repo.writeUntracked(["mix.txt": "staged then modified\n"])
+        let dirty = try read(repo, ctx)
+
+        let undone = try JournalUndo.undo(in: ctx)
+        let afterUndo = try read(repo, ctx)
+        #expect(afterUndo != dirty,
+                "undo must actually overwrite the staged/unstaged work, or this proves nothing")
+
+        // The traversal entry undo just wrote must hold what it is about to
+        // let redo restore — not refs-only.
+        let undoCheckpoint = try #require(undone.first).checkpoint
+        let undoMeta = try JournalEntryMetadata(
+            serialized: JournalAnchor.metadata(for: undoCheckpoint.id, in: ctx))
+        #expect(undoMeta.captured.index != .notCaptured)
+        #expect(undoMeta.captured.worktree != .notCaptured)
+
+        let redone = try JournalUndo.redo(in: ctx)
+        let redoneReport = try #require(redone.first)
+        #expect(redoneReport.restored.contains(.index))
+        #expect(redoneReport.restored.contains(.worktree))
+
+        let afterRedo = try read(repo, ctx)
+        #expect(afterRedo.stages == dirty.stages,
+                "staged bytes must round-trip through undo then redo")
+        #expect(afterRedo.tracked == dirty.tracked,
+                "tracked file contents must round-trip through undo then redo")
+        #expect(afterRedo.untracked == dirty.untracked,
+                "untracked files must round-trip through undo then redo")
+    }
+
+    /// The claim at `JournalRestore.swift:47` — "restore is itself a
+    /// mutation, so it is itself undoable" — exercised across index and
+    /// worktree, not just refs: an explicit restore clobbers staged and
+    /// unstaged work, and restoring its own `report.checkpoint` must bring
+    /// that work back byte-exact.
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func restoreOfARestoreRoundTripsStagedAndUnstagedIndexAndWorktree(
+        format: FixtureRepository.RefFormat
+    ) throws {
+        let repo = try FixtureRepository.linear(refFormat: format)
+        defer { repo.destroy() }
+        let ctx = try WorktreeContext.resolve(path: repo.url.path)
+        let entry = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+
+        // Dirty the index and the worktree, plus an untracked file, before
+        // the explicit restore runs.
+        try repo.writeUntracked(["mix.txt": "staged\n", "loose.txt": "unstaged only\n"])
+        try git.run(["add", "mix.txt"], workingDirectory: repo.url.path)
+        try repo.writeUntracked(["mix.txt": "staged then modified\n"])
+        let dirty = try read(repo, ctx)
+
+        let report = try JournalRestore.restore(entry.id, in: ctx)
+        let afterRestore = try read(repo, ctx)
+        #expect(afterRestore != dirty,
+                "restore must actually overwrite the staged/unstaged work, or this proves nothing")
+
+        let backReport = try JournalRestore.restore(report.checkpoint.id, in: ctx)
+        #expect(backReport.restored.contains(.index))
+        #expect(backReport.restored.contains(.worktree))
+
+        let restoredBack = try read(repo, ctx)
+        #expect(restoredBack.stages == dirty.stages,
+                "staged bytes must round-trip through a restore of a restore")
+        #expect(restoredBack.tracked == dirty.tracked,
+                "tracked file contents must round-trip through a restore of a restore")
+        #expect(restoredBack.untracked == dirty.untracked,
+                "untracked files must round-trip through a restore of a restore")
+    }
 }

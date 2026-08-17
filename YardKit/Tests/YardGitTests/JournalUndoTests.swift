@@ -260,7 +260,12 @@ struct JournalUndoTests {
         #expect(undoMeta.command == "switchyard undo")
         #expect(undoMeta.agent == .init(name: "claude-code", session: "s-1"))
         #expect(undoMeta.traversal == .init(restored: c1.id, resultingPosition: c1.id))
-        #expect(undoMeta.captured == .refsOnly)
+        // #0200: restoreAssumingLock now captures index and worktree at the
+        // same step-3 moment as refs, so the traversal entry it writes is no
+        // longer refsOnly.
+        #expect(undoMeta.captured == JournalEntryMetadata.Captured(
+            refs: true, head: true, index: .tree, worktree: .stash,
+            untracked: true, sequencer: .notCaptured))
 
         // The full redo restored the run's first traversal entry — the one
         // undo just wrote — and the cursor returned to present: `restored`
