@@ -950,6 +950,19 @@ a feature at any milestone on the grounds that GitUp had it.
     test in `Tests/YardWireTests` — the one target that imports both — pins them against each other so
     a rename on either side fails loudly. Migrating the two existing literals is **#0199**.
 
+14. **A restore clears a sequencer the target never captured.** Decided 2026-08-17 in Brennan's absence
+    under the standing instruction — reversible, flagged, and taken on measurement rather than taste
+    (#0205). Leaving it was not a neutral default: a repository whose refs and worktree have been
+    restored under a live rebase **advertises a resumable operation, refuses to resume it**
+    (`cannot lock ref … is at X but expected Y`), and its one clean exit, `git rebase --abort`,
+    **silently reverts the restore**. All three measured.
+
+    Clearing makes the repository match the snapshot, which is what restore promises, and nothing is
+    lost: the pre-restore entry captures the live sequencer (#0200), so the mid-rebase state is
+    recoverable by restoring that entry. The journal's own guarantee is what makes a deletion on the
+    restore path acceptable here, and it is the reason this is not a precedent for deleting anything the
+    journal does not hold.
+
     **And never resolve one of these paths through `git rev-parse --git-path`.** Measured: for a
     subpath git does not know, `--git-path` answers *per-worktree*, so a linked worktree would resolve
     `switchyard/repository-id` under `$GIT_DIR/worktrees/<name>/` and two worktrees would disagree
