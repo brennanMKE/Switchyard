@@ -249,6 +249,7 @@ public enum JournalAnchor {
         _ contents: Contents,
         id: JournalEntryID,
         in context: WorktreeContext,
+        namespace: String = refPrefix,
         git: GitProcess = GitProcess()
     ) throws -> Entry {
         let base = context.topLevel ?? context.gitDir
@@ -296,7 +297,7 @@ public enum JournalAnchor {
             command: "commit-tree")
 
         try git.run(["update-ref", "--stdin"], workingDirectory: base,
-                    standardInput: Data("create \(refName(for: id)) \(commit)\n".utf8))
+                    standardInput: Data("create \(namespace + id.string) \(commit)\n".utf8))
         return Entry(id: id, commit: commit)
     }
 
