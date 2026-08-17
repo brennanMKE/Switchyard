@@ -12,7 +12,10 @@ not written down here at the moment it was measured is unrecoverable.
 a figure derived from it appears.
 
 **Planning moved to Opus 5 on 2026-08-09** (Brennan's instruction), so planning rows now bill at
-the Opus rate above and carry `(O)`. Rows marked `(F)` predate the change.
+the Opus rate above and carry `(O)`. Rows marked `(F)` predate the change. **Implementation rounds
+from 2026-08-17 carry `(S)`** — Sonnet at $3/$15 per million, the same 85/15 split, so **$4.80 per
+million combined**. They are measured, not estimated: a subagent reports its token count once, in a
+completion notification that exists nowhere else.
 
 **Fable 5**, used for planning until then, billed at $10.00 per million input and $50.00 per million output; the
 same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using it are marked `(F)`.
@@ -232,6 +235,7 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-08-09 | #0175 | Filter half written and verified in-context (O, estimated) | 61,000 | $0.98 |
 | 2026-08-09 | #0171 | Written and verified in-context (O, estimated) | 105,000 | $1.68 |
 | 2026-08-09 | #0035 | Written and verified in-context (O, estimated) | 79,000 | $1.26 |
+| 2026-08-17 | #0189 | Implementation round 1, Sonnet subagent (S, measured) | 79,574 | $0.38 |
 | | | **Total measured** | **19,368,531** | **$253.81** |
 
 ## What this total does and does not cover
