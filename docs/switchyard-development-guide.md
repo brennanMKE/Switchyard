@@ -968,6 +968,38 @@ a feature at any milestone on the grounds that GitUp had it.
     restore path acceptable here, and it is the reason this is not a precedent for deleting anything the
     journal does not hold.
 
+15. **The XPC wire between the CLI and the app carries argv in and a rendered envelope out.** Decided
+    2026-08-17 in Brennan's absence under the standing instruction; it is implied by §5's own wording,
+    *"the CLI marshals arguments over XPC and prints the reply"*, and it is reversible — the protocol
+    is one `@objc` method with no persisted format behind it.
+
+    ```swift
+    func perform(arguments: [String],
+                 workingDirectory: String,
+                 reply: @escaping @Sendable (Data, Int32) -> Void)
+    ```
+
+    `Data` is the JSON envelope **exactly as the CLI must print it**, and `Int32` is the exit code. The
+    CLI writes the bytes to stdout and exits; it parses nothing, so it needs no knowledge of any
+    command's result shape.
+
+    The alternative — a typed request/response per command — would make every new command a change to
+    both sides of an `@objc` protocol, and would need the thirteen payload schemas of **#0194** settled
+    before the first command could be wired. This shape needs none of them: the envelope already carries
+    `schemaVersion` and is already pinned by `YardWireTests`, so the transport inherits a versioned
+    contract instead of inventing a second one.
+
+    Two consequences. **`workingDirectory` is explicit and never inferred** — the app's own working
+    directory is meaningless to a CLI invoked in a repository, and passing it is what lets one running
+    app serve CLIs in many repositories at once. And **engine-backed command arms cannot live in
+    `YardKit`**, which the CLI links: they go in a `YardCommands` target that depends on `YardGit` and is
+    linked by the app alone. `LayeringTests` keeps asserting that `YardKit` does not import `YardGit`
+    — the assertion #0124 round 3 inverted, which is what made that round a rejection rather than a
+    design.
+
+    This decision does not cover the `reference-transaction` hook arm, which has a latency budget and
+    must work with the app closed. That is **#0217**, and it is Brennan's.
+
 
 
 ### Still open
