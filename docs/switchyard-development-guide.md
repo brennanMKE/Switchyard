@@ -1005,6 +1005,14 @@ a feature at any milestone on the grounds that GitUp had it.
     — the assertion #0124 round 3 inverted, which is what made that round a rejection rather than a
     design.
 
+    **Routing has three cases, not two** — added 2026-08-17 after #0124 round 2 shipped a two-way
+    split. A command is *local* (`--help`, `--version`, `schema`, `noop`), *known and remote*, or
+    **unknown**. An unknown subcommand is a **usage error answered locally, exit 1** (§6), and it must
+    never reach the transport: with a registered broker, sending a typo to the app **launches
+    Switchyard.app for a misspelling**, and with no app it reports `app_unavailable` (3) for a command
+    that does not exist. `CommandRegistry.all` is the list that decides "known"; derive all three cases
+    from one place.
+
     This decision does not cover the `reference-transaction` hook arm, which has a latency budget and
     must work with the app closed. That is **#0217**, and it is Brennan's.
 
