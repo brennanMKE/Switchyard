@@ -83,6 +83,32 @@ public struct SequencerSnapshot: Equatable, Sendable {
         return nil
     }
 
+    /// Removes a leftover sequencer directory that no target snapshot
+    /// describes — the inverse of `capture`, using the same path
+    /// resolution so nothing here concatenates onto `.git/` by hand.
+    /// Checks both layouts, since `rebase-apply` is reachable through
+    /// `git rebase --apply` or `git am` and a stale one would be just as
+    /// unresumable. Returns whether anything was actually removed, so a
+    /// caller can report the piece as restored only when the state
+    /// changed (#0205).
+    @discardableResult
+    public static func clear(
+        in context: WorktreeContext,
+        git: GitProcess = GitProcess()
+    ) throws -> Bool {
+        let fm = FileManager.default
+        var removed = false
+        for layout in Layout.allCases {
+            let directory = try context.path(for: layout.rawValue, git: git)
+            var isDirectory: ObjCBool = false
+            guard fm.fileExists(atPath: directory, isDirectory: &isDirectory),
+                  isDirectory.boolValue else { continue }
+            try fm.removeItem(atPath: directory)
+            removed = true
+        }
+        return removed
+    }
+
     /// Restores the directory byte-for-byte, replacing whatever is there.
     ///
     /// **A partially restored sequencer is more dangerous than an absent one**,

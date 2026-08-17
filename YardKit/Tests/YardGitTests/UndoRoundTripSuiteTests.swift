@@ -349,4 +349,83 @@ struct UndoRoundTripSuiteTests {
                             workingDirectory: repo.url.path)
             .text.contains("branch.head side"))
     }
+
+    // MARK: - #0205: a restore whose target captured no sequencer must clear
+    // a leftover one, not leave it standing describing an operation the
+    // just-restored refs no longer match. Measured in the issue: left in
+    // place, `git rebase --continue` fails to lock the ref, and the only
+    // clean exit, `--abort`, silently reverts the restore.
+
+    /// Checkpoints before a rebase is attempted (capturing no sequencer),
+    /// drives the rebase to a real conflict stop, then restores that
+    /// pre-rebase checkpoint. The stale `rebase-merge` directory must be
+    /// removed and `git status` must no longer report a rebase in progress.
+    @Test func restoringPreRebaseCheckpointClearsTheLeftoverSequencer() throws {
+        let repo = try repositoryStoppedMidRebase()
+        defer { repo.destroy() }
+        let ctx = try WorktreeContext.resolve(path: repo.url.path)
+
+        // Abort back to before the rebase and checkpoint there -- no
+        // sequencer is active, so nothing is captured -- then recreate the
+        // identical conflict so a live sequencer is standing when that
+        // checkpoint is restored.
+        try git.run(["rebase", "--abort"], workingDirectory: repo.url.path)
+        let beforeRebase = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+        let beforeMeta = try JournalEntryMetadata(
+            serialized: JournalAnchor.metadata(for: beforeRebase.id, in: ctx))
+        #expect(beforeMeta.captured.sequencer == .notCaptured,
+                "no rebase is active yet, so there is nothing to capture")
+
+        _ = try? git.run(["rebase", "main"], workingDirectory: repo.url.path)
+        let sequencerDirectory = try ctx.path(for: "rebase-merge")
+        #expect(FileManager.default.fileExists(atPath: sequencerDirectory),
+                "the rebase must actually be interrupted again, or this proves nothing")
+
+        let report = try JournalRestore.restore(beforeRebase.id, in: ctx)
+        #expect(report.restored.contains(.sequencer),
+                "the leftover was brought into line with the snapshot, which is what restored means")
+        #expect(!FileManager.default.fileExists(atPath: sequencerDirectory),
+                "the stale sequencer directory must be removed")
+        let status = try git.run(["status", "--porcelain=v2", "--branch"],
+                                 workingDirectory: repo.url.path).text
+        #expect(status.contains("branch.head side"),
+                "HEAD must be back on the branch, not detached mid-rebase")
+    }
+
+    /// The safety half, and the one that proves the deletion above is not a
+    /// real loss: the pre-restore entry the clearing restore just wrote
+    /// captured the live sequencer (#0200), so restoring *that* entry must
+    /// bring the interrupted rebase all the way back -- resumable, not just
+    /// present on disk.
+    @Test func restoringThePreRestoreEntryBringsTheClearedRebaseBack() throws {
+        let repo = try repositoryStoppedMidRebase()
+        defer { repo.destroy() }
+        let ctx = try WorktreeContext.resolve(path: repo.url.path)
+
+        try git.run(["rebase", "--abort"], workingDirectory: repo.url.path)
+        let beforeRebase = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+        _ = try? git.run(["rebase", "main"], workingDirectory: repo.url.path)
+        let sequencerDirectory = try ctx.path(for: "rebase-merge")
+        #expect(FileManager.default.fileExists(atPath: sequencerDirectory),
+                "the rebase must actually be interrupted again, or this proves nothing")
+
+        let report = try JournalRestore.restore(beforeRebase.id, in: ctx)
+        #expect(!FileManager.default.fileExists(atPath: sequencerDirectory),
+                "sanity: the clearing restore must actually have cleared it")
+
+        let restoredBack = try JournalRestore.restore(report.checkpoint.id, in: ctx)
+        #expect(restoredBack.restored.contains(.sequencer))
+        #expect(FileManager.default.fileExists(atPath: sequencerDirectory),
+                "the pre-restore entry must bring the sequencer directory back")
+
+        try repo.writeUntracked(["shared.txt": "resolved\n"])
+        try git.run(["add", "shared.txt"], workingDirectory: repo.url.path)
+        let resumed = try git.run(["rebase", "--continue"],
+                                  workingDirectory: repo.url.path,
+                                  extraEnvironment: ["GIT_EDITOR": "true"])
+        #expect(resumed.exitCode == 0, "the restored rebase must actually be resumable")
+        #expect(try git.run(["status", "--porcelain=v2", "--branch"],
+                            workingDirectory: repo.url.path)
+            .text.contains("branch.head side"))
+    }
 }
