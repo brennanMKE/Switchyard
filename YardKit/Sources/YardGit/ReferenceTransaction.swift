@@ -187,3 +187,69 @@ extension ReferenceTransaction.RefUpdate: Encodable {
         case oldValue, newValue, refName
     }
 }
+
+extension ReferenceTransaction {
+
+    /// What one `reference-transaction` hook invocation did.
+    public struct HookOutcome: Equatable, Sendable {
+        /// What the hook must exit with. **Always 0**, including when
+        /// recording failed — a non-zero exit from this hook aborts the
+        /// user's ref transaction (`fatal: ref updates aborted by hook`,
+        /// exit 128, measured), so a journal defect must never become a
+        /// repository defect.
+        public let exitCode: Int32
+        /// The observed entry written, when one was.
+        public let recorded: JournalAnchor.Entry?
+        /// Why recording failed, when it did. Present *and* `exitCode == 0`
+        /// is the normal shape of a swallowed failure; a caller that wants to
+        /// surface it may, but the hook does not.
+        public let recordingFailure: String?
+        /// Malformed stdin lines dropped while parsing.
+        public let malformedLineCount: Int
+    }
+
+    /// Runs one hook invocation end to end: decide, then persist.
+    ///
+    /// The decision core owns the invariants (exit 0 always; only `committed`
+    /// reads stdin; our own transactions are skipped via the marker). This
+    /// adds persistence and **catches everything it can throw**, which is the
+    /// whole reason it is a separate function rather than a call site.
+    public static func runHook(
+        stateArgument: String,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        in context: WorktreeContext,
+        markerVariable: String = GitProcess.markerVariable,
+        git: GitProcess = GitProcess(),
+        readStandardInput: () -> Data
+    ) -> HookOutcome {
+        let decision = decide(
+            stateArgument: stateArgument,
+            environment: environment,
+            markerVariable: markerVariable,
+            readStandardInput: readStandardInput)
+
+        guard !decision.updates.isEmpty else {
+            return HookOutcome(
+                exitCode: decision.exitCode, recorded: nil,
+                recordingFailure: nil,
+                malformedLineCount: decision.malformedLineCount)
+        }
+
+        do {
+            let entry = try JournalObserved.record(
+                decision.updates, in: context, git: git)
+            return HookOutcome(
+                exitCode: decision.exitCode, recorded: entry,
+                recordingFailure: nil,
+                malformedLineCount: decision.malformedLineCount)
+        } catch {
+            // Deliberately total. Every failure mode of the store -- a git
+            // that cannot run, a ref that already exists, a full disk --
+            // lands here and still exits 0.
+            return HookOutcome(
+                exitCode: decision.exitCode, recorded: nil,
+                recordingFailure: String(describing: error),
+                malformedLineCount: decision.malformedLineCount)
+        }
+    }
+}
