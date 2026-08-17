@@ -174,6 +174,29 @@ atomically: a rejected call writes nothing, which is what #0014 hit — 188 reje
 file. `cat >` fails *partially*, leaving a truncated file behind. The distinction is destructive-on-
 failure versus safe-on-failure, not shell versus tool.
 
+## Rule 5d — Use ABSOLUTE paths for every file edit. A `cd` does not protect you.
+
+**Your file-editing tools do not resolve paths against your shell's working directory.** They resolve
+them against the session's default directory, which is **the primary checkout on `main`** — not the
+worktree you were given, however correctly you have `cd`'d into it.
+
+So `Edit("YardKit/Sources/YardGit/Foo.swift")` from a shell sitting in `../switchyard-0206` **edits
+`main`**. Measured 2026-08-17: a round did exactly this, and its changes landed in the primary
+checkout while its `swift test` ran against an unmodified worktree. It noticed only because a filtered
+test disagreed with what it had just written.
+
+**Always pass the full path**, exactly as the dispatch prompt gave it to you:
+`/Users/brennan/Developer/brennanMKE/Git/switchyard-NNNN/YardKit/Sources/...`. Never retype that prefix
+from memory — three rounds have died on a typo in it — copy it from the prompt.
+
+**Why this rule is not merely tidiness.** Work landing in the primary checkout is what forced the
+2026-08-16 reset of `main`: an entire day's commits had to be moved to a salvage branch because a round
+ran there. This is the same failure by a route nobody had written down, and it is silent — the edit
+succeeds, the tests pass or fail against the wrong tree, and nothing warns you.
+
+**If you suspect it has happened**: check `git -C /Users/brennan/Developer/brennanMKE/Git/Switchyard status --porcelain`.
+Report it and revert it there. Disclosing it costs a paragraph; leaving it costs a day.
+
 ## Rule 6 — Every scratch file goes in `build/`, inside the worktree.
 
 Your sandbox auto-rejects writes to `/tmp`, `/var/tmp`, and anything outside the working directory.
