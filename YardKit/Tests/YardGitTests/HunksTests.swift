@@ -379,3 +379,100 @@ func stagedAreaListsTheIndexNotTheWorktree(format: FixtureRepository.RefFormat) 
     let hunk = try #require(file.hunks.first)
     #expect(hunk.body == [" keep", "+++ x", " tail"])
 }
+
+// MARK: - Conflict-format lines
+
+@Test func unmergedPathLineIsNotAppendedToThePreviousFilesHeader() throws {
+    // Measured: `git diff --cached` during a merge prints `* Unmerged path
+    // m.txt` at its sorted position — here after a.txt's block. Appended to
+    // headerText, the reconstructed patch fails `git apply` with "patch with
+    // only garbage at line 5".
+    let text = """
+    diff --git a/a.txt b/a.txt
+    index 2cdcdb0..1c76fbc 100644
+    --- a/a.txt
+    +++ b/a.txt
+    @@ -1,3 +1,3 @@
+    -a1
+    +a1 CHANGED
+     a2
+     a3
+    * Unmerged path m.txt
+
+    """
+    let files = try HunkParser().parse(text)
+    #expect(files.map(\.path) == ["a.txt"])
+    let file = try #require(files.first)
+    #expect(file.headerText == """
+    diff --git a/a.txt b/a.txt
+    index 2cdcdb0..1c76fbc 100644
+    --- a/a.txt
+    +++ b/a.txt
+
+    """)
+    #expect(file.hunks.count == 1)
+}
+
+@Test func combinedDiffBlockDoesNotCorruptAnOpenFile() throws {
+    // Synthetic order: a `diff --cc` block after a `diff --git` block.
+    // Measured git output puts all --cc blocks first, but the parser must
+    // not depend on that: without a boundary here, the --cc block's
+    // `--- a/m.txt` line would overwrite the open file's path.
+    let text = """
+    diff --git a/a.txt b/a.txt
+    index 2cdcdb0..1c76fbc 100644
+    --- a/a.txt
+    +++ b/a.txt
+    @@ -1,3 +1,3 @@
+    -a1
+    +a1 CHANGED
+     a2
+     a3
+    diff --cc m.txt
+    index abd82df,846f043..0000000
+    --- a/m.txt
+    +++ b/m.txt
+    @@@ -1,1 -1,1 +1,5 @@@
+    ++<<<<<<< HEAD
+     +main version
+    ++=======
+     + side version
+    ++>>>>>>> side
+
+    """
+    let files = try HunkParser().parse(text)
+    #expect(files.map(\.path) == ["a.txt"])
+    let file = try #require(files.first)
+    #expect(file.hunks.count == 1)
+    #expect(!file.headerText.contains("m.txt"))
+}
+
+@Test func combinedDiffFirstThenNormalFileParses() throws {
+    // The order git actually emits (measured): every `diff --cc` block
+    // precedes every `diff --git` block.
+    let text = """
+    diff --cc m.txt
+    index abd82df,846f043..0000000
+    --- a/m.txt
+    +++ b/m.txt
+    @@@ -1,1 -1,1 +1,5 @@@
+    ++<<<<<<< HEAD
+     +main version
+    ++=======
+     + side version
+    ++>>>>>>> side
+    diff --git a/z.txt b/z.txt
+    index c1c940f..b759132 100644
+    --- a/z.txt
+    +++ b/z.txt
+    @@ -1,3 +1,3 @@
+    -z1
+    +z1 CHANGED
+     z2
+     z3
+
+    """
+    let files = try HunkParser().parse(text)
+    #expect(files.map(\.path) == ["z.txt"])
+    #expect(files.first?.hunks.count == 1)
+}
