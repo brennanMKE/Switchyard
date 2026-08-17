@@ -99,6 +99,9 @@ struct ExitClassCoverageTests {
             Row("CommitCreate.Failure", CommitCreate.Failure.signingFailed(reason: "x"), .signingFailed),
             Row("WorktreeStatusParser.Failure",
                 WorktreeStatusParser.Failure.unrecognizedRecordType(leading: "X"), .repositoryError),
+            // #0208: asserted in CommitHunksTests.commitHunksErrorMapsToRepositoryError.
+            Row("CommitHunksError", CommitHunksError.indexNotClean(paths: ["probe/staged.txt"]),
+                .repositoryError),
         ]
     }
 
