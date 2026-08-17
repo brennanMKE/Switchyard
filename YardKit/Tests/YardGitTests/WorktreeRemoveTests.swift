@@ -162,6 +162,51 @@ struct WorktreeRemoveTests {
                 "the removed worktree should no longer be listed at all")
     }
 
+    /// When releasing an agent lock fails for real, the caller sees git's own
+    /// stderr in `.lockFailed`'s `detail` — not Foundation's generic
+    /// `localizedDescription` fallback (#0195). We force a genuine failure by
+    /// making the worktree's private git-dir read-only, so `git worktree
+    /// unlock` cannot unlink its `locked` file.
+    @Test("lockFailed detail carries git's stderr, not the Foundation fallback", arguments: FixtureRepository.RefFormat.supported())
+    func lockFailureSurfacesGitStderr(format: FixtureRepository.RefFormat) throws {
+        var fixture = try FixtureRepository(refFormat: format)
+
+        let worktreeURL: URL = try fixture.addWorktree(named: "stuck-lock-wt", branch: "main")
+        try fixture.lockWorktree(worktreeURL, reason: "agent session id-99")
+
+        let git = GitProcess()
+        let repoPath = try repoPath(for: fixture, git: git)
+
+        // The worktree's private admin directory, e.g.
+        // `<main>/.git/worktrees/<name>`, holds the `locked` file that
+        // `worktree unlock` deletes. Stripping write permission makes that
+        // unlink fail with a real, reproducible error.
+        let gitDirOutcome = try git.capture(
+            ["rev-parse", "--absolute-git-dir"], workingDirectory: worktreeURL.path)
+        let privateGitDir = gitDirOutcome.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(!privateGitDir.isEmpty, "git should report a private git-dir for the linked worktree")
+
+        let fm = FileManager.default
+        try fm.setAttributes([.posixPermissions: 0o555], ofItemAtPath: privateGitDir)
+        defer { try? fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: privateGitDir) }
+
+        let thrown = #expect(throws: WorktreeRemoveError.self) {
+            _ = try worktreeRemove(at: repoPath, worktreeURL.path, git: git)
+        }
+        let failure = try #require(thrown)
+        guard case let .lockFailed(_, detail) = failure else {
+            Issue.record("expected .lockFailed, got \(failure)")
+            return
+        }
+
+        // Git's real message (measured): "warning: unable to unlink
+        // '.../locked': Permission denied". The Foundation fallback reads
+        // "The operation couldn't be completed. (YardGit.GitProcess.Failure
+        // error 1.)" and contains no such phrase, so this substring
+        // distinguishes the two renderings.
+        #expect(detail.contains("Permission denied"))
+    }
+
     /// Unknown path returns a structured error, not a crash.
     @Test("returns unknown-error for a path that is not a worktree", arguments: FixtureRepository.RefFormat.supported())
     func refusesUnknownPath(format: FixtureRepository.RefFormat) throws {
