@@ -295,8 +295,7 @@ public enum JournalRestore {
         let candidate: RefSnapshot = allowDifferentWorktree && metadata.worktree.name != context.worktreeName
             ? RefSnapshot(
                 head: recorded.head,
-                refs: recorded.withoutPerWorktreeRefs.refs
-                    + current.refs.filter { WorktreeContext.isPerWorktree($0.name) })
+                refs: recorded.withoutPerWorktreeRefs.refs)
             : recorded
 
         // Detach HEAD instead of adopting it when its branch is checked out

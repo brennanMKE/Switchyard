@@ -357,3 +357,182 @@ private func succeedThenFailGpgScript(succeedingCalls: Int) -> String {
     ).lines.first
     #expect(parent == before, "HEAD is exactly one commit — the un-rewritten fixup — past the pre-fixup tip")
 }
+
+// MARK: - Existing-commit mode (#0214)
+//
+// `source` folds an already-made commit into an older ancestor by rewriting
+// `source`'s own message to `fixup! <target's subject>` first, then reusing
+// the same autosquash rebase the staged-index mode above runs. Only
+// `source: "HEAD"` is supported.
+
+@Test func existingCommitFixupSquashesIntoTheTargetAndAutosquashes() throws {
+    var repo = try FixtureRepository()
+    defer { repo.destroy() }
+    try repo.build([.init("c1"), .init("c2"), .init("c3"), .init("c4")])
+    let target = try #require(repo.oids["c2"])
+    let before = try repo.revParse("HEAD")
+
+    let result = try Fixup.run(
+        source: "HEAD", target: target, at: repo.url.path, extraEnvironment: hermetic)
+
+    #expect(result.head == (try repo.revParse("HEAD")))
+    #expect(try repo.revParse("HEAD") != before)
+
+    let log = try git.run(
+        ["log", "--oneline"], workingDirectory: repo.url.path, extraEnvironment: hermetic
+    ).lines
+    #expect(log.count == 3, "one commit shorter — c4 was folded into c2, not left standing on its own")
+
+    let subjectList = try subjects(in: repo)
+    #expect(!subjectList.isEmpty)
+    #expect(!subjectList.contains { $0.hasPrefix("fixup!") })
+
+    // c2 (now HEAD~1) gained c4's file; c4 no longer exists as its own commit.
+    #expect(try fileAt("HEAD~1", path: "c2.txt", in: repo) == "c2\n")
+    #expect(try fileAt("HEAD~1", path: "c4.txt", in: repo) == "c4\n")
+}
+
+// MARK: - Dirty index refused
+
+@Test func dirtyIndexRefusesWithoutTouchingHeadOrTheStagedFile() throws {
+    var repo = try FixtureRepository()
+    defer { repo.destroy() }
+    try repo.build([.init("c1"), .init("c2"), .init("c3")])
+    let target = try #require(repo.oids["c1"])
+    let before = try repo.revParse("HEAD")
+
+    try stage(["staged.txt": "unrelated\n"], in: repo)
+    let stagedBefore = try git.run(
+        ["diff", "--cached", "--name-only"], workingDirectory: repo.url.path, extraEnvironment: hermetic
+    ).lines
+    #expect(stagedBefore == ["staged.txt"])
+
+    let thrown = #expect(throws: FixupError.self) {
+        _ = try Fixup.run(
+            source: "HEAD", target: target, at: repo.url.path, extraEnvironment: hermetic)
+    }
+    let failure = try #require(thrown)
+    guard case let .indexNotClean(paths) = failure else {
+        Issue.record("expected .indexNotClean, got \(failure)")
+        return
+    }
+    #expect(paths == ["staged.txt"])
+    #expect(try repo.revParse("HEAD") == before, "HEAD must be unchanged")
+
+    let stagedAfter = try git.run(
+        ["diff", "--cached", "--name-only"], workingDirectory: repo.url.path, extraEnvironment: hermetic
+    ).lines
+    #expect(stagedAfter == stagedBefore, "the refusal must not consume the staged file")
+}
+
+// MARK: - source == target refused
+
+@Test func sourceEqualsTargetIsRefused() throws {
+    var repo = try FixtureRepository()
+    defer { repo.destroy() }
+    try repo.build([.init("c1"), .init("c2")])
+    let head = try repo.revParse("HEAD")
+
+    let thrown = #expect(throws: FixupError.self) {
+        _ = try Fixup.run(
+            source: "HEAD", target: head, at: repo.url.path, extraEnvironment: hermetic)
+    }
+    #expect(try #require(thrown) == .sourceEqualsTarget)
+    #expect(try repo.revParse("HEAD") == head)
+}
+
+// MARK: - Non-descendant source/target pair refused
+
+@Test func nonAncestorTargetForAnExistingCommitIsRefusedAndHeadIsUnchanged() throws {
+    var repo = try FixtureRepository()
+    defer { repo.destroy() }
+    try repo.build([.init("a")])
+    let mainTip = try repo.revParse("HEAD")
+    // "side" branches off "a" but is never merged back — reachable from
+    // neither `main` nor `HEAD`.
+    try repo.build([.init("side", parents: ["a"])])
+    let sideTip = try #require(repo.oids["side"])
+    try repo.checkout("main")
+    #expect(try repo.revParse("HEAD") == mainTip)
+
+    let thrown = #expect(throws: FixupError.self) {
+        _ = try Fixup.run(
+            source: "HEAD", target: sideTip, at: repo.url.path, extraEnvironment: hermetic)
+    }
+    let failure = try #require(thrown)
+    #expect(failure == .targetNotAncestor(target: sideTip))
+    #expect(try repo.revParse("HEAD") == mainTip)
+}
+
+// MARK: - Unsupported (non-HEAD) source refused
+
+@Test func nonHeadSourceIsRefusedRatherThanApproximated() throws {
+    var repo = try FixtureRepository()
+    defer { repo.destroy() }
+    try repo.build([.init("c1"), .init("c2"), .init("c3")])
+    let target = try #require(repo.oids["c1"])
+    let before = try repo.revParse("HEAD")
+
+    let thrown = #expect(throws: FixupError.self) {
+        _ = try Fixup.run(
+            source: "HEAD~1", target: target, at: repo.url.path, extraEnvironment: hermetic)
+    }
+    #expect(try #require(thrown) == .unsupportedSource(source: "HEAD~1"))
+    #expect(try repo.revParse("HEAD") == before)
+}
+
+// MARK: - Undo
+
+@Test func undoRestoresHeadAndBranchTipForAnExistingCommitFixup() throws {
+    var repo = try FixtureRepository()
+    defer { repo.destroy() }
+    try repo.build([.init("c1"), .init("c2"), .init("c3")])
+    let target = try #require(repo.oids["c1"])
+    let before = try repo.revParse("HEAD")
+
+    _ = try Fixup.run(
+        source: "HEAD", target: target, at: repo.url.path, extraEnvironment: hermetic)
+    #expect(try repo.revParse("HEAD") != before, "the fixup must actually change HEAD")
+
+    let context = try WorktreeContext.resolve(path: repo.url.path)
+    try JournalUndo.undo(in: context)
+
+    #expect(try repo.revParse("HEAD") == before)
+    #expect(try repo.revParse("refs/heads/main") == before)
+}
+
+// MARK: - Conflict
+
+@Test func existingCommitFixupConflictBlocksAndLeavesTheRebaseResumable() throws {
+    var repo = try FixtureRepository()
+    defer { repo.destroy() }
+    try repo.build([
+        .init("c1", files: ["f.txt": "a\n"]),
+        .init("c2", files: ["f.txt": "b\n"]),
+        .init("c3", files: ["f.txt": "c\n"]),
+    ])
+    // Target is c1, not c3's immediate parent c2: the diff `git commit
+    // --amend --fixup=` carries forward is c2→c3 ("b\n"→"c\n"), and
+    // applying that onto c1's own content ("a\n") during the rebase finds
+    // no matching context — measured directly with plain git before writing
+    // this test. Squashing into the immediate parent never conflicts, since
+    // the carried diff's context is exactly that parent's content.
+    let target = try #require(repo.oids["c1"])
+
+    let thrown = #expect(throws: FixupError.self) {
+        _ = try Fixup.run(
+            source: "HEAD", target: target, at: repo.url.path, extraEnvironment: hermetic)
+    }
+    let failure = try #require(thrown)
+    guard case let .blockedOnConflicts(files) = failure else {
+        Issue.record("expected .blockedOnConflicts, got \(failure)")
+        return
+    }
+    #expect(files.count == 1)
+    let conflict = try #require(files.first)
+    #expect(conflict.path == "f.txt")
+    #expect(rebaseInProgress(in: repo), "the rebase must be left resumable, not aborted")
+
+    // Clean up so the fixture destructor is not fighting a live rebase.
+    _ = try? git.run(["rebase", "--abort"], workingDirectory: repo.url.path, extraEnvironment: hermetic)
+}
