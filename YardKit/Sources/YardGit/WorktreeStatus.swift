@@ -41,8 +41,25 @@ public struct WorktreeStatusEntry {
         case untracked = "?"
         case ignored = "!"
         case conflicted = "u"
+        /// Typechange: a tracked path swapped kind on disk — regular file to
+        /// symlink or the reverse. Only appears in the XY field of an ordinary
+        /// (`1`) or renamed/copied (`2`) record; `git status --porcelain=v2 -z`
+        /// never emits `T` on an unmerged (`u`) record. Measured 2026-08-17:
+        /// `git add` after `ln -sf` over a tracked file prints
+        /// `1 T. N... 100644 120000 120000 <h1> <h2> file.txt`.
+        case typechange = "T"
+        /// Unmerged: the literal porcelain `U` half of a conflict combination
+        /// (`UU`, `AU`, `UA`, `DU`, `UD`). Only appears in the XY field of an
+        /// unmerged (`u`) record. Measured 2026-08-17 from a real content
+        /// conflict: `u UU N... 100644 100644 100644 100644 <b> <o> <t> f.txt`.
+        case unmerged = "U"
 
         /// Path is tracked in the index (`A`-`M`) — not `untracked`.
+        ///
+        /// The alphabets of ordinary/rename records (`. M T A D R C`) and
+        /// unmerged records (`D A U`) are disjoint apart from `D`/`A`, which
+        /// mean the same thing on both — deleted or added — so one mapping
+        /// serves every record type without knowing which one it came from.
         init?(char: Character) {
             switch char {
             case ".": self = .unmodified
@@ -50,6 +67,8 @@ public struct WorktreeStatusEntry {
             case "D", "-": self = .deleted
             case "M": self = .modified
             case "R", "C": self = .modified
+            case "T": self = .typechange
+            case "U": self = .unmerged
             default: return nil
             }
         }
@@ -149,6 +168,11 @@ public struct WorktreeStatusParser {
         case unrecognizedRecordType(leading: String)
         /// A record had fewer space-separated tokens than its type requires.
         case truncatedRecord(String)
+        /// An XY status character git did not document for either alphabet —
+        /// `. M T A D R C` (ordinary/rename) or `D A U` (unmerged). A genuinely
+        /// unknown character is a sign this parser is behind a future git, not
+        /// something to fold into `.unmodified` (#0207).
+        case unrecognizedStatusCharacter(Character)
 
         public var description: String {
             switch self {
@@ -156,6 +180,8 @@ public struct WorktreeStatusParser {
                 "unrecognized porcelain v2 record type \"\(leading)\""
             case let .truncatedRecord(record):
                 "malformed porcelain v2 record: \(record)"
+            case let .unrecognizedStatusCharacter(char):
+                "unrecognized porcelain v2 status character \"\(char)\""
             }
         }
     }
@@ -294,13 +320,19 @@ public struct WorktreeStatusParser {
                 guard let statusStr = String(bytes: statusBytes, encoding: .ascii),
                       let stagedChar = statusStr.first else { continue }
 
-                let staged: WorktreeStatusEntry.State =
-                    WorktreeStatusEntry.State(char: stagedChar) ?? .unmodified
+                guard let staged = WorktreeStatusEntry.State(char: stagedChar) else {
+                    throw Failure.unrecognizedStatusCharacter(stagedChar)
+                }
 
-                let workChar: WorktreeStatusEntry.State =
-                    statusStr.dropFirst().first.map {
-                        WorktreeStatusEntry.State(char: $0) ?? .unmodified
-                    } ?? .unmodified
+                let workChar: WorktreeStatusEntry.State
+                if let secondChar = statusStr.dropFirst().first {
+                    guard let mapped = WorktreeStatusEntry.State(char: secondChar) else {
+                        throw Failure.unrecognizedStatusCharacter(secondChar)
+                    }
+                    workChar = mapped
+                } else {
+                    workChar = .unmodified
+                }
 
                 entry.staged = staged
                 entry.worktree = workChar

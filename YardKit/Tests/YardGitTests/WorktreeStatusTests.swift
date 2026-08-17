@@ -349,4 +349,83 @@ struct WorktreeStatusTests {
             _ = try WorktreeStatusParser().parse(data)
         }
     }
+
+    // MARK: - Typechange and unmerged (#0207)
+
+    /// A tracked file replaced by a symlink, then staged. Measured 2026-08-17
+    /// against a real repository: `ln -sf` over a tracked file followed by
+    /// `git add` prints
+    /// `1 T. N... 100644 120000 120000 <h1> <h2> swapped.txt` — `T` on the
+    /// staged half, `.` on the worktree half. Before this fix `State(char:)`
+    /// returned nil for `T` and both call sites coalesced that to
+    /// `.unmodified`, so a file that changed kind on disk read as unchanged.
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func symlinkSwapReportsTypechangeNotUnmodified(format: FixtureRepository.RefFormat) throws {
+        let repo = try FixtureRepository.linear(refFormat: format)
+        defer { repo.destroy() }
+
+        let repoGit = GitProcess()
+        let swappedPath = repo.url.appendingPathComponent("swapped.txt")
+        try "regular file\n".write(to: swappedPath, atomically: true, encoding: .utf8)
+        try repoGit.run(["add", "swapped.txt"], workingDirectory: repo.url.path)
+        try repoGit.run(["commit", "-m", "track swapped.txt"], workingDirectory: repo.url.path)
+
+        // Real typechange: swap the tracked regular file for a symlink, then stage it.
+        try FileManager.default.removeItem(at: swappedPath)
+        try FileManager.default.createSymbolicLink(
+            at: swappedPath, withDestinationURL: URL(fileURLWithPath: "/etc/hosts"))
+        try repoGit.run(["add", "swapped.txt"], workingDirectory: repo.url.path)
+
+        let output = try repoGit.capture(
+            ["status", "--porcelain=v2", "-z"],
+            workingDirectory: repo.url.path
+        )
+        let status = try WorktreeStatusParser().parse(output.standardOutput)
+        let entry = try #require(status.entries.first { $0.path == "swapped.txt" })
+
+        #expect(entry.staged == .typechange,
+                "a tracked file replaced by a symlink and staged must report as typechange")
+        #expect(entry.worktree == .unmodified)
+    }
+
+    /// The unmerged worktree half of a real content conflict. Measured
+    /// 2026-08-17: `FixtureRepository.conflicted()` (both sides edit the same
+    /// line) prints
+    /// `u UU N... 100644 100644 100644 100644 <b> <o> <t> f.txt` — `U` on
+    /// both XY halves. `staged` is overridden to `.conflicted` by the
+    /// existing leading-token rule regardless of XY (unrelated to this fix);
+    /// `worktree` is not, and before this fix its raw `U` character returned
+    /// nil from `State(char:)` and was coalesced to `.unmodified`, so the
+    /// unmerged half of a conflicted path read as unchanged.
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func unmergedConflictReportsUnmergedNotUnmodified(format: FixtureRepository.RefFormat) throws {
+        let repo = try FixtureRepository.conflicted(refFormat: format)
+        defer { repo.destroy() }
+
+        let output = try git.capture(
+            ["status", "--porcelain=v2", "-z"],
+            workingDirectory: repo.url.path
+        )
+        let status = try WorktreeStatusParser().parse(output.standardOutput)
+        let entry = try #require(status.entries.first { $0.path == "f.txt" })
+
+        #expect(entry.staged == .conflicted,
+                "the leading `u` token overrides staged regardless of the XY field")
+        #expect(entry.worktree == .unmerged,
+                "the unmerged worktree half of a UU conflict must not report as unmodified")
+    }
+
+    /// A genuinely unrecognized XY status character — `Z`, which no `git`
+    /// version emits — must throw rather than silently coalesce to
+    /// `.unmodified`. Hand-built, mirroring `unrecognizedRecordTypeThrows`.
+    @Test("an unrecognized status character throws, not silently unmodified")
+    func unrecognizedStatusCharacterThrows() throws {
+        var data = Data()
+        data.append(contentsOf: Array("1 Z. N... 100644 100644 100644 aaa bbb mystery.txt".utf8))
+        data.append(0x00)
+
+        #expect(throws: WorktreeStatusParser.Failure.unrecognizedStatusCharacter("Z")) {
+            _ = try WorktreeStatusParser().parse(data)
+        }
+    }
 }
