@@ -105,4 +105,38 @@ struct ServiceNamesTests {
         }
         #expect(offenders.isEmpty, "hardcoded identifiers outside ServiceNames: \(offenders)")
     }
+
+    // MARK: - Broker plist agreement
+
+    /// `launchd` reads `Support/co.sstools.Switchyard.broker.plist` from disk
+    /// -- it has no notion of `ServiceNames`. `derivedNamesShareTheBundleIdentifier`
+    /// above only relates the Swift constants to each other; it reads nothing
+    /// from disk. This test reads the file launchd actually consumes, located
+    /// by a path independent of the `ServiceNames` constants, and checks it
+    /// against them. If the plist's `MachServices` key ever diverges from
+    /// `ServiceNames.machServiceName`, launchd reserves one name while the
+    /// listener publishes another and the broker silently never receives a
+    /// connection.
+    @Test func brokerPlistMatchesServiceNames() throws {
+        let plistURL = repoRoot.appendingPathComponent("Support/co.sstools.Switchyard.broker.plist")
+        try #require(
+            FileManager.default.fileExists(atPath: plistURL.path),
+            "expected the broker plist at \(plistURL.path)"
+        )
+
+        let data = try Data(contentsOf: plistURL)
+        let raw = try PropertyListSerialization.propertyList(from: data, options: [], format: nil)
+        let plist = try #require(raw as? [String: Any], "broker plist is not a dictionary")
+
+        #expect(plist["Label"] as? String == ServiceNames.machServiceName)
+
+        let machServices = try #require(
+            plist["MachServices"] as? [String: Any],
+            "MachServices key missing or not a dictionary"
+        )
+        #expect(machServices.count == 1)
+        #expect(machServices[ServiceNames.machServiceName] != nil)
+
+        #expect(plistURL.lastPathComponent == ServiceNames.agentPlistName)
+    }
 }
