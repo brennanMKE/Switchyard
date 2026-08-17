@@ -38,6 +38,21 @@ final class AppXPCServer {
     /// stale endpoint.
     private var brokerConnection: NSXPCConnection?
 
+    /// Claimed the first time the broker connection's error handler observes
+    /// an actual failure, so repair runs at most once per launch.
+    ///
+    /// `nonisolated` and backed by a lock (see `RepairGate`), not an actor:
+    /// the error handler closure below is `@Sendable` and fires on XPC's own
+    /// queue, not the main actor, so the claim must be checkable synchronously
+    /// from there without a hop.
+    nonisolated private let repairGate = RepairGate()
+
+    /// Runs the agent repair (unregister + re-register with `SMAppService`).
+    /// Set by whoever owns the `AgentRegistrar` — `AppXPCServer` has no
+    /// dependency on `ServiceManagement` itself, so it stays testable without
+    /// one. Called at most once per launch, driven by `repairGate`.
+    var repairHandler: (() -> Void)?
+
     init() {}
 
     // MARK: - Lifecycle
@@ -77,10 +92,22 @@ final class AppXPCServer {
         // on its own queue and the process dies with SIGTRAP in
         // _swift_task_checkIsolatedSwift. Marking the closure @Sendable
         // makes it nonisolated, which is what it must be.
-        let proxy = connection.remoteObjectProxyWithErrorHandler { @Sendable error in
+        let proxy = connection.remoteObjectProxyWithErrorHandler { @Sendable [weak self] error in
             let message = error.localizedDescription
             Task { @MainActor in
                 Self.logger.error("broker connection error: \(message, privacy: .public)")
+            }
+
+            // This is where a *failed call* is actually observed — repair is
+            // driven from here, at most once per launch, never from
+            // `service.status`. The claim itself must happen synchronously,
+            // on whatever queue XPC calls this on, so two overlapping
+            // failures cannot both win it.
+            guard let self, self.repairGate.claim() else { return }
+            Task { @MainActor [weak self] in
+                Self.logger.notice("broker call failed — repairing agent registration")
+                self?.repairHandler?()
+                self?.registerWithBroker()
             }
         }
 
