@@ -184,6 +184,12 @@ paths, guard clauses that skip. The question to answer is not "does the code do 
 
 ### Judgment — read the issue and answer honestly
 
+0c. **Is any deliverable in the app target — `Switchyard/`, `BrokerAgent/` — where `swift test`
+    cannot reach it?** If so, the issue must say **which part moves into the package** and which part
+    stays as a forwarder. An app-target method is verified only by the app building; a test that
+    exercises a fake of it proves the fake. #0218 round 1 landed exactly that, and the mutation that
+    exposed it was made on the shipped file rather than on the test's helper.
+
 0. **For every mutation-table row: has the mutation been applied and the named test observed going
    RED?** Not "the code behaves correctly here" — that is a different claim, and it is the one that
    still holds when the test is vacuous. #0019's row 5 was written from a real probe of real
