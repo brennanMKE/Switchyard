@@ -185,3 +185,26 @@ public enum PostRewrite {
         return order.map { Replacement(newOid: $0, oldOids: groups[$0] ?? []) }
     }
 }
+
+extension PostRewrite.Source {
+    /// The git argument this source is encoded as when persisted as an
+    /// observed entry (#0220): `"amend"`, `"rebase"`, or the raw string for
+    /// `.unrecognized` — a future git verb the parser does not know is
+    /// exactly the case worth keeping, not dropping.
+    public var gitArgument: String {
+        switch self {
+        case .amend: return "amend"
+        case .rebase: return "rebase"
+        case .unrecognized(let raw): return raw
+        }
+    }
+}
+
+/// `Rewrite` rides inside an observed journal entry's metadata (#0220), so its
+/// keys are pinned rather than synthesized: a rename here silently changes
+/// bytes already written into a repository's refs.
+extension PostRewrite.Rewrite: Encodable {
+    private enum CodingKeys: String, CodingKey {
+        case oldOid, newOid, extraInfo
+    }
+}

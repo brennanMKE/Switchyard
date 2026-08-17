@@ -23,21 +23,67 @@ public enum JournalObserved {
     /// from `JournalEntryMetadata`'s: these are a different shape with a
     /// different lifetime, and sharing a version number would tie two formats
     /// together that have no reason to change together.
+    ///
+    /// Two payload shapes share this type (#0220), discriminated by `kind`:
+    /// a foreign `reference-transaction` carries ref updates, a foreign
+    /// rewrite (`commit --amend` / `rebase`) carries an old→new commit
+    /// mapping. `kind` is added additively as a new required key on both
+    /// shapes — an existing reader that only looks at `updates` is
+    /// unaffected by a `rewrites`-kind entry appearing, so no
+    /// `schemaVersion` bump accompanies it. One namespace, not two: a second
+    /// ref namespace would keep each shape single-purpose at the cost of a
+    /// second `list` on every read, for a distinction `kind` already makes.
+    ///
+    /// Modeled as `kind` plus two optional payload fields rather than a
+    /// nested `enum Payload`: Swift's synthesized `Encodable` already emits
+    /// an `Optional` property via `encodeIfPresent`, so the field that does
+    /// not apply to a given `kind` is simply absent from the JSON with no
+    /// custom `encode(to:)` needed, and `Metadata` stays a plain struct
+    /// rather than growing a second type to duplicate against.
     public struct Metadata: Sendable, Equatable, Encodable {
         public static let currentSchemaVersion = 1
 
+        /// Discriminates the two payload shapes an observed entry can carry.
+        public enum Kind: String, Sendable, Equatable, Encodable {
+            case refUpdates = "ref_updates"
+            case rewrites
+        }
+
         public let schemaVersion: Int
-        public let updates: [ReferenceTransaction.RefUpdate]
+        public let kind: Kind
+
+        /// Present only when `kind == .refUpdates`.
+        public let updates: [ReferenceTransaction.RefUpdate]?
+        /// Present only when `kind == .rewrites`: the git argument the
+        /// rewrite arrived as (`PostRewrite.Source.gitArgument`).
+        public let source: String?
+        /// Present only when `kind == .rewrites`, in `PostRewrite.parse`'s
+        /// order -- order is part of the contract, a rebase's mapping is a
+        /// sequence, not a set.
+        public let rewrites: [PostRewrite.Rewrite]?
 
         public init(updates: [ReferenceTransaction.RefUpdate],
                     schemaVersion: Int = Metadata.currentSchemaVersion) {
             self.schemaVersion = schemaVersion
+            self.kind = .refUpdates
             self.updates = updates
+            self.source = nil
+            self.rewrites = nil
+        }
+
+        public init(source: PostRewrite.Source, rewrites: [PostRewrite.Rewrite],
+                    schemaVersion: Int = Metadata.currentSchemaVersion) {
+            self.schemaVersion = schemaVersion
+            self.kind = .rewrites
+            self.updates = nil
+            self.source = source.gitArgument
+            self.rewrites = rewrites
         }
     }
 
-    /// Writes one observed entry. Returns the anchor so a caller can assert on
-    /// it; callers in the hook path ignore it (#0191).
+    /// Writes one observed entry for a foreign `reference-transaction`.
+    /// Returns the anchor so a caller can assert on it; callers in the hook
+    /// path ignore it (#0191).
     @discardableResult
     public static func record(
         _ updates: [ReferenceTransaction.RefUpdate],
@@ -48,6 +94,64 @@ public enum JournalObserved {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         let json = try encoder.encode(Metadata(updates: updates))
+        return try JournalAnchor.write(
+            JournalAnchor.Contents(metadataJSON: json),
+            id: JournalEntryID.generate(now: now, after: try list(in: context, git: git).last?.id),
+            in: context,
+            namespace: refPrefix,
+            git: git)
+    }
+
+    /// Writes one observed entry for a **foreign** rewrite decision (#0220).
+    ///
+    /// Only `isOwnInvocation == false` lands here — attaching an **own**
+    /// invocation's mapping to its in-flight journal entry is #0221's job,
+    /// not this one. Passing an own-invocation decision writes nothing and
+    /// returns `nil`, a guard rather than a `precondition`: the hook must
+    /// never crash, and this keeps the two halves from both firing once
+    /// #0221 lands, whichever routes to this function by mistake.
+    ///
+    /// **Mid-rebase dedup.** A rebase step that squashes, fixes up, or
+    /// rewords internally amends, raising its own `post-rewrite amend`
+    /// invocation whose old oid is an intermediate commit that never
+    /// existed in the pre-rewrite history (measured, #0043's Givens). The
+    /// rebase's own final `rebase`-sourced invocation repeats that pair
+    /// alongside the rest of its mapping, so skipping the mid-rebase amend
+    /// loses nothing and the final invocation alone is authoritative.
+    /// Detected the way git itself exposes the state: `git rev-parse
+    /// --git-path rebase-merge` resolved through `WorktreeContext.path(for:)`,
+    /// then a `FileManager` existence check on *that resolved path* — never
+    /// a path built by string concatenation onto `.git/`. Measured to hold
+    /// for a real `post-rewrite amend` invocation; see `JournalObservedTests`.
+    ///
+    /// Throws on a persistence failure exactly as the ref-update `record`
+    /// does; the totality invariant (#0043) — a failure here must never
+    /// surface as a non-zero hook exit — is upheld by the caller, which
+    /// swallows the throw the way `ReferenceTransaction.runHook` already
+    /// does for `@discardableResult` callers of the ref-update `record`
+    /// (#0191). `decide`'s exit code is total by construction and is
+    /// unaffected either way.
+    @discardableResult
+    public static func record(
+        _ decision: PostRewrite.Decision,
+        in context: WorktreeContext,
+        now: Date = Date(),
+        git: GitProcess = GitProcess(),
+        fileManager: FileManager = .default
+    ) throws -> JournalAnchor.Entry? {
+        guard !decision.isOwnInvocation else { return nil }
+
+        if decision.source == .amend {
+            let rebaseMergePath = try context.path(for: "rebase-merge", git: git)
+            if fileManager.fileExists(atPath: rebaseMergePath) {
+                return nil
+            }
+        }
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        let json = try encoder.encode(
+            Metadata(source: decision.source, rewrites: decision.rewrites))
         return try JournalAnchor.write(
             JournalAnchor.Contents(metadataJSON: json),
             id: JournalEntryID.generate(now: now, after: try list(in: context, git: git).last?.id),
