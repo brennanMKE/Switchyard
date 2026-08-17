@@ -359,6 +359,11 @@ struct ExitClassCoverageTests {
             "#0197 — declared in YardKit, which does not depend on YardGit " +
             "and cannot import ExitClassCarrying; §6 mapping happens at M3 " +
             "wiring time via ExitCode conversion instead.",
+        "RecentOperations.swift:Error":
+            "#0150 — declared in YardKit, which does not depend on YardGit " +
+            "and cannot import ExitClassCarrying; same shape as " +
+            "RepositoryRegistry.Error above, §6 mapping happens at M3 " +
+            "wiring time via ExitCode conversion instead.",
         "BrokerConnection.swift:CLIError":
             "#0048 — declared in YardKit, which does not depend on YardGit " +
             "and cannot import ExitClassCarrying; maps directly to ExitCode " +
