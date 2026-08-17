@@ -17,6 +17,16 @@ public struct GitProcess: Sendable {
     /// itself.
     public static let markerVariable = "SWITCHYARD_YARD_INVOCATION"
 
+    /// Environment variable carrying the in-flight journal entry's id
+    /// (#0221), set only on the scoped `GitProcess` `JournalCheckpoint.around`
+    /// hands its body — never on the default instance. Beside
+    /// `markerVariable`, not folded into it: the marker answers "is this
+    /// ours", this answers "which entry", and conflating them would make an
+    /// own operation that took no checkpoint indistinguishable from a
+    /// foreign one. The `post-rewrite` hook reads it back to attach its
+    /// mapping to the entry that was in flight when the rewrite ran.
+    public static let entryVariable = "SWITCHYARD_JOURNAL_ENTRY"
+
     public enum Failure: Error, CustomStringConvertible, Sendable {
         /// `git` ran and exited non-zero. Carries stderr, because a bare exit
         /// code tells whoever hits it nothing.
@@ -59,8 +69,17 @@ public struct GitProcess: Sendable {
     /// us to something else.
     public let executablePath: String
 
-    public init(executablePath: String = "/usr/bin/git") {
+    /// The in-flight journal entry id, exported to every subprocess this
+    /// instance runs as `entryVariable` (#0221). `nil` on every `GitProcess`
+    /// except the one `JournalCheckpoint.around` constructs and passes to its
+    /// body — a stored property, not a mutating setter, so `GitProcess` stays
+    /// a plain `Sendable` value and the scoping is exactly the lifetime of
+    /// the instance the caller was handed, nothing process-global.
+    public let journalEntryID: JournalEntryID?
+
+    public init(executablePath: String = "/usr/bin/git", journalEntryID: JournalEntryID? = nil) {
         self.executablePath = executablePath
+        self.journalEntryID = journalEntryID
     }
 
     /// Runs `git` and returns its output, throwing on a non-zero exit.
@@ -115,7 +134,8 @@ public struct GitProcess: Sendable {
         }
         argv += arguments
         process.arguments = argv
-        process.environment = Self.environment(adding: extraEnvironment)
+        process.environment = Self.environment(
+            adding: extraEnvironment, entryID: journalEntryID?.string)
 
         // stdout comes back through a pipe; stderr goes to a temporary file.
         //
@@ -170,7 +190,9 @@ public struct GitProcess: Sendable {
     /// `yard` is never interactive: no editor, no pager, no credential prompt
     /// that blocks forever. A command that would need one must fail with a
     /// structured error instead of hanging a headless agent run.
-    static func environment(adding extra: [String: String] = [:]) -> [String: String] {
+    static func environment(
+        adding extra: [String: String] = [:], entryID: String? = nil
+    ) -> [String: String] {
         var env = ProcessInfo.processInfo.environment
 
         // Nothing may spawn an editor. `yard commit` without -m is an error,
@@ -194,6 +216,11 @@ public struct GitProcess: Sendable {
 
         // Lets the reference-transaction hook skip our own ref writes (#0042).
         env[markerVariable] = "1"
+
+        // Lets the post-rewrite hook find the in-flight entry to attach its
+        // mapping to (#0221). Absent -- not empty-stringed -- when no
+        // checkpoint is scoping this invocation.
+        if let entryID { env[entryVariable] = entryID }
 
         for (key, value) in extra { env[key] = value }
         return env
