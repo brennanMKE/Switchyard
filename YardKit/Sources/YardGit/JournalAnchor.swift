@@ -157,6 +157,10 @@ public enum JournalAnchor {
     public static let indexTreeEntryName = "index"
     public static let indexBlobTreeEntryName = "index.raw"
     public static let untrackedTreeEntryName = "untracked"
+    /// Tree OID of the sequencer state snapshot, if captured. The directory
+    /// is stored as a single tree object; the layout (rebase-merge vs
+    /// rebase-apply) is recorded in metadata.captured.sequencer.
+    public static let sequencerTreeEntryName = "sequencer"
 
     /// What one entry stores. Piece OIDs are produced by the snapshot
     /// primitives (#0027, #0151, #0152) and arrive here opaque; `write`
@@ -174,6 +178,8 @@ public enum JournalAnchor {
         public var indexBlob: String?
         /// Tree OID of the untracked-files snapshot, if captured.
         public var untrackedTree: String?
+        /// Tree OID of the sequencer state snapshot, if captured.
+        public var sequencerTree: String?
         /// Commit OIDs the entry must keep reachable — the stash commit and
         /// captured history tips. Written as the snapshot commit's parents.
         public var keepAlive: [String]
@@ -184,6 +190,7 @@ public enum JournalAnchor {
             indexTree: String? = nil,
             indexBlob: String? = nil,
             untrackedTree: String? = nil,
+            sequencerTree: String? = nil,
             keepAlive: [String] = []
         ) {
             self.metadataJSON = metadataJSON
@@ -191,6 +198,7 @@ public enum JournalAnchor {
             self.indexTree = indexTree
             self.indexBlob = indexBlob
             self.untrackedTree = untrackedTree
+            self.sequencerTree = sequencerTree
             self.keepAlive = keepAlive
         }
     }
@@ -275,6 +283,9 @@ public enum JournalAnchor {
         }
         if let oid = contents.untrackedTree {
             treeLines += "040000 tree \(oid)\t\(untrackedTreeEntryName)\n"
+        }
+        if let oid = contents.sequencerTree {
+            treeLines += "040000 tree \(oid)\t\(sequencerTreeEntryName)\n"
         }
         let tree = try singleOID(
             of: try git.run(["mktree"], workingDirectory: base,
