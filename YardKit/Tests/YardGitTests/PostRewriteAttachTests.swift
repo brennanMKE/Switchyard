@@ -262,6 +262,50 @@ struct PostRewriteAttachTests {
         #expect(newerMetadata.rewrite == nil, "the unrelated newer entry must be untouched")
     }
 
+    /// The own-path mirror of `JournalObservedTests`'
+    /// `aMidRebaseAmendDoesNotProduceItsOwnObservedEntry`: a mid-rebase
+    /// `amend` decision, own-sourced and carrying a real in-flight entry id,
+    /// attaches nothing (#0233). Before this issue the gate in
+    /// `JournalObserved.record(_ decision:)` sat after `guard
+    /// !decision.isOwnInvocation`, so it was structurally unreachable here —
+    /// `attachRewrite` had no equivalent check at all, and a probe that
+    /// routed a real own autosquash's mid-rebase invocation through
+    /// `attachRewrite` attached the intermediate, never-existed-before-the-
+    /// rewrite mapping. `finalInvocation` (`logged.last`) is not exercised
+    /// here on purpose: the production code must do the selecting, not the
+    /// test picking the authoritative invocation for it.
+    @Test func aMidRebaseAmendAttachesNothingToItsInFlightEntry() throws {
+        let repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let context = try WorktreeContext.resolve(path: repo.url.path)
+
+        let checkpointEntry = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: context)
+        let beforeAttach = try JournalEntryMetadata(
+            serialized: try JournalAnchor.metadata(for: checkpointEntry.id, in: context))
+        #expect(beforeAttach.rewrite == nil)
+
+        let rebaseMergePath = try context.path(for: "rebase-merge")
+        try FileManager.default.createDirectory(
+            atPath: rebaseMergePath, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: rebaseMergePath) }
+
+        let decision = PostRewrite.decide(
+            sourceArgument: "amend",
+            environment: [GitProcess.markerVariable: "1"],
+            readStandardInput: {
+                Data("\(String(repeating: "a", count: 40)) \(String(repeating: "b", count: 40))\n".utf8)
+            })
+        #expect(decision.isOwnInvocation)
+
+        let attached = try JournalCheckpoint.attachRewrite(
+            decision, entryID: checkpointEntry.id, in: context)
+        #expect(attached == nil, "a mid-rebase amend must not attach to its in-flight entry")
+
+        let after = try JournalEntryMetadata(
+            serialized: try JournalAnchor.metadata(for: checkpointEntry.id, in: context))
+        #expect(after.rewrite == nil, "the entry's metadata must still carry no rewrite mapping")
+    }
+
     // MARK: - The compare-and-swap guard
 
     /// `updateRefCommand`'s literal output, old oid included. `update-ref
