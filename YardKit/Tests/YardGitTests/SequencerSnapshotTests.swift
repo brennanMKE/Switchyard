@@ -10,8 +10,14 @@ struct SequencerSnapshotTests {
 
     /// Drives a real rebase to a conflict stop. Returns the repository with a
     /// rebase genuinely in progress.
-    private func repositoryStoppedMidRebase() throws -> FixtureRepository {
+    private func repositoryStoppedMidRebase(diff3: Bool = false) throws -> FixtureRepository {
         let repo = try FixtureRepository.linear()
+        if diff3 {
+            // AUTO_MERGE only exists under diff3/zdiff3 — a default-configured
+            // fixture never produces one.
+            try git.run(["config", "merge.conflictStyle", "diff3"],
+                        workingDirectory: repo.url.path)
+        }
         // `linear` builds a, b, c each touching a DIFFERENT file, so a naive
         // fork conflicts with nothing and the rebase completes cleanly. Both
         // sides must edit the same path after the fork point.
@@ -48,7 +54,6 @@ struct SequencerSnapshotTests {
 
         let snapshot = try #require(try SequencerSnapshot.capture(in: context))
         #expect(snapshot.layout == .rebaseMerge)
-        #expect(snapshot.keepAlive.contains(snapshot.tree))
 
         // Wreck it, and prove the wreck took effect: with the directory gone
         // there is no rebase to continue.
@@ -108,8 +113,10 @@ struct SequencerSnapshotTests {
     }
 
     /// `AUTO_MERGE` sits OUTSIDE the sequencer directory and points at a tree
-    /// reachable from no ref, so it must be reported for keep-alive.
-    @Test func autoMergeIsCapturedForKeepAliveWhenPresent() throws {
+    /// reachable from no ref. Capture still records it — it is real,
+    /// cheap-to-record state — but nothing downstream needs it to stay
+    /// reachable (#0201).
+    @Test func autoMergeIsCapturedWhenPresent() throws {
         let repo = try repositoryStoppedMidRebase()
         defer { repo.destroy() }
         let context = try WorktreeContext.resolve(path: repo.url.path)
@@ -121,9 +128,39 @@ struct SequencerSnapshotTests {
             #expect(try git.run(["cat-file", "-t", oid],
                                 workingDirectory: repo.url.path).text
                 .trimmingCharacters(in: .whitespacesAndNewlines) == "tree")
-            #expect(snapshot.keepAlive.contains(oid))
         } else {
             #expect(snapshot.autoMerge == nil)
         }
+    }
+
+    /// Pins the measurement behind #0201: a real conflicted rebase under
+    /// `merge.conflictStyle=diff3` resumes with `git rebase --continue` even
+    /// after `AUTO_MERGE` is deleted outright, so nothing needs to keep its
+    /// tree reachable. The config is set explicitly on the fixture — a
+    /// default-configured repository never produces an `AUTO_MERGE` at all,
+    /// which is why the gap stayed invisible.
+    @Test func rebaseContinuesAfterAutoMergeIsDeleted() throws {
+        let repo = try repositoryStoppedMidRebase(diff3: true)
+        defer { repo.destroy() }
+
+        // Assert AUTO_MERGE exists BEFORE deleting it, so this test cannot
+        // pass vacuously against a fixture that never produced one.
+        let before = try git.run(["rev-parse", "--verify", "AUTO_MERGE"],
+                                 workingDirectory: repo.url.path)
+        let oid = before.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(!oid.isEmpty, "the fixture must produce AUTO_MERGE under diff3")
+
+        try git.run(["update-ref", "-d", "AUTO_MERGE"], workingDirectory: repo.url.path)
+        #expect(throws: (any Error).self) {
+            try git.run(["rev-parse", "--verify", "AUTO_MERGE"],
+                        workingDirectory: repo.url.path)
+        }
+
+        try repo.writeUntracked(["shared.txt": "resolved\n"])
+        try git.run(["add", "shared.txt"], workingDirectory: repo.url.path)
+        let resumed = try git.run(["rebase", "--continue"],
+                                  workingDirectory: repo.url.path,
+                                  extraEnvironment: ["GIT_EDITOR": "true"])
+        #expect(resumed.exitCode == 0)
     }
 }

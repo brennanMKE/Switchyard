@@ -28,9 +28,11 @@ public struct SequencerSnapshot: Equatable, Sendable {
     /// A tree of the directory's files, empty ones included.
     public let tree: String
     /// `AUTO_MERGE`'s tree oid when present. It lives OUTSIDE the sequencer
-    /// directory, beside `HEAD`, and is reachable from no ref — so it must
-    /// join the anchor's keep-alive set or ordinary maintenance may reclaim
-    /// it, leaving a restored entry pointing at a missing object.
+    /// directory, beside `HEAD`. **Informational only** — `restore` never
+    /// reads it, and a real conflicted rebase resumes with `git rebase
+    /// --continue` even after `AUTO_MERGE` is deleted outright (measured,
+    /// #0201). It needs no reachability path: losing it costs the three-way
+    /// diff3 view tools can build from that tree, not resumability.
     public let autoMerge: String?
 
     public init(layout: Layout, tree: String, autoMerge: String?) {
@@ -38,9 +40,6 @@ public struct SequencerSnapshot: Equatable, Sendable {
         self.tree = tree
         self.autoMerge = autoMerge
     }
-
-    /// Every oid that must stay reachable for this snapshot to restore.
-    public var keepAlive: [String] { [tree] + (autoMerge.map { [$0] } ?? []) }
 
     public enum Error: Swift.Error, Equatable, Sendable, CustomStringConvertible {
         case directoryUnreadable(path: String, detail: String)
