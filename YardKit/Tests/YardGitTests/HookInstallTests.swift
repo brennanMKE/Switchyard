@@ -260,3 +260,81 @@ func aChainedHookFailureStillAbortsTheTransaction(format: FixtureRepository.RefF
     #expect(!FileManager.default.fileExists(atPath: log),
             "a non-executable chained hook must not be executed")
 }
+
+// MARK: - Atomic replace (#0178 item 2)
+
+/// The wrapper must be executable even when the hook it replaces was not.
+/// `replaceItemAt` carries the original's metadata unless told otherwise, so
+/// without `.usingNewMetadataOnly` chaining over a 0644 hook installs a 0644
+/// wrapper and git silently ignores it. Measured: 644 without the option, 755
+/// with it — and the entire hook suite passes either way, which is why this
+/// assertion exists.
+@Test func chainingOverANonExecutableHookInstallsAnExecutableWrapper() throws {
+    var repo = try FixtureRepository()
+    defer { repo.destroy() }
+    try repo.build([.init("a")])
+    let hooks = try hooksDirectory(repo)
+    try writeHook("reference-transaction", in: hooks,
+                  content: loggerHook(to: repo.url.appendingPathComponent("t.log").path),
+                  mode: 0o644)
+
+    #expect(try installReports(repo).first?.outcome == .chained)
+
+    let wrapper = hooks + "/reference-transaction"
+    let mode = try #require(
+        FileManager.default.attributesOfItem(atPath: wrapper)[.posixPermissions] as? NSNumber)
+    #expect(mode.intValue & 0o111 != 0, "git ignores a non-executable hook")
+    let chained = try #require(
+        FileManager.default.attributesOfItem(atPath: wrapper + HookInstall.chainedSuffix)[.posixPermissions] as? NSNumber)
+    #expect(chained.intValue & 0o111 == 0, "the foreign hook keeps its own mode")
+}
+
+/// #0178 item 2: a failure AFTER the foreign hook has been copied aside must
+/// leave the user's hook in place and running. The old ordering (move, then
+/// write) left the hook path empty, so a failed write silently disabled it.
+///
+/// The failure is injected by marking the STAGING path immutable, which lets
+/// the copy aside succeed and fails only the final replace of the staging
+/// file — i.e. it fails exactly inside the window this issue is about.
+/// Marking the hook itself immutable cannot distinguish the old and new
+/// orderings, because it blocks moveItem and replaceItemAt equally (round 1
+/// measured this).
+@Test func aFailureAfterTheBackupCopyLeavesTheForeignHookRunning() throws {
+    let fm = FileManager.default
+    var repo = try FixtureRepository()
+    defer { repo.destroy() }
+    try repo.build([.init("a")])
+    let hooks = try hooksDirectory(repo)
+    let hook = hooks + "/reference-transaction"
+    let body = loggerHook(to: repo.url.appendingPathComponent("theirs.log").path)
+    try writeHook("reference-transaction", in: hooks, content: body, mode: 0o755)
+
+    // The injection: a staging file that can be neither removed nor
+    // overwritten, so the copy aside succeeds and only the wrapper write
+    // fails. Marking the HOOK immutable instead cannot distinguish the two
+    // orderings -- it blocks moveItem and replaceItemAt equally, which round 1
+    // measured -- so this is the fixture that actually pins the ordering.
+    let staging = hook + ".switchyard-installing"
+    try Data("stale\n".utf8).write(to: URL(fileURLWithPath: staging))
+    try fm.setAttributes([.immutable: true], ofItemAtPath: staging)
+    defer { try? fm.setAttributes([.immutable: false], ofItemAtPath: staging) }
+
+    let report = try #require(try installReports(repo).first)
+    guard case .failed = report.outcome else {
+        Issue.record("expected .failed, got \(report.outcome)")
+        return
+    }
+
+    // The invariant: the user's hook is still there, still theirs, still
+    // executable. Never an empty path, never a partial file.
+    #expect(try String(contentsOfFile: hook, encoding: .utf8) == body)
+    let mode = try #require(fm.attributesOfItem(atPath: hook)[.posixPermissions] as? NSNumber)
+    #expect(mode.intValue & 0o111 != 0)
+    // No "no staging file" assertion here: under this injection the staging
+    // path IS the fixture's own stale, deliberately-immutable file, which
+    // production code cannot remove by design -- that removal attempt is
+    // exactly what fails and produces .failed in the first place. Asserting
+    // its absence would test the fixture, not the production code.
+    #expect(!fm.fileExists(atPath: hook + HookInstall.chainedSuffix),
+            "a failed install rolls back the backup copy, so a retry is not blocked")
+}

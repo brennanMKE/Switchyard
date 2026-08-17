@@ -233,8 +233,22 @@ public enum HookInstall {
                 guard !backupPresent else {
                     return Report(hook: hook, outcome: .blockedByExistingBackup)
                 }
-                try fm.moveItem(at: url, to: backup)
-                try write(desired, to: url)
+                // COPY aside, then replace the hook path with an atomic
+                // rename -- never move-then-write. The old ordering left the
+                // hook path EMPTY between the two steps, so a failed write
+                // silently disabled the user's hook until #0158 restored it.
+                //
+                // On failure, undo the copy. Otherwise a failed install leaves
+                // a backup behind and every retry returns
+                // .blockedByExistingBackup, which makes a transient failure
+                // permanent.
+                try fm.copyItem(at: url, to: backup)
+                do {
+                    try write(desired, to: url)
+                } catch {
+                    try? fm.removeItem(at: backup)
+                    throw error
+                }
                 return Report(hook: hook, outcome: .chained)
             }
             try write(desired, to: url)
@@ -248,9 +262,28 @@ public enum HookInstall {
     /// non-executable hook (measured: `hint: … ignored because it's not set
     /// as executable`), so the mode is part of installing, not a nicety.
     static func write(_ content: Data, to url: URL) throws {
-        try content.write(to: url)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: 0o755], ofItemAtPath: url.path)
+        let fm = FileManager.default
+        let staging = url.appendingPathExtension("switchyard-installing")
+        // Leave no litter on any path out of here, including a throw: a
+        // staging file left beside a hook is indistinguishable from a hook.
+        defer { try? fm.removeItem(at: staging) }
+        if fm.fileExists(atPath: staging.path) { try fm.removeItem(at: staging) }
+        try content.write(to: staging)
+        // Mark it executable BEFORE it goes live -- git ignores a
+        // non-executable hook, so a chmod after the rename is a window in
+        // which the hook exists and does nothing.
+        try fm.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: staging.path)
+        if fm.fileExists(atPath: url.path) {
+            // .usingNewMetadataOnly is load-bearing, not decoration: without
+            // it replaceItemAt carries the ORIGINAL's metadata onto the
+            // replacement, so chaining over a 0644 foreign hook installs a
+            // 0644 wrapper that git silently ignores. Measured.
+            _ = try fm.replaceItemAt(url, withItemAt: staging,
+                                     options: .usingNewMetadataOnly)
+        } else {
+            try fm.moveItem(at: staging, to: url)
+        }
     }
 }
 
