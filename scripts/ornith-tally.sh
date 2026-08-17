@@ -1,4 +1,8 @@
 #!/usr/bin/env zsh
+# RETIRED 2026-08-16. Read Ornith's per-session token counts out of OpenCode's
+# SQLite database; there is no local model any more. issues/ornith-tally.md is
+# the closed record it produced.
+#
 #
 # ornith-tally.sh [--markdown]
 #

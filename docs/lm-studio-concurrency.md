@@ -1,5 +1,9 @@
 # LM Studio concurrency for Ornith dispatches
 
+**HISTORICAL — the local model was retired on 2026-08-16** and implementation moved to Sonnet
+subagents. Nothing in this file constrains the current workflow; it is kept as the measurement
+record behind the concurrency decisions made while it did. See `docs/workflow-reset-2026-08-16.md`.
+
 **Measured 2026-08-07 on the model host** (`brennan-mac-mini-m4.local`, M4 Pro, 64 GB), against
 `ornith-1.0-35b-mlx-oq8` loaded at `--context-length 65536`. Supersedes the `PARALLEL 2` ceiling
 asserted in `CLAUDE.md` § "Concurrency ceiling" and in `docs/review-failures.md` preflight rule 7.

@@ -1,4 +1,9 @@
 #!/bin/zsh
+# RETIRED 2026-08-16 with the local model: it regenerates the Ornith section of
+# issues/cost-ledger.md from OpenCode's SQLite database, which no longer accrues
+# rows. The ledger's hand-written planning and review rows are unaffected and are
+# still maintained by hand, in the turn each measurement is reported.
+#
 # update-cost-ledger.sh — refresh the Ornith section of issues/cost-ledger.md.
 #
 # Two kinds of number live in that file and they are maintained differently,

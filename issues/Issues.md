@@ -195,9 +195,9 @@ free:
 
 | Phase | Who | Cost |
 |---|---|---|
-| **Authoring** | Opus | hosted |
-| **Implementation** | OpenCode / ornith-1.0-35b-mlx-oq8 (local) | $0.00 |
-| **Review** | Opus | hosted |
+| **Authoring** | Opus 5 | hosted |
+| **Implementation** | Sonnet, Claude Code subagent | hosted |
+| **Review** | Opus 5 | hosted |
 
 | | |
 |---|---|
@@ -205,15 +205,15 @@ free:
 | **Wall time** | 14m |
 ```
 
-**Authoring and review are always hosted and always cost money.** Writing an issue detailed enough
-that implementation needs no further judgment is real work, and so is reading a diff and its
-verification output against the done-criteria. Recording those as free would make delegation look
-cheaper than it is and would hide where the remaining spend actually goes.
+**All three phases are hosted and all three cost money**, as of 2026-08-16. Writing an issue detailed
+enough that implementation needs no further judgment is real work, and so is reading a diff and its
+verification output against the done-criteria. Recording any of them as free would hide where the
+spend actually goes.
 
-**Implementation is $0.00 only when it actually ran locally.** When a round is taken over by hand —
-or by a hosted model for any reason — that row reads `Opus, hosted`, not `$0.00`. The table exists so
-a reader can tell at a glance which issues were genuinely free to implement and which were not, so
-misattributing one destroys the only thing it is for.
+**A `$0.00` implementation row means the round ran on the retired local model**, before 2026-08-16.
+Those rows are historical and must not be edited to match the new shape — the tally in
+`issues/ornith-tally.md` is what makes them meaningful. When a round is taken over by hand, the row
+reads `Opus, hosted` and says so.
 
 ### Pricing and how to compute a cost
 
@@ -285,18 +285,15 @@ When status moves to `resolved` or `closed`, add a `**Closed**` row with the dat
 
 ## The implementation workflow: author → dispatch → review → re-dispatch
 
-Implementation is delegated to **OpenCode** driving **Ornith 1.0 35B-A3B** (8-bit MLX) locally
-through **LM Studio**. Token cost is $0.00. The cost is wall time.
+Implementation is delegated to **Sonnet**, dispatched as a **Claude Code subagent** working in the
+issue's own worktree. Rounds are billed, so a wasted round costs real budget rather than wall time.
 
-**Why this model.** Ornith is a Gemma 4 model tuned using Qwen. It scores nearly as well as the Qwen
-model while being an MoE without thinking, where Qwen is dense and thinking and therefore much
-slower. Fast and non-thinking is the right trade for implementation work that has already been
-thought through — which is exactly what this workflow produces: the thinking happens when the issue
-is authored, not when it is implemented. **Ornith replaces Sonnet in this project**; a hosted
-mid-tier model is no longer in the loop.
-
-This is also a deliberate experiment in running local AI alongside Claude Code, so treat friction as
-a finding worth recording rather than an annoyance to route around.
+**The local-model experiment ended 2026-08-16.** For nine days implementation ran on Ornith 1.0
+35B-A3B under OpenCode through LM Studio at $0.00 a round, and what it bought was recorded honestly:
+`docs/local-ai-workflow-log.md`, `docs/sonnet5-vs-ornith-coding-benchmarks.md` and
+`issues/ornith-tally.md` are the record, and they stay. The finding that mattered is not about the
+model — **issues that carried measured code converged in one round and issues written in prose did
+not**, and that is still the standard, because a vague issue now wastes a billed round.
 
 ### Stage only what the commit owns — never `git add -A`
 
@@ -310,41 +307,29 @@ commit is about>`**, always. A broad add is a race with every other agent workin
 
 The same applies to `git commit -a`.
 
-### The five roles, revised 2026-08-07
+### The four roles, set 2026-08-16
 
 | role | model | scope |
 |---|---|---|
-| Planning | **Fable 5** | Authors the issue down to the code — exact paths, exact signatures, the literal lines, measured before-and-after values |
-| Implementation, pure code | **Ornith**, local, $0.00 | Ordinary Swift against a target the issue already measured |
-| Implementation, structural | **Sonnet 5**, billed | `Package.swift`, the Xcode project, build settings, the environment, the harness |
-| Issue review | **Opus 5** | Re-runs verification, runs mutations, reads every new test |
-| Milestone review | **Fable 5** | Runs when a milestone's issues are all `resolved`; checks the guide §9 exit criteria, not individual issues |
+| **Planning** | **Opus 5** | Authors the issue down to the code — exact paths, exact signatures, the literal lines, measured before-and-after values |
+| **Implementation** | **Sonnet**, a Claude Code subagent | One issue, one round, in `../switchyard-NNNN`. Commits to its branch; does not merge and does not set status. |
+| **Issue review** | **Opus 5** | Re-runs verification, runs mutations, reads every new test |
+| **Milestone review** | **Opus 5** | Runs when a milestone's issues are all `resolved`; checks the guide §9 exit criteria, not individual issues |
 
-Dispatch with `scripts/dispatch-issue.sh NNNN --round N [--model ornith|sonnet]`. `ornith` is the
-default; `sonnet` warns that the round is billed.
+Fable is out of the workflow entirely as of 2026-08-09, and the local model as of 2026-08-16. There
+is no `--model` flag and no dispatch script: the orchestrator runs
+`scripts/preflight-issue.sh NNNN`, creates the worktree, and spawns the subagent. `CLAUDE.md`,
+"What the orchestrator owes the round", lists the guards that moved from the retired script onto
+the orchestrator — the 3-round cap, the empty-suite-line rule, worktree cleanup.
 
-**Route to Sonnet when the issue touches `Package.swift`, `project.pbxproj`, build settings, or the
-harness itself.** Ornith has failed at those repeatedly — #0124 spent three rounds on one command
-wiring, #0126 needed hand finishing on exactly the structural half — while landing single-file repairs
-first time.
+**A hand finish is expected, not a failure.** Sixteen of twenty-four accepted rounds needed one under
+the local model. Review, finish the last small thing by hand, and re-dispatch only when the *shape*
+is wrong rather than the details.
 
-**A hand finish is expected, not a failure.** Sixteen of twenty-four accepted rounds needed one.
-Review, finish the last small thing by hand, and re-dispatch only when the *shape* is wrong rather
-than the details.
-
-### The four roles
-
-| Role | Who | Does |
-|---|---|---|
-| **Author** | Opus or Fable | Writes the issue with enough detail that implementation needs no further judgment: exact files, exact approach, exact verification command, exact done-criteria. |
-| **Dispatcher** | A Claude Code **subagent** | Runs `scripts/dispatch-issue.sh` and returns only the outcome. |
-| **Implementer** | Ornith, via OpenCode | Implements one issue. Does not commit. Does not set status. |
-| **Reviewer** | Opus | Reads the diff and the verification output, then either accepts, or writes a `## Review` section into the issue and re-dispatches. |
-
-**Dispatch through a subagent, not from the main loop.** An OpenCode run produces a long transcript
-that is worthless once the outcome is known. A subagent absorbs it and returns a short verdict, which
-is what keeps the main context window small enough to keep authoring and reviewing well. This is the
-main reason the workflow is shaped this way.
+**Dispatch through a subagent, not from the main loop.** A round produces a long transcript that is
+worthless once the outcome is known. A subagent absorbs it and returns a short verdict, which is what
+keeps the main context window small enough to keep authoring and reviewing well. This is the main
+reason the workflow is shaped this way.
 
 ### The loop
 
@@ -358,7 +343,9 @@ main reason the workflow is shaped this way.
 1. **Branch and push it empty, immediately**: `git push -u origin issue/NNNN`. A branch that exists
    only locally is invisible, and invisible work looks like no work.
 2. **Author** the issue, or update it with review feedback in a `## Review` section.
-3. **Dispatch**: a subagent runs `scripts/dispatch-issue.sh NNNN --round N`.
+3. **Dispatch**: run `scripts/preflight-issue.sh NNNN`, then spawn a Sonnet subagent pointed at the
+   worktree. The round works only in `../switchyard-NNNN` and commits to `issue/NNNN` before it
+   reports.
 4. **Review** the diff and the pasted verification output — not the model's summary of them.
    **Re-run the verification yourself.** A round that pastes real command output can still be wrong
    about what the output means, and a well-written document is the easiest kind to under-review. On
@@ -379,12 +366,16 @@ main reason the workflow is shaped this way.
 git worktree add -b issue/0012 ../switchyard-0012 main
 cd ../switchyard-0012 && git push -u origin issue/0012
 
-lms ps                                  # confirm the model is loaded
-scripts/dispatch-issue.sh 0012          # round 1 (via a subagent, backgrounded)
-git add -A && git commit -m "#0012 round 1: <what it did>" && git push
+scripts/preflight-issue.sh 0012          # the only automated gate; exit 9 means fix the issue
+# then spawn the Sonnet subagent against ../switchyard-0012 (round 1)
 
-scripts/dispatch-issue.sh 0012 --round 2
+# the round commits its own work; the orchestrator reviews, then merges
+git -C ../switchyard-0012 push
 ```
+
+**And clean up after it lands:** `git worktree remove ../switchyard-0012` once the squash-merge is
+pushed. Keep the branch forever; keep the worktree only while it is in use. 121 abandoned worktrees
+holding 22 GB of `.build` is what the alternative looks like.
 
 ### Branching and merging
 
@@ -433,8 +424,8 @@ Logs land in `.switchyard-runs/NNNN-roundN.log`, which is gitignored.
 
 ### Why the implementer does not commit, branch, or resolve
 
-Ornith leaves changes in the working tree on a branch someone else created. Review decides what
-happens to them: commit the round to the branch as an artifact, or discard it with `git checkout .`
+The round leaves its changes on a branch the orchestrator created, committed to that branch and
+nowhere else. Review decides what happens to them: commit the round to the branch as an artifact, or discard it with `git checkout .`
 when it produced nothing worth keeping. A no-op round is discarded, not committed.
 
 This keeps the critical rule at the top of this file intact — status moves are never inferred from a
@@ -449,11 +440,13 @@ them. **Append to it whenever something costs more than a few minutes to diagnos
 silently.** Silent failures are the expensive ones: most entries in that file produced no error
 message at all.
 
-### AGENTS.md is what OpenCode actually reads
+### AGENTS.md is the round's rulebook and it stands alone
 
-**OpenCode loads `AGENTS.md` into its system prompt. It does not load `CLAUDE.md`.** This was
-verified, not assumed: asked to state the GitUp licensing rule with only `CLAUDE.md` present, the
-model answered `UNKNOWN`; with `AGENTS.md` present it recited the rule correctly.
+It was written for a delegate that could not see `CLAUDE.md` — verified, not assumed: asked to state
+the GitUp licensing rule with only `CLAUDE.md` present, that model answered `UNKNOWN`; with
+`AGENTS.md` present it recited the rule correctly. A Sonnet subagent is not under that constraint,
+but the property is kept on purpose, because the dispatch prompt names `AGENTS.md` and nothing
+guarantees the round reads anything else.
 
 So `AGENTS.md` duplicates the two non-negotiable rule sets — the GPL/MIT clean-room separation and
 the code-signing prohibitions — inline rather than by reference, because a pointer is not reliable
@@ -479,17 +472,18 @@ that a test can settle. Most of M1's read commands qualify once #0006 lands.
 
 ## Resolving an issue: the mechanics
 
-This is the detail behind steps 4–7 of "The loop" above. The roles there apply: Ornith implements,
+This is the detail behind steps 4–7 of "The loop" above. The roles there apply: Sonnet implements,
 the reviewer owns everything below.
 
 ### Orchestrator: pick and dispatch
 
 1. List `issues/*.md` (skip `Issues.md`). Pick the lowest-numbered file whose status is `open` and
    whose blockers (`Blocked by #NNNN` in its Notes) are resolved.
-2. `git switch -c issue/NNNN` from an up-to-date `main`.
-3. Spawn a fresh **dispatcher subagent** that runs `scripts/dispatch-issue.sh NNNN --round N` and
-   returns only the outcome — the diff summary, the verification output, and whether it converged.
-   The subagent exists to absorb the OpenCode transcript so it never reaches the reviewing context.
+2. `git worktree add ../switchyard-NNNN -b issue/NNNN main`, then `preflight-issue.sh NNNN`.
+   Never `git switch` in the primary checkout — it stays on `main` permanently.
+3. Spawn a fresh **Sonnet subagent** scoped to that worktree, which returns only the outcome — the
+   diff summary, the verification output, and whether it converged. The subagent exists to absorb
+   the round's transcript so it never reaches the reviewing context.
 4. Review, then either land it or re-dispatch with feedback. Move to the next issue when done.
 
 If the user names a specific issue ("fix 0046"), skip the picking step.
@@ -578,11 +572,9 @@ checks by hand.
 |---|---|---|
 | `scripts/new-issue.sh "<title>"` | filing anything | allocating a number that a **resolved** issue already owns, and clobbering it with a `>` redirect. It allocates over every `NNNN.md` below 8000 and refuses an existing path. Body on stdin. |
 | `scripts/set-issue-status.sh NNNN <status>` | claiming and releasing | an invalid status value, and setting `closed`, which is Brennan's alone. Valid: `open`, `in-progress`, `resolved`, `wontfix`. |
-| `scripts/preflight-issue.sh NNNN` | **before every dispatch**, from the issue's worktree | the eight authoring defects that have each cost at least one round — a file named inside an executable target, a `/tmp` path the sandbox rejects, no source file named, no verification command or baseline count, a dependency on a branch that does not exist, delegated discovery, an unclaimed issue, and a third concurrent dispatch. |
-| `scripts/dispatch-issue.sh NNNN --round N` | running a round | an unbounded run, a fourth round, a dirty tree, and the wrong branch. |
-| `scripts/await-dispatch.sh NNNN` | inside the dispatching subagent | the subagent ending its turn while its round is still running. Blocks; exit 0 means finished, exit 75 means call it again. **The issue number is required** — without it, concurrent dispatches block each other. |
+| `scripts/preflight-issue.sh NNNN` | **before every dispatch**, and it is now the only automated gate | the authoring defects that have each cost at least one round — a file named inside an executable target, a scratch path outside the worktree, no source file named, no verification command or baseline count, a dependency on a branch that does not exist, delegated discovery, an unclaimed issue, a `@Test` name that already exists, and a primary checkout that is not on `main`. |
+| `scripts/list-recent-issues-by-milestone.sh` | working a milestone goal | guessing at progress. Prints open / in-progress / resolved per milestone, which is the goal's whole state. |
 | `scripts/check-tests-assert.sh` | reviewing every round | tests that cannot fail: no assertion macro, a `guard case … else { continue }` that skips silently, `#expect(true)`, a bare `return` in a `@Test`, a hand-written `allCases`, and `ORPHANTEST` — a test file outside every declared target path, which SwiftPM never compiles while the suite stays green. |
-| `scripts/ornith-tally.sh --write` | after accepting a round | losing the local model's token volume, which exists only in OpenCode's SQLite and nowhere else. |
 
 **`check-tests-assert.sh` and `preflight-issue.sh` are necessary and not sufficient.** Neither can see
 an assertion whose predicate is structurally unsatisfiable, or one that is true for a second, wrong

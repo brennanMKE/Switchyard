@@ -281,129 +281,54 @@ deciding its own correct measurement must be wrong."
   fi
 fi
 
-# --- Check 7 (WARN) — concurrency headroom ----------------------------------
-# TWO DIFFERENT NUMBERS, deliberately separated after they were conflated:
+# --- Check 7 (HARD) — the primary checkout is on main ------------------------
+# Replaced the LM Studio slot checks on 2026-08-16, when implementation moved
+# from a local model to Sonnet subagents and `lms`/`opencode run` stopped
+# existing in this workflow. Those checks asked whether the host had capacity;
+# this one asks the question that actually cost us something.
 #
-#   DISPATCH_CEILING - how many rounds WE run at once. Policy. Currently 1.
-#   EXPECTED_SLOTS   - how the host is loaded. Capability. Currently 4.
+# On 2026-08-12 a round was run IN THE PRIMARY CHECKOUT. Its output landed as
+# uncommitted changes on `main`, on no branch anywhere, and the twelve hand-made
+# commits around it forced the 2026-08-16 reset of `main` to 3c49ba6. See
+# docs/workflow-reset-2026-08-16.md.
 #
-# The host stays at 4 so the capacity is there, but we dispatch one at a time,
-# because per-round latency is what actually matters to the queue: decode is
-# 52.4 tok/s solo against 21.7 at 4-way, so a serialised round finishes about
-# 2.4x faster. Measured occupancy over a real 4-hour window was 0.44 of 2 slots
-# -- concurrency was never the constraint; planning was. Serialising costs
-# almost nothing and makes each round land sooner.
-#
-# Requests beyond the host's slot count queue SILENTLY -- no 429, no error, just
-# latency indistinguishable from a slow round. See docs/lm-studio-concurrency.md.
-DISPATCH_CEILING=${DISPATCH_CEILING:-1}
-RUNNING=$(pgrep -f 'opencode run' 2>/dev/null | grep -c . || true)
-# Parse by position relative to the CONTEXT value, not by offset from either
-# end: `lms ps` prints SIZE as two fields ("37.73 GB") and TTL may be empty, so
-# both $5 and $(NF-2) land on the wrong column. $(NF-2) yielded 65536 -- the
-# context -- and the check then "passed" with a ceiling of 65536, which would
-# have allowed unlimited concurrent dispatches. A guard that reads a plausible
-# number from the wrong column is worse than no guard.
-SLOTS=$(lms ps 2>/dev/null | awk '/ornith/ {
-  for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]{4,6}$/) { print $(i+1); exit }
-}' | head -1)
-# Sanity-clamp: anything outside 1-8 means the parse drifted again.
-[[ "$SLOTS" == <-> ]] && (( SLOTS >= 1 && SLOTS <= 8 )) || SLOTS=4
+# The primary checkout stays on `main` permanently: it is where merges happen and
+# what a human watches. A round belongs in ../switchyard-NNNN. If the primary is
+# on an issue branch, something has already gone wrong -- either a round is about
+# to run here, or one already did.
+PRIMARY=$(git -C "$REPO_ROOT" worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $2; exit}')
+if [[ -n "$PRIMARY" ]]; then
+  PRIMARY_BRANCH=$(git -C "$PRIMARY" symbolic-ref --quiet --short HEAD 2>/dev/null || print detached)
+  if [[ "$PRIMARY_BRANCH" != main ]]; then
+    fail "the primary checkout is on '$PRIMARY_BRANCH', not main" \
+"$PRIMARY must stay on main permanently -- it is where merges land and what a
+human watches. A round runs in ../switchyard-$ISSUE, never here.
 
-# --- Check 7b (HARD) — the LOADED model matches the intended concurrency ------
-# Occupancy is not the only thing that can be wrong. #0029 round 1 died with
-# `Model unloaded` after one tool call: the instance was still running the old
-# PARALLEL 1 configuration and LM Studio reloaded it *underneath the round* to
-# pick up the new setting. Preflight read SLOTS=1 and PASSED anyway, because
-# check 7 only asks whether a slot is free -- 0 < 1 is true.
-#
-# That 1 was the visible signal that the host had not applied the change, and it
-# cost a round. Changing PARALLEL requires a reload, so a mismatch here means
-# either the reload has not happened yet or something re-loaded with the old
-# flag (opencode-ornith.sh does exactly that if re-run).
-EXPECTED_SLOTS=${EXPECTED_SLOTS:-4}
-# Two different questions, and the first version conflated them:
-#
-#   Is the host SUFFICIENT?  SLOTS >= DISPATCH_CEILING. Hard -- dispatching more
-#                            rounds than there are slots queues them silently.
-#   Does it match INTENT?    SLOTS == EXPECTED_SLOTS. A warning. Drift is worth
-#                            knowing about, but it does not block work.
-#
-# Asserting equality blocked a dispatch when the host was at PARALLEL 2 and we
-# only ever run 1 round -- perfectly adequate, refused anyway. The host reverts
-# to 2 on its own repeatedly (a TTL unload followed by a JIT reload from a
-# stored default is the likely mechanism), so an equality check here would keep
-# stopping the queue for a difference that does not affect it.
-if (( SLOTS < DISPATCH_CEILING )); then
-  fail "LM Studio has $SLOTS slot(s); we dispatch $DISPATCH_CEILING at a time" \
-"Requests beyond the slot count queue silently -- no error, just latency
-indistinguishable from a slow round. Reload with at least $DISPATCH_CEILING:
+  git -C $PRIMARY switch main
 
-  lms unload --all
-  lms load ornith-1.0-35b-mlx-oq8 --context-length 65536 --parallel $EXPECTED_SLOTS -y"
-elif (( SLOTS != EXPECTED_SLOTS )); then
-  warn "LM Studio is loaded PARALLEL $SLOTS, intent is $EXPECTED_SLOTS" \
-"Sufficient for our ceiling of $DISPATCH_CEILING, so not blocking. The host
-reverts on its own; reload it if you want the intended capacity back."
-else
-  pass "LM Studio loaded PARALLEL $SLOTS as intended"
-fi
-if (( RUNNING >= DISPATCH_CEILING )); then
-  warn "$RUNNING dispatch(es) running; our ceiling is $DISPATCH_CEILING (host allows $SLOTS)" \
-"We serialise deliberately: a solo round decodes at 52.4 tok/s against 21.7 at
-4-way, so one at a time lands sooner. Wait for it to finish."
-else
-  pass "$RUNNING/$DISPATCH_CEILING dispatch slots in use (host allows $SLOTS)"
-fi
-
-# --- Check 10 (HARD) — the issue fits the context window --------------------
-# #0017 round 1 produced nothing because the mandated reading set (issue +
-# Issues.md + AGENTS.md + the skill = 106KB) exceeded the usable input budget.
-# OpenCode compacted after four reads and threw away the issue's verbatim
-# source block -- the one artifact that made the issue worth authoring.
-#
-# Usable input = limit.context - limit.output, and compaction fires near 90%
-# of it. The prompt floor is OpenCode's system prompt, tool schemas and the
-# dispatch prompt itself: measured at roughly 12k tokens with AGENTS.md
-# auto-loaded. Bytes/4 is the usual rough token estimate for English + code.
-OC_CONF="$HOME/.config/opencode/opencode.json"
-if [[ -f "$OC_CONF" ]]; then
-  CTX=$(sed -n 's/.*"context"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$OC_CONF" | head -1)
-  OUT=$(sed -n 's/.*"output"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$OC_CONF" | head -1)
-  if [[ -n "$CTX" && -n "$OUT" ]]; then
-    USABLE=$(( (CTX - OUT) * 9 / 10 ))
-    FLOOR=12000
-    ISSUE_TOK=$(( $(wc -c < "$FILE") / 4 ))
-    NEED=$(( FLOOR + ISSUE_TOK ))
-    # Leave at least a third of the budget for the work itself: reading the
-    # source files the issue names, and emitting the file.
-    if (( NEED * 3 / 2 > USABLE )); then
-      fail "issue needs ~${NEED} tokens of context against ~${USABLE} usable" \
-"Issue is $ISSUE_TOK tokens, prompt floor ~$FLOOR, usable = (context $CTX - output $OUT) * 0.9.
-The round will compact before it writes, and compaction discards the issue's
-source block first. Split the issue, or raise limit.context in $OC_CONF."
-    else
-      pass "context budget: ~${NEED} needed of ~${USABLE} usable"
-    fi
-  fi
-fi
-
-# --- Check 11 (HARD) — the dispatcher mandates no reading but the issue -----
-# Regression guard on the #0017 fix. AGENTS.md is auto-loaded by OpenCode
-# (verified: it recited the GitUp licensing rule with zero tool calls), and
-# Issues.md is the tracker's process guide, not the implementer's document.
-# Together they cost ~15k tokens of the ~44k budget, for nothing.
-DISPATCH="${0:h}/dispatch-issue.sh"
-if [[ -f "$DISPATCH" ]]; then
-  MANDATE=$(sed -n '/^Work issue \$ISSUE/p' "$DISPATCH" || true)
-  if [[ "$MANDATE" == *"Issues.md"* || "$MANDATE" == *"AGENTS.md"* ]]; then
-    fail "dispatch-issue.sh mandates reading Issues.md or AGENTS.md" \
-"That is the #0017 round 1 failure: ~15k tokens of already-available or
-irrelevant text, spent before the first write. The prompt must name only
-issues/\$ISSUE.md."
+If a round has already run in the primary checkout, salvage its work to a branch
+before switching: docs/workflow-reset-2026-08-16.md is what happens otherwise."
   else
-    pass "dispatcher mandates only the issue itself"
+    pass "primary checkout is on main"
   fi
+fi
+
+# --- Check 10 (WARN) — the issue is not oversized ---------------------------
+# #0017 round 1 produced nothing because its mandated reading set (issue +
+# Issues.md + AGENTS.md + the skill = 106KB) exceeded a 65k context. Sonnet's
+# context makes that specific arithmetic irrelevant, and the check was rewritten
+# rather than deleted, because the underlying signal was never really about
+# tokens: an issue that large is an issue with more than one deliverable in it.
+#
+# Advisory, and generous. Bytes/4 is the usual rough token estimate.
+ISSUE_TOK=$(( $(wc -c < "$FILE") / 4 ))
+if (( ISSUE_TOK > 25000 )); then
+  warn "issue is ~${ISSUE_TOK} tokens — that is a sizing smell, not a context problem" \
+"Sonnet can hold it. The concern is that no issue this large has one deliverable:
+every oversized issue in the failure log (#0010, #0011, #0012) failed by getting
+partway into each of several pieces. Consider splitting it."
+else
+  pass "issue size ~${ISSUE_TOK} tokens"
 fi
 
 # A `grep -c '<pattern>'` criterion whose expected count was written from memory

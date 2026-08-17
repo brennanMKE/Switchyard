@@ -1,4 +1,10 @@
 #!/usr/bin/env zsh
+# RETIRED 2026-08-16 with dispatch-issue.sh. It waited on an `opencode run`
+# round; subagent completions now wake the session directly. Kept for the
+# liveness lesson it encodes: `pgrep -f` on a command string is not a liveness
+# test, because a wrapper process keeps the whole string in its argv after the
+# real round exits. Two dispatchers sat over an hour on finished work.
+#
 #
 # await-dispatch.sh NNNN — block until *that issue's* dispatch finishes.
 #

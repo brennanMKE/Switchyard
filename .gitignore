@@ -7,3 +7,6 @@ YardKit/.build/
 
 # Coverage artifact left by `swift test` in the working directory.
 default.profraw
+
+# OpenCode — retired 2026-08-16, directory left in place
+.opencode/

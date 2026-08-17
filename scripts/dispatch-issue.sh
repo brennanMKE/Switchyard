@@ -1,4 +1,12 @@
 #!/bin/zsh
+# RETIRED 2026-08-16. Implementation moved from a local model under OpenCode to
+# Sonnet, dispatched as a Claude Code subagent by the orchestrator. Nothing
+# invokes this script. It is kept because it encodes guards that were each paid
+# for by a lost round -- wall-clock timeout, stall watchdog, 3-round cap, clean
+# tree, branch check, and a .done record written from an EXIT trap so a killed
+# round still leaves a readable result. Read it before re-implementing any of
+# them. See CLAUDE.md, 'What the orchestrator owes the round'.
+#
 # Dispatch one issue to OpenCode running the local model.
 #
 #   scripts/dispatch-issue.sh 0012 [--round N] [--model ornith|sonnet] [--timeout SECS]

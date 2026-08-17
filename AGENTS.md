@@ -64,10 +64,10 @@ reviews your work, commits it, and decides when it is done.
 - **Do not change the issue's `Status` row.** Review decides that.
 - **Do not start another issue**, however tempting or related it looks. One issue per run.
 
-## Rule 4b — Write your round's report to a file. The harness commits it.
+## Rule 4b — Write your round's report to a file. The orchestrator commits it.
 
-Rule 4 still holds: **you do not run git.** But your round now ends in a commit on the issue branch,
-and the message is yours.
+Rule 4 still holds: **you do not run git.** But your round ends in a commit on the issue branch —
+made by whoever reviews it, the moment your round returns — and the message is yours.
 
 Write `.switchyard-runs/NNNN-roundN.report.md` before you finish, with a heredoc:
 

@@ -82,69 +82,119 @@ round, a missed notification, and both slots idle because the last turn ended wi
 Pick the interval from the failure being bounded — an hour means a stalled queue costs at most an
 hour — not from how long a round takes.
 
-**On each firing:** confirm both slots are busy, merge anything that finished and set its status, then
-dispatch from the ready queue until both slots are full. Stop the loop when the queue is genuinely
-empty or blocked rather than letting it tick.
+**On each firing:** confirm a round is actually running, merge anything that finished and set its
+status, then dispatch the next ready issue. Stop the loop when the queue is genuinely empty or
+blocked rather than letting it tick.
 
 Between firings the issue tracker is the state — status rows and branches say what is done, so a fresh
 context resumes without needing the previous conversation.
 
-## Implementation is delegated, and which model depends on the task
+### A milestone goal is the unit of work
 
-**Four roles, revised 2026-08-07 after fifty rounds of evidence.**
+Brennan sets goals as **"complete every issue in milestone MN"**, and that goal — not a single issue
+— is what a session iterates against. There is no separate goal-tracking mechanism and none is
+wanted: **the tracker is the goal's state.** `./scripts/list-recent-issues-by-milestone.sh` prints
+open / in-progress / resolved per milestone, which is the whole progress report.
+
+Working a milestone goal means, on repeat until the milestone's open count is zero: pick the next
+open issue in that milestone, plan it to the standard below, preflight it, dispatch one round,
+review, squash-merge, set it `resolved`, remove its worktree. Then the **milestone review** in guide
+§9 runs, and its findings become ordinary issues in the same milestone — so the goal is not met when
+the last issue resolves, it is met when two consecutive milestone reviews find nothing.
+
+An issue that turns out to belong to a different milestone gets re-milestoned rather than dragged
+into the goal, and an issue that is genuinely blocked goes back to `open` with the blocker written
+into it — the goal moves on. Neither is a reason to stop and ask.
+
+## Implementation is delegated
+
+**Three roles, set 2026-08-16.** No local model, no OpenCode, no Fable.
 
 | role | model | what it does |
 |---|---|---|
 | **Planning** | Opus 5 | Authors the issue **down to the code**: exact paths, exact signatures, the literal lines to change, measured before-and-after values. Not a description of the work — a colour-by-numbers of it. |
-| **Implementation, pure code** | Ornith 1.0 35B-A3B, local, $0.00 | One file, or a few files of ordinary Swift, against a target the issue has already measured. |
-| **Implementation, structural** | Ornith when the edit is **pasted**; Sonnet when it needs **design** | `Package.swift`, the Xcode project, build settings, the environment. Amended 2026-08-07 — see below. |
-| **Issue review** | Opus 5 | Re-runs the verification, runs the mutations, reads every new test. Unchanged — this is where the catches happen. |
+| **Implementation** | Sonnet | One round, one issue, in its own worktree. Spawned as a Claude Code subagent, never run from the main loop and never in the primary checkout. |
+| **Issue review** | Opus 5 | Re-runs the verification, runs the mutations, reads every new test. This is where the catches happen. |
 | **Milestone review** | Opus 5 | Runs when every issue in a milestone is `resolved`. See below. |
 
-Dispatch with `scripts/dispatch-issue.sh NNNN --round N [--model ornith|sonnet]`. **`ornith` is the
-default**; `sonnet` prints a billed-round warning. Everything else about the loop is unchanged: a
-subagent absorbs the transcript, Opus reviews the diff and the real verification output, and the
-branch is squash-merged only after it passes.
+**Dispatch is a Claude Code subagent with `model: sonnet`, working in `../switchyard-NNNN`.** The
+loop is otherwise unchanged: the subagent absorbs the round's transcript, Opus reviews the diff and
+the *re-run* verification output, and the branch is squash-merged only after it passes.
 
-**"Ornith cannot do `Package.swift`" was a fact about issues, not about manifests.** #0124 and
-#0126 had it *designing* a manifest change from prose, and it failed repeatedly. #0129 pasted the
-literal ten-line manifest edit, and Ornith transcribed it byte-identically in one round with zero
-edits — verified by extracting the fenced block from the issue and diffing it against the commit. The
-diff was the new target and nothing else: no reformatting, inserted at exactly the specified point.
+**What the orchestrator owes the round, now that no script wraps it.** `dispatch-issue.sh` carried a
+wall-clock timeout, a stall watchdog, a 3-round cap, a clean-tree check, a branch check and a `.done`
+record. Every one of those exists because a round once looped, lied, or died quietly. With the script
+out of the loop **those become the orchestrator's job, and they are not optional**:
 
-So route structural work by **how specified it is**, not by which file it touches. A pasted edit goes
-to Ornith at $0.00. Reserve Sonnet for manifest or project work that genuinely requires a decision.
+1. **Run `scripts/preflight-issue.sh NNNN` before every round**, including re-dispatches. It is
+   model-agnostic and still the gate; it also refuses an issue that is not `in-progress`.
+2. **Create the worktree first** — `git worktree add ../switchyard-NNNN -b issue/NNNN main` — and
+   give the subagent that path. A round in the primary checkout is the failure that cost us the
+   2026-08-13 reset.
+3. **Three rounds is the cap.** After the third, the issue goes back to `open` and is re-planned or
+   split. Do not spend a fourth.
+4. **A round that produces no `Test run with N tests` line is a failed round**, not a quiet one. An
+   empty suite capture is indistinguishable from an unread one, which is how #0157 and #0180 both
+   shipped code that did not compile.
+5. **Remove the worktree once the issue resolves and the branch is merged.** Keep the branch —
+   forever, per the squash rule below — but not 121 stale checkouts and 22 GB of `.build`.
 
-**And check that Sonnet can run at all before relying on it.** As of 2026-08-07 OpenCode on this
-machine has **no `anthropic` provider configured** — `opencode models` lists lmstudio, nebius, openai
-and opencode. `--model sonnet` fails in one second with an opaque `UnknownError`, and that branch of
-`dispatch-issue.sh` had never been exercised, so this table documented a capability that did not
-exist. The script now probes before dispatching.
+**The `--model ornith|sonnet` flag, `scripts/dispatch-issue.sh`, `scripts/await-dispatch.sh` and
+`scripts/ornith-tally.sh` are all retired.** They are kept for the guard logic they encode, which is
+worth reading before re-implementing any of it, but nothing invokes them. `issues/ornith-tally.md`,
+`docs/lm-studio-concurrency.md` and the Ornith rows in `issues/cost-ledger.md` are a closed
+historical record.
 
-**Planning and milestone review moved from Fable 5 to Opus 5 on 2026-08-09**, by Brennan's
-instruction. Two consequences worth stating: planning becomes **cheaper**, not dearer — Opus bills
-$5/$25 per million against Fable's $10/$50, so the same pass costs roughly half — and the reviewing
-and planning roles now share a model, which removes the one structural reason a planner and its
-reviewer disagreed about a fact. The `(F)` marker in `issues/cost-ledger.md` applies only to rows
-dated before this change; new planning rows are `(O)`.
+### The dispatch prompt
 
-### Why the split, in numbers
+Short, and deliberate about what it makes the round read: **`issues/NNNN.md` as the deliverable and
+`AGENTS.md` as the rulebook.** #0017's round burned its whole budget on a mandated reading set and
+wrote no code — that specific arithmetic was a 65k-context problem and no longer binds, but the
+habit it teaches does. Reading is not free, and a round pointed at four documents is a round that
+has not started.
 
-Of fifty rounds on 2026-08-07: 24 accepted, 22 rejected, 3 failed outright. **Sixteen of the
-twenty-four accepted needed a hand finish; two were accepted clean.** The pattern in the failures is
-consistent:
+The prompt carries, and nothing more:
+
+- **The worktree path**, and that everything happens inside it — no absolute paths reproduced from
+  memory, which has killed three rounds by typo (`brenbanMKE`, `tensorshare`).
+- **The issue file to implement**, and that its Expected behavior is the deliverable list.
+- **`AGENTS.md`'s numbered rules**, by reference, plus the licensing and signing rules inline if the
+  round could plausibly touch either.
+- **The `swift-guidance` skill**, to be loaded before writing Swift, not worked from memory.
+- **The verification command and the line its output must contain** — `swift test` printing
+  `Test run with N tests`. The round pastes that line or the round failed.
+- **`.switchyard-runs/NNNN-roundN.report.md`, written before it finishes** — `AGENTS.md` Rule 4b.
+  The round does not run git at all; its first line becomes the commit subject.
+- **Stop at the issue's scope.** No edits to `CLAUDE.md`, `AGENTS.md`, the issue file, or any file
+  the issue does not name.
+
+**The orchestrator commits the round the moment it returns**, using that report as the message —
+before reviewing it, not after. The script used to do this from an `EXIT` trap; now nobody does it
+unless you do, and an uncommitted round is one killed session away from being the thing that caused
+the 2026-08-16 reset. A round that produced nothing worth keeping is discarded with
+`git checkout .` instead, which is a decision, not an omission.
+
+The round's *report* is a verdict, not a transcript: what it changed, the suite line, what it could
+not do. The subagent keeps the transcript out of the main context, which is the point of dispatching
+through one.
+
+### Why issues carry code, whatever runs them
+
+Measured over fifty rounds on 2026-08-07 — a local model, but the pattern is about the *issue*, not
+the model, and it held across every round since:
 
 - **Issues that carried measured code converged in one round** — #0117, #0110, #0118. Issues that
   described the work in prose did not.
 - **Pasting five function signatures into #0116** took round 2 from 26 file rewrites and a timeout to
   17 edits and a finish inside the clock. Nothing else changed.
 - **Every timeout was a round creating a large new file.** Every round scoped as a repair converged.
-- **Ornith fails structurally on `Package.swift` and the Xcode project.** #0124 spent three rounds on
-  one command wiring and never wrote a test; #0126 needed hand finishing on exactly the structural
-  half. Pure single-file repairs land first time.
+- **Rounds asked to *design* a structural change failed; rounds handed the literal edit did not.**
+  #0124 spent three rounds designing a `Package.swift` change and never wrote a test. #0129 pasted
+  the ten-line manifest edit and it was transcribed byte-identically, first round, zero edits.
 
-So: **smaller issues, with the code in them, and a different model for the work the local one cannot
-do.**
+Sonnet is a stronger implementer than what produced those numbers, and that is a reason to expect
+fewer rounds — **not** a reason to loosen the standard. The rule stands: **smaller issues, with the
+code in them.** A vague issue wastes a Sonnet round at Sonnet prices.
 
 ### Every existing issue is re-authored before it is dispatched
 
@@ -182,9 +232,9 @@ The counter-risk is real and has cost rounds: **a code sample written from memor
 **Commit the issue file as soon as it is structurally complete, then keep editing it.** Do not hold
 the finished artifact in context until every mutation has been run and commit once at the end.
 
-A dispatch externalises its state continuously — `dispatch-issue.sh` commits each round to the branch
-and writes its `.done` record from an `EXIT` trap — so a round killed at any point leaves something
-readable behind. A planning pass that commits only at the end has no such property, and the
+A round that commits to its branch as it goes leaves something readable behind when it is killed —
+which is why an implementation round is told to commit its work before it reports. A planning pass
+that commits only at the end has no such property, and the
 difference is not theoretical: an API session limit killed a dispatcher and two planners
 simultaneously on 2026-08-08. The dispatch resumed from its round commit with nothing lost; both
 planners lost the entire pass, including scratch trees whose code had already been compiled and
@@ -242,14 +292,6 @@ where merged work becomes visible. Never switch it to an issue branch and never 
 that pins `main`, so every finished issue queues behind whatever round is running while the repo
 reads as idle. Issue work happens only in `../switchyard-NNNN` worktrees; merges happen here.
 
-**Ornith's token counts come from `./scripts/ornith-tally.sh`, not from the dispatch logs.** The
-logs carry no token counts and LM Studio exposes no historical usage endpoint; OpenCode's SQLite
-database at `~/.local/share/opencode/opencode.db` records `tokens_input`/`tokens_output` per session
-and is the only durable record. Unlike a dispatcher's `subagent_tokens`, it survives the session, so
-it can be regenerated at any time — run it when updating `issues/cost-ledger.md`. Attribution is by
-working directory, which is another reason a dispatch must run in `../switchyard-NNNN` and never in
-the primary checkout.
-
 **Record every measurement in the turn it is reported.** A dispatcher subagent reports
 `subagent_tokens` exactly once, in a completion notification that exists nowhere else — not in git,
 not in a log, not in any API. When the session ends it is gone. Write it into
@@ -262,50 +304,24 @@ round; squash-merge and push `main` the moment an issue resolves. Do not batch. 
 committed but unpushed is invisible, and invisible work is indistinguishable from no work — this has
 already happened once, with seven finished branches sitting unpushed while `main` looked idle.
 
-**Two different numbers, and conflating them cost a round.**
-
-- **The host is loaded `--parallel 4`** — that is capacity. `docs/lm-studio-concurrency.md` has the
-  measurements. Never raise it past 4: aggregate throughput is flat from 4 to 8 while per-round
-  latency keeps degrading.
-- **We dispatch ONE round at a time** — that is policy, `DISPATCH_CEILING` in
-  `scripts/preflight-issue.sh`. Decided 2026-08-07.
-
-Serialising looks backwards and is not. Decode is **52.4 tok/s solo against 21.7 at 4-way**, so a
-single round lands about 2.4x sooner, and measured slot occupancy over a real four-hour window was
-**0.44 of 2** — concurrency was never the constraint. **Planning is.** Planning has no host ceiling, so the
-way to go faster is more planning agents running ahead of the queue, not more rounds contending for
-one model.
-
-Because we serialise, the watchdogs are back at their solo values: `TIMEOUT=1800`, `STALL=420`, and
-`await-dispatch.sh`'s `QUIET_LIMIT=450`. **`QUIET_LIMIT` is coupled to `STALL` and must stay above
-it** — move them together or `await` will call a live round finished mid-prefill. If the dispatch
-ceiling ever rises above 1, raise all three with it.
-
-Preflight checks both numbers: occupancy against `DISPATCH_CEILING`, and the **loaded** `PARALLEL`
-against `EXPECTED_SLOTS`. The second exists because #0029 round 1 died with `Model unloaded` when a
-reload landed on top of it, and preflight had read `PARALLEL 1` and passed anyway.
-
-**Output ceiling:** `~/.config/opencode/opencode.json` sets the model's `limit.output`. It was `8192`,
-which silently truncated any `write` tool call carrying a large file — the `content` key never
-arrives and the schema rejects it, which reads as flakiness rather than as a ceiling. Two rounds were
-lost to it before the cause was found. Raised to `16384` on 2026-08-07; the previous file is backed up
-beside it. If a round dies emitting `SchemaError(Missing key at ["content"])` repeatedly, this is the
-first thing to check.
+**One round in flight, two at the outside.** The old ceiling of one came from a local host that
+degraded under concurrency; that reason is gone, but the policy mostly stands for a better one.
+**Review is the bottleneck, and review runs in the main loop.** A second round finishing while the
+first is under review does not go faster — it goes unmerged, which is how seven finished branches
+once sat unpushed while `main` read as idle. Dispatch a second only when both issues are small,
+independent, and the first is already merged or in review. The binding constraint now is the weekly
+usage limit, not a machine, so an idle slot costs nothing and a wasted round costs real budget.
 
 Two rules that bind this file specifically:
 
-- **Dispatch through a subagent, never from the main loop.** An OpenCode transcript is long and
-  worthless once the outcome is known; a subagent absorbs it and returns a verdict. Keeping the main
-  context small is what makes authoring and reviewing good, which is what makes the local model
-  work at all.
-- **Branch per issue, squash to `main`.** `git switch -c issue/NNNN`, one commit per round on the
-  branch, then `git merge --squash` into a single commit on `main`. **Never delete the branch** —
-  squash-merging records no ancestry, so the branch is the only surviving record of how the work
-  went, and the issue's `**Commit**` row points into it.
-
-Run dispatches through `scripts/dispatch-issue.sh NNNN --round N`, which enforces a wall-clock
-timeout, a 3-round cap, a clean tree, and the correct branch. It has looped before; the guards are
-the mechanism, not the prose.
+- **Dispatch through a subagent, never from the main loop.** A round's transcript is long and
+  worthless once the outcome is known; the subagent absorbs it and returns a verdict. Keeping the
+  main context small is what makes authoring and reviewing good.
+- **Branch per issue, squash to `main`.** `git worktree add ../switchyard-NNNN -b issue/NNNN main`,
+  one commit per round on the branch, then `git merge --squash` into a single commit on `main`.
+  **Never delete the branch** — squash-merging records no ancestry, so the branch is the only
+  surviving record of how the work went, and the issue's `**Commit**` row points into it. Removing
+  the *worktree* after the merge is right and expected; deleting the branch is not.
 
 ## Issue status is part of the work, not bookkeeping after it
 
@@ -344,8 +360,8 @@ written into a retrospective instead of into the file the model reads.
 ### Before dispatching any issue — every time, including a re-dispatch
 
 1. **Run `scripts/preflight-issue.sh NNNN`.** It implements every mechanical check derived from a
-   past failure. `dispatch-issue.sh` runs it too and refuses to dispatch on failure, so this is for
-   seeing the result while there is still time to fix the issue.
+   past failure, and it is now the *only* automated gate — nothing downstream re-runs it, so a round
+   dispatched without it is dispatched unchecked.
 2. **Read the `## Preflight checklist` in `docs/review-failures.md`** and answer its `[JUDGMENT]`
    questions against the issue text. These are the ones no script can decide — whether the issue has
    one deliverable, whether every fact it asserts was verified, whether it names a path that can hold
@@ -368,8 +384,9 @@ this sequence before anything else is dispatched:
 2. **Record the round in `docs/review-failures.md`** — one row in the failure table, and a new entry
    in the preflight checklist if the cause is not already covered. Do this in the turn the finding
    arrives; see the rule about measurements above, which applies identically here.
-3. **Push the fix to where it will be read.** A lesson about the model's behaviour or its environment
-   goes into `AGENTS.md` as a numbered rule, because that is what OpenCode loads. A lesson about how
+3. **Push the fix to where it will be read.** A lesson about the round's behaviour or its environment
+   goes into `AGENTS.md` as a numbered rule, because that is the rulebook the dispatch prompt makes
+   an implementation round read. A lesson about how
    issues are written goes into the preflight checklist. A lesson that a script can enforce goes into
    `scripts/preflight-issue.sh`. **A finding recorded only in `docs/` has not been fixed** — it has
    been filed.
@@ -394,10 +411,10 @@ timeout) · `model-behaviour` (narrated instead of acting, looped, fabricated, v
 `sizing` (too many deliverables). Most failures so far have been `spec-defect` — which is to say
 **most failed rounds are my fault, not the model's**, and the fix belongs upstream of the dispatch.
 
-**`AGENTS.md` is what OpenCode reads — it does not load this file.** Verified: asked for the GitUp
-licensing rule with only `CLAUDE.md` present, the model answered `UNKNOWN`; with `AGENTS.md` present
-it recited the rule. `AGENTS.md` therefore duplicates the licensing and code-signing rules inline
-rather than by reference.
+**`AGENTS.md` is the round's rulebook, and it stands alone.** It was written for a delegate that
+could not see this file, and it keeps that property on purpose: it duplicates the licensing and
+code-signing rules **inline rather than by reference**, so a round that reads only `AGENTS.md` still
+has them. The dispatch prompt names it explicitly; do not assume a subagent has read this file.
 
 **This file stays canonical. Any edit to the licensing or signing rules must be mirrored into
 `AGENTS.md` in the same commit** — a delegate operating on a stale copy of the GPL rule is exactly
