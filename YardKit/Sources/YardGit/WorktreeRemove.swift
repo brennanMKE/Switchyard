@@ -127,7 +127,12 @@ public func worktreeRemove(
             )
             releasedLock = true
         } catch {
-            throw WorktreeRemoveError.lockFailed(path: normalizedTarget, detail: error.localizedDescription)
+            // `error` is `GitProcess.Failure`, which conforms to
+            // `CustomStringConvertible` and carries git's stderr — not
+            // `LocalizedError`, so `error.localizedDescription` would render
+            // Foundation's generic fallback and discard git's own message.
+            // `String(describing:)` picks up the `description` conformance.
+            throw WorktreeRemoveError.lockFailed(path: normalizedTarget, detail: String(describing: error))
         }
     }
 
