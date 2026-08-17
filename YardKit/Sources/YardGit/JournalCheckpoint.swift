@@ -226,3 +226,36 @@ public enum JournalCheckpoint {
         return parents
     }
 }
+
+public extension JournalCheckpoint {
+
+    /// Runs `body` with a pre-operation journal entry written first, so
+    /// `switchyard undo` works without the caller having asked (#0034
+    /// decision 1's second entry kind).
+    ///
+    /// **One entry per user-level operation, not per primitive.** The
+    /// primitives this wraps — `stageHunks`, `CommitCreate.run` — deliberately
+    /// write no entries of their own, so a composed command like `commitHunks`
+    /// produces exactly one. A checkpoint inside each primitive would litter
+    /// the journal and make `undo` step through halves of a single action
+    /// (guide §11 decision 15).
+    ///
+    /// The checkpoint is taken **before** `body` and is not rolled back if
+    /// `body` throws: an entry describing the state before a failed attempt is
+    /// correct and cheap, and removing it would need a second write on the
+    /// error path for no gain.
+    static func around<T>(
+        operation: String,
+        at path: String,
+        command: String? = nil,
+        agent: JournalEntryMetadata.Agent? = nil,
+        git: GitProcess = GitProcess(),
+        _ body: () throws -> T
+    ) throws -> T {
+        let context = try WorktreeContext.resolve(path: path, git: git)
+        _ = try checkpoint(
+            operation: operation, command: command, agent: agent,
+            in: context, git: git)
+        return try body()
+    }
+}

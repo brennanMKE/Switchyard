@@ -151,15 +151,18 @@ public func commitHunks(
     guard staged.isEmpty else {
         throw CommitHunksError.indexNotClean(paths: staged)
     }
-    try stageHunks(ids: ids, at: path, git: git)
-    return try CommitCreate.run(
-        message: message,
-        signing: signing,
-        trailers: trailers,
-        in: path,
-        git: git,
-        extraEnvironment: extraEnvironment
-    )
+    return try JournalCheckpoint.around(
+        operation: "commit", at: path, git: git) {
+        try stageHunks(ids: ids, at: path, git: git)
+        return try CommitCreate.run(
+            message: message,
+            signing: signing,
+            trailers: trailers,
+            in: path,
+            git: git,
+            extraEnvironment: extraEnvironment
+        )
+    }
 }
 
 /// Guide §6 code 6: an unrelated already-staged path is a repository-state
