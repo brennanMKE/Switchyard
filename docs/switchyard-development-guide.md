@@ -685,7 +685,9 @@ Heavy test coverage on undo across every mutating path.
 **Exit criteria:**
 
 - [ ] `checkpoint`, `undo`, `redo`, `journal`, `restore`, `commit`, `fixup`, `stage`, `unstage` each
-      **run from the built binary** and emit a `schemaVersion: 1` envelope.
+      exist as an engine entry point with tests. ~~and **run from the built binary**~~ — **the
+      reachability half moved to M3 on 2026-08-17 (§11 decision 17)**, the same way M1's did under
+      decision 11 and for the same reason: the CLI reaches the engine over XPC, and XPC is M3.
 - [ ] `switchyard hooks install` installs the `reference-transaction` and `post-rewrite` handlers,
       chains any hook already present, and `hooks status` reports what is installed.
 - [ ] The hook returns 0 immediately in **every state that is not `committed`**, and skips the
@@ -699,7 +701,8 @@ Heavy test coverage on undo across every mutating path.
 - [ ] The journal survives a rebuild from refs alone (#0030), and pruning never orphans an anchor.
 - [ ] Commits sign under both SSH and GPG, and a signature that cannot be produced fails with exit 9
       rather than committing unsigned.
-- [ ] `swift test` is green and every command has a test that exercises the **binary**.
+- [ ] `swift test` is green and every command has a test that exercises its **engine entry point**.
+      Exercising the **binary** is M3's criterion (§11 decision 17).
 
 **M3 — Switchyard.app: window, tabs, and the graph view.** The full shell — multiple windows,
 repository tabs on SlidingTabs, and the three-pane Git View — rendering the graph from `YardGit`.
@@ -726,6 +729,10 @@ exist yet.
       on stdout, with `--help` listing each and `schema` emitting one for each. This criterion moved
       here from M1 on 2026-08-07 (§11 decision 11), because the CLI reaches the engine over XPC and
       XPC is built in this milestone.
+- [ ] **Every M2 mutating command runs from the built binary** — `checkpoint`, `undo`, `redo`,
+      `journal`, `restore`, `commit`, `fixup`, `stage`, `unstage` — emitting a `schemaVersion: 1`
+      envelope. Moved here from M2 on 2026-08-17 (§11 decision 17), for the same reason as the line
+      above: M2's engine work cannot be gated on a transport built in M3.
 - [ ] Every command has a test that exercises the **binary**, not only the engine function.
 - [ ] Every command's failure mode returns a structured error and the exit code from §6, not a trap
       and not a success envelope with empty fields.
@@ -999,6 +1006,20 @@ a feature at any milestone on the grounds that GitUp had it.
 
     This decision does not cover the `reference-transaction` hook arm, which has a latency budget and
     must work with the app closed. That is **#0217**, and it is Brennan's.
+
+17. **M2's "runs from the built binary" criteria move to M3, exactly as M1's did.** Decided
+    2026-08-17 in Brennan's absence; it is bookkeeping that follows from decision 11 rather than a new
+    judgement, and it is trivially reversible — two checklist lines.
+
+    Decision 11 (2026-08-07) settled the principle: *"M1 claims the engine and its tests; M3 owns the
+    claim that the commands run."* M2's checklist was written before that and still carried both
+    halves, which makes **M2 unclosable until M3 finishes** — a milestone gated on a later one. The
+    same two lines move, and M3's checklist gains the M2 commands beside the M1 ones it already
+    lists.
+
+    What stays in M2 is everything the journal actually is: the hook layer, undo round-tripping every
+    mutating path, rebuild and pruning, and signing failing with exit 9 rather than committing
+    unsigned. None of that needs a CLI.
 
 16. **A restore detaches rather than adopting a branch a live sibling holds.** Decided 2026-08-17 in
     Brennan's absence under the standing instruction, on the same terms as decision 14 — reversible,
