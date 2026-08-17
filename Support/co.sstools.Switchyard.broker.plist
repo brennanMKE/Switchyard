@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Broker launch agent, registered by the app via
+	  SMAppService.agent(plistName:) and copied into the app bundle at
+	  Contents/Library/LaunchAgents/.
+
+	  Three strings must be identical and are the single most expensive thing to
+	  get wrong here, because launchd fails quietly:
+
+	    1. this file's NAME          co.sstools.Switchyard.broker.plist
+	    2. the Label below           co.sstools.Switchyard.broker
+	    3. the MachServices key      co.sstools.Switchyard.broker
+
+	  All three must equal ServiceNames.machServiceName
+	  (YardKit/Sources/YardKit/ServiceNames.swift), and this file's name must
+	  equal ServiceNames.agentPlistName. #0045's mutation table checks that a
+	  wrong identifier here builds cleanly with nothing mechanical catching it
+	  -- #0046 depends on this matching exactly.
+	-->
+	<key>Label</key>
+	<string>co.sstools.Switchyard.broker</string>
+
+	<!--
+	  Relative to the app bundle root, NOT an absolute path. Using Program with
+	  an absolute path would break the moment the app is moved, and during
+	  development the app lives in DerivedData.
+	-->
+	<key>BundleProgram</key>
+	<string>Contents/MacOS/BrokerAgent</string>
+
+	<!--
+	  This is the key that makes the whole experiment possible: it tells launchd
+	  to reserve the mach service name and hand this process the receive right.
+	  An app cannot do this for itself.
+	-->
+	<key>MachServices</key>
+	<dict>
+		<key>co.sstools.Switchyard.broker</key>
+		<true/>
+	</dict>
+
+	<!--
+	  On-demand only. launchd starts the agent when something connects to the
+	  mach service above, rather than eagerly at login/RunAtLoad.
+	-->
+	<key>RunAtLoad</key>
+	<false/>
+
+	<key>ProcessType</key>
+	<string>Interactive</string>
+</dict>
+</plist>
