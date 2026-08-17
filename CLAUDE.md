@@ -192,6 +192,14 @@ that catches a semantic conflict between two rounds before it reaches `main`. **
 on `main` after the squash**: #0048 was green three times in its own worktree and red on `main` five
 minutes later, because the merge raised the parallel load past what its deadlines tolerated.
 
+**One green run is not evidence when the suite runs in parallel.** #0214 was green in its own
+worktree with `main` merged in, green again when I re-ran it, and put `main` into a state where a
+#0211 test fails in the **full suite only** — bisected to that commit, which touched two files
+neither of which the failing test imports (#0229). Seventy-odd suites shelling out to `git`
+concurrently is a load test nobody wrote, and it has now produced two distinct failures in one day.
+**Run the full suite twice on the merged result before calling an issue resolved**, and treat a
+single green as a sample rather than a proof.
+
 **The orchestrator commits the round the moment it returns**, using that report as the message —
 before reviewing it, not after. The script used to do this from an `EXIT` trap; now nobody does it
 unless you do, and an uncommitted round is one killed session away from being the thing that caused
