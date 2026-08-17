@@ -981,7 +981,9 @@ Decide these with Brennan, do not decide them in code.
    `JournalCheckpoint.checkpoint` now **fails in a bare repository**: #0171 made the
    `WorktreeSnapshot.capture` call unconditional, and it throws `noWorktree(gitDir:)` when
    `context.topLevel` is nil (`WorktreeSnapshot.swift:126-128`). Checkpointing a bare repo previously
-   succeeded refs-only. `WorktreeContext.isBare` exists and `JournalRebuild` is tested against a bare
+   succeeded refs-only. **#0200 widened this to `restore` on 2026-08-17** — the restore flow now takes
+   the same capture at its step 3, so `JournalRestore.restore` fails in a bare repository for the same
+   reason. One answer settles both entry points. `WorktreeContext.isBare` exists and `JournalRebuild` is tested against a bare
    mirror clone, so parts of the engine clearly expect them — but nothing states whether the mutating
    half should. Either capture degrades gracefully when there is no worktree, or bare repositories are
    out of scope and say so.
