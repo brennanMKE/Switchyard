@@ -317,4 +317,36 @@ struct WorktreeStatusTests {
         let bad = try #require(status.entries.dropFirst().first)
         #expect(bad.pathBytes == [0xFF, 0xFE], "pathBytes must be lossless")
     }
+
+    // MARK: - Malformed records throw, rather than being dropped (#0193)
+
+    /// A record whose leading token is not one of `1`, `2`, `u`, `?`, `!` —
+    /// a record type a future git might add. Hand-built, since real
+    /// `git status` never emits a leading token outside that set.
+    @Test("an unrecognized leading record type throws, not silently dropped")
+    func unrecognizedRecordTypeThrows() throws {
+        var data = Data()
+        data.append(contentsOf: Array("X mystery.txt".utf8))
+        data.append(0x00)
+
+        #expect(throws: WorktreeStatusParser.Failure.unrecognizedRecordType(leading: "X")) {
+            _ = try WorktreeStatusParser().parse(data)
+        }
+    }
+
+    /// A `1` record needs 8 space-separated tokens (7 fields plus the
+    /// leading tag) before a path is present. This one is cut off after the
+    /// mode fields, with no oids, XY, or path at all — hand-built, since
+    /// real `git status` never truncates a record mid-field.
+    @Test("a record with fewer tokens than its type requires throws, not silently dropped")
+    func truncatedRecordThrows() throws {
+        let truncated = "1 .M N... 100644 100644"
+        var data = Data()
+        data.append(contentsOf: Array(truncated.utf8))
+        data.append(0x00)
+
+        #expect(throws: WorktreeStatusParser.Failure.truncatedRecord(truncated)) {
+            _ = try WorktreeStatusParser().parse(data)
+        }
+    }
 }

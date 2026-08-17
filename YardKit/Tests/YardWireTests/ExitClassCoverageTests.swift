@@ -97,6 +97,8 @@ struct ExitClassCoverageTests {
     private func addedSinceTheGuard() throws -> [Row] {
         [
             Row("CommitCreate.Failure", CommitCreate.Failure.signingFailed(reason: "x"), .signingFailed),
+            Row("WorktreeStatusParser.Failure",
+                WorktreeStatusParser.Failure.unrecognizedRecordType(leading: "X"), .repositoryError),
         ]
     }
 
