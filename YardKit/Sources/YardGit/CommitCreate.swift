@@ -72,9 +72,14 @@ public struct CommitCreate: Equatable, Sendable {
     ///   every invocation. Tests use it to neutralize global and system config
     ///   scope; production callers leave it empty.
     /// - Throws: `Failure.signingFailed` when signing was in effect and git's
-    ///   stderr matches a measured signing-failure shape; `GitProcess.Failure`
-    ///   for every other non-zero exit. On either throw no commit was written —
-    ///   git refuses the object write itself, measured in #0036's Givens.
+    ///   stderr matches a measured signing-failure shape, or when the commit
+    ///   was still running at `GitProcess.signingTimeout` and signing was in
+    ///   effect (#0163 -- a signing helper's own UI, pinentry or an ssh-agent
+    ///   prompt, is not governed by any of `GitProcess`'s prompt-suppressing
+    ///   environment variables); `GitProcess.Failure` for every other
+    ///   non-zero exit or a timeout with signing not in effect. On either
+    ///   throw no commit was written — git refuses the object write itself,
+    ///   measured in #0036's Givens.
     public static func run(
         message: String,
         signing: Signing = .config,
@@ -86,11 +91,31 @@ public struct CommitCreate: Equatable, Sendable {
         let args = ["commit", "-m", message]
             + trailers.flatMap { ["--trailer", $0.description] }
             + arguments(for: signing)
-        let output = try git.capture(
-            args,
-            workingDirectory: workingDirectory,
-            extraEnvironment: extraEnvironment
-        )
+        let output: GitProcess.Output
+        do {
+            output = try git.capture(
+                args,
+                workingDirectory: workingDirectory,
+                extraEnvironment: extraEnvironment,
+                timeout: GitProcess.signingTimeout
+            )
+        } catch let failure as GitProcess.Failure {
+            if case .timedOut = failure {
+                let inEffect = try signingInEffect(
+                    signing,
+                    in: workingDirectory,
+                    git: git,
+                    extraEnvironment: extraEnvironment
+                )
+                if inEffect {
+                    throw Failure.signingFailed(
+                        reason: "git commit did not finish within \(GitProcess.signingTimeout) "
+                            + "and was terminated -- likely a signing prompt with no way to answer it"
+                    )
+                }
+            }
+            throw failure
+        }
         guard output.exitCode == 0 else {
             let inEffect = try signingInEffect(
                 signing,

@@ -149,11 +149,32 @@ public struct Fixup: Equatable, Sendable {
             rebaseArguments = ["rebase", "--autosquash", "--root"]
                 + CommitCreate.arguments(for: signing)
         }
-        let rebaseOutput = try git.capture(
-            rebaseArguments,
-            workingDirectory: path,
-            extraEnvironment: extraEnvironment
-        )
+        // Bounded only when `signing` could actually invoke a signing
+        // helper (#0163) -- `.noSign` can never prompt, and a rebase
+        // replays every commit between `target` and `HEAD`, so it can
+        // legitimately run far longer than a single `git commit` for
+        // reasons that have nothing to do with signing.
+        let rebaseTimeout: Duration? = signing == .noSign ? nil : GitProcess.signingTimeout
+        let rebaseOutput: GitProcess.Output
+        do {
+            rebaseOutput = try git.capture(
+                rebaseArguments,
+                workingDirectory: path,
+                extraEnvironment: extraEnvironment,
+                timeout: rebaseTimeout
+            )
+        } catch let failure as GitProcess.Failure {
+            if case .timedOut = failure {
+                throw try classifiedRebaseTimeout(
+                    arguments: rebaseArguments,
+                    signing: signing,
+                    at: path,
+                    git: git,
+                    extraEnvironment: extraEnvironment
+                )
+            }
+            throw failure
+        }
         guard rebaseOutput.exitCode == 0 else {
             throw try classifiedRebaseFailure(
                 output: rebaseOutput,
@@ -236,6 +257,31 @@ public struct Fixup: Equatable, Sendable {
             ["rebase", "--abort"], workingDirectory: path, extraEnvironment: extraEnvironment)
         return GitProcess.Failure.exited(
             code: output.exitCode, stderr: output.standardError, arguments: arguments)
+    }
+
+    /// Classifies a `git rebase --autosquash …` that did not finish within
+    /// `GitProcess.signingTimeout` (#0163). The rebase can never be resumed
+    /// from mid-hang, so it is aborted unconditionally, exactly as
+    /// `classifiedRebaseFailure`'s non-conflict paths do -- there is no
+    /// index state here that a caller could usefully continue.
+    private static func classifiedRebaseTimeout(
+        arguments: [String],
+        signing: CommitCreate.Signing,
+        at path: String,
+        git: GitProcess,
+        extraEnvironment: [String: String]
+    ) throws -> Error {
+        let inEffect = try CommitCreate.signingInEffect(
+            signing, in: path, git: git, extraEnvironment: extraEnvironment)
+        _ = try? git.run(
+            ["rebase", "--abort"], workingDirectory: path, extraEnvironment: extraEnvironment)
+        guard inEffect else {
+            return GitProcess.Failure.timedOut(
+                after: GitProcess.signingTimeout, arguments: arguments)
+        }
+        return FixupError.signingFailed(
+            reason: "git rebase --autosquash did not finish within \(GitProcess.signingTimeout) "
+                + "and was terminated -- likely a signing prompt with no way to answer it")
     }
 }
 
