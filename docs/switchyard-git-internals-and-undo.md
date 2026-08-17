@@ -351,7 +351,11 @@ Consequences for undo:
   records which worktree, and restore refuses if run from a different one without `--worktree`.
 - Restoring `refs/heads/*` affects **every worktree**. If another worktree has that branch checked
   out, its working copy is now inconsistent with its `HEAD`. The guard must check other worktrees'
-  `HEAD` values, and `undo` must warn by name when a restore will disturb another worktree.
+  `HEAD` values, and `undo` **refuses**, naming the worktree and branch — corrected 2026-08-17; this
+  line said "must warn by name", and #0044 decision 2 settled it as a refusal rather than a warning
+  because `update-ref` clobbers a sibling's checked-out branch at exit 0 with no message, so a warning
+  would arrive after the damage. Implemented as `WorktreeDisturbance` (#0173), which refuses with exit
+  class 6 and names every disturbance.
 - `refs/rewritten/*` is per-worktree and holds interactive rebase label state. A journal snapshot
   taken mid-rebase must capture it or the rebase cannot be resumed after restore.
 
