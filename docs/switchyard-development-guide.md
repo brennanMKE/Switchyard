@@ -685,9 +685,10 @@ Heavy test coverage on undo across every mutating path.
 **Exit criteria:**
 
 - [ ] `checkpoint`, `undo`, `redo`, `journal`, `restore`, `commit`, `fixup`, `stage`, `unstage` each
-      exist as an engine entry point with tests. ~~and **run from the built binary**~~ — **the
-      reachability half moved to M3 on 2026-08-17 (§11 decision 17)**, the same way M1's did under
-      decision 11 and for the same reason: the CLI reaches the engine over XPC, and XPC is M3.
+      exist as a tested engine entry point emitting a `schemaVersion: 1` envelope. **Running them
+      from the built binary is M3's criterion**, moved there 2026-08-17 (§11 decision 17) the same way
+      M1's was under decision 11, and for the same reason: the CLI reaches the engine over XPC, and
+      XPC is built in M3.
 - [ ] `switchyard hooks install` installs the `reference-transaction` and `post-rewrite` handlers,
       chains any hook already present, and `hooks status` reports what is installed.
 - [ ] The hook returns 0 immediately in **every state that is not `committed`**, and skips the
