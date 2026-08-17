@@ -198,4 +198,16 @@ private nonisolated final class AppService: NSObject, AppServiceProtocol {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
         reply(version ?? "unknown")
     }
+
+    /// Forwards to `performCommand`, the single body both sides of the wire
+    /// run — kept in `YardKit` so the package test suite exercises the exact
+    /// bytes this app sends, rather than a copy that could drift from it.
+    func perform(
+        arguments: [String],
+        workingDirectory: String,
+        reply: @escaping @Sendable (Data, Int32) -> Void
+    ) {
+        let result = performCommand(arguments: arguments, workingDirectory: workingDirectory)
+        reply(result.stdout, result.exitCode)
+    }
 }
