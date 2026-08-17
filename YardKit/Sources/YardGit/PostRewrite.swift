@@ -200,10 +200,14 @@ extension PostRewrite.Source {
     }
 }
 
-/// `Rewrite` rides inside an observed journal entry's metadata (#0220), so its
-/// keys are pinned rather than synthesized: a rename here silently changes
-/// bytes already written into a repository's refs.
-extension PostRewrite.Rewrite: Encodable {
+/// `Rewrite` rides inside an observed journal entry's metadata (#0220) and,
+/// when the invocation was `switchyard`'s own, inside the in-flight entry's
+/// attached mapping (#0221) — so its keys are pinned rather than
+/// synthesized: a rename here silently changes bytes already written into a
+/// repository's refs. `Decodable` too: unlike the foreign observed path,
+/// `JournalEntryMetadata` must round-trip its attached mapping through
+/// ordinary reads (`undo`, `list`), not just write it once.
+extension PostRewrite.Rewrite: Codable {
     private enum CodingKeys: String, CodingKey {
         case oldOid, newOid, extraInfo
     }

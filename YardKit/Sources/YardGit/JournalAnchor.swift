@@ -327,6 +327,109 @@ public enum JournalAnchor {
         return Entry(id: id, commit: commit)
     }
 
+    // MARK: - Updating
+
+    /// Rewrites an already-anchored entry's `metadata.json` blob in place,
+    /// leaving every other tree entry, the commit's parents, and the commit
+    /// message untouched. Used exactly once today: attaching an
+    /// own-invocation rewrite mapping to its in-flight entry after
+    /// `JournalCheckpoint.writeEntry` already wrote it (#0221) — the mapping
+    /// cannot be known until the `post-rewrite` hook fires, which is after
+    /// the entry exists.
+    ///
+    /// **How the other pieces survive untouched.** `git ls-tree <commit>`
+    /// prints each top-level entry as `<mode> SP <type> SP <oid> TAB <name>`
+    /// — measured, and exactly the line shape `mktree` accepts back — so
+    /// every entry but `metadata.json` is carried through byte-for-byte
+    /// rather than reconstructed from typed knowledge of what `write` might
+    /// have stored. Parents come from `git cat-file -p <commit>`'s `parent `
+    /// lines, in order, and ride onto the new commit unchanged; the commit
+    /// message is rebuilt identically to `write`'s.
+    ///
+    /// **The ref update is a compare-and-swap**, `update-ref --stdin`'s
+    /// `update` verb with both the new and the expected-current value, so a
+    /// concurrently replaced or already-deleted anchor is a thrown failure
+    /// (measured: exit 128 on a mismatch), never a silent overwrite — the
+    /// same guarantee `delete` already gives.
+    @discardableResult
+    public static func updateMetadata(
+        _ metadataJSON: Data,
+        for id: JournalEntryID,
+        in context: WorktreeContext,
+        namespace: String = refPrefix,
+        git: GitProcess = GitProcess()
+    ) throws -> Entry {
+        let base = context.topLevel ?? context.gitDir
+        let ref = namespace + id.string
+
+        let current = try singleOID(
+            of: try git.run(["rev-parse", "--verify", ref], workingDirectory: base),
+            command: "rev-parse")
+
+        let metadataBlob = try singleOID(
+            of: try git.run(["hash-object", "-w", "--stdin"],
+                            workingDirectory: base,
+                            standardInput: metadataJSON),
+            command: "hash-object")
+
+        let listing = try git.run(["ls-tree", current], workingDirectory: base)
+        var treeLines = ""
+        var replacedMetadata = false
+        for line in listing.lines {
+            guard let tab = line.firstIndex(of: "\t") else {
+                throw Error.malformedPlumbingOutput(command: "ls-tree", line: line)
+            }
+            if String(line[line.index(after: tab)...]) == metadataTreeEntryName {
+                treeLines += "100644 blob \(metadataBlob)\t\(metadataTreeEntryName)\n"
+                replacedMetadata = true
+            } else {
+                treeLines += line + "\n"
+            }
+        }
+        guard replacedMetadata else {
+            throw Error.malformedPlumbingOutput(
+                command: "ls-tree", line: "no \(metadataTreeEntryName) entry in \(current)")
+        }
+        let tree = try singleOID(
+            of: try git.run(["mktree"], workingDirectory: base,
+                            standardInput: Data(treeLines.utf8)),
+            command: "mktree")
+
+        let parents = try git.run(["cat-file", "-p", current], workingDirectory: base)
+            .lines
+            .prefix(while: { !$0.isEmpty })
+            .filter { $0.hasPrefix("parent ") }
+            .map { String($0.dropFirst("parent ".count)) }
+
+        var commitArguments = ["commit-tree", tree,
+                               "-m", "switchyard journal entry \(id.string)"]
+        for parent in parents { commitArguments += ["-p", parent] }
+        let commit = try singleOID(
+            of: try git.run(commitArguments, workingDirectory: base,
+                            extraEnvironment: commitEnvironment),
+            command: "commit-tree")
+
+        try git.run(["update-ref", "--stdin"], workingDirectory: base,
+                    standardInput: Data(updateRefCommand(ref: ref, new: commit, old: current).utf8))
+        return Entry(id: id, commit: commit)
+    }
+
+    /// The `update-ref --stdin` line that swaps `ref` from `old` to `new`.
+    ///
+    /// The **old** oid is the compare-and-swap: `update <ref> <new> <old>`
+    /// fails if anything moved the ref since it was read, so a concurrent
+    /// writer loses rather than being silently overwritten. `update-ref
+    /// --stdin`'s `update` verb accepts `<old>` as optional -- omitting it is
+    /// a valid line, and it means "write unconditionally" -- so the old oid
+    /// is not incidental formatting here; it is the whole guard, and its
+    /// absence is a silent downgrade to an unguarded write rather than a
+    /// parse error. `updateMetadata` is the only caller today; extracted so
+    /// the guard is a pure function a test can assert on directly, not just
+    /// exercise indirectly through git's own success or failure.
+    static func updateRefCommand(ref: String, new: String, old: String) -> String {
+        "update \(ref) \(new) \(old)\n"
+    }
+
     // MARK: - Reading
 
     /// Every entry, oldest first. `for-each-ref` sorts by refname and ids

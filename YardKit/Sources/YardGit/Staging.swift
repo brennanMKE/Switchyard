@@ -54,7 +54,7 @@ public func stageHunks(
     at path: String,
     git: GitProcess = GitProcess()
 ) throws {
-    try JournalCheckpoint.around(operation: "stage", at: path, git: git) {
+    try JournalCheckpoint.around(operation: "stage", at: path, git: git) { git in
         try stageHunksWithoutCheckpoint(ids: ids, at: path, git: git)
     }
 }
@@ -170,7 +170,7 @@ public func commitHunks(
         throw CommitHunksError.indexNotClean(paths: staged)
     }
     return try JournalCheckpoint.around(
-        operation: "commit", at: path, git: git) {
+        operation: "commit", at: path, git: git) { git in
         try stageHunksWithoutCheckpoint(ids: ids, at: path, git: git)
         return try CommitCreate.run(
             message: message,

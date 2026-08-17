@@ -71,11 +71,19 @@ public struct JournalEntryMetadata: Sendable, Equatable, Codable {
     /// disagree about what a traversal records.
     public let traversal: JournalChain.Traversal?
 
+    /// The old→new commit mapping from `switchyard`'s own rewrite, attached
+    /// after this entry was written when the operation the checkpoint
+    /// preceded turned out to run one (#0221) — the `post-rewrite` hook
+    /// fires only after the rewrite, so this field can never be known at
+    /// checkpoint time and always arrives as a later attach, never at
+    /// initial write. `nil` on every entry nothing rewrote.
+    public let rewrite: RewriteMapping?
+
     /// The wire names. `guardRefs` maps to "guard", which Swift reserves;
     /// everything else matches its property.
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, id, operation, command, label, timestamp
-        case worktree, captured, agent, traversal
+        case worktree, captured, agent, traversal, rewrite
         case guardRefs = "guard"
     }
 
@@ -89,7 +97,8 @@ public struct JournalEntryMetadata: Sendable, Equatable, Codable {
         captured: Captured,
         guardRefs: [String: String] = [:],
         agent: Agent? = nil,
-        traversal: JournalChain.Traversal? = nil
+        traversal: JournalChain.Traversal? = nil,
+        rewrite: RewriteMapping? = nil
     ) {
         self.schemaVersion = Self.currentSchemaVersion
         self.id = id
@@ -103,6 +112,36 @@ public struct JournalEntryMetadata: Sendable, Equatable, Codable {
         self.guardRefs = guardRefs
         self.agent = agent
         self.traversal = traversal
+        self.rewrite = rewrite
+    }
+
+    /// This entry with `mapping` attached as `rewrite`, every other field
+    /// carried through unchanged (#0221) — the metadata is already written
+    /// by the time a rewrite's mapping exists to attach, so this is the one
+    /// legitimate way to add the field after the fact rather than a general
+    /// mutation path.
+    public func attachingRewrite(_ mapping: RewriteMapping) -> JournalEntryMetadata {
+        JournalEntryMetadata(
+            id: id, operation: operation, command: command, label: label,
+            timestamp: timestamp, worktree: worktree, captured: captured,
+            guardRefs: guardRefs, agent: agent, traversal: traversal,
+            rewrite: mapping)
+    }
+
+    /// What `attachingRewrite` carries: the same shape
+    /// `JournalObserved.Metadata`'s foreign-rewrite payload uses (#0220) —
+    /// `source` is `PostRewrite.Source.gitArgument`, `rewrites` is the
+    /// mapping in `PostRewrite.parse`'s order — but living inside the
+    /// in-flight entry rather than a separate observed one, because this
+    /// mapping came from `switchyard`'s own invocation.
+    public struct RewriteMapping: Sendable, Equatable, Codable {
+        public let source: String
+        public let rewrites: [PostRewrite.Rewrite]
+
+        public init(source: String, rewrites: [PostRewrite.Rewrite]) {
+            self.source = source
+            self.rewrites = rewrites
+        }
     }
 
     // MARK: - Nested pieces
