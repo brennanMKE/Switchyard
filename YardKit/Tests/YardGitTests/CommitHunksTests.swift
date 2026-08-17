@@ -138,3 +138,87 @@ func unknownHunkIdCommitsNothingAndStagesNothing(format: FixtureRepository.RefFo
     let unstaged = try listedHunks(in: repo, area: .unstaged)
     #expect(unstaged.count == 2)
 }
+
+// MARK: - #0209: commitHunks composes stageHunks and CommitCreate.run behind
+// JournalCheckpoint.around and must produce exactly one journal entry — not
+// zero, not two — with the clean-index refusal outside the checkpoint.
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func commitHunksWritesExactlyOneJournalEntry(format: FixtureRepository.RefFormat) throws {
+    let repo = try twoHunkRepo(format)
+    defer { repo.destroy() }
+    let ctx = try WorktreeContext.resolve(path: repo.url.path)
+    let before = try JournalAnchor.list(in: ctx).count
+
+    let first = try #require(try listedHunks(in: repo, area: .unstaged).first)
+    _ = try commitHunks(
+        ids: [first.id], message: "commit first hunk only",
+        at: repo.url.path, extraEnvironment: hermetic)
+
+    let after = try JournalAnchor.list(in: ctx).count
+    #expect(after - before == 1,
+            "two primitives ran inside commitHunks; exactly one journal entry must result")
+}
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func undoAfterCommitHunksRestoresThePreCommitState(format: FixtureRepository.RefFormat) throws {
+    let repo = try twoHunkRepo(format)
+    defer { repo.destroy() }
+    let ctx = try WorktreeContext.resolve(path: repo.url.path)
+
+    let beforeRefs = try RefSnapshot.capture(in: ctx)
+    let beforeStages = try GitProcess().run(
+        ["ls-files", "-s"], workingDirectory: repo.url.path).text
+    let beforeTracked = try GitProcess().run(
+        ["show", "HEAD:f.txt"], workingDirectory: repo.url.path).text
+
+    let before = try JournalAnchor.list(in: ctx).count
+
+    let first = try #require(try listedHunks(in: repo, area: .unstaged).first)
+    _ = try commitHunks(
+        ids: [first.id], message: "commit first hunk only",
+        at: repo.url.path, extraEnvironment: hermetic)
+
+    let afterEntries = try JournalAnchor.list(in: ctx)
+    #expect(afterEntries.count == before + 1)
+    // `JournalAnchor.list` is creation-ordered oldest-first (its own doc
+    // comment), so the entry commitHunks just wrote is the last one.
+    let checkpointEntry = try #require(afterEntries.last)
+
+    let wreckedRefs = try RefSnapshot.capture(in: ctx)
+    #expect(wreckedRefs != beforeRefs, "the commit must actually move HEAD, or this proves nothing")
+
+    let report = try JournalRestore.restore(checkpointEntry.id, in: ctx)
+    #expect(report.restored.contains(.refs))
+    #expect(report.restored.contains(.index))
+
+    let afterRefs = try RefSnapshot.capture(in: ctx)
+    #expect(afterRefs == beforeRefs, "refs must round-trip back to before the commit")
+    let afterStages = try GitProcess().run(
+        ["ls-files", "-s"], workingDirectory: repo.url.path).text
+    #expect(afterStages == beforeStages, "index stages must round-trip back to before the commit")
+    let afterTracked = try GitProcess().run(
+        ["show", "HEAD:f.txt"], workingDirectory: repo.url.path).text
+    #expect(afterTracked == beforeTracked, "HEAD:f.txt must round-trip back to before the commit")
+}
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func aRefusedCommitHunksWritesNoEntry(format: FixtureRepository.RefFormat) throws {
+    let repo = try twoHunkRepo(format)
+    defer { repo.destroy() }
+    let ctx = try WorktreeContext.resolve(path: repo.url.path)
+    try repo.writeUntracked(["unrelated.txt": "unrelated content\n"])
+    try GitProcess().run(["add", "unrelated.txt"], workingDirectory: repo.url.path)
+
+    let before = try JournalAnchor.list(in: ctx).count
+    let first = try #require(try listedHunks(in: repo, area: .unstaged).first)
+
+    #expect(throws: CommitHunksError.self) {
+        _ = try commitHunks(
+            ids: [first.id], message: "must not commit",
+            at: repo.url.path, extraEnvironment: hermetic)
+    }
+
+    let after = try JournalAnchor.list(in: ctx).count
+    #expect(after == before, "a refusal must not write a journal entry")
+}
