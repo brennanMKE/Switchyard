@@ -178,3 +178,12 @@ public enum ReferenceTransaction {
         return ParseResult(updates: updates, malformedLineCount: malformed)
     }
 }
+
+/// `RefUpdate` rides inside an observed journal entry's metadata (#0153), so
+/// its keys are pinned rather than synthesized: a rename here silently changes
+/// bytes already written into a repository's refs.
+extension ReferenceTransaction.RefUpdate: Encodable {
+    private enum CodingKeys: String, CodingKey {
+        case oldValue, newValue, refName
+    }
+}
