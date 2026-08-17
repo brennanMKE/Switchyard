@@ -339,6 +339,18 @@ public enum JournalRestore {
             if metadata.captured.untracked { restored.append(.untracked) }
         }
 
+        // 8b. Restore the sequencer state, if captured. The tree is stored as a
+        // single tree object in the anchor; restore materialises it into the
+        // sequencer directory byte-for-byte. `autoMerge` is a keep-alive
+        // concern at capture time only -- restore never reads it -- so nil here
+        // restores identically and adds no crash path.
+        if let layout = metadata.captured.sequencer.layout,
+           let oid = slots[JournalAnchor.sequencerTreeEntryName] {
+            try SequencerSnapshot(layout: layout, tree: oid, autoMerge: nil)
+                .restore(in: context, git: git)
+            restored.append(.sequencer)
+        }
+
         // 9. Report honestly — only what was NOT put back.
         return Report(
             entry: entry,
@@ -457,8 +469,11 @@ public enum JournalRestore {
                 piece: .untracked,
                 reason: captured.untracked ? .restoreUnavailable : .notCaptured))
         }
-        // #0174 built the primitive; nothing captures it yet.
-        result.append(Omission(piece: .sequencer, reason: .notCaptured))
+        if !restored.contains(.sequencer) {
+            result.append(Omission(
+                piece: .sequencer,
+                reason: captured.sequencer == .notCaptured ? .notCaptured : .restoreUnavailable))
+        }
         return result
     }
 }

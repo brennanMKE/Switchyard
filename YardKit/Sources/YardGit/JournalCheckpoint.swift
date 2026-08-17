@@ -54,10 +54,12 @@ public enum JournalCheckpoint {
         git: GitProcess = GitProcess()
     ) throws -> JournalAnchor.Entry {
         try JournalLock(context: context).withLock(timeout: lockTimeout) {
-            try writeEntry(
+            let sequencer = try SequencerSnapshot.capture(in: context, git: git)
+            return try writeEntry(
                 capturing: RefSnapshot.capture(in: context, git: git),
                 index: try IndexSnapshot.capture(in: context, git: git),
                 worktree: try WorktreeSnapshot.capture(in: context, git: git),
+                sequencer: sequencer,
                 operation: operation,
                 label: label,
                 command: command,
@@ -84,6 +86,7 @@ public enum JournalCheckpoint {
         capturing snapshot: RefSnapshot,
         index: IndexSnapshot? = nil,
         worktree: WorktreeSnapshot? = nil,
+        sequencer: SequencerSnapshot? = nil,
         operation: String,
         label: String? = nil,
         command: String? = nil,
@@ -119,7 +122,8 @@ public enum JournalCheckpoint {
                 refs: true, head: true,
                 index: index?.captured ?? .notCaptured,
                 worktree: worktree == nil ? .notCaptured : .stash,
-                untracked: worktree != nil),
+                untracked: worktree != nil,
+                sequencer: sequencer.map { .init($0.layout) } ?? .notCaptured),
             agent: agent,
             traversal: traversal)
 
@@ -128,6 +132,22 @@ public enum JournalCheckpoint {
         // be a parent or ordinary maintenance may reclaim it — the same reason
         // captured ref tips are parents.
         if let worktree { keepAlive.append(worktree.commit) }
+        // NOT `keepAlive.append(contentsOf: sequencer.keepAlive)`, as this
+        // issue's own literal text specified: `SequencerSnapshot.keepAlive`
+        // returns TREE oids (the sequencer tree, and AUTO_MERGE's tree when
+        // present) — commit-tree's `-p` requires an actual commit, and a tree
+        // there is a hard `fatal: <oid> is not a valid 'commit' object`, exit
+        // 128, on every mid-rebase checkpoint (measured: this crashed the
+        // round-trip test the issue calls "the point", and reproduced with a
+        // two-line scratch repo independent of any fixture). The sequencer's
+        // own tree needs no parent slot regardless: `JournalAnchor.write`
+        // already embeds `contents.sequencerTree` as a subtree of the anchor
+        // commit's own tree, so it is reachable from the anchor with no
+        // parent needed. AUTO_MERGE's tree (only present under
+        // merge.conflictStyle=diff3/zdiff3) has no reachability path in this
+        // design — it is not embedded in the anchor tree and cannot be a
+        // commit parent — which is a real gap left for review rather than
+        // silently dropped; see the round's report.
 
         var indexTree: String?
         var indexBlob: String?
@@ -143,6 +163,7 @@ public enum JournalCheckpoint {
             indexTree: indexTree,
             indexBlob: indexBlob,
             untrackedTree: worktree?.untrackedTree,
+            sequencerTree: sequencer?.tree,
             keepAlive: keepAlive)
         return try JournalAnchor.write(contents, id: id, in: context, git: git)
     }
