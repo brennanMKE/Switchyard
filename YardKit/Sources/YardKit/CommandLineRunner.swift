@@ -42,6 +42,29 @@ public func runYard(arguments: [String]) -> (stdout: String, stderr: String, exi
     return (stdout: jsonString(env), stderr: human, exitCode: .usage)
 }
 
+/// Runs a command and returns exactly what the CLI must print, plus the exit
+/// code as it crosses the XPC boundary — `Data` because `NSXPCInterface`
+/// carries no Swift `String`/`enum` guarantees, `Int32` because `ExitCode` is
+/// `Int`-backed. See guide §11 decision 15.
+///
+/// This is the single body both sides of the wire run: `AppService.perform`
+/// in `Switchyard/AppXPCServer.swift` is a thin forwarder to this function
+/// plus `reply(...)`, and a test's in-process fake calls this same function
+/// rather than reimplementing its encoding — so a bug here is caught by the
+/// package test suite, which `swift test` builds, instead of living only in
+/// the app target, which it does not.
+public func performCommand(
+    arguments: [String],
+    workingDirectory: String
+) -> (stdout: Data, exitCode: Int32) {
+    // workingDirectory is threaded through the wire now so a future
+    // engine-backed command (#0124) can resolve paths relative to the CLI's
+    // cwd rather than the app's; runYard does not consume it yet.
+    let result = runYard(arguments: arguments)
+    let data = result.stdout.data(using: .utf8) ?? Data()
+    return (stdout: data, exitCode: Int32(result.exitCode.rawValue))
+}
+
 // MARK: - --help / --version helpers
 
 private func helpForTopLevel() -> (stdout: String, stderr: String, exitCode: ExitCode) {

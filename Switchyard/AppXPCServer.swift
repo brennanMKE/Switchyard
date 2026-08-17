@@ -199,17 +199,15 @@ private nonisolated final class AppService: NSObject, AppServiceProtocol {
         reply(version ?? "unknown")
     }
 
-    /// Runs `runYard` and replies with its stdout bytes and exit code,
-    /// unmodified — no re-encoding, no pretty-printing. `runYard` does not
-    /// take a working directory yet, so `workingDirectory` passes through
-    /// unused until an engine-backed command needs it (#0124).
+    /// Forwards to `performCommand`, the single body both sides of the wire
+    /// run — kept in `YardKit` so the package test suite exercises the exact
+    /// bytes this app sends, rather than a copy that could drift from it.
     func perform(
         arguments: [String],
         workingDirectory: String,
         reply: @escaping @Sendable (Data, Int32) -> Void
     ) {
-        let result = runYard(arguments: arguments)
-        let data = result.stdout.data(using: .utf8) ?? Data()
-        reply(data, Int32(result.exitCode.rawValue))
+        let result = performCommand(arguments: arguments, workingDirectory: workingDirectory)
+        reply(result.stdout, result.exitCode)
     }
 }

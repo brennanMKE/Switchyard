@@ -14,20 +14,19 @@ private final class FakeAppService: NSObject, AppServiceProtocol {
         reply("pong")
     }
 
-    /// Mirrors the real app's implementation in
-    /// `Switchyard/AppXPCServer.swift` exactly: calls `runYard` and hands
-    /// back its stdout bytes and exit code unmodified. The app target is not
+    /// Forwards to `performCommand`, the exact function `AppService.perform`
+    /// in `Switchyard/AppXPCServer.swift` forwards to. The app target is not
     /// `@testable import`able from a Swift package test target, so this is
-    /// the same object the app exports in every way that matters for this
-    /// wire — same protocol, same interface, same underlying call.
+    /// not a re-implementation to keep in sync — it is a call to the same
+    /// body the app actually runs, which is what makes a mutation to that
+    /// body visible to `swift test`.
     func perform(
         arguments: [String],
         workingDirectory: String,
         reply: @escaping @Sendable (Data, Int32) -> Void
     ) {
-        let result = runYard(arguments: arguments)
-        let data = result.stdout.data(using: .utf8) ?? Data()
-        reply(data, Int32(result.exitCode.rawValue))
+        let result = performCommand(arguments: arguments, workingDirectory: workingDirectory)
+        reply(result.stdout, result.exitCode)
     }
 }
 
