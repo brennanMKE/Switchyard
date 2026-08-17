@@ -1000,6 +1000,34 @@ a feature at any milestone on the grounds that GitUp had it.
     This decision does not cover the `reference-transaction` hook arm, which has a latency budget and
     must work with the app closed. That is **#0217**, and it is Brennan's.
 
+16. **A restore detaches rather than adopting a branch a live sibling holds.** Decided 2026-08-17 in
+    Brennan's absence under the standing instruction, on the same terms as decision 14 — reversible,
+    flagged here, and taken on measurement. **#0211** is the finding and states the case for overruling
+    it; if the strict reading of #0044 decision 2's three verbs is the one Brennan wants, this becomes a
+    recorded scope clarification instead and #0211 closes `wontfix`.
+
+    Measured, git 2.50.1: `git checkout <branch>` refuses with `fatal: '<branch>' is already used by
+    worktree at …` (exit 128), but the plumbing `symref-update HEAD refs/heads/<branch>` that restore
+    uses **succeeds silently**, after which `git worktree list` shows the branch claimed **twice** and
+    the next commit in either worktree moves it under the other. Restore therefore manufactures a state
+    git itself refuses to create.
+
+    Adopting is not the only way to honour the snapshot. **`HEAD` at the recorded oid, detached**, puts
+    the worktree on exactly the commit the snapshot recorded; only the symref is given up, and only when
+    someone else is standing on it. So:
+
+    - The branch's holder must be a **live** sibling — a `prunable` worktree record holds nothing, and
+      adopting its branch is the dead-agent recovery case #0175 exists for. Key on liveness, never on
+      the `allowDifferentWorktree` override; the collision predates it and happens same-worktree too
+      (both measured in #0211).
+    - Refusing was the alternative and is worse here: it would break the recovery path #0175 was built
+      for, and a refusal at restore time is not more informative than a detached `HEAD` the caller can
+      see in `whereami`.
+
+    **#0034 decision 5** — "`HEAD` applies to the calling worktree — documented, not hidden" — was
+    settled without this collision in view. It is unchanged in substance; this is the exception it did
+    not consider.
+
 
 
 ### Still open
