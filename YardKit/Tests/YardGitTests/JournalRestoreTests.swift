@@ -572,6 +572,44 @@ struct JournalRestoreTests {
             calling: nil, recordedStillExists: true))
     }
 
+    /// #0175's own Expected-behavior list says `WorktreeDisturbance` still
+    /// refuses a sibling-disturbing restore under the override. #0210: the
+    /// "agent" worktree from `crossWorktreeFixture` is itself the sibling
+    /// relative to the caller (`mainCtx`) here, so moving its checked-out
+    /// branch after the entry was recorded — the same `update-ref` plumbing
+    /// as `restoreRefusesToDisturbASiblingsCheckoutEvenWithBypassGuard` —
+    /// makes the cross-worktree apply disturb it.
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func restoreRefusesToDisturbASiblingsCheckoutEvenUnderTheCrossWorktreeOverride(
+        format: FixtureRepository.RefFormat
+    ) throws {
+        let (repo, mainCtx, wtCtx, entry, _, _) = try crossWorktreeFixture(format: format)
+        defer { repo.destroy() }
+        let wtPath = try #require(wtCtx.topLevel)
+
+        // Move the sibling's checked-out branch with plumbing after the
+        // entry was recorded — which git allows silently at exit 0 (#0044).
+        // Restoring under the override would move it back.
+        let moved = try #require(repo.oids["a"])
+        let target = try #require(repo.oids["c"])
+        try git.run(["update-ref", "refs/heads/agent-branch", moved],
+                    workingDirectory: repo.url.path)
+        let countBefore = try JournalAnchor.list(in: mainCtx).count
+        let stateBefore = try RefSnapshot.capture(in: mainCtx)
+
+        let thrown = #expect(throws: WorktreeDisturbance.Error.self) {
+            try JournalRestore.restore(entry.id, allowDifferentWorktree: true, in: mainCtx)
+        }
+        let error = try #require(thrown)
+        #expect(error == .wouldDisturb(disturbances: [
+            .init(worktreePath: wtPath, branch: "refs/heads/agent-branch",
+                  current: moved, target: target, prunable: false),
+        ]))
+        // Nothing was written, even under the cross-worktree override.
+        #expect(try JournalAnchor.list(in: mainCtx).count == countBefore)
+        #expect(try RefSnapshot.capture(in: mainCtx) == stateBefore)
+    }
+
     // MARK: - The lock wraps the whole flow
 
     /// Single format on purpose: the lock is `flock(2)` on a file under the
