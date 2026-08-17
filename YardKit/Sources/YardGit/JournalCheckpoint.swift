@@ -130,7 +130,10 @@ public enum JournalCheckpoint {
         var keepAlive = try keepAliveParents(of: snapshot, at: base, git: git)
         // The worktree snapshot's commit is reachable from no ref, so it must
         // be a parent or ordinary maintenance may reclaim it — the same reason
-        // captured ref tips are parents.
+        // captured ref tips are parents. Its *position* in this list carries
+        // no meaning: `worktreeCommit` above is the identification path
+        // (#0202), read from its own tree entry, not from where it lands
+        // here relative to whatever else this list grows to hold.
         if let worktree { keepAlive.append(worktree.commit) }
         // NOT `keepAlive.append(contentsOf: sequencer.keepAlive)`, as this
         // issue's own literal text specified: `SequencerSnapshot.keepAlive`
@@ -164,6 +167,7 @@ public enum JournalCheckpoint {
             indexBlob: indexBlob,
             untrackedTree: worktree?.untrackedTree,
             sequencerTree: sequencer?.tree,
+            worktreeCommit: worktree?.commit,
             keepAlive: keepAlive)
         return try JournalAnchor.write(contents, id: id, in: context, git: git)
     }

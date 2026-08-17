@@ -161,6 +161,12 @@ public enum JournalAnchor {
     /// is stored as a single tree object; the layout (rebase-merge vs
     /// rebase-apply) is recorded in metadata.captured.sequencer.
     public static let sequencerTreeEntryName = "sequencer"
+    /// Commit OID of the worktree snapshot, if captured — stored as its own
+    /// gitlink entry (mode `160000`, the same mode git uses for submodules)
+    /// so a reader finds it by name rather than by position in `keepAlive`
+    /// (#0202). A gitlink entry confers no reachability of its own; the
+    /// commit is *also* a `keepAlive` parent for that reason, unchanged.
+    public static let worktreeCommitTreeEntryName = "worktree-commit"
 
     /// What one entry stores. Piece OIDs are produced by the snapshot
     /// primitives (#0027, #0151, #0152) and arrive here opaque; `write`
@@ -180,6 +186,10 @@ public enum JournalAnchor {
         public var untrackedTree: String?
         /// Tree OID of the sequencer state snapshot, if captured.
         public var sequencerTree: String?
+        /// Commit OID of the worktree snapshot, if captured — stored as a
+        /// named gitlink entry (`worktreeCommitTreeEntryName`) rather than
+        /// inferred from `keepAlive`'s order (#0202).
+        public var worktreeCommit: String?
         /// Commit OIDs the entry must keep reachable — the stash commit and
         /// captured history tips. Written as the snapshot commit's parents.
         public var keepAlive: [String]
@@ -191,6 +201,7 @@ public enum JournalAnchor {
             indexBlob: String? = nil,
             untrackedTree: String? = nil,
             sequencerTree: String? = nil,
+            worktreeCommit: String? = nil,
             keepAlive: [String] = []
         ) {
             self.metadataJSON = metadataJSON
@@ -199,6 +210,7 @@ public enum JournalAnchor {
             self.indexBlob = indexBlob
             self.untrackedTree = untrackedTree
             self.sequencerTree = sequencerTree
+            self.worktreeCommit = worktreeCommit
             self.keepAlive = keepAlive
         }
     }
@@ -286,6 +298,9 @@ public enum JournalAnchor {
         }
         if let oid = contents.sequencerTree {
             treeLines += "040000 tree \(oid)\t\(sequencerTreeEntryName)\n"
+        }
+        if let oid = contents.worktreeCommit {
+            treeLines += "160000 commit \(oid)\t\(worktreeCommitTreeEntryName)\n"
         }
         let tree = try singleOID(
             of: try git.run(["mktree"], workingDirectory: base,

@@ -96,4 +96,53 @@ struct FullCaptureUndoTests {
         #expect(!unreachable.contains(worktreeCommit),
                 "the worktree commit must be reachable through the anchor")
     }
+
+    /// A commit reachable from nothing, distinguishable by its message —
+    /// stands in for a real worktree snapshot or a further keep-alive tip
+    /// without needing a real capture.
+    private func syntheticCommit(marker: String, in repo: FixtureRepository) throws -> String {
+        let tree = try #require(try git.run(
+            ["write-tree"], workingDirectory: repo.url.path).lines.first)
+        return try #require(try git.run(
+            ["commit-tree", tree, "-m", "synthetic \(marker)"],
+            workingDirectory: repo.url.path,
+            extraEnvironment: ["GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@invalid",
+                               "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@invalid"])
+            .lines.first)
+    }
+
+    /// #0202 regression, built directly against `JournalAnchor.write` rather
+    /// than by editing `JournalCheckpoint.writeEntry`: the worktree commit
+    /// sits in `keepAlive` at index 0, with a second keep-alive oid appended
+    /// after it — the exact #0188-shaped ordering (append one more keep-alive
+    /// commit past the worktree commit) that the old `parents.last` read
+    /// would have missed. `worktreeCommit(of:)` must still find it, because
+    /// it now reads the commit's own tree entry rather than the tail of this
+    /// list.
+    @Test func worktreeCommitIsFoundEvenWhenNotTheLastKeepAliveParent() throws {
+        let repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let ctx = try WorktreeContext.resolve(path: repo.url.path)
+
+        let worktreeVictim = try syntheticCommit(marker: "worktree", in: repo)
+        let trailingVictim = try syntheticCommit(marker: "trailing-keep-alive", in: repo)
+        #expect(worktreeVictim != trailingVictim,
+                "the two synthetic commits must be distinguishable")
+
+        let id = try #require(JournalEntryID("010000000000000000000000" + "02"))
+        let metadata = JournalEntryMetadata(
+            id: id, operation: "checkpoint", timestamp: Date(timeIntervalSince1970: 0),
+            worktree: .init(name: nil, path: repo.url.path),
+            captured: .refsOnly)
+        let entry = try JournalAnchor.write(
+            JournalAnchor.Contents(
+                metadataJSON: try metadata.serialized(),
+                worktreeCommit: worktreeVictim,
+                keepAlive: [worktreeVictim, trailingVictim]),
+            id: id, in: ctx)
+
+        let found = try JournalRestore.worktreeCommit(of: entry, at: repo.url.path, git: git)
+        #expect(found == worktreeVictim,
+                "worktreeCommit(of:) must resolve the commit named in its own tree entry, not \(trailingVictim)")
+    }
 }
