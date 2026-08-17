@@ -138,14 +138,18 @@ public struct JournalEntryMetadata: Sendable, Equatable, Codable {
         public let index: IndexCapture
         public let worktree: WorktreeCapture
         public let untracked: Bool
+        /// The sequencer capture state. Wire: `false` or `"merge"`.
+        public let sequencer: SequencerCapture
 
         public init(refs: Bool, head: Bool, index: IndexCapture,
-                    worktree: WorktreeCapture, untracked: Bool) {
+                    worktree: WorktreeCapture, untracked: Bool,
+                    sequencer: SequencerCapture = .notCaptured) {
             self.refs = refs
             self.head = head
             self.index = index
             self.worktree = worktree
             self.untracked = untracked
+            self.sequencer = sequencer
         }
 
         /// What checkpoint writes until #0171 wires the index and worktree
@@ -153,6 +157,42 @@ public struct JournalEntryMetadata: Sendable, Equatable, Codable {
         public static let refsOnly = Captured(
             refs: true, head: true, index: .notCaptured,
             worktree: .notCaptured, untracked: false)
+
+        /// The sequencer capture state. Wire: `false` / `"merge"`.
+        public enum SequencerCapture: Sendable, Equatable, Codable {
+            /// Not captured. Wire: `false`.
+            case notCaptured
+            /// Captured as a rebase-merge state. Wire: `"merge"`.
+            case merge
+            public init(from decoder: any Decoder) throws {
+                let container = try decoder.singleValueContainer()
+                if let flag = try? container.decode(Bool.self) {
+                    guard !flag else {
+                        throw DecodingError.dataCorrupted(.init(
+                            codingPath: decoder.codingPath,
+                            debugDescription:
+                                "captured.sequencer true is not a wire value; expected false or \"merge\""))
+                    }
+                    self = .notCaptured
+                    return
+                }
+                switch try container.decode(String.self) {
+                case "merge": self = .merge
+                case let other:
+                    throw DecodingError.dataCorrupted(.init(
+                        codingPath: decoder.codingPath,
+                        debugDescription: "unknown captured.sequencer value: \(other)"))
+                }
+            }
+
+            public func encode(to encoder: any Encoder) throws {
+                var container = encoder.singleValueContainer()
+                switch self {
+                case .notCaptured: try container.encode(false)
+                case .merge: try container.encode("merge")
+                }
+            }
+        }
     }
 
     /// How the index was captured. Encoded by hand as `false` / `"tree"` /

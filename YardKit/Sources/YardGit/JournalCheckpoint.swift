@@ -7,11 +7,10 @@ import Foundation
 /// `checkpoint [label]`, and the primitive every restore-class flow (#0168,
 /// #0169) calls to write its own pre-mutation entry.
 ///
-/// **What a checkpoint captures today: refs and `HEAD`, nothing else.** The
-/// index and worktree snapshot primitives (#0151, #0152) do not exist yet, so
-/// the entry's `captured` map is `JournalEntryMetadata.Captured.refsOnly` —
-/// honest by construction until #0171 wires the other pieces in and flips the
-/// flags (#0034 decision 3).
+/// **What a checkpoint captures today: refs, `HEAD`, index, worktree, and
+/// the sequencer.** The index and worktree snapshot primitives (#0151, #0152)
+/// are wired in (#0171); the sequencer is captured when present, so an
+/// interrupted rebase survives a checkpoint/restore cycle (#0188).
 ///
 /// **The whole flow runs inside `JournalLock.withLock` (#0032)** — capture,
 /// blob write, id generation, anchor write — so the newest-id read that
@@ -53,11 +52,13 @@ public enum JournalCheckpoint {
         in context: WorktreeContext,
         git: GitProcess = GitProcess()
     ) throws -> JournalAnchor.Entry {
-        try JournalLock(context: context).withLock(timeout: lockTimeout) {
-            try writeEntry(
+        return try JournalLock(context: context).withLock(timeout: lockTimeout) {
+            let sequencer = try SequencerSnapshot.capture(in: context, git: git)
+            return try writeEntry(
                 capturing: RefSnapshot.capture(in: context, git: git),
                 index: try IndexSnapshot.capture(in: context, git: git),
                 worktree: try WorktreeSnapshot.capture(in: context, git: git),
+                sequencer: sequencer,
                 operation: operation,
                 label: label,
                 command: command,
@@ -84,6 +85,7 @@ public enum JournalCheckpoint {
         capturing snapshot: RefSnapshot,
         index: IndexSnapshot? = nil,
         worktree: WorktreeSnapshot? = nil,
+        sequencer: SequencerSnapshot? = nil,
         operation: String,
         label: String? = nil,
         command: String? = nil,
@@ -108,6 +110,13 @@ public enum JournalCheckpoint {
         let id = JournalEntryID.generate(
             after: try JournalAnchor.list(in: context, git: git).last?.id)
 
+        let captured = JournalEntryMetadata.Captured(
+            refs: true, head: true,
+            index: index?.captured ?? .notCaptured,
+            worktree: worktree == nil ? .notCaptured : .stash,
+            untracked: worktree != nil,
+            sequencer: sequencer == nil ? .notCaptured : .merge)
+
         let metadata = JournalEntryMetadata(
             id: id,
             operation: operation,
@@ -115,11 +124,7 @@ public enum JournalCheckpoint {
             label: label,
             timestamp: Date(),
             worktree: .init(name: context.worktreeName, path: base),
-            captured: JournalEntryMetadata.Captured(
-                refs: true, head: true,
-                index: index?.captured ?? .notCaptured,
-                worktree: worktree == nil ? .notCaptured : .stash,
-                untracked: worktree != nil),
+            captured: captured,
             agent: agent,
             traversal: traversal)
 
@@ -128,6 +133,10 @@ public enum JournalCheckpoint {
         // be a parent or ordinary maintenance may reclaim it — the same reason
         // captured ref tips are parents.
         if let worktree { keepAlive.append(worktree.commit) }
+        // The sequencer's tree and AUTO_MERGE oid are reachable from no ref, so
+        // they must join the keep-alive set or ordinary maintenance may reclaim
+        // them, leaving a restored entry pointing at missing objects.
+        if let sequencer { keepAlive.append(contentsOf: sequencer.keepAlive) }
 
         var indexTree: String?
         var indexBlob: String?
@@ -143,6 +152,7 @@ public enum JournalCheckpoint {
             indexTree: indexTree,
             indexBlob: indexBlob,
             untrackedTree: worktree?.untrackedTree,
+            sequencerTree: sequencer?.tree,
             keepAlive: keepAlive)
         return try JournalAnchor.write(contents, id: id, in: context, git: git)
     }

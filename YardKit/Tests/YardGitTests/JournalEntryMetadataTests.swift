@@ -70,7 +70,7 @@ struct JournalEntryMetadataTests {
 
     @Test func aFullyPopulatedEntrySerializesToThePinnedBytes() throws {
         let f = try Fixture()
-        let expected = #"{"agent":{"name":"claude-code","session":"01J8W"},"captured":{"head":true,"index":"tree","refs":true,"untracked":true,"worktree":"stash"},"command":"switchyard fixup HEAD~2","guard":{"HEAD":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","refs/heads/main":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"id":"01K1H8R100W7CBVX5TRJJEDDVM","label":"before rebasing onto main","operation":"fixup","schemaVersion":1,"timestamp":"2026-08-07T18:22:31Z","worktree":{"name":"agent-a","path":"/Users/b/src/proj-agent-a"}}"#
+        let expected = #"{"agent":{"name":"claude-code","session":"01J8W"},"captured":{"head":true,"index":"tree","refs":true,"sequencer":false,"untracked":true,"worktree":"stash"},"command":"switchyard fixup HEAD~2","guard":{"HEAD":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","refs/heads/main":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"id":"01K1H8R100W7CBVX5TRJJEDDVM","label":"before rebasing onto main","operation":"fixup","schemaVersion":1,"timestamp":"2026-08-07T18:22:31Z","worktree":{"name":"agent-a","path":"/Users/b/src/proj-agent-a"}}"#
         #expect(try f.full.serialized() == Data(expected.utf8))
     }
 
@@ -78,7 +78,7 @@ struct JournalEntryMetadataTests {
     /// pieces are the JSON boolean `false`, never the SE-0295 object form.
     @Test func aRefsOnlyEntrySerializesToThePinnedBytes() throws {
         let f = try Fixture()
-        let expected = #"{"captured":{"head":true,"index":false,"refs":true,"untracked":false,"worktree":false},"guard":{},"id":"01K1H8R100W7CBVX5TRJJEDDVM","operation":"checkpoint","schemaVersion":1,"timestamp":"2026-08-07T18:22:31Z","worktree":{"path":"/Users/b/src/proj"}}"#
+        let expected = #"{"captured":{"head":true,"index":false,"refs":true,"sequencer":false,"untracked":false,"worktree":false},"guard":{},"id":"01K1H8R100W7CBVX5TRJJEDDVM","operation":"checkpoint","schemaVersion":1,"timestamp":"2026-08-07T18:22:31Z","worktree":{"path":"/Users/b/src/proj"}}"#
         #expect(try f.minimal.serialized() == Data(expected.utf8))
     }
 
@@ -86,7 +86,7 @@ struct JournalEntryMetadataTests {
     /// absent — not null — when a traversal returned it to present.
     @Test func traversalEntriesSerializeToThePinnedBytes() throws {
         let f = try Fixture()
-        let redoExpected = #"{"captured":{"head":true,"index":false,"refs":true,"untracked":false,"worktree":false},"guard":{},"id":"01K1H8R100W7CBVX5TRJJEDDVM","operation":"redo","schemaVersion":1,"timestamp":"2026-08-07T18:22:31Z","traversal":{"restored":"01K1H8QZZZW7CBVX5TRJJEDDVM","resultingPosition":"01K1H8QZZZW7CBVX5TRJJEDDVM"},"worktree":{"path":"/Users/b/src/proj"}}"#
+        let redoExpected = #"{"captured":{"head":true,"index":false,"refs":true,"sequencer":false,"untracked":false,"worktree":false},"guard":{},"id":"01K1H8R100W7CBVX5TRJJEDDVM","operation":"redo","schemaVersion":1,"timestamp":"2026-08-07T18:22:31Z","traversal":{"restored":"01K1H8QZZZW7CBVX5TRJJEDDVM","resultingPosition":"01K1H8QZZZW7CBVX5TRJJEDDVM"},"worktree":{"path":"/Users/b/src/proj"}}"#
         #expect(try f.redo.serialized() == Data(redoExpected.utf8))
 
         let toPresent = JournalEntryMetadata(
@@ -94,7 +94,7 @@ struct JournalEntryMetadataTests {
             worktree: .init(name: nil, path: "/Users/b/src/proj"),
             captured: .refsOnly,
             traversal: .init(restored: f.idA, resultingPosition: nil))
-        let undoExpected = #"{"captured":{"head":true,"index":false,"refs":true,"untracked":false,"worktree":false},"guard":{},"id":"01K1H8R100W7CBVX5TRJJEDDVM","operation":"switchyard undo","schemaVersion":1,"timestamp":"2026-08-07T18:22:31Z","traversal":{"restored":"01K1H8QZZZW7CBVX5TRJJEDDVM"},"worktree":{"path":"/Users/b/src/proj"}}"#
+        let undoExpected = #"{"captured":{"head":true,"index":false,"refs":true,"sequencer":false,"untracked":false,"worktree":false},"guard":{},"id":"01K1H8R100W7CBVX5TRJJEDDVM","operation":"switchyard undo","schemaVersion":1,"timestamp":"2026-08-07T18:22:31Z","traversal":{"restored":"01K1H8QZZZW7CBVX5TRJJEDDVM"},"worktree":{"path":"/Users/b/src/proj"}}"#
         #expect(try toPresent.serialized() == Data(undoExpected.utf8))
     }
 
