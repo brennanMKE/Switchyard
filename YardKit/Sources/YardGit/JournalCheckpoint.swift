@@ -290,6 +290,12 @@ public extension JournalCheckpoint {
     /// `JournalObserved.record` already uses for the opposite half of this
     /// boundary.
     ///
+    /// **Mid-rebase dedup (#0233).** `JournalObserved.isMidRebaseAmend` is
+    /// checked first, before the own/foreign split, so a mid-rebase `amend`
+    /// invocation attaches nothing here for the same reason it records
+    /// nothing on the foreign path: the rebase's own final `rebase`-sourced
+    /// invocation repeats the pair and is the authoritative one.
+    ///
     /// Throws only on a genuine persistence failure once there is an id to
     /// attach to. The totality invariant (#0043, #0191) — a failed attach
     /// must never surface as a non-zero hook exit — is the caller's job,
@@ -299,8 +305,14 @@ public extension JournalCheckpoint {
         _ decision: PostRewrite.Decision,
         entryID: JournalEntryID?,
         in context: WorktreeContext,
-        git: GitProcess = GitProcess()
+        git: GitProcess = GitProcess(),
+        fileManager: FileManager = .default
     ) throws -> JournalAnchor.Entry? {
+        if try JournalObserved.isMidRebaseAmend(
+            decision, in: context, git: git, fileManager: fileManager) {
+            return nil
+        }
+
         guard decision.isOwnInvocation, let entryID else { return nil }
 
         let existing = try JournalEntryMetadata(
