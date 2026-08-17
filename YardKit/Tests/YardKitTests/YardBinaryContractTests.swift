@@ -76,20 +76,43 @@ struct YardBinaryContractTests {
         }
     }
 
-    // MARK: - Failure path -- usage error
+    // MARK: - Failure path -- app unreachable for an unrecognized command
+    //
+    // A command `runYard` does not know locally (see `isAnsweredLocally` in
+    // CommandLineRunner.swift) is no longer answered with a local "usage"
+    // failure by the compiled binary: `main.swift` now runs everything else
+    // through `dispatch`, which tries to reach the app (guide §11 decision
+    // 15, #0124). Spawning the real binary with a bogus subcommand would
+    // therefore try to reach the real broker/app on whatever machine runs
+    // this suite -- on a machine with the broker registered that can mean
+    // actually launching Switchyard.app, which this suite must never do
+    // (see CLAUDE.md's Code signing / "never launch the app" boundaries).
+    // So this test, and the four below it that also used to spawn
+    // `switchyard bogus-command`, call `dispatch` in-process with an
+    // injected connector that always throws, instead of spawning a
+    // subprocess. The local-only paths elsewhere in this file (root
+    // command, noop, binary-exists) are unaffected: those commands are
+    // always answered locally and never touch the connector, subprocess or
+    // not.
 
-    @Test("unknown subcommand exits 1 with a valid envelope") func unknownSubcommandUsageError() throws {
-        #expect(
-            FileManager.default.fileExists(atPath: yardBinary.path),
-            "switchyard binary not found at \(yardBinary.path); swift test must build it first"
-        )
+    /// Always fails, deterministically, without ever touching a broker, a
+    /// launch agent, or `NSWorkspace` -- the seam `dispatch` exists to make
+    /// testable (see its doc comment in Dispatch.swift).
+    private func unreachableAppConnector() async throws -> AppConnection {
+        throw AppConnectionError.appUnavailable
+    }
 
-        let (status, stdout, _) = try runProcess(binaryPath: yardBinary, args: ["bogus-command"])
-        #expect(status == 1)
+    @Test("unrecognized command routes to the app and exits 3 when it is unreachable")
+    func unknownSubcommandRoutesToUnreachableApp() async throws {
+        let result = await dispatch(
+            arguments: ["bogus-command"], workingDirectory: "/", connect: unreachableAppConnector)
 
+        #expect(result.exitCode == .appUnavailable)
+
+        let data = Data(result.stdout.utf8)
         do {
-            let json = try JSONSerialization.jsonObject(with: stdout, options: [])
-            #expect(json is [String: Any], "usage-error stdout is not a JSON dictionary")
+            let json = try JSONSerialization.jsonObject(with: data, options: [])
+            #expect(json is [String: Any], "failure stdout is not a JSON dictionary")
             let dict = try #require(json as? [String: Any], "stdout parsed but was not a JSON object")
 
             #expect(dict["ok"] as? Bool == false, "failure envelope must have ok=false")
@@ -101,9 +124,9 @@ struct YardBinaryContractTests {
                 errorCode = nil
             }
 
-            #expect(errorCode as? String == "usage", "error.code must be \"usage\", got \(String(describing: errorCode))")
+            #expect(errorCode as? String == "app_unavailable", "error.code must be \"app_unavailable\", got \(String(describing: errorCode))")
         } catch {
-            Issue.record("usage-error stdout is not valid JSON: \(error)")
+            Issue.record("failure stdout is not valid JSON: \(error)")
         }
     }
 
@@ -127,13 +150,10 @@ struct YardBinaryContractTests {
         #expect(isJsonEnd(trimmed.last), "success stdout does not end with a JSON value")
     }
 
-    @Test("failure stdout is pure JSON") func failureNoNonJsonPrefixOrSuffix() throws {
-        #expect(
-            FileManager.default.fileExists(atPath: yardBinary.path),
-            "switchyard binary not found at \(yardBinary.path); swift test must build it first"
-        )
-
-        let (_, stdout, _) = try runProcess(binaryPath: yardBinary, args: ["bogus-command"])
+    @Test("failure stdout is pure JSON") func failureNoNonJsonPrefixOrSuffix() async throws {
+        let result = await dispatch(
+            arguments: ["bogus-command"], workingDirectory: "/", connect: unreachableAppConnector)
+        let stdout = Data(result.stdout.utf8)
         #expect(!stdout.isEmpty, "failure stdout was empty")
 
         do {
@@ -155,37 +175,29 @@ struct YardBinaryContractTests {
         #expect(stderr.isEmpty, "stderr should be empty on success but got \(String(data: stderr, encoding: .utf8) ?? "<non-UTF8>")")
     }
 
-    @Test("stderr carries the error line on failure") func stderrCarriesErrorLineOnFailure() throws {
-        #expect(
-            FileManager.default.fileExists(atPath: yardBinary.path),
-            "switchyard binary not found at \(yardBinary.path); swift test must build it first"
-        )
-
-        let (_, _, stderr) = try runProcess(binaryPath: yardBinary, args: ["bogus-command"])
-        let text = String(data: stderr, encoding: .utf8) ?? ""
+    @Test("stderr carries the error line on failure") func stderrCarriesErrorLineOnFailure() async throws {
+        let result = await dispatch(
+            arguments: ["bogus-command"], workingDirectory: "/", connect: unreachableAppConnector)
+        let text = result.stderr
 
         #expect(!text.isEmpty, "stderr must not be empty on failure")
         if !text.isEmpty {
             #expect(text.hasPrefix("[error]"), "stderr should begin with '[error]' marker")
-            #expect(text.contains("usage"), "stderr must contain the error code label 'usage'")
-            #expect(text.contains("bogus-command"), "stderr must contain the offending subcommand name")
+            #expect(text.contains("app_unavailable"), "stderr must contain the error code label 'app_unavailable'")
             #expect(text.hasSuffix("\n"), "stderr line must terminate with newline")
         }
     }
 
-    @Test("failure stderr uses wire code not Swift case name") func failureStderrUsesWireCode() throws {
-        #expect(
-            FileManager.default.fileExists(atPath: yardBinary.path),
-            "switchyard binary not found at \(yardBinary.path); swift test must build it first"
-        )
-
-        let (_, _, stderr) = try runProcess(binaryPath: yardBinary, args: ["bogus-command"])
-        let text = String(data: stderr, encoding: .utf8) ?? ""
+    @Test("failure stderr uses wire code not Swift case name") func failureStderrUsesWireCode() async throws {
+        let result = await dispatch(
+            arguments: ["bogus-command"], workingDirectory: "/", connect: unreachableAppConnector)
+        let text = result.stderr
 
         #expect(!text.isEmpty, "stderr must not be empty on failure")
         if !text.isEmpty {
-            #expect(text.contains("usage"), "stderr should carry wire code 'usage'")
+            #expect(text.contains("app_unavailable"), "stderr should carry wire code 'app_unavailable'")
             #expect(!text.contains("EnvelopeErrorCode"), "stderr must not leak Swift type qualifiers")
+            #expect(!text.contains("AppConnectionError"), "stderr must not leak Swift type qualifiers")
         }
     }
 
@@ -213,24 +225,21 @@ struct YardBinaryContractTests {
 
     // MARK: - Non-zero exit code distinct from usage-specific codes
 
-    @Test("usage failure emits schemaVersion and ok=false") func usageEmitsSchemaVersionAndOkFalse() throws {
-        #expect(
-            FileManager.default.fileExists(atPath: yardBinary.path),
-            "switchyard binary not found at \(yardBinary.path); swift test must build it first"
-        )
-
-        let (_, stdout, _) = try runProcess(binaryPath: yardBinary, args: ["bogus-command"])
-        #expect(!stdout.isEmpty, "stdout was empty on usage failure")
+    @Test("app-unreachable failure emits schemaVersion and ok=false") func appUnreachableEmitsSchemaVersionAndOkFalse() async throws {
+        let result = await dispatch(
+            arguments: ["bogus-command"], workingDirectory: "/", connect: unreachableAppConnector)
+        let stdout = Data(result.stdout.utf8)
+        #expect(!stdout.isEmpty, "stdout was empty on failure")
 
         do {
             let json = try JSONSerialization.jsonObject(with: stdout, options: [])
-            #expect(json is [String: Any], "usage failure stdout is not a JSON dictionary")
+            #expect(json is [String: Any], "failure stdout is not a JSON dictionary")
             let dict = try #require(json as? [String: Any], "stdout parsed but was not a JSON object")
 
             #expect(dict["schemaVersion"] is Int)
-            #expect((dict["ok"] as? Bool) == false, "usage envelope must have ok=false")
+            #expect((dict["ok"] as? Bool) == false, "failure envelope must have ok=false")
         } catch {
-            Issue.record("usage failure stdout is not valid JSON: \(error)")
+            Issue.record("failure stdout is not valid JSON: \(error)")
         }
     }
 

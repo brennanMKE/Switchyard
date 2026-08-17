@@ -12,7 +12,7 @@ public enum CommandRegistry {
 
     /// All known `yard` command specifications in the order they should be
     /// rendered in help output.
-    public static let all: [CommandSpec] = [switchyardSpec, noopSpec]
+    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec]
 
     // MARK: - The switchyard spec — rendered by `yard --help`
 
@@ -43,6 +43,19 @@ public enum CommandRegistry {
             ExitCodeSpec(code: 1, meaning: "Invalid arguments or unknown subcommand."),
         ],
         schemaName: "noop"
+    )
+
+    // MARK: - The whereami spec — engine-backed, resolved by `YardCommands` (#0124)
+
+    static let whereamiSpec = CommandSpec(
+        name: "whereami",
+        summary: "Report branch, upstream, ahead/behind, and worktree status in one call.",
+        flags: [],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The command completed and returned repository status."),
+            ExitCodeSpec(code: 6, meaning: "The working directory is not inside a git repository."),
+        ],
+        schemaName: "whereami"
     )
 
     /// Look up a `CommandSpec` by its name, returning nil if the spec is not in

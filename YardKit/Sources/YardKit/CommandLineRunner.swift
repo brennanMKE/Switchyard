@@ -5,6 +5,25 @@ import Foundation
 internal let encodingFailureEnvelope =
     #"{"schemaVersion":1,"ok":false,"error":{"code":"request_failed","message":"Failed to encode the response."}}"#
 
+/// Command names `runYard` answers on its own — no repository, no app.
+/// `dispatch(arguments:workingDirectory:connect:)` in `Dispatch.swift` is
+/// the only other reader of this set (via `isAnsweredLocally` below): that
+/// is what lets it decide "local or app?" without keeping a second,
+/// independently-maintained list that could silently drift from this one.
+/// Bare invocation (no arguments at all) is local too, but has no command
+/// name to put in a set — `runYard` and `isAnsweredLocally` each handle
+/// that case (`arguments.isEmpty`) directly.
+let localCommandNames: Set<String> = ["--help", "--version", "-v", "schema", "noop"]
+
+/// True when `dispatch` can answer `arguments` without reaching the app —
+/// either `arguments` is empty (bare invocation) or its first element is in
+/// `localCommandNames`. `runYard`'s own dispatch below is built on the same
+/// two checks, so the two cannot disagree about what counts as local.
+func isAnsweredLocally(_ arguments: [String]) -> Bool {
+    guard let command = arguments.first else { return true }
+    return localCommandNames.contains(command)
+}
+
 /// Pure, testable entry-point logic. Takes the argument array *after* the
 /// executable name and returns what `switchyard` would write to stdout, any
 /// human-readable line for stderr, and the exit code — no I/O of its own.
@@ -20,6 +39,12 @@ public func runYard(arguments: [String]) -> (stdout: String, stderr: String, exi
 
     let command = arguments[0]
 
+    guard isAnsweredLocally(arguments) else {
+        let env = EnvelopeFail(code: .usage, message: "Unknown subcommand '\(command)'.")
+        let human = "[error] \(env.error.code.rawValue): \(env.error.message)\n"
+        return (stdout: jsonString(env), stderr: human, exitCode: .usage)
+    }
+
     switch command {
     case "--help":
         return helpForTopLevel()
@@ -34,12 +59,15 @@ public func runYard(arguments: [String]) -> (stdout: String, stderr: String, exi
         return (stdout: jsonString(Envelope()), stderr: "", exitCode: .success)
 
     default:
-        break
+        // Unreachable: isAnsweredLocally(arguments) admits exactly
+        // localCommandNames, which lists precisely the cases above. Falls
+        // back to the same "unknown subcommand" shape rather than trapping,
+        // matching how the rest of this file degrades (e.g.
+        // ExitCode(fromAppReply:) never traps on an unrecognized value).
+        let env = EnvelopeFail(code: .usage, message: "Unknown subcommand '\(command)'.")
+        let human = "[error] \(env.error.code.rawValue): \(env.error.message)\n"
+        return (stdout: jsonString(env), stderr: human, exitCode: .usage)
     }
-
-    let env = EnvelopeFail(code: .usage, message: "Unknown subcommand '\(command)'.")
-    let human = "[error] \(env.error.code.rawValue): \(env.error.message)\n"
-    return (stdout: jsonString(env), stderr: human, exitCode: .usage)
 }
 
 /// Runs a command and returns exactly what the CLI must print, plus the exit
