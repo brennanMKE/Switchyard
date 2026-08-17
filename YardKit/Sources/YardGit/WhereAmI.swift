@@ -4,7 +4,7 @@ import Foundation
 
 /// The output of `yard whereami`. One call returns every field; no
 /// follow-up command is required.
-public struct WhereAmI: Sendable, Equatable {
+public struct WhereAmI: Sendable, Equatable, Encodable {
 
     /// The branch name, e.g. `"main"`. Nil when HEAD is detached.
     public let branch: String?

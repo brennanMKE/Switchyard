@@ -26,7 +26,7 @@ let package = Package(
         ),
         .target(
             name: "YardKit",
-            dependencies: [],
+            dependencies: ["YardGit"],
             path: "Sources/YardKit"
         ),
         .target(

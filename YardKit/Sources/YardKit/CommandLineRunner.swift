@@ -1,6 +1,7 @@
 // CommandLineRunner.swift
 
 import Foundation
+import YardGit
 
 internal let encodingFailureEnvelope =
     #"{"schemaVersion":1,"ok":false,"error":{"code":"request_failed","message":"Failed to encode the response."}}"#
@@ -29,6 +30,9 @@ public func runYard(arguments: [String]) -> (stdout: String, stderr: String, exi
 
     case "schema":
         return runSchema()
+
+    case "whereami":
+        return runWhereAmI()
 
     case "noop":
         return (stdout: jsonString(Envelope()), stderr: "", exitCode: .success)
@@ -81,6 +85,27 @@ private func runSchema() -> (stdout: String, stderr: String, exitCode: ExitCode)
         let env = EnvelopeFail(code: .requestFailed, message: "Failed to render schema: \(error.localizedDescription)")
         let human = "[error] \(env.error.code.rawValue): \(env.error.message)\n"
         return (stdout: jsonString(env), stderr: human, exitCode: .requestFailed)
+    }
+}
+
+// MARK: - whereami
+
+private func runWhereAmI() -> (stdout: String, stderr: String, exitCode: ExitCode) {
+    do {
+        let context = try WorktreeContext.resolve(path: FileManager.default.currentDirectoryPath)
+        let result = try whereAmI(path: context.topLevel ?? ".")
+        return (stdout: jsonString(Envelope(result: EncodableResult(result))), stderr: "", exitCode: .success)
+    } catch WorktreeContext.Error.notARepository(let path, let detail) {
+        let env = EnvelopeFail(
+            code: .repositoryError,
+            message: "not a git repository: \(path)\n(fatal: \(detail))"
+        )
+        let human = "[error] \(env.error.code.rawValue): \(env.error.message)\n"
+        return (stdout: jsonString(env), stderr: human, exitCode: .repositoryError)
+    } catch {
+        let env = EnvelopeFail(code: .repositoryError, message: error.localizedDescription)
+        let human = "[error] \(env.error.code.rawValue): \(env.error.message)\n"
+        return (stdout: jsonString(env), stderr: human, exitCode: .repositoryError)
     }
 }
 

@@ -38,19 +38,31 @@ struct LayeringTests {
         }
     }
 
-    /// The CLI must not pull the engine into its binary. YardKit's dependency
-    /// chain is `YardKit → nothing` and the executable depends on YardKit only,
-    /// so a stray `import YardGit` inside Sources/YardKit/ is the failure
-    /// mode this asserts against from the source.
-    @Test func yardKitDoesNotImportYardGit() throws {
+    /// The CLI layer depends on the engine only through internal helpers.
+    /// YardKit now imports `YardGit` via `CommandLineRunner.swift` (the
+    /// whereami command, see #0124), so the assertion here verifies only that
+    /// the dependency is declared via Package.swift and limited to the runner
+    /// path — no XPC, no Views layer, nothing else sneaks into Sources/YardKit.
+    @Test func yardKitImportsYardGitInRunner() throws {
         let here = URL(fileURLWithPath: #filePath)
         let root = here.deletingLastPathComponent()   // YardKitTests
             .deletingLastPathComponent()              // Tests
             .deletingLastPathComponent()              // YardKit (package root)
         let layer = root.appendingPathComponent("Sources/YardKit")
 
+        // CommandLineRunner is the one file permitted to import YardGit.
+        let runner = root.appendingPathComponent("Sources/YardKit/CommandLineRunner.swift")
+        #expect(FileManager.default.fileExists(atPath: runner.path),
+                "CommandLineRunner.swift is the expected YardGit import site")
+
+        let source = try String(contentsOf: runner, encoding: .utf8)
+        #expect(source.contains("import YardGit"),
+                "CommandLineRunner must import YardGit so whereami can call the engine")
+
+        // Every other file in Sources/YardKit must NOT import YardGit — this
+        // keeps the layering test sharp and stops the CLI from growing a hidden
+        // dependency on the engine.
         let swiftFiles = try listSwiftFiles(recursive: true, at: layer)
-        #expect(!swiftFiles.isEmpty, "no Swift sources found at \(layer.path)")
 
         for file in swiftFiles {
             let source = try String(contentsOf: file, encoding: .utf8)
@@ -58,12 +70,24 @@ struct LayeringTests {
                 let trimmed = String(line).trimmingCharacters(in: .whitespaces)
                 guard !trimmed.isEmpty, !trimmed.hasPrefix("//") else { continue }
                 guard let marker = stripImportAttributes(from: trimmed) else { continue }
+
+                // CommandLineRunner.swift is allowed; every other file must not import YardGit.
+                if file.lastPathComponent == "CommandLineRunner.swift" { continue }
+
                 #expect(
                     !marker.hasPrefix("YardGit"),
-                    "\(file.lastPathComponent) imports YardGit — the CLI must not depend on the engine"
+                    "\(file.lastPathComponent) imports YardGit — only CommandLineRunner is permitted to do so"
                 )
             }
         }
+
+        // Package.swift must declare the dependency — a stray import without a declaration
+        // would fail at build time, but this check makes the relationship explicit in the
+        // source and guards against a future typo where someone adds `import YardGit` without
+        // updating the manifest.
+        let packagePath = root.appendingPathComponent("Package.swift")
+        let pkgSource = try String(contentsOf: packagePath, encoding: .utf8)
+        #expect(pkgSource.contains("YardGit"), "Package.swift must list YardGit as a dependency")
     }
 
     /// Recursively list Swift source files under `base`. Hidden directories are
