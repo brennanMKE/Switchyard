@@ -24,7 +24,25 @@ import Foundation
 /// hunks go to git as one atomic `git apply` invocation.
 ///
 /// An empty `ids` array is a no-op; git is not invoked.
+///
+/// **Writes exactly one journal entry per call (#0212)**, via
+/// `JournalCheckpoint.around`, so `undo` works after unstaging directly.
+/// This is the entry point everything outside this file must call — see
+/// `stageHunks` in `Staging.swift`, the identical shape.
 public func unstageHunks(
+    ids: [String],
+    at path: String,
+    git: GitProcess = GitProcess()
+) throws {
+    try JournalCheckpoint.around(operation: "unstage", at: path, git: git) {
+        try unstageHunksWithoutCheckpoint(ids: ids, at: path, git: git)
+    }
+}
+
+/// The non-checkpointing primitive, for any future composed command that
+/// needs to unstage inside a single checkpoint of its own (#0212) — the same
+/// reason `stageHunksWithoutCheckpoint` exists.
+func unstageHunksWithoutCheckpoint(
     ids: [String],
     at path: String,
     git: GitProcess = GitProcess()
