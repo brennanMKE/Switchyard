@@ -94,3 +94,76 @@ func selectPatch(ids: [String], from files: [FileDiff], area: DiffArea) throws -
 extension StagingError: ExitClassCarrying {
     public var exitClass: ExitClass { .repositoryError }
 }
+
+// MARK: - Commit a named hunk set (#0208)
+
+/// Why `commitHunks` refused rather than committing.
+///
+/// `stageHunks` is `git apply --cached`, which is additive: it stages the
+/// requested patch and touches nothing else already in the index. Composing
+/// it with `CommitCreate.run` naively would therefore silently commit
+/// whatever else the caller had staged — the opposite of what asking for
+/// specific hunks means. #0208's decision is to refuse rather than guess:
+/// it matches `WorktreeDisturbance`, the worktree gate, and `CrossToolGuard`,
+/// all of which refuse rather than warn (guide §7).
+public enum CommitHunksError: Error, Equatable, CustomStringConvertible, Sendable {
+    /// The index already held staged changes when hunk ids were given.
+    /// `paths` is `git diff --cached --name-only`, read **before**
+    /// `stageHunks` runs — reading it after would always fire, since staging
+    /// the named hunks always adds something to the index.
+    case indexNotClean(paths: [String])
+
+    public var description: String {
+        switch self {
+        case let .indexNotClean(paths):
+            "refusing to commit named hunks: the index already holds staged changes in "
+                + paths.joined(separator: ", ")
+                + " — commit or unstage that work first, then retry with only the named hunks"
+        }
+    }
+}
+
+/// Commits exactly the hunks named by `ids`, refusing when the index already
+/// holds unrelated staged work (#0208 Decision — refuse, and say what is
+/// staged).
+///
+/// The clean-index check (`git diff --cached --name-only`) runs **before**
+/// `stageHunks`, not after: `stageHunks` always adds the requested patch to
+/// the index, so a check made afterward would always find something staged
+/// and always refuse. `stageHunks` itself resolves every id against a fresh
+/// listing and throws `StagingError.unknownHunkIDs` before applying anything
+/// (#0040) — this function does not weaken that: an unknown or stale id
+/// still stages nothing and commits nothing.
+public func commitHunks(
+    ids: [String],
+    message: String,
+    signing: CommitCreate.Signing = .config,
+    trailers: [Trailer] = [],
+    at path: String,
+    git: GitProcess = GitProcess(),
+    extraEnvironment: [String: String] = [:]
+) throws -> CommitCreate {
+    let staged = try git.run(
+        ["diff", "--cached", "--name-only"],
+        workingDirectory: path,
+        extraEnvironment: extraEnvironment
+    ).lines
+    guard staged.isEmpty else {
+        throw CommitHunksError.indexNotClean(paths: staged)
+    }
+    try stageHunks(ids: ids, at: path, git: git)
+    return try CommitCreate.run(
+        message: message,
+        signing: signing,
+        trailers: trailers,
+        in: path,
+        git: git,
+        extraEnvironment: extraEnvironment
+    )
+}
+
+/// Guide §6 code 6: an unrelated already-staged path is a repository-state
+/// refusal, the same class `StagingError` above carries.
+extension CommitHunksError: ExitClassCarrying {
+    public var exitClass: ExitClass { .repositoryError }
+}
