@@ -38,6 +38,21 @@ final class AppXPCServer {
     /// stale endpoint.
     private var brokerConnection: NSXPCConnection?
 
+    /// Claimed the first time the broker connection's error handler observes
+    /// an actual failure, so repair runs at most once per launch.
+    ///
+    /// `nonisolated` and backed by a lock (see `RepairGate`), not an actor:
+    /// the error handler closure below is `@Sendable` and fires on XPC's own
+    /// queue, not the main actor, so the claim must be checkable synchronously
+    /// from there without a hop.
+    nonisolated private let repairGate = RepairGate()
+
+    /// Runs the agent repair (unregister + re-register with `SMAppService`).
+    /// Set by whoever owns the `AgentRegistrar` — `AppXPCServer` has no
+    /// dependency on `ServiceManagement` itself, so it stays testable without
+    /// one. Called at most once per launch, driven by `repairGate`.
+    var repairHandler: (() -> Void)?
+
     init() {}
 
     // MARK: - Lifecycle
@@ -77,10 +92,22 @@ final class AppXPCServer {
         // on its own queue and the process dies with SIGTRAP in
         // _swift_task_checkIsolatedSwift. Marking the closure @Sendable
         // makes it nonisolated, which is what it must be.
-        let proxy = connection.remoteObjectProxyWithErrorHandler { @Sendable error in
+        let proxy = connection.remoteObjectProxyWithErrorHandler { @Sendable [weak self] error in
             let message = error.localizedDescription
             Task { @MainActor in
                 Self.logger.error("broker connection error: \(message, privacy: .public)")
+            }
+
+            // This is where a *failed call* is actually observed — repair is
+            // driven from here, at most once per launch, never from
+            // `service.status`. The claim itself must happen synchronously,
+            // on whatever queue XPC calls this on, so two overlapping
+            // failures cannot both win it.
+            guard let self, self.repairGate.claim() else { return }
+            Task { @MainActor [weak self] in
+                Self.logger.notice("broker call failed — repairing agent registration")
+                self?.repairHandler?()
+                self?.registerWithBroker()
             }
         }
 
@@ -143,9 +170,32 @@ private nonisolated final class ListenerDelegate: NSObject, NSXPCListenerDelegat
         _ listener: NSXPCListener,
         shouldAcceptNewConnection connection: NSXPCConnection
     ) -> Bool {
-        // Exporting a real service interface to accepted CLIs, and the
-        // session machinery behind it, is #0213. Decline for now rather than
-        // accept a connection nothing will ever serve.
-        false
+        // Both must be set BEFORE resume(), or calls silently do nothing — no
+        // error, no reply, no crash. Same rule as the client side.
+        connection.exportedInterface = XPCInterfaces.appService
+        connection.exportedObject = AppService()
+        connection.resume()
+        return true
+    }
+}
+
+// MARK: - Exported service
+
+/// The object exported to an accepted CLI connection.
+///
+/// One instance per accepted connection: `ListenerDelegate` creates one each
+/// time `shouldAcceptNewConnection` fires, the connection retains it as its
+/// `exportedObject`, and it is released when that connection invalidates. No
+/// session state lives here — that is #0213, deliberately after this.
+///
+/// `nonisolated` for the same reason as `ListenerDelegate`: XPC reaches this
+/// object on its own queues, not the main actor, and the app target compiles
+/// with `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`.
+private nonisolated final class AppService: NSObject, AppServiceProtocol {
+    func appPing(reply: @escaping @Sendable (String) -> Void) {
+        // Bundle.main.infoDictionary is safe to read from any queue, so no
+        // main-actor hop is needed here.
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+        reply(version ?? "unknown")
     }
 }

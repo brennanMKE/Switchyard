@@ -99,9 +99,20 @@ private struct FakeBroker {
 
         self.listener = listener
         self.delegate = delegate
-        self.connection = BrokerConnection(connection: xpc)
+        self.connection = BrokerConnection(connection: xpc, defaultTimeout: testTimeout)
     }
 }
+
+/// Deadlines in this file are deliberately generous.
+///
+/// The package runs 70 suites in parallel and most of them block in `git`
+/// subprocesses, which starves the cooperative thread pool badly enough that a
+/// reply can arrive tens of seconds late. **A late reply is not a failed
+/// reply**, and a test that says otherwise measures the machine — two tests
+/// asserting elapsed time cost a round on 2026-08-17, and five more failed on
+/// `main` the same day for the same reason with a 5-second deadline. The
+/// production defaults are unchanged: a CLI is one process making one call.
+private let testTimeout: Duration = .seconds(60)
 
 // MARK: - Tests
 
@@ -114,11 +125,13 @@ struct AppConnectionTests {
         // A Mach service name embedding a UUID cannot exist, so the error
         // handler fires immediately rather than hanging — measured during
         // planning at 0.000s.
-        let broker = BrokerConnection(machServiceName: "co.sstools.switchyard.test.\(UUID().uuidString)")
+        let broker = BrokerConnection(
+            machServiceName: "co.sstools.switchyard.test.\(UUID().uuidString)",
+            defaultTimeout: testTimeout)
         defer { broker.close() }
 
         do {
-            _ = try await broker.ping(timeout: .seconds(5))
+            _ = try await broker.ping()
             Issue.record("expected CLIError.brokerUnreachable")
         } catch let error as CLIError {
             guard case .brokerUnreachable = error else {
@@ -138,7 +151,7 @@ struct AppConnectionTests {
         let app = fake.connect()
         defer { app.close() }
 
-        let reply = try await app.appPing(timeout: .seconds(5))
+        let reply = try await app.appPing(timeout: testTimeout)
         #expect(reply == "pong")
     }
 
@@ -150,13 +163,13 @@ struct AppConnectionTests {
 
         // Prove the connection works before killing it, or a failure below
         // could just as easily mean the setup was wrong.
-        let reply = try await app.appPing(timeout: .seconds(5))
+        let reply = try await app.appPing(timeout: testTimeout)
         #expect(reply == "pong")
 
         fake.listener.invalidate()
 
         do {
-            _ = try await app.appPing(timeout: .seconds(5))
+            _ = try await app.appPing(timeout: testTimeout)
             Issue.record("expected AppConnectionError.appTerminated")
         } catch let error as AppConnectionError {
             guard case .appTerminated = error else {

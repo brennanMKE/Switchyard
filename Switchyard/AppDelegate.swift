@@ -10,8 +10,18 @@ import AppKit
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let server = AppXPCServer()
+    let agentRegistrar = AgentRegistrar()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Register the launch agent before handing the endpoint to the
+        // broker — launchd cannot own the Mach service name until the agent
+        // is registered.
+        agentRegistrar.registerIfNeeded()
+
+        server.repairHandler = { [weak self] in
+            self?.agentRegistrar.repair()
+        }
+
         server.start()
         server.registerWithBroker()
     }

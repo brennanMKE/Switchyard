@@ -51,7 +51,16 @@ public final class BrokerConnection: @unchecked Sendable {
     ///   name that cannot exist and exercise the real `call` failure path —
     ///   see `AppConnectionTests.brokerUnreachableMapsToExitCodeTwo`. Real
     ///   callers never pass this.
-    public init(machServiceName: String = ServiceNames.machServiceName) {
+    /// The deadline every call on this connection uses when the caller does
+    /// not name one. Five seconds is right for a CLI, which is one process
+    /// making one call; the package's own tests raise it, because 70 suites of
+    /// blocking `git` subprocesses can starve the cooperative pool for tens of
+    /// seconds and a reply that arrives late is not a reply that failed.
+    let defaultTimeout: Duration
+
+    public init(machServiceName: String = ServiceNames.machServiceName,
+                defaultTimeout: Duration = .seconds(5)) {
+        self.defaultTimeout = defaultTimeout
         connection = NSXPCConnection(machServiceName: machServiceName)
         // Before resume(), or calls silently do nothing.
         connection.remoteObjectInterface = XPCInterfaces.broker
@@ -63,7 +72,8 @@ public final class BrokerConnection: @unchecked Sendable {
     /// fake broker (`NSXPCListener.anonymous()`) instead of the real
     /// `machServiceName` broker, so `launchIfNeeded`/`requireApp` are
     /// testable without launchd or the app.
-    init(connection: NSXPCConnection) {
+    init(connection: NSXPCConnection, defaultTimeout: Duration = .seconds(5)) {
+        self.defaultTimeout = defaultTimeout
         self.connection = connection
     }
 
@@ -71,15 +81,17 @@ public final class BrokerConnection: @unchecked Sendable {
         connection.invalidate()
     }
 
-    public func ping(timeout: Duration = .seconds(5)) async throws -> String {
-        try await call(timeout: timeout) { broker, complete in
+    public func ping(timeout: Duration? = nil) async throws -> String {
+        let timeout = timeout ?? defaultTimeout
+        return try await call(timeout: timeout) { broker, complete in
             broker.brokerPing { complete(.success($0)) }
         }
     }
 
     /// Fetches the app's listener endpoint, or `nil` if no app has registered.
-    public func appEndpoint(timeout: Duration = .seconds(5)) async throws -> NSXPCListenerEndpoint? {
-        try await call(timeout: timeout) { broker, complete in
+    public func appEndpoint(timeout: Duration? = nil) async throws -> NSXPCListenerEndpoint? {
+        let timeout = timeout ?? defaultTimeout
+        return try await call(timeout: timeout) { broker, complete in
             broker.appEndpoint { complete(.success(Transferred($0))) }
         }.value
     }
