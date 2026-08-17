@@ -261,4 +261,64 @@ struct PostRewriteAttachTests {
             serialized: try JournalAnchor.metadata(for: newer.id, in: context))
         #expect(newerMetadata.rewrite == nil, "the unrelated newer entry must be untouched")
     }
+
+    // MARK: - The compare-and-swap guard
+
+    /// `updateRefCommand`'s literal output, old oid included. `update-ref
+    /// --stdin`'s `update` verb treats `<old>` as optional -- a line with
+    /// only `<ref>` and `<new>` is valid input and means "write
+    /// unconditionally" -- so this is not incidental formatting: dropping
+    /// the third field silently downgrades a guarded write to an unguarded
+    /// one, with no parse error to catch it. Pinned the same way every other
+    /// wire-shaped literal in this codebase is.
+    @Test func updateRefCommandIncludesTheOldOidAsTheCompareAndSwap() {
+        // `JournalAnchor.refPrefix`, not a hardcoded literal -- ServiceNames
+        // owns that string (`ServiceNamesTests.noOtherSwiftSourceHardcodesTheIdentifiers`).
+        let ref = JournalAnchor.refPrefix + "01K1H8R100W7CBVX5TRJJEDDVM"
+        let command = JournalAnchor.updateRefCommand(
+            ref: ref,
+            new: String(repeating: "1", count: 40),
+            old: String(repeating: "2", count: 40))
+        #expect(command ==
+            "update \(ref) \(String(repeating: "1", count: 40)) \(String(repeating: "2", count: 40))\n")
+    }
+
+    /// The real race the compare-and-swap exists for, reproduced with actual
+    /// git state rather than mocked or relying on thread scheduling to land
+    /// it (AGENTS.md Rule 7c: this suite runs seventy suites in parallel and
+    /// scheduling is not a fact to depend on, so a real concurrent-task race
+    /// would be flaky rather than deterministic here).
+    ///
+    /// Two writers both read the entry's original commit as `current`. One
+    /// applies its update first through the real `updateMetadata` path,
+    /// moving the ref forward. The other -- built here from
+    /// `updateRefCommand` using the same stale `current` the first writer
+    /// started from, exactly what a second concurrent writer would have
+    /// sent -- must be rejected by git itself, not silently applied, and the
+    /// ref must still point at the winner's commit afterward.
+    @Test func aStaleCompareAndSwapLosesRatherThanSilentlyOverwriting() throws {
+        let repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let context = try WorktreeContext.resolve(path: repo.url.path)
+        let entry = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: context)
+        let staleCurrent = entry.commit
+
+        let winner = try JournalAnchor.updateMetadata(
+            Data(#"{"writer":"first"}"#.utf8), for: entry.id, in: context)
+        #expect(winner.commit != staleCurrent, "the winner must have actually moved the ref")
+
+        let ref = JournalAnchor.refPrefix + entry.id.string
+        let loserCommand = JournalAnchor.updateRefCommand(
+            ref: ref, new: staleCurrent, old: staleCurrent)
+        let loserResult = try git.capture(
+            ["update-ref", "--stdin"], workingDirectory: repo.url.path,
+            standardInput: Data(loserCommand.utf8))
+        #expect(loserResult.exitCode != 0,
+                "a compare-and-swap against a stale old value must be rejected")
+
+        let final = try git.run(
+            ["rev-parse", "--verify", ref], workingDirectory: repo.url.path
+        ).lines.first
+        #expect(final == winner.commit, "the ref must still point at whoever actually won")
+    }
 }

@@ -410,8 +410,24 @@ public enum JournalAnchor {
             command: "commit-tree")
 
         try git.run(["update-ref", "--stdin"], workingDirectory: base,
-                    standardInput: Data("update \(ref) \(commit) \(current)\n".utf8))
+                    standardInput: Data(updateRefCommand(ref: ref, new: commit, old: current).utf8))
         return Entry(id: id, commit: commit)
+    }
+
+    /// The `update-ref --stdin` line that swaps `ref` from `old` to `new`.
+    ///
+    /// The **old** oid is the compare-and-swap: `update <ref> <new> <old>`
+    /// fails if anything moved the ref since it was read, so a concurrent
+    /// writer loses rather than being silently overwritten. `update-ref
+    /// --stdin`'s `update` verb accepts `<old>` as optional -- omitting it is
+    /// a valid line, and it means "write unconditionally" -- so the old oid
+    /// is not incidental formatting here; it is the whole guard, and its
+    /// absence is a silent downgrade to an unguarded write rather than a
+    /// parse error. `updateMetadata` is the only caller today; extracted so
+    /// the guard is a pure function a test can assert on directly, not just
+    /// exercise indirectly through git's own success or failure.
+    static func updateRefCommand(ref: String, new: String, old: String) -> String {
+        "update \(ref) \(new) \(old)\n"
     }
 
     // MARK: - Reading
