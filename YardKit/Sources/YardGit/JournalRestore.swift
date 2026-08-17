@@ -441,18 +441,26 @@ public enum JournalRestore {
         return slots
     }
 
-    /// The worktree snapshot's commit, recorded as a parent of the anchor so
-    /// it stays reachable (#0171). The first parent is the entry's own
-    /// keep-alive head; the worktree commit is appended last.
+    /// The worktree snapshot's commit. It is *also* recorded as a parent of
+    /// the anchor so it stays reachable (#0171), but that parent list is not
+    /// where this reads from: this reads the commit's own tree entry,
+    /// `JournalAnchor.worktreeCommitTreeEntryName` — a gitlink written by
+    /// `JournalCheckpoint.writeEntry` alongside the keep-alive append.
+    ///
+    /// Before #0202 this read `parents.last`, correct only because
+    /// `writeEntry` happened to append the worktree commit after every other
+    /// keep-alive oid — an ordering nothing enforced and nothing tested.
+    /// #0188 came one line from adding a further keep-alive append after it,
+    /// which would have made `parents.last` something else entirely, and the
+    /// wrong answer would not have thrown: `JournalRestore` would have
+    /// applied the wrong commit as a stash, or found nothing, and reported
+    /// the worktree restored regardless. Reading a named entry instead of a
+    /// list position removes that coupling outright rather than documenting
+    /// around it.
     static func worktreeCommit(
         of entry: JournalAnchor.Entry, at base: String, git: GitProcess
     ) throws -> String? {
-        let parents = try git.run(
-            ["rev-list", "--parents", "-n", "1", entry.commit],
-            workingDirectory: base).text
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .split(separator: " ").map(String.init)
-        return parents.count > 1 ? parents.last : nil
+        try anchoredSlots(of: entry, at: base, git: git)[JournalAnchor.worktreeCommitTreeEntryName]
     }
 
     /// What the caller did **not** get back, and why. A piece that was
