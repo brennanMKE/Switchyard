@@ -472,9 +472,21 @@ path yourself, resolve it the same way — with `realpath(3)`.
 which normalises in the opposite direction. It looks like the right call and silently does nothing
 useful here.
 
-### Every file path you use must be worktree-relative. Never absolute. Reads included.
+### Superseded 2026-08-17 — this section said the opposite of Rule 5d. Follow Rule 5d.
 
-Write `YardKit/Sources/YardKit/CommandLineRunner.swift`, not
+**Read Rule 5d and do what it says: absolute paths, copied from the dispatch prompt.** The section
+below was written for OpenCode's sandbox, where a mistyped absolute path was auto-rejected and the
+round ended. Rounds now run as Claude Code subagents, where a **relative** path silently resolves
+against the primary checkout and edits `main` — which is worse than a rejection, because it succeeds.
+
+What survives from it is the reason both rules exist: **never reproduce the worktree prefix from
+memory.** Copy it from the prompt. Three rounds died on a one-character typo in it.
+
+The original text follows, for the record.
+
+---
+
+~~Write `YardKit/Sources/YardKit/CommandLineRunner.swift`, not~~
 `/Users/brennan/Developer/brennanMKE/Git/switchyard-0124/YardKit/…`.
 
 You are already in the worktree. An absolute path is a long string you have to reproduce from memory,
@@ -499,9 +511,27 @@ issue file itself**. One tool call, 21 seconds, nothing written, nothing attempt
 `tensorshare` appears nowhere in this repository; it was reproduced from memory and corrupted, which
 is the same failure as the other two and simply landed earlier.
 
-So: **read `issues/NNNN.md`, not `/Users/…/switchyard-NNNN/issues/NNNN.md`.** You are already in the
-worktree when the round starts. There is never a reason to type the absolute prefix, and the only
-thing typing it can do is end the round before it begins.
+~~So: read `issues/NNNN.md`, not `/Users/…/switchyard-NNNN/issues/NNNN.md`.~~ **Superseded.** Under
+Claude Code the absolute path is required (Rule 5d) and the prompt supplies it — copy it rather than
+typing it.
+
+## Rule 7c — Never assert wall-clock elapsed time.
+
+The package runs seventy suites in parallel and most of them block in `git` subprocesses, so Swift's
+cooperative thread pool is starved for long stretches. Measured 2026-08-17: a `Task.sleep(for: 50ms)`
+inside a 300 ms bound did not return for **24.4 seconds**, reproducibly, in a suite that passed under
+`--filter`.
+
+So an assertion like `#expect(elapsed < .seconds(1))` measures this machine's load, not your code, and
+it will pass on your branch and fail on `main`. Assert the property the criterion names instead:
+
+- a bounded loop **terminates**, and called its source no more times than the bound allows;
+- a call **succeeds**, with a deadline generous enough that lateness is not failure (60 seconds in a
+  test is fine — the test still returns as soon as the reply arrives).
+
+Production defaults stay small. A CLI is one process making one call, and five seconds is right there.
+Two tests broke this rule on 2026-08-17 and cost a round; five more with a five-second XPC deadline
+turned `main` red an hour later.
 
 ## Rule 10 — `swift build` does not compile the tests. Only `swift test` does.
 
