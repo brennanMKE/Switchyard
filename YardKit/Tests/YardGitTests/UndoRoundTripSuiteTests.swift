@@ -428,4 +428,55 @@ struct UndoRoundTripSuiteTests {
                             workingDirectory: repo.url.path)
             .text.contains("branch.head side"))
     }
+
+    // MARK: - #0206: a layout mismatch escapes both branches that clear a
+    // leftover sequencer. `SequencerSnapshot.restore` only removes ITS OWN
+    // destination, so restoring a captured `rebase-merge` snapshot while a
+    // `rebase-apply` directory stands (or the reverse) left the wrong-layout
+    // directory in place -- exactly the stale state decision 14 exists to
+    // eliminate. #0205's clearing only ran when nothing was captured at all.
+    //
+    // A real `rebase-apply` state needs `git rebase --apply` or `git am`;
+    // `FixtureRepository` has no helper for either (checked: only
+    // `beginInterruptedRebase` exists, and it drives the default merge
+    // backend). Verified by hand first, outside this file, that the same
+    // divergence `repositoryStoppedMidRebase` builds also conflicts under
+    // `git rebase --apply` after `--abort`, leaving a genuine
+    // `.git/rebase-apply/` directory -- so this test drives a second, real
+    // apply-backend rebase to the conflict rather than constructing the
+    // directory by hand.
+    @Test func restoringACapturedRebaseMergeClearsAStandingRebaseApply() throws {
+        let repo = try repositoryStoppedMidRebase()
+        defer { repo.destroy() }
+        let ctx = try WorktreeContext.resolve(path: repo.url.path)
+
+        // Capture while the real rebase-MERGE sequencer stands.
+        let mergeCheckpoint = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+        let mergeMeta = try JournalEntryMetadata(
+            serialized: JournalAnchor.metadata(for: mergeCheckpoint.id, in: ctx))
+        #expect(mergeMeta.captured.sequencer == .merge,
+                "the checkpoint must actually capture the rebase-merge sequencer, or this proves nothing")
+
+        // Clear that real state, then drive a second, real rebase -- this
+        // time the apply backend -- on the identical divergence to a
+        // genuine conflict stop, leaving a real `rebase-apply` directory
+        // standing in place of the one just captured.
+        try git.run(["rebase", "--abort"], workingDirectory: repo.url.path)
+        _ = try? git.run(["rebase", "--apply", "main"], workingDirectory: repo.url.path)
+        let mergeDirectory = try ctx.path(for: "rebase-merge")
+        let applyDirectory = try ctx.path(for: "rebase-apply")
+        #expect(!FileManager.default.fileExists(atPath: mergeDirectory))
+        #expect(FileManager.default.fileExists(atPath: applyDirectory),
+                "the apply-backend rebase must actually be interrupted, or this proves nothing")
+
+        // Restore the rebase-MERGE checkpoint while the mismatched
+        // rebase-apply directory stands. A captured layout must clear the
+        // OTHER standing layout, not just materialise its own.
+        let report = try JournalRestore.restore(mergeCheckpoint.id, in: ctx)
+        #expect(report.restored.contains(.sequencer))
+        #expect(FileManager.default.fileExists(atPath: mergeDirectory),
+                "the captured rebase-merge layout must be materialised")
+        #expect(!FileManager.default.fileExists(atPath: applyDirectory),
+                "the mismatched rebase-apply directory must not survive the restore")
+    }
 }

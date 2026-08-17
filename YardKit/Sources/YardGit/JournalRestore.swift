@@ -355,6 +355,18 @@ public enum JournalRestore {
         // restores identically and adds no crash path.
         if let layout = metadata.captured.sequencer.layout,
            let oid = slots[JournalAnchor.sequencerTreeEntryName] {
+            // Clear both layouts first (#0206). `SequencerSnapshot.restore`
+            // only removes its own destination -- if the standing sequencer
+            // is the OTHER layout (a `rebase-apply` directory while
+            // restoring a `rebase-merge` snapshot, or the reverse), that
+            // stale directory survives untouched and is exactly the state
+            // decision 14 exists to eliminate. Clearing first is safe:
+            // `clear` loops `Layout.allCases`, including the target's own,
+            // but `restore` below removes+recreates its destination
+            // unconditionally (it stages into a sibling directory and moves
+            // it into place only after removing whatever is already there),
+            // so pre-removing it here changes nothing about that step.
+            try SequencerSnapshot.clear(in: context, git: git)
             try SequencerSnapshot(layout: layout, tree: oid, autoMerge: nil)
                 .restore(in: context, git: git)
             restored.append(.sequencer)
