@@ -928,3 +928,25 @@ Paths below are relative to the **repository root**, not to this file.
     The instinct behind the original criterion was right and is preserved: an engine nobody can call
     is not a product, and forty-two M1 issues resolved with nothing shippable is what taught that. The
     error was assigning the fix to a milestone that could not carry it.
+
+12. **Observed foreign ref transactions live in their own ref namespace, `refs/switchyard/observed/`,
+    not in the journal's.** Decided 2026-08-17 **in Brennan's absence, under the standing instruction
+    to work the milestones through** — reversible, and flagged for his confirmation. #0153 recorded
+    the fork rather than picking; two independent passes then picked the same side.
+
+    The constraint is that `undo` must never offer an observed entry, while #0155 decision 2 fixes an
+    entry's kind by the presence of `traversal` and forbids deciding it from the `operation` string.
+    A separate namespace makes the safety property **structural**: observed entries cannot reach the
+    chain because they are not in the space `JournalChain` reads. The alternative — an `observed:`
+    field on the entry metadata — enforces the same property by agreement across four `chainNode`
+    call sites, changes a wire format pinned by golden-bytes tests, and needs a new `ChainPosition`
+    case so observed entries do not list as defective. #0157 had just shown how a filter that must be
+    applied everywhere gets missed.
+
+    **The cost is explicit and is now #0190**: `JournalRebuild` scans `JournalAnchor.refPrefix`, so a
+    rebuild does not recover observed entries unless it learns the second namespace. They record
+    *foreign* activity, so losing them to a rebuild may well be acceptable — but that is a decision to
+    take deliberately, not to discover.
+
+    `RefSnapshot` already filters the whole `refs/switchyard/` namespace, so capture and restore are
+    unaffected either way.
