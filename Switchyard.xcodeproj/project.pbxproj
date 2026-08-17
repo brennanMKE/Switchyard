@@ -12,6 +12,7 @@
 		E398814DF31922FD00FDEBAD /* BrokerAgent in Embed Broker Agent Executable */ = {isa = PBXBuildFile; fileRef = 297AF29631C6CF47EA378EF1 /* BrokerAgent */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		09E01719DA7A35F18DF2878D /* co.sstools.Switchyard.broker.plist in Embed Broker Agent Plist */ = {isa = PBXBuildFile; fileRef = 48178BDA2A706B46B93DF235 /* co.sstools.Switchyard.broker.plist */; };
 		A1B2C3D4E5F60001 /* YardUI in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D4E5F60000 /* YardUI */; };
+		2CA217801CFCB04B9FF511A2 /* YardKit in Frameworks */ = {isa = PBXBuildFile; productRef = A81B5573CF0B3AD6AD1C5675 /* YardKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -123,6 +124,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				2CA217801CFCB04B9FF511A2 /* YardKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -260,6 +262,7 @@
 			);
 			name = BrokerAgent;
 			packageProductDependencies = (
+				A81B5573CF0B3AD6AD1C5675 /* YardKit */,
 			);
 			productName = BrokerAgent;
 			productReference = 297AF29631C6CF47EA378EF1 /* BrokerAgent */;
@@ -812,6 +815,10 @@
 		A1B2C3D4E5F60000 /* YardUI */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = YardUI;
+		};
+		A81B5573CF0B3AD6AD1C5675 /* YardKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = YardKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
