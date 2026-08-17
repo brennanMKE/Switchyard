@@ -306,6 +306,67 @@ struct PostRewriteAttachTests {
         #expect(after.rewrite == nil, "the entry's metadata must still carry no rewrite mapping")
     }
 
+    /// #0234's own test: `Fixup.run(source:target:)` (#0214's existing-commit
+    /// mode) fires **three** `post-rewrite` invocations for one operation — a
+    /// standalone `amend` (`headBefore → mid`), a mid-rebase `amend` that
+    /// #0233 already filters, and the final `rebase` (`mid → head`, plus
+    /// `target`'s own rewrite). Attaching each invocation as it arrives must
+    /// leave the entry's pre-checkpoint `HEAD` reachable through the stored
+    /// mapping — the assertion this issue exists for, not merely that the
+    /// mapping is non-empty.
+    @Test func attachingAnExistingCommitFixupMappingKeepsThePreCheckpointHeadReachable() throws {
+        var repo = try FixtureRepository()
+        try repo.build([.init("c1"), .init("c2"), .init("c3")])
+        defer { repo.destroy() }
+        let target = try #require(repo.oids["c2"])
+        let context = try WorktreeContext.resolve(path: repo.url.path)
+        let log = repo.url.appendingPathComponent("post-rewrite.log")
+        try installLoggingPostRewriteHook(in: repo, loggingTo: log)
+
+        let headBefore = try #require(
+            git.run(["rev-parse", "HEAD"], workingDirectory: repo.url.path).lines.first)
+
+        #expect(try JournalAnchor.list(in: context).isEmpty)
+
+        let result = try Fixup.run(
+            source: "HEAD", target: target, at: repo.url.path, extraEnvironment: hermetic)
+
+        let entries = try JournalAnchor.list(in: context)
+        #expect(entries.count == 1)
+        let checkpointEntry = try #require(entries.first)
+
+        let logged = try allInvocations(in: log)
+        #expect(logged.count == 3,
+                "a standalone amend, a mid-rebase amend, then the authoritative final rebase")
+
+        // Attach every invocation in order, exactly as the real hook would
+        // fire them across the lifetime of one operation.
+        for invocation in logged {
+            let decision = PostRewrite.decide(
+                sourceArgument: invocation.source,
+                environment: [GitProcess.markerVariable: invocation.marker ?? ""],
+                readStandardInput: { invocation.stdin })
+            let entryIDString = try #require(invocation.entryID)
+            let entryID = try #require(JournalEntryID(entryIDString))
+            #expect(entryID == checkpointEntry.id)
+            _ = try JournalCheckpoint.attachRewrite(decision, entryID: entryID, in: context)
+        }
+
+        let after = try JournalEntryMetadata(
+            serialized: try JournalAnchor.metadata(for: checkpointEntry.id, in: context))
+        let mapping = try #require(after.rewrite)
+        #expect(!mapping.rewrites.isEmpty)
+
+        // The assertion that matters: the entry's pre-checkpoint HEAD must
+        // be reachable through the stored mapping, chained to the operation's
+        // actual result — not merely present somewhere, and not lost behind
+        // the intermediate commit the mid-rebase amend named.
+        let fromHeadBefore = try #require(
+            mapping.rewrites.first(where: { $0.oldOid == headBefore }),
+            "headBefore must be reachable through the stored mapping")
+        #expect(fromHeadBefore.newOid == result.head)
+    }
+
     // MARK: - The compare-and-swap guard
 
     /// `updateRefCommand`'s literal output, old oid included. `update-ref
