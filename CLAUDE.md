@@ -507,8 +507,8 @@ xcodebuild -project Switchyard.xcodeproj -scheme Switchyard \
 cd YardKit && swift build && swift test
 ```
 
-`YardKit/` does not exist yet. Until it does, the app target is a stock SwiftUI template — see
-[Current state](#current-state).
+`YardKit/` exists with four targets — `YardGit`, `YardKit`, `YardUI` and the `switchyard`
+executable — and five test targets. See [Current state](#current-state).
 
 ## Layering
 
@@ -602,15 +602,23 @@ invocation, and every path lookup goes through it. It exists from M1 for this re
 
 ## Current state
 
-The repository is a stock SwiftUI macOS template plus the documents in `docs/` and the tasks in
-`issues/`. Nothing in the architecture above is built yet.
+**Updated 2026-08-17.** This section was two milestones out of date — it still said the repository was
+a stock SwiftUI template with nothing built, which a fresh context would read as fact.
 
-**Milestone 0 is the engine spike, and nothing else starts until it lands.** It answers four
-questions in `docs/engine-findings.md` — SSH-signed commits through libgit2, graph layout
-performance on a 50k-commit repo with and without `commit-graph`, how libgit2 packages into SwiftPM
-in 2026, and whether the chosen build can read a `--ref-format=reftable` repository — then the spike
-code is deleted. Do not scaffold the app first.
+- **M0 is done.** `docs/engine-findings.md` answers all four spike questions with measured evidence
+  and the spike code is deleted. Its exit criteria in guide §9 are checked off.
+- **`YardKit/` is real**: `YardGit` (46 source files — the engine), `YardKit`, `YardUI`, and the
+  `switchyard` executable, plus five test targets. `docs/test-baseline.txt` carries the current suite
+  count, and it is the number to trust rather than any figure written into prose here.
+- **M1 — the read engine and worktrees — is at its milestone review**, not at its start. The engine
+  behind `whereami`, `graph`, `status`, `hunks`, `conflicts`, `log` and `verify` and the whole `wt`
+  group exists with tests.
+- **M2 — journal, hooks, safe mutation — is the milestone in progress.** The journal, its anchor
+  store, undo/redo, the chain, and hook install all exist; see the M2 checklist in guide §9 for what
+  is not done.
+- **The app target is still a stock SwiftUI template.** Nothing in the XPC layer, the broker, or the
+  UI is built; that is M3 onward. An engine with no caller is exactly the gap guide §11 decision 11
+  moved to M3.
 
-If signing or performance fails, stop and escalate; the project's premise depends on both. A
-reftable failure does not stop the project but must be settled before M1, because it moves ref
-enumeration and graph traversal onto `git` plumbing, and that is not a retrofit.
+**On 2026-08-16 `main` was reset** to recover from work done outside the workflow; see
+`docs/workflow-reset-2026-08-16.md` for what moved to which branch and what has to be re-done.
