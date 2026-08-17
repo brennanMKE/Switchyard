@@ -244,18 +244,71 @@ public extension JournalCheckpoint {
     /// `body` throws: an entry describing the state before a failed attempt is
     /// correct and cheap, and removing it would need a second write on the
     /// error path for no gain.
+    ///
+    /// **`body` receives a `GitProcess` carrying the entry's id (#0221)**,
+    /// scoped to exactly this call: every git subprocess `body` runs through
+    /// the parameter it is handed exports `GitProcess.entryVariable`, so the
+    /// `post-rewrite` hook can find its way back to the entry that was
+    /// in-flight when the rewrite ran. `body` must use the parameter, not the
+    /// outer `git` it may have captured — that captured value carries no id
+    /// and a rewrite run through it attaches to nothing. Nothing is
+    /// process-global: the id lives only on this one `GitProcess` value,
+    /// which stops existing when `around` returns.
     static func around<T>(
         operation: String,
         at path: String,
         command: String? = nil,
         agent: JournalEntryMetadata.Agent? = nil,
         git: GitProcess = GitProcess(),
-        _ body: () throws -> T
+        _ body: (GitProcess) throws -> T
     ) throws -> T {
         let context = try WorktreeContext.resolve(path: path, git: git)
-        _ = try checkpoint(
+        let entry = try checkpoint(
             operation: operation, command: command, agent: agent,
             in: context, git: git)
-        return try body()
+        let scoped = GitProcess(executablePath: git.executablePath, journalEntryID: entry.id)
+        return try body(scoped)
+    }
+
+    /// Attaches an own-invocation rewrite mapping to the journal entry that
+    /// was in flight when the rewrite ran — the other half of #0220's
+    /// foreign path, and #0221's job. `entryID` is whatever the caller read
+    /// back out of `GitProcess.entryVariable` in the `post-rewrite` hook's
+    /// environment; parsing that environment is the hook glue's job (#0217),
+    /// not this function's.
+    ///
+    /// **No entry id records nothing, deliberately, and says so by
+    /// returning `nil`.** An own invocation whose git subprocess ran with no
+    /// `entryVariable` set is one that took no `JournalCheckpoint.around` —
+    /// there is no in-flight entry to attach to, and no entry at all is the
+    /// honest state: falling back to an observed entry would misrepresent
+    /// the mapping as foreign-sourced, which is exactly the distinction
+    /// `JournalObserved.Metadata.kind` exists to preserve (#0220), and
+    /// inventing a new entry with nothing else to anchor would fabricate
+    /// state nothing captured. This is a documented, tested `nil`, not a
+    /// swallowed failure — the same shape #0220's own-invocation guard on
+    /// `JournalObserved.record` already uses for the opposite half of this
+    /// boundary.
+    ///
+    /// Throws only on a genuine persistence failure once there is an id to
+    /// attach to. The totality invariant (#0043, #0191) — a failed attach
+    /// must never surface as a non-zero hook exit — is the caller's job,
+    /// exactly as it already is for `JournalObserved.record`.
+    @discardableResult
+    static func attachRewrite(
+        _ decision: PostRewrite.Decision,
+        entryID: JournalEntryID?,
+        in context: WorktreeContext,
+        git: GitProcess = GitProcess()
+    ) throws -> JournalAnchor.Entry? {
+        guard decision.isOwnInvocation, let entryID else { return nil }
+
+        let existing = try JournalEntryMetadata(
+            serialized: try JournalAnchor.metadata(for: entryID, in: context, git: git))
+        let mapping = JournalEntryMetadata.RewriteMapping(
+            source: decision.source.gitArgument, rewrites: decision.rewrites)
+        let updated = existing.attachingRewrite(mapping)
+        return try JournalAnchor.updateMetadata(
+            try updated.serialized(), for: entryID, in: context, git: git)
     }
 }

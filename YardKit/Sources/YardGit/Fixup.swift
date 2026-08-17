@@ -71,7 +71,7 @@ public struct Fixup: Equatable, Sendable {
         }
 
         // 3. Everything past this point is one checkpoint for the pair.
-        return try JournalCheckpoint.around(operation: "fixup", at: path, git: git) {
+        return try JournalCheckpoint.around(operation: "fixup", at: path, git: git) { git in
             try performFixup(
                 target: target,
                 signing: signing,

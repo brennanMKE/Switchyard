@@ -34,7 +34,7 @@ public func unstageHunks(
     at path: String,
     git: GitProcess = GitProcess()
 ) throws {
-    try JournalCheckpoint.around(operation: "unstage", at: path, git: git) {
+    try JournalCheckpoint.around(operation: "unstage", at: path, git: git) { git in
         try unstageHunksWithoutCheckpoint(ids: ids, at: path, git: git)
     }
 }
