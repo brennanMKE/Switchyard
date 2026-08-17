@@ -31,7 +31,20 @@ import Foundation
     func appEndpoint(reply: @escaping @Sendable (NSXPCListenerEndpoint?) -> Void)
 }
 
-/// `NSXPCInterface` value for ``BrokerProtocol``.
+/// What the app exposes to a CLI over the direct connection.
+///
+/// Scoped to a liveness check only. The app's listener declines every
+/// connection until #0215 exports a real service interface, so nothing here
+/// is reachable end to end yet — this issue tests it against an in-process
+/// listener instead. `perform`/`startSession` shapes belong with the command
+/// wiring (#0115, #0124) and the session work (#0213).
+@objc public protocol AppServiceProtocol {
+    /// Liveness check on the app itself, distinct from `brokerPing`: this one
+    /// only answers when the direct connection is live.
+    func appPing(reply: @escaping @Sendable (String) -> Void)
+}
+
+/// `NSXPCInterface` values for ``BrokerProtocol`` and ``AppServiceProtocol``.
 ///
 /// Both sides of a connection must configure `remoteObjectInterface` and
 /// `exportedInterface` with matching interfaces *before* calling `resume()`.
@@ -40,6 +53,10 @@ import Foundation
 public enum XPCInterfaces {
     public static var broker: NSXPCInterface {
         NSXPCInterface(with: BrokerProtocol.self)
+    }
+
+    public static var appService: NSXPCInterface {
+        NSXPCInterface(with: AppServiceProtocol.self)
     }
 }
 
