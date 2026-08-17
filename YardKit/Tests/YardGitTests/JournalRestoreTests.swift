@@ -479,6 +479,99 @@ struct JournalRestoreTests {
         #expect(try JournalAnchor.list(in: ctx).count > countBefore)
     }
 
+    // MARK: - Cross-worktree restore (#0175)
+
+    /// A linked worktree with a checkpoint recorded in it and per-worktree
+    /// `refs/worktree/probe-*` refs planted on both sides — the fixture the
+    /// cross-worktree tests need to prove that the applied snapshot carries
+    /// the caller's own per-worktree refs through and drops the recorded
+    /// worktree's.
+    private func crossWorktreeFixture(
+        format: FixtureRepository.RefFormat
+    ) throws -> (repo: FixtureRepository, mainCtx: WorktreeContext, wtCtx: WorktreeContext,
+                 entry: JournalAnchor.Entry, recorded: RefSnapshot, mainProbe: String) {
+        let repo = try FixtureRepository.linear(refFormat: format)
+        let wtURL = try repo.addWorktree(named: "agent", branch: "agent-branch")
+        let wtCtx = try WorktreeContext.resolve(path: wtURL.path)
+        let mainCtx = try context(of: repo)
+
+        let mainProbe = try #require(repo.oids["a"])
+        let linkedProbe = try #require(repo.oids["b"])
+        try git.run(["update-ref", "refs/worktree/probe-main", mainProbe],
+                    workingDirectory: mainCtx.topLevel ?? mainCtx.gitDir)
+        try git.run(["update-ref", "refs/worktree/probe-linked", linkedProbe],
+                    workingDirectory: wtCtx.topLevel ?? wtCtx.gitDir)
+
+        // Captured immediately before the checkpoint, which itself captures
+        // the same present — nothing else touches refs in between, so this
+        // is what the entry's own recorded snapshot holds.
+        let recorded = try RefSnapshot.capture(in: wtCtx, git: git)
+        let entry = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: wtCtx)
+        return (repo, mainCtx, wtCtx, entry, recorded, mainProbe)
+    }
+
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func aForeignEntryRestoresUnderTheOverrideAndLeavesOurPrivateRefsAlone(
+        format: FixtureRepository.RefFormat
+    ) throws {
+        let (repo, mainCtx, _, entry, recorded, mainProbe) = try crossWorktreeFixture(format: format)
+        defer { repo.destroy() }
+
+        let report = try JournalRestore.restore(entry.id, allowDifferentWorktree: true, in: mainCtx)
+        #expect(report.entry == entry)
+
+        // The shared refs match the recorded snapshot, and the caller's HEAD
+        // applies as recorded.
+        let after = try RefSnapshot.capture(in: mainCtx)
+        #expect(after.withoutPerWorktreeRefs == recorded.withoutPerWorktreeRefs)
+        #expect(after.head == recorded.head)
+
+        // The caller's own refs/worktree/probe-main still exists with its
+        // original oid — untouched by a cross-worktree application.
+        let survivor = try git.capture(
+            ["rev-parse", "--verify", "--quiet", "refs/worktree/probe-main"],
+            workingDirectory: mainCtx.topLevel ?? mainCtx.gitDir)
+        #expect(survivor.exitCode == 0)
+        #expect(survivor.lines.first == mainProbe)
+    }
+
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func theRecordedWorktreesPrivateRefsAreNotWrittenIntoOurs(
+        format: FixtureRepository.RefFormat
+    ) throws {
+        let (repo, mainCtx, _, entry, _, _) = try crossWorktreeFixture(format: format)
+        defer { repo.destroy() }
+
+        try JournalRestore.restore(entry.id, allowDifferentWorktree: true, in: mainCtx)
+
+        // The recorded worktree's own refs/worktree/probe-linked must not
+        // appear in the caller's namespace.
+        let imported = try git.capture(
+            ["rev-parse", "--verify", "--quiet", "refs/worktree/probe-linked"],
+            workingDirectory: mainCtx.topLevel ?? mainCtx.gitDir)
+        #expect(imported.exitCode != 0)
+    }
+
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func withoutTheOverrideAForeignEntryStillRefuses(format: FixtureRepository.RefFormat) throws {
+        let repo = try FixtureRepository.linear(refFormat: format)
+        defer { repo.destroy() }
+        let wtURL = try repo.addWorktree(named: "agent", branch: "agent-branch")
+        let wtCtx = try WorktreeContext.resolve(path: wtURL.path)
+        let name = try #require(wtCtx.worktreeName)
+        let path = try #require(wtCtx.topLevel)
+        let entry = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: wtCtx)
+
+        let mainCtx = try context(of: repo)
+        let thrown = #expect(throws: JournalRestore.Error.self) {
+            try JournalRestore.restore(entry.id, in: mainCtx)
+        }
+        let error = try #require(thrown)
+        #expect(error == .differentWorktree(
+            recordedName: name, recordedPath: path,
+            calling: nil, recordedStillExists: true))
+    }
+
     // MARK: - The lock wraps the whole flow
 
     /// Single format on purpose: the lock is `flock(2)` on a file under the
