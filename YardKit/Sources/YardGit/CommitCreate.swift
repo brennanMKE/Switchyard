@@ -60,6 +60,14 @@ public struct CommitCreate: Equatable, Sendable {
     /// HEAD` for the new oid on success. `GIT_EDITOR` is never invoked:
     /// `GitProcess` pins it to `false` and `-m` is always passed.
     ///
+    /// - Parameter trailers: Provenance trailers to attach, in order. Passed
+    ///   as `--trailer`, never concatenated into `message`: git inserts the
+    ///   blank-line separator itself, preserves the given order, and
+    ///   **extends an existing trailer block rather than starting a second
+    ///   one** — all measured (#0038). It also assembles the whole message
+    ///   before writing the object, so a signature covers the trailers by
+    ///   construction; appending them afterwards would mean rewriting the
+    ///   commit and invalidating it.
     /// - Parameter extraEnvironment: merged over the process environment for
     ///   every invocation. Tests use it to neutralize global and system config
     ///   scope; production callers leave it empty.
@@ -70,11 +78,14 @@ public struct CommitCreate: Equatable, Sendable {
     public static func run(
         message: String,
         signing: Signing = .config,
+        trailers: [Trailer] = [],
         in workingDirectory: String,
         git: GitProcess = GitProcess(),
         extraEnvironment: [String: String] = [:]
     ) throws -> CommitCreate {
-        let args = ["commit", "-m", message] + arguments(for: signing)
+        let args = ["commit", "-m", message]
+            + trailers.flatMap { ["--trailer", $0.description] }
+            + arguments(for: signing)
         let output = try git.capture(
             args,
             workingDirectory: workingDirectory,

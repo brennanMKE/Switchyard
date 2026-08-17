@@ -183,3 +183,69 @@ private let measuredUnsetKeyStderr =
     #expect(CommitCreate.classify(
         stderr: measuredUnloadableKeyStderr, signingInEffect: false) == nil)
 }
+
+// MARK: - Provenance trailers (#0038)
+
+/// `git log -1 --format=%B` for the current HEAD, as bytes decoded UTF-8.
+private func commitBody(in repo: FixtureRepository) throws -> String {
+    try GitProcess().run(
+        ["log", "-1", "--format=%B"], workingDirectory: repo.url.path, extraEnvironment: hermetic
+    ).text
+}
+
+@Test func provenanceTrailersLandInTheCommitBody() throws {
+    var repo = try FixtureRepository()
+    defer { repo.destroy() }
+    try repo.build([.init("a")])
+    try stageChange(in: repo)
+
+    let trailers = [
+        Trailer(key: "Agent-Name", value: "claude-code"),
+        Trailer(key: "Agent-Model", value: "claude-opus-5"),
+        Trailer(key: "Agent-Session", value: "01J8X"),
+    ]
+    _ = try CommitCreate.run(
+        message: "subject line", trailers: trailers, in: repo.url.path, extraEnvironment: hermetic)
+
+    // Whole-body equality, not "contains" — this is what pins the blank-line
+    // separator and the given order (measured #0038, git 2.50.1).
+    #expect(try commitBody(in: repo) ==
+        "subject line\n\nAgent-Name: claude-code\nAgent-Model: claude-opus-5\nAgent-Session: 01J8X\n\n")
+
+    let value = try GitProcess().run(
+        ["log", "-1", "--format=%(trailers:key=Agent-Name,valueonly)"],
+        workingDirectory: repo.url.path, extraEnvironment: hermetic
+    ).text
+    #expect(value == "claude-code\n\n")
+}
+
+@Test func trailersExtendAnExistingBlockRatherThanStartingASecond() throws {
+    var repo = try FixtureRepository()
+    defer { repo.destroy() }
+    try repo.build([.init("a")])
+    try stageChange(in: repo)
+
+    // The `-m` message already ends in a trailer line. Hand-built
+    // concatenation would start a second blank-line-delimited block; git's
+    // `--trailer` extends the existing one instead (measured #0038).
+    _ = try CommitCreate.run(
+        message: "second commit\n\nSigned-off-by: someone <s@e>",
+        trailers: [Trailer(key: "Agent-Name", value: "claude-code")],
+        in: repo.url.path,
+        extraEnvironment: hermetic)
+
+    #expect(try commitBody(in: repo) ==
+        "second commit\n\nSigned-off-by: someone <s@e>\nAgent-Name: claude-code\n\n")
+}
+
+@Test func noTrailersLeavesTheMessageUnchanged() throws {
+    var repo = try FixtureRepository()
+    defer { repo.destroy() }
+    try repo.build([.init("a")])
+    try stageChange(in: repo)
+
+    _ = try CommitCreate.run(
+        message: "plain message", in: repo.url.path, extraEnvironment: hermetic)
+
+    #expect(try commitBody(in: repo) == "plain message\n\n")
+}
