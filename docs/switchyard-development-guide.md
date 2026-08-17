@@ -1059,6 +1059,31 @@ a feature at any milestone on the grounds that GitUp had it.
     not consider.
 
 
+18. **`GitProcess` gets an opt-in wall-clock timeout, used only at signing-adjacent call sites.**
+    Decided 2026-08-17 in Brennan's absence, on the same terms as decisions 14–17: reversible, flagged
+    here, and taken on measurement. **#0163** states the three options and is where the measurements
+    live; option 3 (a blanket default) it rules out itself, since a clone or a fetch legitimately runs
+    for minutes.
+
+    Between the remaining two, option 1 (do nothing) leaves a real hang: `GIT_TERMINAL_PROMPT=0`,
+    `GIT_ASKPASS=""` and `GIT_EDITOR=false` stop **git** prompting, and govern a **signing helper's**
+    own UI not at all — gpg launches pinentry, a GUI dialog, for a passphrase-protected key, and
+    `ssh-keygen` can read `/dev/tty` directly. `GitProcess.launch` calls `waitUntilExit()` with no
+    bound, so that dialog blocks the engine and then whatever agent called it, indefinitely. An agent
+    surface whose stated rule is *"nothing is interactive unless the command name says so"* should not
+    have one.
+
+    Option 2 is additive: a `timeout:` parameter defaulting to nil, passed only where signing is in
+    effect, classified as `ExitClass.signingFailed` (9) when it fires. Nothing else changes, and
+    removing it later is a parameter deletion.
+
+    The termination semantics were measured in #0163 and decide the implementation: `terminate()`
+    alone is **not** sufficient — a child that ignores `SIGTERM`, which is the shape of the case this
+    is about, survives it and needs `SIGKILL` after a grace period. And a killed child reports
+    `terminationStatus` **9**, which is also `ExitClass.signingFailed`'s raw value, so a timeout must
+    be classified by *how the process ended* (`terminationReason == .uncaughtSignal`) and never by the
+    number.
+
 
 ### Still open
 
