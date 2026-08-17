@@ -10,10 +10,16 @@ struct LayeringTests {
         #expect(!YardKit.version.isEmpty)
     }
 
-    /// The engine must stay usable with no app, no XPC, and no launch agent —
-    /// that constraint is what lets `yard` run in CI, over SSH, and in headless
-    /// agent runs. A stray `import YardKit` inside `YardGit` would break it
-    /// silently, so this asserts the dependency direction from the source.
+    /// The dependency arrow points one way: the XPC layer knows about the
+    /// engine, never the reverse. A stray `import YardKit` inside `YardGit`
+    /// would invert it silently — nothing about a compile would complain —
+    /// so this asserts it from the source.
+    ///
+    /// The rationale here used to read "so the engine runs in CI, over SSH and
+    /// in headless agent runs". **There is no such requirement** and there never
+    /// was; CLAUDE.md records it as invented and corrected on 2026-08-06. The
+    /// assertion is still right, for the ordinary reason that a layer should not
+    /// depend on the thing that depends on it.
     @Test func yardGitDoesNotImportYardKit() throws {
         let here = URL(fileURLWithPath: #filePath)
         let root = here.deletingLastPathComponent()   // YardKitTests
