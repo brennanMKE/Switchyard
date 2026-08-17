@@ -97,13 +97,20 @@ public enum JournalRestore {
         /// The entry written immediately before applying the snapshot,
         /// capturing the state the restore replaced.
         public let checkpoint: JournalAnchor.Entry
+        /// The branch `HEAD` did **not** adopt, because a live sibling worktree
+        /// has it checked out — `HEAD` was detached at that branch's recorded
+        /// oid instead (#0211, guide §11 decision 16). Nil when nothing was
+        /// given up, which is the ordinary case.
+        public let detachedFrom: String?
 
         public init(entry: JournalAnchor.Entry, restored: [Piece],
-                    notRestored: [Omission], checkpoint: JournalAnchor.Entry) {
+                    notRestored: [Omission], checkpoint: JournalAnchor.Entry,
+                    detachedFrom: String? = nil) {
             self.entry = entry
             self.restored = restored
             self.notRestored = notRestored
             self.checkpoint = checkpoint
+            self.detachedFrom = detachedFrom
         }
     }
 
@@ -272,6 +279,12 @@ public enum JournalRestore {
         let currentWorktree = try WorktreeSnapshot.capture(in: context, git: git)
         let currentSequencer = try SequencerSnapshot.capture(in: context, git: git)
 
+        // Hoisted above `applied`: both the head-detach transformation below
+        // and the disturbance check (step 5) need the same worktree listing,
+        // and the transformation must run before step 5 sees the snapshot it
+        // will actually inspect.
+        let worktrees = try worktreeList(path: base, git: git)
+
         // Under the override the recorded snapshot cannot be applied
         // verbatim: `for-each-ref` lists the CAPTURING worktree's
         // `refs/worktree/*` and `refs/rewritten/*` under plain names, so
@@ -279,12 +292,21 @@ public enum JournalRestore {
         // ours and delete ours as extras (measured, #0044). Take the
         // recorded shared refs, and carry our own per-worktree entries
         // through unchanged so deletion planning leaves them alone.
-        let applied: RefSnapshot = allowDifferentWorktree && metadata.worktree.name != context.worktreeName
+        let candidate: RefSnapshot = allowDifferentWorktree && metadata.worktree.name != context.worktreeName
             ? RefSnapshot(
                 head: recorded.head,
                 refs: recorded.withoutPerWorktreeRefs.refs
                     + current.refs.filter { WorktreeContext.isPerWorktree($0.name) })
             : recorded
+
+        // Detach HEAD instead of adopting it when its branch is checked out
+        // by a live sibling (#0211, guide §11 decision 16). Not keyed on
+        // `allowDifferentWorktree`: the collision predates the override and
+        // happens same-worktree too — a live sibling can check out the
+        // caller's own recorded branch between checkpoint and restore.
+        let headDetach = WorktreeDisturbance.detachingHeldHead(
+            in: candidate, worktrees: worktrees, callerPath: context.topLevel)
+        let applied = headDetach.snapshot
 
         // 4. The cross-tool guard, against the cursor's snapshot. A
         // cursor naming a pruned entry (possible only once its chain's
@@ -306,7 +328,7 @@ public enum JournalRestore {
         let disturbances = WorktreeDisturbance.disturbances(
             restoring: applied,
             current: current,
-            worktrees: try worktreeList(path: base, git: git),
+            worktrees: worktrees,
             callerPath: context.topLevel)
         guard disturbances.isEmpty else {
             throw WorktreeDisturbance.Error.wouldDisturb(disturbances: disturbances)
@@ -405,12 +427,14 @@ public enum JournalRestore {
             restored.append(.sequencer)
         }
 
-        // 9. Report honestly — only what was NOT put back.
+        // 9. Report honestly — only what was NOT put back, and what HEAD gave
+        // up rather than adopted.
         return Report(
             entry: entry,
             restored: restored,
             notRestored: omissions(of: metadata.captured, restored: restored),
-            checkpoint: checkpoint)
+            checkpoint: checkpoint,
+            detachedFrom: headDetach.detachedFrom)
     }
 
     // MARK: - Pieces

@@ -219,4 +219,84 @@ struct WorktreeDisturbanceTests {
                   current: nil, target: y, prunable: false),
         ])
     }
+
+    // MARK: - detachingHeldHead: detach on collision (#0211, guide §11 decision 16)
+
+    private func liveEntry(_ path: String, branch: String) -> WorktreeEntry {
+        WorktreeEntry(path: path, head: nil, branch: branch,
+                      locked: false, lockReason: nil, bare: false,
+                      detached: false, prunable: false,
+                      prunableReason: nil, isMainWorktree: false)
+    }
+
+    @Test func aLiveSiblingHoldingTheBranchDetachesHeadAtTheRecordedOid() {
+        let oid = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        let snapshot = RefSnapshot(
+            head: .symbolic(target: "refs/heads/agent-branch"),
+            refs: [.init(name: "refs/heads/agent-branch", oid: oid)])
+        let result = WorktreeDisturbance.detachingHeldHead(
+            in: snapshot,
+            worktrees: [liveEntry("/w/sibling", branch: "agent-branch")],
+            callerPath: "/w/caller")
+        #expect(result.snapshot.head == .detached(oid: oid))
+        #expect(result.snapshot.refs == snapshot.refs)
+        #expect(result.detachedFrom == "refs/heads/agent-branch")
+    }
+
+    @Test func aPrunedSiblingHoldingTheBranchLeavesHeadSymbolic() {
+        // This is the dead-agent recovery case #0175 exists for: a pruned
+        // record holds nothing, so adopting its HEAD is correct.
+        let oid = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        let snapshot = RefSnapshot(
+            head: .symbolic(target: "refs/heads/agent-branch"),
+            refs: [.init(name: "refs/heads/agent-branch", oid: oid)])
+        var pruned = liveEntry("/w/sibling", branch: "agent-branch")
+        pruned = WorktreeEntry(path: pruned.path, head: pruned.head, branch: pruned.branch,
+                                locked: false, lockReason: nil, bare: false,
+                                detached: false, prunable: true,
+                                prunableReason: "gitdir file points to non-existent location",
+                                isMainWorktree: false)
+        let result = WorktreeDisturbance.detachingHeldHead(
+            in: snapshot, worktrees: [pruned], callerPath: "/w/caller")
+        #expect(result.snapshot == snapshot)
+        #expect(result.detachedFrom == nil)
+    }
+
+    @Test func theCallerHoldingItsOwnBranchIsNeverDetached() {
+        let oid = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        let snapshot = RefSnapshot(
+            head: .symbolic(target: "refs/heads/agent-branch"),
+            refs: [.init(name: "refs/heads/agent-branch", oid: oid)])
+        let result = WorktreeDisturbance.detachingHeldHead(
+            in: snapshot,
+            worktrees: [liveEntry("/w/caller", branch: "agent-branch")],
+            callerPath: "/w/caller")
+        #expect(result.snapshot == snapshot)
+        #expect(result.detachedFrom == nil)
+    }
+
+    @Test func aDetachedHeadInIsReturnedUnchanged() {
+        let oid = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        let snapshot = RefSnapshot(head: .detached(oid: oid), refs: [])
+        let result = WorktreeDisturbance.detachingHeldHead(
+            in: snapshot,
+            worktrees: [liveEntry("/w/sibling", branch: "agent-branch")],
+            callerPath: "/w/caller")
+        #expect(result.snapshot == snapshot)
+        #expect(result.detachedFrom == nil)
+    }
+
+    @Test func aBranchAbsentFromTheSnapshotsRefsLeavesHeadSymbolic() {
+        // No `refs/heads/agent-branch` entry in `refs` -- fabricating a
+        // detached head from an oid the snapshot never recorded would be
+        // inventing state.
+        let snapshot = RefSnapshot(
+            head: .symbolic(target: "refs/heads/agent-branch"), refs: [])
+        let result = WorktreeDisturbance.detachingHeldHead(
+            in: snapshot,
+            worktrees: [liveEntry("/w/sibling", branch: "agent-branch")],
+            callerPath: "/w/caller")
+        #expect(result.snapshot == snapshot)
+        #expect(result.detachedFrom == nil)
+    }
 }
