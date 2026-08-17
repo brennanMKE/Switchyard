@@ -102,6 +102,11 @@ struct ExitClassCoverageTests {
             // #0208: asserted in CommitHunksTests.commitHunksErrorMapsToRepositoryError.
             Row("CommitHunksError", CommitHunksError.indexNotClean(paths: ["probe/staged.txt"]),
                 .repositoryError),
+            // #0039: FixupError has three distinct exit classes across its
+            // cases (targetNotAncestor/nothingStaged → 6, blockedOnConflicts
+            // → 8, signingFailed → 9); this row exercises the repositoryError
+            // case, the same shape as the sibling errors above.
+            Row("FixupError", FixupError.targetNotAncestor(target: "probe-target"), .repositoryError),
         ]
     }
 
