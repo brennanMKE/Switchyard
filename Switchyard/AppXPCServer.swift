@@ -170,9 +170,32 @@ private nonisolated final class ListenerDelegate: NSObject, NSXPCListenerDelegat
         _ listener: NSXPCListener,
         shouldAcceptNewConnection connection: NSXPCConnection
     ) -> Bool {
-        // Exporting a real service interface to accepted CLIs, and the
-        // session machinery behind it, is #0213. Decline for now rather than
-        // accept a connection nothing will ever serve.
-        false
+        // Both must be set BEFORE resume(), or calls silently do nothing — no
+        // error, no reply, no crash. Same rule as the client side.
+        connection.exportedInterface = XPCInterfaces.appService
+        connection.exportedObject = AppService()
+        connection.resume()
+        return true
+    }
+}
+
+// MARK: - Exported service
+
+/// The object exported to an accepted CLI connection.
+///
+/// One instance per accepted connection: `ListenerDelegate` creates one each
+/// time `shouldAcceptNewConnection` fires, the connection retains it as its
+/// `exportedObject`, and it is released when that connection invalidates. No
+/// session state lives here — that is #0213, deliberately after this.
+///
+/// `nonisolated` for the same reason as `ListenerDelegate`: XPC reaches this
+/// object on its own queues, not the main actor, and the app target compiles
+/// with `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`.
+private nonisolated final class AppService: NSObject, AppServiceProtocol {
+    func appPing(reply: @escaping @Sendable (String) -> Void) {
+        // Bundle.main.infoDictionary is safe to read from any queue, so no
+        // main-actor hop is needed here.
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+        reply(version ?? "unknown")
     }
 }
