@@ -63,16 +63,6 @@ public struct WorktreeStatusEntry {
             default:  return .unmodified
             }
         }
-
-        /// Char-parsed fallback for the worktree side (Y): handles `?`, `!`, and `u`.
-        init?(ychar: Character) {
-            switch ychar {
-            case "?": self = .untracked
-            case "!": self = .ignored
-            case "u": self = .conflicted
-            default:  return nil
-            }
-        }
     }
 
     /// State of a submodule, parsed from the `S<c><m><u>` token.
