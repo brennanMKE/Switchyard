@@ -240,8 +240,14 @@ struct JournalRestoreTests {
         #expect(try RefSnapshot.capture(in: ctx) == stateBefore)
     }
 
+    // Renamed from `bypassGuardSkipsTheGuardAndNothingElse` (#0203): this
+    // fixture has no sibling worktree, so it can only pin that bypassGuard
+    // skips step 4, the cross-tool guard. It cannot see whether step 5, the
+    // sibling-disturbance check, still runs — that half of the "and nothing
+    // else" claim is what `restoreRefusesToDisturbASiblingsCheckoutEvenWithBypassGuard`
+    // pins below.
     @Test(arguments: FixtureRepository.RefFormat.supported())
-    func bypassGuardSkipsTheGuardAndNothingElse(format: FixtureRepository.RefFormat) throws {
+    func bypassGuardSkipsTheCrossToolGuard(format: FixtureRepository.RefFormat) throws {
         let (repo, ctx, redoTarget, redoState, _) =
             try standingOnAnEntryWithARogueRef(format: format)
         defer { repo.destroy() }
@@ -345,6 +351,40 @@ struct JournalRestoreTests {
                   current: moved, target: target, prunable: false),
         ]))
         // Nothing was written.
+        #expect(try JournalAnchor.list(in: ctx).count == countBefore)
+        #expect(try RefSnapshot.capture(in: ctx) == stateBefore)
+    }
+
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func restoreRefusesToDisturbASiblingsCheckoutEvenWithBypassGuard(format: FixtureRepository.RefFormat) throws {
+        var repo = try FixtureRepository.linear(refFormat: format)
+        defer { repo.destroy() }
+        let wtURL = try repo.addWorktree(named: "agent", branch: "agent-branch")
+        let wtPath = try #require(try WorktreeContext.resolve(path: wtURL.path).topLevel)
+        let ctx = try context(of: repo)
+        let entry = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+
+        // Move the sibling's branch with plumbing — which git allows
+        // silently at exit 0 (#0044). Restore would move it back.
+        let moved = try #require(repo.oids["a"])
+        let target = try #require(repo.oids["c"])
+        try git.run(["update-ref", "refs/heads/agent-branch", moved],
+                    workingDirectory: repo.url.path)
+        let countBefore = try JournalAnchor.list(in: ctx).count
+        let stateBefore = try RefSnapshot.capture(in: ctx)
+
+        // bypassGuard skips step 4, the cross-tool guard, never step 5, the
+        // sibling-disturbance check (#0044 decision 3) — the check must
+        // still refuse even when the guard is bypassed.
+        let thrown = #expect(throws: WorktreeDisturbance.Error.self) {
+            try JournalRestore.restore(entry.id, bypassGuard: true, in: ctx)
+        }
+        let error = try #require(thrown)
+        #expect(error == .wouldDisturb(disturbances: [
+            .init(worktreePath: wtPath, branch: "refs/heads/agent-branch",
+                  current: moved, target: target, prunable: false),
+        ]))
+        // Nothing was written, even with the guard bypassed.
         #expect(try JournalAnchor.list(in: ctx).count == countBefore)
         #expect(try RefSnapshot.capture(in: ctx) == stateBefore)
     }
