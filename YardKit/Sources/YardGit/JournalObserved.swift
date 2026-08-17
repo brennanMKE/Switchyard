@@ -102,6 +102,36 @@ public enum JournalObserved {
             git: git)
     }
 
+    /// **Mid-rebase dedup, shared by both the foreign and own paths
+    /// (#0233).** A rebase step that squashes, fixes up, or rewords
+    /// internally amends, raising its own `post-rewrite amend` invocation
+    /// whose old oid is an intermediate commit that never existed in the
+    /// pre-rewrite history (measured, #0043's Givens). The rebase's own
+    /// final `rebase`-sourced invocation repeats that pair alongside the
+    /// rest of its mapping, so skipping the mid-rebase amend loses nothing
+    /// and the final invocation alone is authoritative.
+    ///
+    /// Detected the way git itself exposes the state: `git rev-parse
+    /// --git-path rebase-merge` resolved through `WorktreeContext.path(for:)`,
+    /// then a `FileManager` existence check on *that resolved path* — never
+    /// a path built by string concatenation onto `.git/`. Measured to hold
+    /// for a real `post-rewrite amend` invocation; see `JournalObservedTests`.
+    ///
+    /// Called **before** the own/foreign split in both `record(_
+    /// decision:)` below and `JournalCheckpoint.attachRewrite`, so the rule
+    /// is one implementation enforced on both paths rather than two, one of
+    /// which can silently drift from the other.
+    static func isMidRebaseAmend(
+        _ decision: PostRewrite.Decision,
+        in context: WorktreeContext,
+        git: GitProcess = GitProcess(),
+        fileManager: FileManager = .default
+    ) throws -> Bool {
+        guard decision.source == .amend else { return false }
+        let rebaseMergePath = try context.path(for: "rebase-merge", git: git)
+        return fileManager.fileExists(atPath: rebaseMergePath)
+    }
+
     /// Writes one observed entry for a **foreign** rewrite decision (#0220).
     ///
     /// Only `isOwnInvocation == false` lands here — attaching an **own**
@@ -111,18 +141,9 @@ public enum JournalObserved {
     /// never crash, and this keeps the two halves from both firing once
     /// #0221 lands, whichever routes to this function by mistake.
     ///
-    /// **Mid-rebase dedup.** A rebase step that squashes, fixes up, or
-    /// rewords internally amends, raising its own `post-rewrite amend`
-    /// invocation whose old oid is an intermediate commit that never
-    /// existed in the pre-rewrite history (measured, #0043's Givens). The
-    /// rebase's own final `rebase`-sourced invocation repeats that pair
-    /// alongside the rest of its mapping, so skipping the mid-rebase amend
-    /// loses nothing and the final invocation alone is authoritative.
-    /// Detected the way git itself exposes the state: `git rev-parse
-    /// --git-path rebase-merge` resolved through `WorktreeContext.path(for:)`,
-    /// then a `FileManager` existence check on *that resolved path* — never
-    /// a path built by string concatenation onto `.git/`. Measured to hold
-    /// for a real `post-rewrite amend` invocation; see `JournalObservedTests`.
+    /// The mid-rebase dedup (`isMidRebaseAmend` above) is checked first, so
+    /// a mid-rebase amend is skipped whether the invocation turns out to be
+    /// foreign or own.
     ///
     /// Throws on a persistence failure exactly as the ref-update `record`
     /// does; the totality invariant (#0043) — a failure here must never
@@ -139,14 +160,11 @@ public enum JournalObserved {
         git: GitProcess = GitProcess(),
         fileManager: FileManager = .default
     ) throws -> JournalAnchor.Entry? {
-        guard !decision.isOwnInvocation else { return nil }
-
-        if decision.source == .amend {
-            let rebaseMergePath = try context.path(for: "rebase-merge", git: git)
-            if fileManager.fileExists(atPath: rebaseMergePath) {
-                return nil
-            }
+        if try isMidRebaseAmend(decision, in: context, git: git, fileManager: fileManager) {
+            return nil
         }
+
+        guard !decision.isOwnInvocation else { return nil }
 
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
