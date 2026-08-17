@@ -148,6 +148,28 @@ extension WorktreeStatus: ExpressibleByArrayLiteral {
 /// thin wrapper in the `YardGit` module that runs it through `git` is kept in
 /// its own call site.
 public struct WorktreeStatusParser {
+
+    /// Malformed input on the `git status --porcelain=v2 -z` byte stream.
+    /// Mirrors `ConflictParser.Failure` on the same stream: a record git did
+    /// not describe, or one truncated before its fixed fields end, is a
+    /// correctness bug to surface, not a record to silently drop.
+    public enum Failure: Error, Equatable, CustomStringConvertible {
+        /// A record's leading token was not one of the record types
+        /// `git status --porcelain=v2 -z` documents (`1`, `2`, `u`, `?`, `!`).
+        case unrecognizedRecordType(leading: String)
+        /// A record had fewer space-separated tokens than its type requires.
+        case truncatedRecord(String)
+
+        public var description: String {
+            switch self {
+            case let .unrecognizedRecordType(leading):
+                "unrecognized porcelain v2 record type \"\(leading)\""
+            case let .truncatedRecord(record):
+                "malformed porcelain v2 record: \(record)"
+            }
+        }
+    }
+
     public init() {}
 
     /// Number of space-separated tokens before the path, keyed on record type.
@@ -235,7 +257,9 @@ public struct WorktreeStatusParser {
                   let leading = String(bytes: [firstByte], encoding: .ascii) else { continue }
 
             let expectedFields = Self.fieldCount[leading]
-            guard let expectedFields else { continue }
+            guard let expectedFields else {
+                throw Failure.unrecognizedRecordType(leading: leading)
+            }
 
             // A `2` record has the original path appended after a NUL by
             // splitRecords. Tokenize only up to that NUL, or the new path comes
@@ -248,7 +272,9 @@ public struct WorktreeStatusParser {
             }
 
             let tokens = Self.splitSpaces(headSlice)
-            guard tokens.count > expectedFields else { continue }
+            guard tokens.count > expectedFields else {
+                throw Failure.truncatedRecord(String(decoding: rawRecord, as: UTF8.self))
+            }
 
             // The path starts at index `expectedFields + 1` (after the leading tag
             // and its fixed fields) and runs to the end, joined by single spaces.
@@ -352,6 +378,14 @@ public struct WorktreeStatusParser {
         return min(offset, rawRecord.count)
     }
 
+}
+
+// MARK: - §6 exit class
+
+/// A malformed porcelain record is a repository-state failure — guide §6
+/// code 6 — matching `ConflictParser.Failure` on the same byte stream.
+extension WorktreeStatusParser.Failure: ExitClassCarrying {
+    public var exitClass: ExitClass { .repositoryError }
 }
 
 extension Array {
