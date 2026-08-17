@@ -19,11 +19,12 @@ import Foundation
 public struct JournalMetadataCache: Sendable {
 
     /// Relative to `commonDir`. `YardGit` cannot import `YardKit`
-    /// (`LayeringTests` forbids both directions), so this is the engine-side
-    /// copy of `ServiceNames.journalMetadataRelativePath` — the same
-    /// arrangement as `RefSnapshot.switchyardNamespace` beside
-    /// `ServiceNames.journalRefPrefix`.
-    public static let relativePath = "switchyard/journal.json"
+    /// (`LayeringTests` forbids both directions), so this defers to
+    /// `RepositoryLayout.journalMetadataRelativePath` — the same arrangement
+    /// as `RefSnapshot.switchyardNamespace` beside `ServiceNames.journalRefPrefix`
+    /// — which is itself pinned against `ServiceNames.journalMetadataRelativePath`
+    /// in `Tests/YardWireTests`.
+    public static let relativePath = RepositoryLayout.journalMetadataRelativePath
 
     /// One cached entry: #0155's metadata verbatim, plus the anchor ref.
     public struct Row: Codable, Equatable, Sendable {
