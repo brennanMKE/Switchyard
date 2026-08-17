@@ -171,6 +171,10 @@ public enum JournalRestore {
     /// matching `operation` (#0034 decision 7). `bypassGuard` skips step 4
     /// and nothing else; whether and to whom it surfaces (`--force`,
     /// human-only) is M3's decision — the engine only carries the parameter.
+    /// `allowDifferentWorktree` lifts step 2's worktree gate for an entry
+    /// recorded in another worktree and, under it, applies a snapshot
+    /// constructed for the caller rather than the one recorded verbatim — see
+    /// the applied-snapshot construction below (#0175).
     @discardableResult
     public static func restore(
         _ id: JournalEntryID,
@@ -179,6 +183,7 @@ public enum JournalRestore {
         agent: JournalEntryMetadata.Agent? = nil,
         traversal: JournalChain.Traversal? = nil,
         bypassGuard: Bool = false,
+        allowDifferentWorktree: Bool = false,
         lockTimeout: Duration = .seconds(10),
         in context: WorktreeContext,
         git: GitProcess = GitProcess()
@@ -191,6 +196,7 @@ public enum JournalRestore {
                 agent: agent,
                 traversal: traversal,
                 bypassGuard: bypassGuard,
+                allowDifferentWorktree: allowDifferentWorktree,
                 in: context,
                 git: git)
         }
@@ -215,6 +221,7 @@ public enum JournalRestore {
         agent: JournalEntryMetadata.Agent? = nil,
         traversal: JournalChain.Traversal? = nil,
         bypassGuard: Bool = false,
+        allowDifferentWorktree: Bool = false,
         in context: WorktreeContext,
         git: GitProcess = GitProcess()
     ) throws -> Report {
@@ -239,8 +246,9 @@ public enum JournalRestore {
         }
         let recorded = try refsSnapshot(of: id, at: base, git: git)
 
-        // 2. The worktree gate — before everything else (#0044).
-        guard metadata.worktree.name == context.worktreeName else {
+        // 2. The worktree gate — before everything else (#0044), unless the
+        // caller opted into a cross-worktree application (#0175).
+        guard metadata.worktree.name == context.worktreeName || allowDifferentWorktree else {
             // `worktrees/<name>/HEAD` resolves while the recorded
             // worktree's administrative entry survives — including
             // prunable, directory-gone worktrees, whose claim git's own
@@ -264,6 +272,20 @@ public enum JournalRestore {
         let currentWorktree = try WorktreeSnapshot.capture(in: context, git: git)
         let currentSequencer = try SequencerSnapshot.capture(in: context, git: git)
 
+        // Under the override the recorded snapshot cannot be applied
+        // verbatim: `for-each-ref` lists the CAPTURING worktree's
+        // `refs/worktree/*` and `refs/rewritten/*` under plain names, so
+        // applying it here would write that worktree's private refs into
+        // ours and delete ours as extras (measured, #0044). Take the
+        // recorded shared refs, and carry our own per-worktree entries
+        // through unchanged so deletion planning leaves them alone.
+        let applied: RefSnapshot = allowDifferentWorktree && metadata.worktree.name != context.worktreeName
+            ? RefSnapshot(
+                head: recorded.head,
+                refs: recorded.withoutPerWorktreeRefs.refs
+                    + current.refs.filter { WorktreeContext.isPerWorktree($0.name) })
+            : recorded
+
         // 4. The cross-tool guard, against the cursor's snapshot. A
         // cursor naming a pruned entry (possible only once its chain's
         // protection expired, #0044 decision 5) has no snapshot left to
@@ -282,7 +304,7 @@ public enum JournalRestore {
         // 5. The sibling-disturbance check, on the snapshot being
         // applied, regardless of bypassGuard.
         let disturbances = WorktreeDisturbance.disturbances(
-            restoring: recorded,
+            restoring: applied,
             current: current,
             worktrees: try worktreeList(path: base, git: git),
             callerPath: context.topLevel)
@@ -292,7 +314,7 @@ public enum JournalRestore {
 
         // 6. Every recorded oid must still exist, or the refusal comes
         // after HEAD has already moved (measured — see the type comment).
-        let missing = try missingObjects(in: recorded, at: base, git: git)
+        let missing = try missingObjects(in: applied, at: base, git: git)
         guard missing.isEmpty else {
             throw Error.unrestorableObjects(missing: missing)
         }
@@ -321,7 +343,7 @@ public enum JournalRestore {
         // command at a temporary index via `GIT_INDEX_FILE`, so it cannot
         // clobber the index just restored. Swapping the two changes nothing,
         // and no mutation catches it — measured, not assumed.
-        try recorded.restore(in: context, git: git)
+        try applied.restore(in: context, git: git)
 
         var restored: [Piece] = [.refs, .head]
         let slots = try anchoredSlots(of: entry, at: base, git: git)
