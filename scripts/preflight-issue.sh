@@ -139,11 +139,19 @@ fi
 # Without one, a round cannot be graded and 'the model said it passed' is the
 # only evidence. #0011 r1 was accepted and later rejected for exactly this.
 if (( IS_CODE )); then
-  if grep -qE 'swift test|xcodebuild [^|]*test|Test run with' "$SPEC"; then
+  # Match against whitespace-FLATTENED text, the way check 4b already does. The
+  # first version grepped the raw file, so an issue that wrapped "greater\nthan"
+  # across a line break -- which prose at this width does constantly -- read as
+  # having no baseline at all. #0189 was written WITH a baseline, warned anyway,
+  # and the warning was accurate about nothing. Same class as the staleness
+  # check that suppressed its own stderr: a guard defeated by formatting is
+  # indistinguishable from a guard with nothing to report.
+  SPEC_FLAT=$(tr -s '[:space:]' ' ' < "$SPEC")
+  if print -r -- "$SPEC_FLAT" | grep -qE 'swift test|xcodebuild [^|]*test|Test run with'; then
     # A count with no baseline is not evidence. A round once added eight
     # XCTest cases to a swift-testing package: the reported count was
     # identical with the new file deleted, and the criterion still "passed".
-    if grep -qiE 'greater than|more than|must (be )?(exceed|increase)|higher than' "$SPEC"; then
+    if print -r -- "$SPEC_FLAT" | grep -qiE 'greater than|more than|must (be )?(exceed|increase)|higher than'; then
       pass "names a verification command with a baseline count"
     else
       warn "names a verification command but no baseline count" \
