@@ -38,11 +38,22 @@ import Foundation
 /// that a clean restore will disturb a *sibling's* checkout is #0044's layer
 /// on top of this one.
 ///
-/// **Force is the caller's decision, not this type's.** `undo` (#0034) calls
-/// `requireUnchanged` and stops on the thrown error; a human-authorized
-/// `--force` simply skips that call (M3 owns detecting who may say so). There
-/// is deliberately no `force:` parameter here — a bypass the engine offers is
-/// a bypass an agent will find.
+/// **Force is the caller's decision, not this type's.** The restore flow stops
+/// on the thrown error; a human-authorized `--force` skips the check entirely
+/// (`bypassGuard`, and M3 owns detecting who may say so). There is deliberately
+/// no `force:` parameter here — a bypass the engine offers is a bypass an agent
+/// will find.
+///
+/// **What is compared, and by whom.** This type is *reference-agnostic*: `diff`
+/// takes whatever snapshot the caller believes and reports divergence from the
+/// present. Choosing the reference is the composing flow's job, and
+/// `JournalRestore` supplies the **scoped chain cursor's** snapshot — the state
+/// the repository is believed to be in — never the target entry's. Comparing
+/// against the target would refuse every legitimate restore, since the diff
+/// between a checkpoint and the present is exactly the history the caller asked
+/// to revert (#0168 decision 1; #0034 decision 4 corrected 2026-08-17).
+/// `requireUnchanged` below has no production call site and exists for a caller
+/// that does hold a specific reference snapshot.
 public enum CrossToolGuard {
 
     /// One ref whose current value is not what the journal recorded.
