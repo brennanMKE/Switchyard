@@ -103,7 +103,9 @@ func entryInitPublic() throws {
 @Test("WorktreeStatusEntry.State cases are public and enumerable")
 func stateAllCasesPublic() {
     let cases = WorktreeStatusEntry.State.allCases
-    #expect(cases.count == 7)
+    // 9 since #0207 added .typechange ("T") and .unmerged ("U") — an
+    // additive, non-breaking wire change per Schemas/README.md.
+    #expect(cases.count == 9)
 
     for c in cases {
         _ = c // reaches — every member is on the public enum.
@@ -130,7 +132,13 @@ func stateInitializersPublic() throws {
     let a = WorktreeStatusEntry.State(rawValue: "A") ?? .unmodified
     #expect(a == .added)
 
-    #expect(WorktreeStatusEntry.State.allCases.count == 7)
+    let t = WorktreeStatusEntry.State(rawValue: "T")
+    #expect(t == .typechange)
+
+    let uMerged = WorktreeStatusEntry.State(rawValue: "U")
+    #expect(uMerged == .unmerged)
+
+    #expect(WorktreeStatusEntry.State.allCases.count == 9)
 }
 
 @Test("WorktreeStatusEntry.SubmoduleState is public and equatable")
