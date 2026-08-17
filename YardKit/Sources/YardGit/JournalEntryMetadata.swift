@@ -115,17 +115,20 @@ public struct JournalEntryMetadata: Sendable, Equatable, Codable {
         self.rewrite = rewrite
     }
 
-    /// This entry with `mapping` attached as `rewrite`, every other field
-    /// carried through unchanged (#0221) — the metadata is already written
-    /// by the time a rewrite's mapping exists to attach, so this is the one
+    /// This entry with `mapping` attached as `rewrite` — **composed** with
+    /// whatever is already there, not replaced (#0234 decision B; see
+    /// `RewriteMapping`'s doc comment for why). Every other field carries
+    /// through unchanged (#0221) — the metadata is already written by the
+    /// time a rewrite's mapping exists to attach, so this is the one
     /// legitimate way to add the field after the fact rather than a general
     /// mutation path.
     public func attachingRewrite(_ mapping: RewriteMapping) -> JournalEntryMetadata {
-        JournalEntryMetadata(
+        let composed = rewrite.map { $0.composing(with: mapping) } ?? mapping
+        return JournalEntryMetadata(
             id: id, operation: operation, command: command, label: label,
             timestamp: timestamp, worktree: worktree, captured: captured,
             guardRefs: guardRefs, agent: agent, traversal: traversal,
-            rewrite: mapping)
+            rewrite: composed)
     }
 
     /// What `attachingRewrite` carries: the same shape
@@ -134,6 +137,22 @@ public struct JournalEntryMetadata: Sendable, Equatable, Codable {
     /// mapping in `PostRewrite.parse`'s order — but living inside the
     /// in-flight entry rather than a separate observed one, because this
     /// mapping came from `switchyard`'s own invocation.
+    ///
+    /// **#0234 decision: B — compose on attach, not A — store a list.** One
+    /// `switchyard` operation can fire several `post-rewrite` invocations
+    /// carrying the same entry id: #0214's existing-commit fixup runs a
+    /// standalone `git commit --amend --fixup=…` before its autosquash
+    /// rebase, and both attach here in turn. #0233 already filters the
+    /// rebase's own *mid-rebase* `amend` (an intermediate commit that never
+    /// existed pre-rewrite), so what survives to reach `attachingRewrite` is
+    /// exactly two invocations: the standalone `amend` (`headBefore → mid`)
+    /// and the final `rebase` (`mid → head`, plus whatever else it
+    /// rewrote). Composing chains those into `headBefore → head` so the
+    /// entry's pre-checkpoint `HEAD` stays reachable through the stored
+    /// mapping — which is the property this issue exists to fix. Storing a
+    /// list instead would leave every consumer (#0064 included) to
+    /// re-derive that chain itself, and "what this operation did" is a
+    /// single mapping, not a log of hook firings.
     public struct RewriteMapping: Sendable, Equatable, Codable {
         public let source: String
         public let rewrites: [PostRewrite.Rewrite]
@@ -141,6 +160,41 @@ public struct JournalEntryMetadata: Sendable, Equatable, Codable {
         public init(source: String, rewrites: [PostRewrite.Rewrite]) {
             self.source = source
             self.rewrites = rewrites
+        }
+
+        /// Composes this **earlier** mapping with `next`, the mapping from a
+        /// later `post-rewrite` invocation attaching to the same entry.
+        ///
+        /// Each pair in `next` is chained through this mapping wherever
+        /// `next`'s old oid equals one of this mapping's new oids — the
+        /// intermediate-commit case above: `self` is `headBefore → mid`,
+        /// `next` contains `mid → head`, and the composed pair is
+        /// `headBefore → head`. A `next` pair whose old oid matches nothing
+        /// here (`target` itself, rewritten by the rebase but never touched
+        /// by the earlier invocation) is not part of any chain and is
+        /// carried through unchanged, in `next`'s order — order git
+        /// guarantees (`Rewrite`'s doc comment). A pair from `self` that
+        /// `next` never mentions is real information the later invocation
+        /// did not repeat and is appended after, rather than dropped.
+        ///
+        /// `source` becomes `next.source`: the newest invocation is
+        /// authoritative, the same rule `JournalObserved` already applies to
+        /// the foreign path's final invocation.
+        func composing(with next: RewriteMapping) -> RewriteMapping {
+            var chainedFrom: Set<Int> = []
+            let composedRewrites = next.rewrites.map { pair -> PostRewrite.Rewrite in
+                guard let index = rewrites.firstIndex(where: { $0.newOid == pair.oldOid }) else {
+                    return pair
+                }
+                chainedFrom.insert(index)
+                let earlier = rewrites[index]
+                return PostRewrite.Rewrite(
+                    oldOid: earlier.oldOid, newOid: pair.newOid, extraInfo: pair.extraInfo)
+            }
+            let unconsumed = rewrites.enumerated()
+                .filter { !chainedFrom.contains($0.offset) }
+                .map(\.element)
+            return RewriteMapping(source: next.source, rewrites: composedRewrites + unconsumed)
         }
     }
 
