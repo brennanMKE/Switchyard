@@ -294,6 +294,16 @@ struct CommitLogTests {
         #expect(trailers.isEmpty)
     }
 
+    @Test func trailersParsingWithEmptyMessageReturnsNoTrailers() {
+        // A genuinely empty commit message. `FixtureRepository.build` runs
+        // `git commit --allow-empty -m <message>` with no `--allow-empty-message`,
+        // so it cannot build a fixture with an empty message -- git rejects it
+        // ("Aborting commit due to empty commit message"). Pin the property by
+        // calling the parser directly instead (#0196).
+        let trailers = CommitLog.parseTrailerBlock(from: "")
+        #expect(trailers.isEmpty)
+    }
+
     @Test func trailersParsingMultipleTrailers() {
         let body = """
             Body text.

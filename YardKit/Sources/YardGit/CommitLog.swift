@@ -268,21 +268,27 @@ public enum CommitLog {
         let lines = commitBody.split(separator: "\n", omittingEmptySubsequences: false)
 
         // Find the first blank-line separator between body and trailers.
+        // Guarded on count instead of building the range by subtraction --
+        // `lines` is never empty from `split(omittingEmptySubsequences: false)`
+        // today, but a range built as `0 ..< lines.count - 1` traps the moment
+        // it is (#0196). Fewer than two lines means no separator can exist.
         var separatorIndex: Int? = nil
-        for i in 0 ..< lines.count - 1 {
-            let line = lines[i].trimmingCharacters(in: .whitespaces)
-            if line.isEmpty {
-                // Look ahead -- is the next non-blank line a trailer?
-                for j in (i + 1) ..< lines.count {
-                    let next = lines[j].trimmingCharacters(in: .whitespaces)
-                    if next.isEmpty { continue }
-                    // A trailer starts at word boundary, no leading whitespace.
-                    if next.first?.isWhitespace == false && next.firstIndex(of: ":") != nil {
-                        separatorIndex = i
+        if lines.count >= 2 {
+            for i in 0 ..< lines.count - 1 {
+                let line = lines[i].trimmingCharacters(in: .whitespaces)
+                if line.isEmpty {
+                    // Look ahead -- is the next non-blank line a trailer?
+                    for j in (i + 1) ..< lines.count {
+                        let next = lines[j].trimmingCharacters(in: .whitespaces)
+                        if next.isEmpty { continue }
+                        // A trailer starts at word boundary, no leading whitespace.
+                        if next.first?.isWhitespace == false && next.firstIndex(of: ":") != nil {
+                            separatorIndex = i
+                        }
+                        break
                     }
-                    break
+                    if separatorIndex != nil { break }
                 }
-                if separatorIndex != nil { break }
             }
         }
 
