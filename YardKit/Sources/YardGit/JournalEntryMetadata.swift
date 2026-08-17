@@ -138,14 +138,39 @@ public struct JournalEntryMetadata: Sendable, Equatable, Codable {
         public let index: IndexCapture
         public let worktree: WorktreeCapture
         public let untracked: Bool
+        /// The sequencer capture state. Wire: `false`, `"merge"` or `"apply"`.
+        public let sequencer: SequencerCapture
 
         public init(refs: Bool, head: Bool, index: IndexCapture,
-                    worktree: WorktreeCapture, untracked: Bool) {
+                    worktree: WorktreeCapture, untracked: Bool,
+                    sequencer: SequencerCapture = .notCaptured) {
             self.refs = refs
             self.head = head
             self.index = index
             self.worktree = worktree
             self.untracked = untracked
+            self.sequencer = sequencer
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case refs, head, index, worktree, untracked, sequencer
+        }
+
+        /// Hand-written so `sequencer` has a **decode default**. Every entry
+        /// written before #0189 has no `sequencer` key, and synthesized
+        /// decoding treats a missing key as an error — measured, before this
+        /// initializer existed: `journal entry metadata does not decode:
+        /// missing key: sequencer`. `encode(to:)` stays synthesized, so the key
+        /// is always written and the pinned bytes are unaffected.
+        public init(from decoder: any Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            refs = try c.decode(Bool.self, forKey: .refs)
+            head = try c.decode(Bool.self, forKey: .head)
+            index = try c.decode(IndexCapture.self, forKey: .index)
+            worktree = try c.decode(WorktreeCapture.self, forKey: .worktree)
+            untracked = try c.decode(Bool.self, forKey: .untracked)
+            sequencer = try c.decodeIfPresent(
+                SequencerCapture.self, forKey: .sequencer) ?? .notCaptured
         }
 
         /// What checkpoint writes until #0171 wires the index and worktree
@@ -153,6 +178,69 @@ public struct JournalEntryMetadata: Sendable, Equatable, Codable {
         public static let refsOnly = Captured(
             refs: true, head: true, index: .notCaptured,
             worktree: .notCaptured, untracked: false)
+    }
+
+    /// The sequencer capture state, which also records **which layout** was
+    /// captured. `SequencerSnapshot.Layout` has two cases and they restore
+    /// to different directories, so a snapshot recorded as the wrong one
+    /// materialises `rebase-apply` state into `rebase-merge` and the rebase
+    /// cannot resume. Wire: `false` / `"merge"` / `"apply"`.
+    public enum SequencerCapture: Sendable, Equatable, Codable {
+        /// Not captured. Wire: `false`.
+        case notCaptured
+        /// Captured as a rebase-merge state. Wire: `"merge"`.
+        case merge
+        /// Captured as a rebase-apply state. Wire: `"apply"`.
+        case apply
+
+        /// The layout this capture restores to, or nil when nothing was
+        /// captured. Total, so no call site needs a `fatalError` branch.
+        public var layout: SequencerSnapshot.Layout? {
+            switch self {
+            case .notCaptured: nil
+            case .merge: .rebaseMerge
+            case .apply: .rebaseApply
+            }
+        }
+
+        /// The capture value for a snapshot that was taken.
+        public init(_ layout: SequencerSnapshot.Layout) {
+            switch layout {
+            case .rebaseMerge: self = .merge
+            case .rebaseApply: self = .apply
+            }
+        }
+
+        public init(from decoder: any Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            if let flag = try? container.decode(Bool.self) {
+                guard !flag else {
+                    throw DecodingError.dataCorrupted(.init(
+                        codingPath: decoder.codingPath,
+                        debugDescription:
+                            "captured.sequencer true is not a wire value; expected false, \"merge\" or \"apply\""))
+                }
+                self = .notCaptured
+                return
+            }
+            switch try container.decode(String.self) {
+            case "merge": self = .merge
+            case "apply": self = .apply
+            case let other:
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: decoder.codingPath,
+                    debugDescription: "unknown captured.sequencer value: \(other)"))
+            }
+        }
+
+        public func encode(to encoder: any Encoder) throws {
+            var container = encoder.singleValueContainer()
+            switch self {
+            case .notCaptured: try container.encode(false)
+            case .merge: try container.encode("merge")
+            case .apply: try container.encode("apply")
+            }
+        }
     }
 
     /// How the index was captured. Encoded by hand as `false` / `"tree"` /
