@@ -22,6 +22,14 @@ import Foundation
 /// as a `Defect` and recovers everything else, because a recovery that dies
 /// on the first oddity recovers nothing. The defect list is how an agent
 /// knows it got a partial journal rather than a complete one.
+///
+/// **Observed entries are out of scope, deliberately** (#0190, guide §11
+/// decision 12). They live in `JournalObserved.refPrefix`, outside the
+/// namespace this scans, because they are a record of *foreign* ref activity
+/// and never undo targets. Rebuild reconstructs the chain; they are not on
+/// it. Widening the scan to all of `refs/switchyard/` would report every one
+/// of them as a `Defect` — a healthy repository declaring itself partial,
+/// once per foreign transaction.
 public enum JournalRebuild {
 
     /// One journal entry as recovered from the repository: its id, the

@@ -240,4 +240,27 @@ struct JournalRebuildTests {
         #expect(result.entries == [good])
         #expect(result.defects == [.foreignRef(name: JournalAnchor.refPrefix + "not-an-id")])
     }
+
+    /// #0190: a rebuild neither recovers nor trips over observed entries. The
+    /// second assertion is the load-bearing one — observed refs sit outside the
+    /// journal namespace, so if the scan were ever widened they would surface
+    /// as `.foreignRef` defects and a healthy repository would report itself
+    /// partial, once per foreign transaction.
+    @Test func rebuildIgnoresObservedEntriesEntirely() throws {
+        let repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let ctx = try context(of: repo)
+        let good = try writeEntry(#"{"op":"good"}"#, id: threeIds().a, in: repo)
+
+        try JournalObserved.record(
+            [.init(oldValue: String(repeating: "0", count: 40),
+                   newValue: String(repeating: "a", count: 40),
+                   refName: "refs/heads/topic")],
+            in: ctx)
+        try #require(try JournalObserved.list(in: ctx).count == 1)
+
+        let result = try JournalRebuild.rebuild(in: ctx)
+        #expect(result.entries == [good])
+        #expect(result.defects.isEmpty)
+    }
 }
