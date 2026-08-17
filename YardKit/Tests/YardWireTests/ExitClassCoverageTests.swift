@@ -235,4 +235,164 @@ struct ExitClassCoverageTests {
                 "registry row named \(row.name) constructs a \(runtime)")
         }
     }
+
+    // MARK: - Every declared error type, not just ExitClassCarrying conformers
+
+    // #0197: the guard above answers "does every ExitClassCarrying conformer
+    // carry the right class?" and structurally cannot answer "does every
+    // error type carry one at all?" — a type that conforms to nothing
+    // produces no line containing "ExitClassCarrying", so the guard above
+    // stays green around it. That is how WorktreeStatusParser shipped with
+    // no error type whatsoever (#0193) while every mechanical check passed.
+    //
+    // Discovery rule: every codebase error type today is declared with a
+    // literal `Error` or `Swift.Error` token in its own conformance clause —
+    // `enum WorktreeAddError: Error, ...` or `enum Error: Swift.Error, ...`
+    // — verified by grepping every enum/struct/class/actor declaration under
+    // `YardKit/Sources/YardGit` and `YardKit/Sources/YardKit` for a
+    // conformance list containing the word `Error`: exactly 35 hits, all
+    // `enum`, none `struct`/`class`/`actor`. So this reuses
+    // `ConformanceScan.scan(for: "Error", under:)` — the same regex-based
+    // scanner as the guard above, parameterised differently — and reads its
+    // `declarationSites`/`extensionSites`, not `unrecognized`: unlike
+    // `ExitClassCarrying`, the word "Error" also appears on nearly every
+    // throw site and catch clause of a nested `.Error` type (`\bError\b`
+    // matches across the dot in `WorktreeContext.Error.pathNotResolved`), so
+    // `unrecognized` is expected to be large and is not a signal here.
+    //
+    // Matching identity: a declaration-site scan cannot see nesting, so a
+    // conformer like `WorktreeContext.Error` is found as local name `Error`
+    // in file `WorktreeContext.swift` — the same `file:localName` identity
+    // `DescriptionCoverageTests.Row.siteLabel` already uses for its
+    // declaration-site scan. The existing `ExitClassCarrying` registry is
+    // scanned by qualified name via extension sites instead (`scanSources()`
+    // above), so this guard re-derives `file:localName` from those same
+    // extension sites rather than inventing a second registry to keep in
+    // sync.
+
+    /// Every type in the engine and the shared layer whose own declaration
+    /// names `Error` or `Swift.Error` in its conformance clause, identified
+    /// as `file:localName` (a declaration-site scan cannot see nesting).
+    ///
+    /// Scanned as **two** separate protocol names, not one: `ConformanceScan`
+    /// wraps its match in `\b...\b`, and Swift's `Regex` word boundary
+    /// follows Unicode text segmentation (UAX #29), which does not break a
+    /// word between two letters joined by a period — `\bError\b` matches
+    /// `.Error` but not `Swift.Error`, measured directly (`Regex("\\bError\\b")`
+    /// matches against `".Error"` but not `"Swift.Error"` or `"X.Error"`).
+    /// Scanning for the literal token `"Swift.Error"` sidesteps this: the
+    /// escaped literal places `\b` only outside the whole token, with no
+    /// boundary check on the internal dot, and correctly finds the ~20
+    /// conformers that spell it that way — verified by hand against
+    /// `RepositoryIdentity.swift` and `WorktreeContext.swift`, both of which
+    /// `\bError\b` alone silently missed before this was found.
+    private func declaredErrorSites() throws -> Set<ConformanceScan.Site> {
+        let roots = [
+            repoRoot.appendingPathComponent("YardKit/Sources/YardGit"),
+            repoRoot.appendingPathComponent("YardKit/Sources/YardKit"),
+        ]
+        var sites: Set<ConformanceScan.Site> = []
+        for root in roots {
+            sites.formUnion(try ConformanceScan.scan(for: "Error", under: root).sites)
+            sites.formUnion(try ConformanceScan.scan(for: "Swift.Error", under: root).sites)
+        }
+        return sites
+    }
+
+    /// Every `ExitClassCarrying` conformer from `scanSources()` above,
+    /// reduced from its qualified name (`WorktreeContext.Error`) to the same
+    /// `file:localName` identity `declaredErrorSites()` uses, so the two
+    /// scans can be compared directly.
+    private func exitClassConformedSites() throws -> Set<ConformanceScan.Site> {
+        let scan = try scanSources()
+        return Set(scan.extensionSites.map { site in
+            ConformanceScan.Site(
+                file: site.file,
+                name: site.name.split(separator: ".").last.map(String.init) ?? site.name)
+        })
+    }
+
+    /// Declared error types this guard does not require to carry an exit
+    /// class, keyed by `file:localName`, each reason citing an issue. Adding
+    /// an entry here is a decision, not a default: a declared error type
+    /// belongs in `ExitClassCarrying` unless a reason says why it cannot.
+    ///
+    /// `FixtureRepository.Error` is #0197's headline finding: it ships in
+    /// the `YardGit` product with no exit class, and is registered in
+    /// `DescriptionCoverageTests`, so the omission reads as an oversight.
+    /// Decided here as an exclusion, not a new conformance: it is a
+    /// test/diagnostic fixture-builder error (`FixtureRepository` "[b]uilds
+    /// throwaway git repositories for tests"), thrown only while assembling
+    /// a DAG description for a test, and it never reaches a real command's
+    /// §6 mapping the way every other conformer above does.
+    ///
+    /// Extending the same scan to `YardKit/Sources/YardKit` (per this
+    /// issue's Expected behavior) surfaced two more gaps #0197 did not
+    /// anticipate, both recorded here rather than silently left red:
+    /// `RepositoryIdentity.Error` has no call site anywhere in `Sources`
+    /// today (the same "not wired to a command path" shape as
+    /// `FixtureRepository.Error`, and the same shape `ExitClass.swift`
+    /// already documents for `.blockedOnConflicts`/`.signingFailed`), and
+    /// `RepositoryRegistry.Error` lives in `YardKit`, which has no
+    /// dependency on `YardGit` in `Package.swift` and so cannot import
+    /// `ExitClassCarrying` at all — `ExitClass.swift`'s own doc comment
+    /// already says "YardKit never sees this protocol"; its §6 mapping
+    /// happens at M3 wiring time via `ExitCode` conversion, not via this
+    /// protocol.
+    private let errorTypeAllowList: [String: String] = [
+        "FixtureRepository.swift:Error":
+            "#0197 — test/diagnostic fixture-builder error, thrown while " +
+            "assembling a throwaway DAG for tests; never reaches a real " +
+            "command's §6 mapping.",
+        "RepositoryIdentity.swift:Error":
+            "#0197 — no call site anywhere in Sources yet; not wired to a " +
+            "command path, same shape as FixtureRepository.Error above.",
+        "RepositoryRegistry.swift:Error":
+            "#0197 — declared in YardKit, which does not depend on YardGit " +
+            "and cannot import ExitClassCarrying; §6 mapping happens at M3 " +
+            "wiring time via ExitCode conversion instead.",
+    ]
+
+    /// #0197's headline: every declared error type under
+    /// `YardKit/Sources/YardGit` and `YardKit/Sources/YardKit` either
+    /// conforms to `ExitClassCarrying` or has a recorded allow-list reason —
+    /// unlike `everySourceConformerHasARegistryRow` above, this cannot be
+    /// fooled by a type that conforms to nothing, because it starts from
+    /// every declared error type rather than from `ExitClassCarrying`
+    /// conformance sites.
+    @Test func everyDeclaredErrorTypeHasAnExitClassOrARecordedReason() throws {
+        let declared = try declaredErrorSites()
+        try #require(
+            !declared.isEmpty,
+            "the Error scan found no declared error types at all — the scanner or its path is broken")
+
+        let declaredLabels = Set(declared.map(\.label))
+        let conformedLabels = Set(try exitClassConformedSites().map(\.label))
+        let allowed = Set(errorTypeAllowList.keys)
+
+        let missing = declaredLabels.subtracting(conformedLabels).subtracting(allowed)
+        #expect(
+            missing.isEmpty,
+            """
+            declared error types with no ExitClassCarrying conformance and \
+            no recorded allow-list reason: \
+            \(missing.sorted().joined(separator: ", ")). Conform via a \
+            top-level extension, or add an errorTypeAllowList entry citing \
+            an issue.
+            """)
+
+        let staleAllowList = allowed.subtracting(declaredLabels)
+        #expect(
+            staleAllowList.isEmpty,
+            """
+            errorTypeAllowList entries with no matching declared error type \
+            (renamed, removed, or now conforming — drop the entry): \
+            \(staleAllowList.sorted().joined(separator: ", "))
+            """)
+
+        let contradictions = conformedLabels.intersection(allowed)
+        #expect(
+            contradictions.isEmpty,
+            "both conforming and allow-listed: \(contradictions.sorted().joined(separator: ", "))")
+    }
 }
