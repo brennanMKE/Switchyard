@@ -624,8 +624,8 @@ stays thin dispatch over the same library — but let nothing else depend on tha
 
 Ship in this order. Each milestone is independently useful and independently abandonable.
 
-**Every milestone below states its exit criteria as a checklist.** The Fable milestone review reads
-those and *only* those — it may file issues against a stated criterion and nothing else. That bound is
+**Every milestone below states its exit criteria as a checklist.** The **Opus 5** milestone review
+reads those and *only* those — it may file issues against a stated criterion and nothing else. That bound is
 what makes the review terminate: without it, "is this good enough" has no answer and a milestone never
 closes. Two consecutive reviews with no findings close the milestone.
 
@@ -688,8 +688,12 @@ Heavy test coverage on undo across every mutating path.
       **run from the built binary** and emit a `schemaVersion: 1` envelope.
 - [ ] `switchyard hooks install` installs the `reference-transaction` and `post-rewrite` handlers,
       chains any hook already present, and `hooks status` reports what is installed.
-- [ ] The hook returns 0 immediately in the `preparing` and `prepared` states, and skips the
-      journal's own transactions via the environment marker.
+- [ ] The hook returns 0 immediately in **every state that is not `committed`**, and skips the
+      journal's own transactions via the environment marker. (The states git 2.50.1 emits are
+      `prepared`, `committed`, `aborted` — measured 2026-08-07. An earlier phrasing of this criterion
+      named a `preparing` state, which git does not emit; a criterion no run can satisfy cannot close
+      a milestone. Phrased as "not `committed`" so a future git that adds a state cannot break a
+      repository.)
 - [ ] Undo round-trips every mutating command, including with an unmerged index, and the round-trip
       suite (#0035) covers each path.
 - [ ] The journal survives a rebuild from refs alone (#0030), and pruning never orphans an anchor.
