@@ -174,6 +174,11 @@ The prompt carries, and nothing more:
   claims — that a bounded loop **terminates**, that a call **succeeds** — and give any deadline in a
   test a generous value. Production defaults stay small; a CLI is one process making one call.
 
+**Merge `main` into the branch when the round is not running.** Doing it mid-round changes files
+under a subagent that is reading and testing them; it happened once on 2026-08-17 and was harmless
+only because the incoming commits touched `issues/` and `docs/`. Merge before dispatching, or after
+the round reports — never while it works.
+
 **Merge `main` into the branch before believing the round's count.** A round's number is a fact
 about its branch; `main` moves under it while it runs. The habit that makes the baseline safe is
 `git merge main` in the worktree, then run the suite there, then squash — and it is the same habit
