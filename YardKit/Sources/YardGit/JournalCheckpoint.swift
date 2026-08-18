@@ -275,6 +275,21 @@ public extension JournalCheckpoint {
     /// (#0241's second symptom) it can never clobber a slot some other,
     /// still-in-progress call already occupies. `attachRewrite` is what
     /// reads the file back.
+    ///
+    /// **First-writer-wins (#0254).** The check above guards a *successful*
+    /// unrelated call — a call that never throws never reaches this write at
+    /// all. But a **second failing** call can still reach it while a first
+    /// operation's rebase is still live: its own body throws too (for
+    /// `Fixup`, `git commit --fixup=` refuses the still-unmerged index the
+    /// first conflict left behind, so no rebase of its own ever starts), and
+    /// the sequencer check above answers non-nil because the *first*
+    /// operation's rebase is what is still live — not one this body started.
+    /// Before this fix that read as "yes, write", and the second call's
+    /// entry id overwrote the first's, orphaning the first's pre-operation
+    /// `HEAD`: no stored mapping could ever reach it again. So the slot is
+    /// claimed once — if `pendingPath` already names a still-live journal
+    /// entry, this call does not overwrite it. A slot that is empty, or that
+    /// names an entry no longer live, is still written exactly as before.
     static func around<T>(
         operation: String,
         at path: String,
@@ -300,13 +315,45 @@ public extension JournalCheckpoint {
             if try SequencerSnapshot.capture(in: context, git: git) != nil {
                 let pendingPath = try context.path(
                     for: RepositoryLayout.inFlightEntryIDRelativePath, git: git)
-                try fileManager.createDirectory(
-                    atPath: URL(fileURLWithPath: pendingPath).deletingLastPathComponent().path,
-                    withIntermediateDirectories: true)
-                try entry.id.string.write(toFile: pendingPath, atomically: true, encoding: .utf8)
+                // #0254: first-writer-wins. The sequencer being live does not
+                // mean THIS body is the one that left it live -- a second,
+                // unrelated call can throw while an earlier call's rebase is
+                // still in progress, and must not steal its slot.
+                if try !slotNamesALiveEntry(at: pendingPath, in: context, git: git, fileManager: fileManager) {
+                    try fileManager.createDirectory(
+                        atPath: URL(fileURLWithPath: pendingPath).deletingLastPathComponent().path,
+                        withIntermediateDirectories: true)
+                    try entry.id.string.write(toFile: pendingPath, atomically: true, encoding: .utf8)
+                }
             }
             throw error
         }
+    }
+
+    /// Whether `pendingPath` already exists and names a journal entry that
+    /// is still live (#0254) -- the first-writer-wins check `around`'s catch
+    /// runs before claiming the slot for its own throw. Deliberately does
+    /// **not** also require the operation still be in progress, unlike
+    /// `inFlightEntryID`'s `stillInProgress` check: this runs only when the
+    /// caller has already confirmed *some* sequencer is live in this
+    /// worktree, and a worktree holds at most one rebase at a time, so a
+    /// pre-existing file naming a still-live entry can only be describing
+    /// that same live operation. An unparseable file, or one naming an
+    /// entry that no longer exists, is treated as an empty slot -- the same
+    /// stale-file handling `inFlightEntryID` gives the read side, applied
+    /// here on the write side instead of removing the file outright, since
+    /// removing it here would race whatever left it.
+    private static func slotNamesALiveEntry(
+        at pendingPath: String,
+        in context: WorktreeContext,
+        git: GitProcess,
+        fileManager: FileManager
+    ) throws -> Bool {
+        guard fileManager.fileExists(atPath: pendingPath),
+              let contents = try? String(contentsOfFile: pendingPath, encoding: .utf8),
+              let id = JournalEntryID(contents.trimmingCharacters(in: .whitespacesAndNewlines))
+        else { return false }
+        return try JournalAnchor.list(in: context, git: git).contains { $0.id == id }
     }
 
     /// Attaches an own-invocation rewrite mapping to the journal entry that
