@@ -230,4 +230,31 @@ struct WorktreeWhereTests {
         #expect(result.mainWorktreePath != ctx.topLevel,
                 "main path must not equal the linked worktree's top-level in \(format.rawValue)")
     }
+
+    // MARK: - Newline safety (#0284)
+
+    @Test func newlineInLinkedWorktreePathDoesNotCorruptParsing() throws {
+        let repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+
+        let nameWithNewline = "has\nnewline"
+        let wtPath = try repo.addWorktree(path: nameWithNewline, branch: "nlbranch")
+        defer { try? FileManager.default.removeItem(at: wtPath) }
+
+        // The newline lives in a *linked* worktree's record, elsewhere in the
+        // porcelain output -- mirrors `WorktreeListTests.newlineInPathRoundTrips`,
+        // which pins the same hazard for `worktreeList`. Both commands parse
+        // the same `-z`-terminated output and must not disagree about how.
+        //
+        // Resolved from the main worktree only: resolving *from inside* the
+        // newline-path worktree itself would also exercise
+        // `WorktreeContext.resolve`'s own `rev-parse` line parsing
+        // (WorktreeContext.swift), which is a separate, out-of-scope
+        // newline hazard -- see the round report.
+        let result = try yardWhere(path: repo.url.path)
+        #expect(result.mainWorktreePath != nil,
+                "main path must survive a newline elsewhere in the porcelain output")
+        #expect(result.mainWorktreePath == WorktreeContext.canonicalize(repo.url.path),
+                "main worktree path must be exact and unmutated by the embedded newline")
+    }
 }

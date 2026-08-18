@@ -21,10 +21,9 @@ public struct WorktreeWhere: Sendable, Equatable {
     public let commonDir: String
 
     /// Path of the main (primary) worktree, as read from
-    /// `git worktree list --porcelain`. Nil for a bare repository. The first
-    /// `worktree <path>` line in the porcelain output is by definition the
-    /// main worktree, regardless of which linked worktree the command runs
-    /// from.
+    /// `git worktree list --porcelain -z`. Nil for a bare repository. The
+    /// first record in the porcelain output is by definition the main
+    /// worktree, regardless of which linked worktree the command runs from.
     public let mainWorktreePath: String?
 
     public init(worktreeName: String?,
@@ -45,10 +44,14 @@ public struct WorktreeWhere: Sendable, Equatable {
 public func yardWhere(path: String, git: GitProcess = GitProcess()) throws -> WorktreeWhere {
     let ctx = try WorktreeContext.resolve(path: path, git: git)
 
-    // Pull the main worktree's path from porcelain. The first `worktree`
-    // line is the primary checkout, always — even from a linked worktree.
+    // Pull the main worktree's path from porcelain. `-z` is required here for
+    // the same reason `WorktreeList` requires it: a worktree path may itself
+    // contain a newline, which would corrupt a newline-split parse. Reuse
+    // `parsePorcelain` (WorktreeList.swift) rather than writing a second NUL
+    // parser for the same git output — the first usable record is always the
+    // primary checkout, even when resolving from a linked worktree.
     let list = try git.capture(
-        ["worktree", "list", "--porcelain"],
+        ["worktree", "list", "--porcelain", "-z"],
         workingDirectory: ctx.topLevel ?? ctx.gitDir
     )
     guard list.exitCode == 0 else {
@@ -59,7 +62,12 @@ public func yardWhere(path: String, git: GitProcess = GitProcess()) throws -> Wo
         // Bare repos report the bare dir as the first (and only) worktree.
         // That is not a "main worktree" — there is no primary checkout.
         guard !ctx.isBare else { return nil }
-        return mainWorktreeLine(from: list.lines)
+        let entries = parsePorcelain(list.standardOutput, path: ctx.topLevel ?? ctx.gitDir)
+        guard let mainEntry = entries.first(where: { $0.isMainWorktree }),
+              let entryPath = mainEntry.path, !entryPath.isEmpty else {
+            return nil
+        }
+        return WorktreeContext.canonicalize(entryPath)
     }()
 
     return WorktreeWhere(
@@ -69,16 +77,6 @@ public func yardWhere(path: String, git: GitProcess = GitProcess()) throws -> Wo
         commonDir: ctx.commonDir,
         mainWorktreePath: mainPath
     )
-}
-
-private func mainWorktreeLine(from lines: [String]) -> String? {
-    for line in lines {
-        if line.hasPrefix("worktree ") {
-            let path = String(line.dropFirst("worktree ".count))
-            return path.isEmpty ? nil : WorktreeContext.canonicalize(path)
-        }
-    }
-    return nil
 }
 
 extension WorktreeWhere {
