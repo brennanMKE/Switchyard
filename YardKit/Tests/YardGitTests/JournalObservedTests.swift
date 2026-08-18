@@ -197,6 +197,52 @@ struct JournalObservedTests {
         ], "order is part of the contract -- a rebase's mapping is a sequence, not a set")
     }
 
+    /// **The real production path, byte-exact (#0235).** `JournalObservedWireTests`
+    /// pins `Metadata`'s `Codable` shape through its own mirrored encoder,
+    /// which moves independently of `record`'s -- deleting `record`'s
+    /// `dateEncodingStrategy = .iso8601` line does not redden any of those
+    /// tests, because the wire tests build their own encoder with the same
+    /// setting rather than exercising `record` itself. This test writes
+    /// through the real `record` and reads the bytes back off disk, so a
+    /// regression to the wrong date strategy (or anything else `record`'s
+    /// own encoder configuration controls) reddens here.
+    ///
+    /// Reads with the same direct `cat-file` the file's own
+    /// `observedMetadataJSON` helper uses above, not
+    /// `JournalAnchor.metadata(for:in:git:)`: that accessor's `refName(for:)`
+    /// hardcodes `JournalAnchor.refPrefix`, the journal's own namespace, and
+    /// an observed entry lives under `JournalObserved.refPrefix` instead --
+    /// measured, calling it against an observed entry's id throws
+    /// (`fatal: Not a valid object name` against the journal-namespace ref
+    /// it constructs, which was never written).
+    ///
+    /// `worktree.path` is asserted against the context's own resolved
+    /// `topLevel` rather than a hardcoded literal, because a
+    /// `FixtureRepository`'s path is a real temporary directory and cannot
+    /// be predicted; every other byte is a fixed literal, including the
+    /// ISO-8601 `timestamp`, which is the part that regresses silently
+    /// without this test.
+    @Test func aForeignRewriteRecordWritesTheExactPinnedBytes() throws {
+        let repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let context = try WorktreeContext.resolve(path: repo.url.path)
+        let base = try #require(context.topLevel)
+
+        let decision = Self.rewriteDecision(
+            source: "rebase", isOwn: false,
+            pairs: [(Self.oidA, Self.oidB)])
+
+        let entry = try JournalObserved.record(
+            decision, in: context, now: Date(timeIntervalSince1970: 0))
+        let recorded = try #require(entry)
+
+        let json = try Self.observedMetadataJSON(for: recorded.id, in: context)
+        #expect(!json.isEmpty)
+        let bytes = String(decoding: json, as: UTF8.self)
+        let expected = #"{"kind":"rewrites","rewrites":[{"newOid":"1db38f7e412aaa4357e0e76acdd212ba8e646517","oldOid":"a3317ca3bde3e98bd5c8d097a5e99dd9cb510742"}],"schemaVersion":1,"source":"rebase","timestamp":"1970-01-01T00:00:00Z","worktree":{"path":"\#(base)"}}"#
+        #expect(bytes == expected)
+    }
+
     /// #0221's boundary: this issue only ever persists a foreign decision.
     /// An own invocation writes nothing here, so once #0221 lands, the two
     /// halves cannot both record the same rewrite.
