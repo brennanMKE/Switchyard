@@ -596,6 +596,72 @@ struct CommitLogTests {
         #expect(filtered.first?.oid == expected)
     }
 
+    // MARK: - Trailer-block termination (#0305)
+    //
+    // `parseTrailerBlock` stops scanning trailer lines at the first
+    // non-trailer-shaped line after the trailer block starts (line 307's
+    // `else { break }`). Nothing exercised what happens when body prose
+    // *after* that stop point still happens to look like `Key: value` --
+    // a mutant that turns that `break` into `continue` skips the prose line
+    // and keeps scanning, picking the trailer-shaped line back up. This body
+    // is the exact five-line shape the milestone review measured by hand:
+    // pristine trailers are `["Fixes"]`, the `continue` mutant produces
+    // `["Fixes", "Note"]`.
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func trailerShapedLineAfterBodyProseIsNotParsedAsTrailer(format: FixtureRepository.RefFormat) throws {
+        var repo = try FixtureRepository(refFormat: format)
+        defer { repo.destroy() }
+
+        let msg = """
+        Work done
+
+        Fixes: #100
+        This explains something further.
+        Note: leftover
+        """
+        try repo.build([FixtureRepository.Commit("a", message: msg)])
+
+        // Through the production path (`CommitLog.run`), not `parseTrailerBlock`
+        // directly, so the wiring from `run` into the parser is covered too.
+        let entries = try CommitLog.run(path: repo.url.path, rangeArguments: ["HEAD"])
+        let trailers = try #require(entries.first?.trailers)
+
+        // Only the real trailer, ended by the prose line -- "Note: leftover"
+        // is body text that happens to be colon-shaped, not a trailer.
+        #expect(trailers == [Trailer(key: "Fixes", value: "#100")])
+    }
+
+    // The `agentOnly` consequence of the same bug: a commit whose body prose
+    // contains an agent-shaped line *after* the real trailer block must not
+    // be returned by an `agentOnly` query. If trailer scanning resumed past
+    // the prose, this commit would wrongly look like it carries provenance.
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func agentOnlyExcludesCommitWhereAgentShapedLineIsBodyProseNotATrailer(format: FixtureRepository.RefFormat) throws {
+        var repo = try FixtureRepository(refFormat: format)
+        defer { repo.destroy() }
+
+        let noProvenance = """
+        Work done
+
+        Fixes: #100
+        This mentions an agent below but is not a trailer.
+        Agent-Name: sneaky-tool v1.0
+        """
+        let realProvenance = "Real agent commit\n\nAgent-Name: real-tool v1.0"
+
+        try repo.build([
+            FixtureRepository.Commit("a", message: noProvenance),
+            FixtureRepository.Commit("b", message: realProvenance)
+        ])
+
+        let filtered = try CommitLog.run(path: repo.url.path, rangeArguments: ["HEAD"],
+                                          options: .agentOnly)
+
+        #expect(filtered.count == 1)
+        #expect(filtered.first?.oid == repo.oids["b"])
+        #expect(!filtered.contains(where: { $0.oid == repo.oids["a"] }))
+    }
+
     @Test(arguments: FixtureRepository.RefFormat.supported())
     func runIncludesRefsWhenRequested(format: FixtureRepository.RefFormat) throws {
         var repo = try FixtureRepository(refFormat: format)
