@@ -35,16 +35,28 @@ public enum JournalObserved {
     /// second `list` on every read, for a distinction `kind` already makes.
     ///
     /// Modeled as `kind` plus two optional payload fields rather than a
-    /// nested `enum Payload`: Swift's synthesized `Encodable` already emits
-    /// an `Optional` property via `encodeIfPresent`, so the field that does
-    /// not apply to a given `kind` is simply absent from the JSON with no
-    /// custom `encode(to:)` needed, and `Metadata` stays a plain struct
-    /// rather than growing a second type to duplicate against.
-    public struct Metadata: Sendable, Equatable, Encodable {
+    /// nested `enum Payload`: Swift's synthesized `Codable` already emits an
+    /// `Optional` property via `encodeIfPresent` on write and
+    /// `decodeIfPresent` on read, so the field that does not apply to a
+    /// given `kind` is simply absent from the JSON on both sides with no
+    /// custom `encode(to:)` or `init(from:)` needed, and `Metadata` stays a
+    /// plain struct rather than growing a second type to duplicate against.
+    ///
+    /// `Codable`, not `Encodable`-only (#0236): a foreign rewrite's stored
+    /// mapping was write-only until this — nothing in the tree could read
+    /// one back. No `schemaVersion` guard on decode, unlike
+    /// `JournalEntryMetadata`: every field this schema has ever added
+    /// (`kind`, `timestamp`, `worktree`) arrived as a new required key
+    /// alongside `schemaVersion` staying at `1` (see the doc comment above),
+    /// so there is no older wire shape a version check would need to reject
+    /// -- `schemaVersion` decodes as an ordinary field and a future bump
+    /// gets the same probe-first treatment `JournalEntryMetadata` uses, once
+    /// there is a second version to distinguish from.
+    public struct Metadata: Sendable, Equatable, Codable {
         public static let currentSchemaVersion = 1
 
         /// Discriminates the two payload shapes an observed entry can carry.
-        public enum Kind: String, Sendable, Equatable, Encodable {
+        public enum Kind: String, Sendable, Equatable, Codable {
             case refUpdates = "ref_updates"
             case rewrites
         }

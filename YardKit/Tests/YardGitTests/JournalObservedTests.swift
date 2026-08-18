@@ -67,18 +67,14 @@ struct JournalObservedTests {
         #expect(listing.items.compactMap(\.defect).isEmpty)
     }
 
-    /// `JournalObserved.Metadata` and `RefUpdate` are `Encodable` only (#0153
-    /// pins the wire shape one way), so decoding the written blob back for
-    /// assertions goes through a local mirror with the identical keys.
-    private struct DecodedRefUpdate: Decodable, Equatable {
-        let oldValue: String
-        let newValue: String
-        let refName: String
-    }
-
-    private struct DecodedMetadata: Decodable {
-        let schemaVersion: Int
-        let updates: [DecodedRefUpdate]
+    /// Decodes observed metadata bytes through the production type,
+    /// `JournalObserved.Metadata` itself (#0236) -- no mirrored struct.
+    /// `record` writes with `dateEncodingStrategy = .iso8601`, so decode
+    /// must match or `timestamp` fails to parse.
+    private static func decodeMetadata(_ json: Data) throws -> JournalObserved.Metadata {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(JournalObserved.Metadata.self, from: json)
     }
 
     @Test func observedEntriesRoundTripTheirRefUpdates() throws {
@@ -104,12 +100,12 @@ struct JournalObservedTests {
 
         let json = try Self.observedMetadataJSON(for: entry.id, in: context)
         #expect(!json.isEmpty)
-        let decoded = try JSONDecoder().decode(DecodedMetadata.self, from: json)
-        #expect(!decoded.updates.isEmpty)
-        #expect(decoded.updates.count == updates.count)
-        #expect(decoded.updates == updates.map {
-            DecodedRefUpdate(oldValue: $0.oldValue, newValue: $0.newValue, refName: $0.refName)
-        })
+        let decoded = try Self.decodeMetadata(json)
+        #expect(decoded.kind == .refUpdates)
+        let decodedUpdates = try #require(decoded.updates)
+        #expect(!decodedUpdates.isEmpty)
+        #expect(decodedUpdates.count == updates.count)
+        #expect(decodedUpdates == updates)
     }
 
     @Test func theObservedNamespaceIsNotTheJournalNamespace() throws {
@@ -135,6 +131,55 @@ struct JournalObservedTests {
         #expect(matching.allSatisfy { $0.hasPrefix(JournalObserved.refPrefix) })
     }
 
+    // MARK: - The read accessor, through production (#0236)
+
+    /// The point of #0236: a foreign rewrite's stored mapping must be
+    /// readable back through production code, not just decodable from bytes
+    /// a test fetched with its own `cat-file`. Reads through
+    /// `JournalAnchor.metadata(for:in:namespace:git:)` -- the same accessor
+    /// `JournalCheckpoint`, `JournalRestore` and `JournalUndo` call for
+    /// journal entries -- passing the observed namespace, then decodes
+    /// through `Metadata` itself. Both kinds, because #0220 split them and
+    /// only one half was ever exercised through a read path at all.
+    @Test func metadataReadsBackBothKindsThroughTheProductionAccessor() throws {
+        let repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let context = try WorktreeContext.resolve(path: repo.url.path)
+        let head = try repo.revParse("HEAD")
+
+        let refUpdates = [
+            ReferenceTransaction.RefUpdate(
+                oldValue: String(repeating: "0", count: 40),
+                newValue: head, refName: "refs/heads/main"),
+        ]
+        let refEntry = try JournalObserved.record(
+            refUpdates, in: context, now: Date(timeIntervalSince1970: 0))
+
+        let refJSON = try JournalAnchor.metadata(
+            for: refEntry.id, in: context, namespace: JournalObserved.refPrefix)
+        #expect(!refJSON.isEmpty)
+        let decodedRef = try Self.decodeMetadata(refJSON)
+        #expect(decodedRef.kind == .refUpdates)
+        let decodedUpdates = try #require(decodedRef.updates)
+        #expect(!decodedUpdates.isEmpty)
+        #expect(decodedUpdates == refUpdates)
+
+        let decision = Self.rewriteDecision(
+            source: "amend", isOwn: false, pairs: [(Self.oidA, Self.oidB)])
+        let rewriteEntry = try #require(try JournalObserved.record(decision, in: context))
+
+        let rewriteJSON = try JournalAnchor.metadata(
+            for: rewriteEntry.id, in: context, namespace: JournalObserved.refPrefix)
+        #expect(!rewriteJSON.isEmpty)
+        let decodedRewrite = try Self.decodeMetadata(rewriteJSON)
+        #expect(decodedRewrite.kind == .rewrites)
+        let source = try #require(decodedRewrite.source)
+        #expect(source == "amend")
+        let rewrites = try #require(decodedRewrite.rewrites)
+        #expect(!rewrites.isEmpty)
+        #expect(rewrites == [PostRewrite.Rewrite(oldOid: Self.oidA, newOid: Self.oidB)])
+    }
+
     // MARK: - Foreign rewrite decisions (#0220)
 
     private static let oidA = "a3317ca3bde3e98bd5c8d097a5e99dd9cb510742"
@@ -153,18 +198,6 @@ struct JournalObservedTests {
             sourceArgument: source,
             environment: isOwn ? [GitProcess.markerVariable: "1"] : [:],
             readStandardInput: { Data(stdin.utf8) })
-    }
-
-    private struct DecodedRewrite: Decodable, Equatable {
-        let oldOid: String
-        let newOid: String
-    }
-
-    private struct DecodedRewriteMetadata: Decodable {
-        let schemaVersion: Int
-        let kind: String
-        let source: String
-        let rewrites: [DecodedRewrite]
     }
 
     @Test func aForeignRewriteDecisionIsRecordedWithKindSourceAndOrderedRewrites() throws {
@@ -186,14 +219,16 @@ struct JournalObservedTests {
 
         let json = try Self.observedMetadataJSON(for: recorded.id, in: context)
         #expect(!json.isEmpty)
-        let decoded = try JSONDecoder().decode(DecodedRewriteMetadata.self, from: json)
+        let decoded = try Self.decodeMetadata(json)
         #expect(decoded.schemaVersion == JournalObserved.Metadata.currentSchemaVersion)
-        #expect(decoded.kind == "rewrites")
-        #expect(decoded.source == "rebase")
-        #expect(!decoded.rewrites.isEmpty)
-        #expect(decoded.rewrites == [
-            DecodedRewrite(oldOid: Self.oidA, newOid: Self.oidB),
-            DecodedRewrite(oldOid: Self.oidB, newOid: Self.oidC),
+        #expect(decoded.kind == .rewrites)
+        let source = try #require(decoded.source)
+        #expect(source == "rebase")
+        let rewrites = try #require(decoded.rewrites)
+        #expect(!rewrites.isEmpty)
+        #expect(rewrites == [
+            PostRewrite.Rewrite(oldOid: Self.oidA, newOid: Self.oidB),
+            PostRewrite.Rewrite(oldOid: Self.oidB, newOid: Self.oidC),
         ], "order is part of the contract -- a rebase's mapping is a sequence, not a set")
     }
 

@@ -181,8 +181,10 @@ public enum ReferenceTransaction {
 
 /// `RefUpdate` rides inside an observed journal entry's metadata (#0153), so
 /// its keys are pinned rather than synthesized: a rename here silently changes
-/// bytes already written into a repository's refs.
-extension ReferenceTransaction.RefUpdate: Encodable {
+/// bytes already written into a repository's refs. `Decodable` too (#0236):
+/// nothing could read a foreign rewrite's stored mapping back until this
+/// conformed both ways.
+extension ReferenceTransaction.RefUpdate: Codable {
     private enum CodingKeys: String, CodingKey {
         case oldValue, newValue, refName
     }
