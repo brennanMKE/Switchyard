@@ -292,6 +292,38 @@ struct WorktreeStatusTests {
         #expect(status.entries.last?.submodule == nil, "N... is an ordinary path, not a submodule")
     }
 
+    @Test("mixed submodule tokens catch a field transposition the all-true/all-false fixtures cannot")
+    func parsesSubmoduleStateFromMixedTokens() throws {
+        // SCMU (all true) and S... (all false, SubmoduleState.clean) are both
+        // invariant under swapping any two of the three flags, so neither one
+        // can catch a transposition between commitChanged/hasModifications/
+        // hasUntracked. A mixed token -- at least two of the three flags
+        // differing -- is required, and it must come from the production
+        // parser rather than SubmoduleState(subToken:) called directly, so the
+        // test pins the token layout, not just the initializer's storage.
+        var data = Data()
+        for record in ["1 .M SC.U 160000 160000 160000 aaa bbb sub-commit-and-untracked",
+                       "1 .M S.M. 160000 160000 160000 aaa bbb sub-modified-only"] {
+            data.append(contentsOf: Array(record.utf8))
+            data.append(0x00)
+        }
+        let status = try WorktreeStatusParser().parse(data)
+
+        #expect(status.entries.count == 2)
+
+        // "SC.U": commit changed, untracked, no modifications.
+        let commitAndUntracked = try #require(status.entries.first?.submodule)
+        #expect(commitAndUntracked.commitChanged)
+        #expect(!commitAndUntracked.hasModifications)
+        #expect(commitAndUntracked.hasUntracked)
+
+        // "S.M.": modifications only.
+        let modifiedOnly = try #require(status.entries.last?.submodule)
+        #expect(!modifiedOnly.commitChanged)
+        #expect(modifiedOnly.hasModifications)
+        #expect(!modifiedOnly.hasUntracked)
+    }
+
     @Test("one non-UTF-8 path does not erase every other entry")
     func nonUTF8PathSurvivesAlongsideItsNeighbours() throws {
         // Git permits arbitrary bytes in a path. The parser used to decode the
