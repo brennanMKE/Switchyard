@@ -209,6 +209,70 @@ struct WorktreeDisturbanceTests {
             current: moved, target: c, prunable: false)])
     }
 
+    // The `--apply` backend (`git am` under the hood) writes its sequencer
+    // state to `rebase-apply/`, a completely different directory from the
+    // `-i`/`--merge` backend's `rebase-merge/` above -- so a fixture that
+    // reaches one never reaches the other. This needs a real conflict: `-i`
+    // can be stopped with `edit` on a clean tree, but `--apply` only ever
+    // stops mid-sequence on a conflicting patch (measured).
+    @Test func aMidRebaseApplySiblingIsNamedAsADisturbance() throws {
+        var repo = try FixtureRepository(refFormat: .files)
+        defer { repo.destroy() }
+
+        // c1: f = "a"
+        try "a\n".write(to: repo.url.appendingPathComponent("f"),
+                        atomically: true, encoding: .utf8)
+        try git.run(["add", "-A"], workingDirectory: repo.url.path)
+        try git.run(["commit", "-qm", "c1"], workingDirectory: repo.url.path)
+        let c1 = try repo.revParse("HEAD")
+
+        // c2: f = "b" -- main moves past c1 on the same file.
+        try "b\n".write(to: repo.url.appendingPathComponent("f"),
+                        atomically: true, encoding: .utf8)
+        try git.run(["commit", "-qam", "c2"], workingDirectory: repo.url.path)
+
+        // The sibling branches off c1, before c2 touched f.
+        let wt = repo.url.deletingLastPathComponent()
+            .appendingPathComponent("\(repo.url.lastPathComponent)-wt-agent-a")
+        try git.run(["worktree", "add", "-q", "-b", "agent-branch", wt.path, c1],
+                    workingDirectory: repo.url.path)
+        defer { try? FileManager.default.removeItem(at: wt) }
+
+        let recorded = try capture(at: repo.url.path)
+
+        // c3, on the sibling: f = "c" -- a conflicting edit to the same line.
+        try "c\n".write(to: wt.appendingPathComponent("f"),
+                        atomically: true, encoding: .utf8)
+        try git.run(["commit", "-qam", "c3"], workingDirectory: wt.path)
+        let moved = try line(of: ["rev-parse", "refs/heads/agent-branch"], at: wt.path)
+
+        // `--apply` replays c3 onto main's c2, conflicts on f, and stops --
+        // exit status is conflict information here, not a harness failure.
+        _ = try git.capture(["rebase", "--apply", "main"], workingDirectory: wt.path)
+
+        // Confirm the fixture actually reached the `--apply` backend and not
+        // `-i`'s `rebase-merge` -- through `WorktreeContext.path(for:)`,
+        // never by concatenating onto `.git/`.
+        let wtContext = try WorktreeContext.resolve(path: wt.path)
+        let applyHeadName = try wtContext.path(for: "rebase-apply/head-name")
+        #expect(FileManager.default.fileExists(atPath: applyHeadName))
+        let mergeHeadName = try wtContext.path(for: "rebase-merge/head-name")
+        #expect(!FileManager.default.fileExists(atPath: mergeHeadName))
+
+        // Porcelain calls this sibling detached too, exactly as `-i` does.
+        let entries = try worktreeList(path: repo.url.path)
+        let entry = try #require(entries.first { $0.path == wt.path })
+        #expect(entry.detached)
+        #expect(entry.branch == nil)
+
+        // But its sequencer state still claims the branch, so restoring the
+        // snapshot would still wreck it -- reported by name.
+        let report = try disturbances(restoring: recorded, at: repo.url.path)
+        #expect(report == [WorktreeDisturbance.Disturbance(
+            worktreePath: wt.path, branch: "refs/heads/agent-branch",
+            current: moved, target: c1, prunable: false)])
+    }
+
     @Test func aMidBisectSiblingIsNamedAsADisturbance() throws {
         var repo = try FixtureRepository.linear()
         defer { repo.destroy() }
