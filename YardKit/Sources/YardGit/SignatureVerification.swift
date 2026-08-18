@@ -109,8 +109,11 @@ public struct SignatureVerification: Equatable, Sendable {
     }
 
     /// Pure mapping from git's outputs to a result. Exposed internally so the
-    /// states that cannot be produced without a real signing key (`G`, `U`,
-    /// `X`, `Y`, `R`, `E`) are still unit-tested.
+    /// states that a fixture cannot make git itself report (`G`, `U`, `X`,
+    /// `Y`, `R`, `E`) are still unit-tested directly. A fake `gpg.program`
+    /// (the `installFakeGpg` technique from #0037's `CommitCreateGPGTests`)
+    /// makes `run` itself reach `.good` with real `%GS`/`%GK` output too —
+    /// no real signing key is required (#0270, `SignatureVerificationTests`).
     static func parse(
         flag: String,
         signer: String,
