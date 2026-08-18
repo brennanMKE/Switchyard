@@ -68,10 +68,15 @@ struct JournalRestoreTests {
     private func standingOnAnEntryWithARogueRef(
         format: FixtureRepository.RefFormat
     ) throws -> (repo: FixtureRepository, ctx: WorktreeContext,
-                 redoTarget: JournalAnchor.Entry, redoState: RefSnapshot) {
+                 redoTarget: JournalAnchor.Entry, redoState: RefSnapshot,
+                 believed: RefSnapshot) {
         var repo = try FixtureRepository.linear(refFormat: format)
         let ctx = try context(of: repo)
         let c1 = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+        // c1's own recorded state — before `feature`/`sidecar` exist — is
+        // exactly what the scoped chain cursor believes once the restore
+        // below lands on it. Captured here, not reconstructed later.
+        let believed = try RefSnapshot.capture(in: ctx)
         try repo.branch("feature")
         try repo.branch("sidecar", at: "a")
         let redoState = try RefSnapshot.capture(in: ctx)
@@ -79,7 +84,7 @@ struct JournalRestoreTests {
         try JournalRestore.restore(
             c1.id, operation: "undo",
             traversal: .init(restored: c1.id, resultingPosition: c1.id), in: ctx)
-        return (repo, ctx, c2, redoState)
+        return (repo, ctx, c2, redoState, believed)
     }
 
     // MARK: - The round trip
@@ -245,7 +250,7 @@ struct JournalRestoreTests {
 
     @Test(arguments: FixtureRepository.RefFormat.supported())
     func anotherToolsMoveRefusesRestoreWhileTheChainStandsOnAnEntry(format: FixtureRepository.RefFormat) throws {
-        let (repo, ctx, redoTarget, redoState) =
+        let (repo, ctx, redoTarget, redoState, _) =
             try standingOnAnEntryWithARogueRef(format: format)
         defer { repo.destroy() }
         // `feature` (created inside the fixture, before its internal
@@ -289,7 +294,7 @@ struct JournalRestoreTests {
     // pins below.
     @Test(arguments: FixtureRepository.RefFormat.supported())
     func bypassGuardSkipsTheCrossToolGuard(format: FixtureRepository.RefFormat) throws {
-        let (repo, ctx, redoTarget, redoState) =
+        let (repo, ctx, redoTarget, redoState, _) =
             try standingOnAnEntryWithARogueRef(format: format)
         defer { repo.destroy() }
 
@@ -363,7 +368,7 @@ struct JournalRestoreTests {
     func aForeignEntryStillReportsTheWorktreeGateEvenWhenTheGuardWouldFire(
         format: FixtureRepository.RefFormat
     ) throws {
-        let (repo, ctx, _, _) = try standingOnAnEntryWithARogueRef(format: format)
+        let (repo, ctx, _, _, believed) = try standingOnAnEntryWithARogueRef(format: format)
         defer { repo.destroy() }
 
         let wtURL = try repo.addWorktree(named: "agent", branch: "agent-branch")
@@ -371,6 +376,9 @@ struct JournalRestoreTests {
         let name = try #require(wtCtx.worktreeName)
         let path = try #require(wtCtx.topLevel)
         let entry = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: wtCtx)
+        // The foreign entry's own captured state — what `applied` would be
+        // if this restore ever reached step 4.
+        let target = try RefSnapshot.capture(in: wtCtx)
 
         // Move `sidecar` only now, after the foreign entry's own capture:
         // its `applied` snapshot still says "a", the repository now says
@@ -379,6 +387,14 @@ struct JournalRestoreTests {
         let driftedOid = try #require(repo.oids["b"])
         try git.run(["update-ref", "refs/heads/sidecar", driftedOid],
                     workingDirectory: repo.url.path)
+        let now = try RefSnapshot.capture(in: ctx)
+
+        // Vacuity guard (#0257): if the guard would NOT have fired on this
+        // fixture, the assertion below that the gate's error comes out
+        // instead of the guard's proves nothing. #0230's original version of
+        // this test went dead exactly this way — the fixture's own
+        // divergence quietly stopped existing while the test kept passing.
+        try #require(!CrossToolGuard.diff(recorded: believed, applied: target, current: now).isEmpty)
 
         let thrown = #expect(throws: JournalRestore.Error.self) {
             try JournalRestore.restore(entry.id, in: ctx)
