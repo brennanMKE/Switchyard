@@ -153,17 +153,56 @@ struct WorktreeDisturbanceTests {
 
     // MARK: - What is deliberately not a disturbance
 
+    // The snapshot must record agent-branch (captured *after* the worktree
+    // exists) and the branch must actually move past it, or an unrecorded-
+    // or unmoved-ref exclusion (decision 20) would make this pass for a
+    // reason that has nothing to do with detachment. Only once both of
+    // those hold does excluding the detached sibling do any work: restore
+    // would move refs/heads/agent-branch back to `c` for whoever holds
+    // it, and detaching means this sibling no longer does.
     @Test func aDetachedSiblingHoldsNoBranchAndIsNeverDisturbed() throws {
         var repo = try FixtureRepository.linear()
         defer { repo.destroy() }
-        let recorded = try capture(at: repo.url.path)
         let wt = try repo.addWorktree(named: "agent-a", branch: "agent-branch")
         defer { try? FileManager.default.removeItem(at: wt) }
-        try git.run(["checkout", "-q", "--detach"], workingDirectory: wt.path)
+        let a = try #require(repo.oids["a"])
 
-        // The snapshot predates agent-branch, so restore would delete it —
-        // but no worktree has it checked out any more.
+        let recorded = try capture(at: repo.url.path)
+        try git.run(["checkout", "-q", "--detach"], workingDirectory: wt.path)
+        // Moves refs/heads/agent-branch out from under the (now detached)
+        // sibling, from the main worktree -- a raw ref update, not a
+        // checkout, so it does not care that the branch is checked out
+        // nowhere any more.
+        try git.run(["update-ref", "refs/heads/agent-branch", a],
+                    workingDirectory: repo.url.path)
+
+        // The branch has moved since the snapshot -- exactly what would be
+        // a disturbance for a sibling that still held it -- but this one
+        // detached, so restoring agent-branch to its recorded value cannot
+        // touch it.
         #expect(try disturbances(restoring: recorded, at: repo.url.path).isEmpty)
+    }
+
+    // Positive control for the test above: identical fixture, but the
+    // sibling stays attached to agent-branch instead of detaching. The same
+    // branch move is now reported by name -- the only variable between the
+    // two tests is the detach, so this is what makes it load-bearing.
+    @Test func anAttachedSiblingWithTheSameBranchMoveIsReportedByName() throws {
+        var repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let wt = try repo.addWorktree(named: "agent-a", branch: "agent-branch")
+        defer { try? FileManager.default.removeItem(at: wt) }
+        let a = try #require(repo.oids["a"])
+        let c = try #require(repo.oids["c"])
+
+        let recorded = try capture(at: repo.url.path)
+        try git.run(["update-ref", "refs/heads/agent-branch", a],
+                    workingDirectory: repo.url.path)
+
+        let report = try disturbances(restoring: recorded, at: repo.url.path)
+        #expect(report == [WorktreeDisturbance.Disturbance(
+            worktreePath: wt.path, branch: "refs/heads/agent-branch",
+            current: a, target: c, prunable: false)])
     }
 
     // MARK: - A sibling stopped mid-rebase or mid-bisect still holds its
