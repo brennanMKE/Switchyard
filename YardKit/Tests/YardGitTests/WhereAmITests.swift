@@ -136,6 +136,60 @@ struct WhereAmITests {
         #expect(!r.isMidMerge, "no MERGE_HEAD in a stopped rebase")
     }
 
+    // MARK: - Issue 0304 Required Test — the `--apply` backend
+
+    /// `isMidRebase` (`WhereAmI.swift:206`) checks both `rebase-merge` and
+    /// `rebase-apply`, but the only mid-rebase test above drives
+    /// `rebase --exec false`, which only ever reaches the **merge** backend
+    /// (`-i`/`--merge`). A repository stopped in `git rebase --apply` (the
+    /// `git am`-based backend) writes its sequencer state to a completely
+    /// different directory, `rebase-apply/`, so that test can never exercise
+    /// dropping `"rebase-apply"` from the list. This is the fourth place
+    /// that backend has been a blind spot -- #0263, #0273 round 2, #0291.
+    ///
+    /// `--apply` only ever stops mid-sequence on a genuine conflict (`-i` can
+    /// stop cleanly with `edit`; `--apply` cannot), so this fixture builds
+    /// one: `main` and `topic` both edit `f.txt` starting from the same base
+    /// commit, and replaying `topic`'s commit onto `main` conflicts.
+    @Test func interruptedRebaseApplySetsMidRebaseFlag() throws {
+        var repo = try FixtureRepository(refFormat: .files)
+        defer { repo.destroy() }
+
+        // base: f.txt = "a"
+        try repo.build([FixtureRepository.Commit("base", files: ["f.txt": "a\n"])])
+
+        // main moves on: f.txt = "b"
+        try repo.build([FixtureRepository.Commit("onMain", parents: ["base"],
+                                                  files: ["f.txt": "b\n"])])
+        try repo.branch("main", at: "onMain")
+        try repo.checkout("main")
+
+        // topic branches off base before main touched f.txt: f.txt = "c"
+        try repo.build([FixtureRepository.Commit("onTopic", parents: ["base"],
+                                                  files: ["f.txt": "c\n"])])
+        try repo.branch("topic", at: "onTopic")
+        try repo.checkout("topic")
+
+        // `--apply` replays onTopic onto main, conflicts on f.txt, and stops
+        // -- exit status is conflict information here, not a harness failure.
+        _ = try git.capture(["rebase", "--apply", "main"], workingDirectory: repo.url.path)
+
+        // Confirm the fixture actually reached the `--apply` backend and not
+        // `-i`'s `rebase-merge`, resolved through `WorktreeContext.path(for:)`
+        // -- never by concatenating onto `.git/`.
+        let context = try WorktreeContext.resolve(path: repo.url.path)
+        let applyHeadName = try context.path(for: "rebase-apply/head-name")
+        #expect(FileManager.default.fileExists(atPath: applyHeadName),
+                "the fixture must actually reach rebase-apply, or this test pins nothing")
+        let mergeHeadName = try context.path(for: "rebase-merge/head-name")
+        #expect(!FileManager.default.fileExists(atPath: mergeHeadName),
+                "rebase-merge must be absent -- this fixture is the --apply backend, not -i")
+
+        let r = try whereAmI(path: repo.url.path, git: git)
+        #expect(r.isMidRebase, "a stopped rebase --apply must set isMidRebase")
+        #expect(!r.isMidMerge, "no MERGE_HEAD in a stopped rebase --apply")
+    }
+
     @Test func midMergeReportsFlagWhenMergeHeadPresent() throws {
         // Build a repo with two divergent branches that edit the same file,
         // then start a conflicting merge in progress so MERGE_HEAD exists.
