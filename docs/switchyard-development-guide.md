@@ -1124,6 +1124,47 @@ a feature at any milestone on the grounds that GitUp had it.
     the live sequencer — `SequencerSnapshot`, or the `rebase-merge` path — before it is trusted.
     **#0241** carries the fix. The reason the file exists at all is unchanged.
 
+20. **A restore deletes only refs its snapshot recorded.** **Brennan's decision, 2026-08-17**, on
+    **#0231** — option A of three. Measured: a restore currently deletes every direct ref absent from
+    the snapshot, so a branch or tag a sibling worktree **created** since the checkpoint is removed
+    silently, with no refusal and nothing in the `Report`.
+
+    What is given up is real and worth naming: `RefSnapshot.restore`'s own type comment promises the
+    repository will match the snapshot, and after this it matches it **except** for refs created since.
+    That is the trade Brennan took, and the reason is that the alternatives are worse — refusing needs
+    a force path that does not exist until M3, and recording it as designed leaves a silent deletion.
+
+    **It also resolves #0232**, the two-agent undo deadlock, and nothing else does. With deletion scoped
+    to recorded refs, "the refs a restore touches" stops being *every ref in the repository*, so the
+    cross-tool guard can be scoped to that set without weakening it — a sibling's ordinary commit no
+    longer refuses the caller's traversal from step two onward.
+
+21. **M1 criterion 4 is met by building real payload schemas, not by narrowing it.** **Brennan's
+    decision, 2026-08-17**, on **#0194** — option (a), against the milestone review's own
+    recommendation of (b).
+
+    `CommandSpec` gains a payload-shape field, the thirteen shapes are expressed in it, the generated
+    files carry real field lists, and the `YardWireTests` literals are bound to the generated files so
+    the two cannot drift. The concrete case that made this decidable: `whereami` is now in the registry
+    and its generated schema documents a success payload of `{"schema": "whereami"}` — fifteen fields,
+    none named — and twelve more commands would each generate one of those.
+
+    `Schemas/README.md`'s payload promises stand as written; it is the emitter that has to catch up.
+
+22. **The `reference-transaction` hook arm goes over XPC like every other command.** **Brennan's
+    decision, 2026-08-17**, on **#0217** — option C of three, and the one that keeps the layering rule
+    without an exception: `switchyard` never links `YardGit`, and there is no second binary.
+
+    It is taken with its consequence stated, because the consequence is not small: the arm connects
+    with **`launchIfNeeded: false`** and a short timeout, so **ref transactions made while the app is
+    closed are not journalled**. Journal completeness becomes a function of whether Switchyard.app
+    happens to be running. A background `git fetch` in a terminal must never launch a GUI application,
+    which is what `launchIfNeeded: false` buys.
+
+    Two things follow and belong in **#0154**: the arm still exits **0** in every case (#0042's
+    totality invariant — a journal that cannot record must never break a commit), and the timeout must
+    be short enough that an unreachable app costs a ref update nothing measurable.
+
 
 ### Still open
 
@@ -1133,7 +1174,8 @@ Decide these with Brennan, do not decide them in code.
    can `absorb` and `split` be built on narrower primitives?
 2. **Domain and App Store name.** Not checked. The App Store name no longer
    matters given the distribution decision above; the domain still does, for the docs site.
-3. **Does M1 criterion 4 cover payload shapes, or only the envelope frame?** Filed as **#0194** by the
+3. ~~**Does M1 criterion 4 cover payload shapes, or only the envelope frame?**~~ **Answered
+   2026-08-17 — decision 21 above: build the payload schemas.** Original text kept for context. Filed as **#0194** by the
    2026-08-17 M1 milestone review. `Schemas/README.md` promises that `schemaVersion: 1` covers *"each
    command's result payload shape"* and that renaming *"any key an agent can currently read, in the
    envelope or in a payload"* is breaking — but no artifact records a single payload shape, and
@@ -1156,8 +1198,9 @@ Decide these with Brennan, do not decide them in code.
    mirror clone, so parts of the engine clearly expect them — but nothing states whether the mutating
    half should. Either capture degrades gracefully when there is no worktree, or bare repositories are
    out of scope and say so.
-6. **Does `GitProcess` get a wall-clock timeout, and where?** **#0163**, still needing a pick among
-   its three options. The termination semantics it depends on were measured 2026-08-17 and are recorded
+6. ~~**Does `GitProcess` get a wall-clock timeout, and where?**~~ **Answered 2026-08-17 —
+   decision 18, option 2, and #0163 is merged.** ~~**#0163**, still needing a pick among
+   its three options.~~ The termination semantics it depends on were measured 2026-08-17 and are recorded
    in the issue, so whichever option is chosen is now cheap to author.
 
 ---
