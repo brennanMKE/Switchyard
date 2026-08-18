@@ -105,6 +105,19 @@ private func colorConfiguredRepo(_ format: FixtureRepository.RefFormat) throws -
     return repo
 }
 
+// MARK: - diff.context override (fixture-backed, #0294)
+
+/// The two-hunk fixture with `diff.context` configured to 10 -- high enough
+/// that git's own context window spans the gap between the two edits (3
+/// lines apart at -U10) and merges them into one hunk. Measured (git
+/// 2.50.1): `git diff` without `--unified=3` on this fixture prints a single
+/// `@@ -1,20 +1,21 @@` hunk; `git diff --unified=3` prints the usual two.
+private func diffContextConfiguredRepo(_ format: FixtureRepository.RefFormat) throws -> FixtureRepository {
+    let repo = try twoHunkRepo(format)
+    try GitProcess().run(["config", "diff.context", "10"], workingDirectory: repo.url.path)
+    return repo
+}
+
 // MARK: - Listing and id stability (fixture-backed)
 
 @Test(arguments: FixtureRepository.RefFormat.supported())
@@ -689,4 +702,45 @@ func listHunksIgnoresColorUiAlwaysConfig(format: FixtureRepository.RefFormat) th
     #expect(files.map(\.path) == ["f.txt"])
     let file = try #require(files.first { $0.path == "f.txt" })
     #expect(file.hunks.count == 2)
+}
+
+// MARK: - diff.context override (fixture-backed, #0294)
+
+/// `listHunks` pins `--unified=3` precisely because `diff.context` is
+/// ordinary user configuration -- set to widen the context git shows around
+/// an edit -- and a high enough value merges two otherwise-separate edits
+/// into a single hunk. Hunk identity is what `stage --hunk` and
+/// `commit --hunk` act on: an agent asked to stage only the first edit would
+/// silently stage both. `twoSeparatedEditsProduceTwoHunks` does not cover
+/// this -- it runs at git's default context, where the two edits are
+/// already separate.
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func listHunksIgnoresDiffContextConfig(format: FixtureRepository.RefFormat) throws {
+    let repo = try diffContextConfiguredRepo(format)
+    defer { repo.destroy() }
+
+    // Confirm diff.context actually takes effect before trusting the
+    // assertion below -- a value git ignores pins nothing. Without
+    // --unified=3, the two edits (3 lines apart) merge into one hunk at
+    // -U10.
+    let plain = try GitProcess().run(["diff"], workingDirectory: repo.url.path).text
+    let plainHeaders = plain.split(separator: "\n").filter { $0.hasPrefix("@@") }
+    #expect(plainHeaders == ["@@ -1,20 +1,21 @@"])
+
+    let files = try listHunks(at: repo.url.path, area: .unstaged)
+    #expect(files.map(\.path) == ["f.txt"])
+    let file = try #require(files.first { $0.path == "f.txt" })
+    #expect(file.hunks.count == 2)
+
+    let first = try #require(file.hunks.first)
+    #expect(first.header == "@@ -1,6 +1,7 @@")
+    #expect(first.oldStart == 1 && first.oldCount == 6)
+    #expect(first.newStart == 1 && first.newCount == 7)
+    #expect(first.body.contains("+inserted after 03"))
+
+    let second = try #require(file.hunks.last)
+    #expect(second.header == "@@ -14,7 +15,7 @@ line 13")
+    #expect(second.oldStart == 14 && second.newStart == 15)
+    #expect(second.body.contains("-line 17"))
+    #expect(second.body.contains("+line 17 CHANGED"))
 }
