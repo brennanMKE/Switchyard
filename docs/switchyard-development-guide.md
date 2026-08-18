@@ -1084,6 +1084,34 @@ a feature at any milestone on the grounds that GitUp had it.
     be classified by *how the process ended* (`terminationReason == .uncaughtSignal`) and never by the
     number.
 
+19. **An interrupted operation's entry id is persisted in `$GIT_DIR`, not carried only in the
+    environment.** Decided 2026-08-17 in Brennan's absence on decisions 14–18's terms: reversible (a
+    file and its writer), and taken on a measurement — **#0237**'s probe, in which a `fixup` that stops
+    on a conflict stores no rewrite mapping anywhere.
+
+    #0221 exports the in-flight entry id through `SWITCHYARD_JOURNAL_ENTRY` on the scoped
+    `GitProcess` that `JournalCheckpoint.around` hands its body. That works exactly as long as the
+    operation completes inside `around`. `Fixup.run` deliberately does not: it leaves a conflicted
+    rebase **in progress** so the caller can resolve and continue, and the scoped process — the only
+    carrier of the id — stops existing at the throw. Whatever runs `git rebase --continue` is an own
+    invocation with **no id**, which both halves of the rewrite persistence refuse.
+
+    The environment cannot span that boundary, because the boundary is a process the engine did not
+    start. So the id goes on disk, in the per-worktree git directory, resolved through
+    `git rev-parse --git-path` like every other path in this codebase — never concatenated onto
+    `.git/`.
+
+    The two alternatives were rejected on the same measurement. **Falling back to the newest entry for
+    this worktree** is wrong the moment anything else has checkpointed since, which in the two-agent
+    repository this milestone is built for is ordinary rather than exotic. **Recording it as an
+    observed entry** keeps the mapping but severs it from the entry that captured the pre-operation
+    state, which is the one thing bullet 5 of #0160 needs it for.
+
+    The file is written when `around` mints the entry and removed when the operation completes inside
+    it; an operation that throws mid-flight leaves it, which is exactly the case it exists for. Whoever
+    consumes it removes it. **A stale file must degrade to today's behaviour** — no attach, nothing
+    invented — rather than attaching a mapping to an unrelated entry.
+
 
 ### Still open
 
