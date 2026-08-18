@@ -260,4 +260,94 @@ struct WhereAmITests {
                 "the error carries git's own stderr as the detail")
     }
 
+    // MARK: - Issue 0259 Required Test — asymmetric working-tree counts
+
+    /// `stashCount`, `untrackedCount`, `unstagedCount`, and `stagedCount` were
+    /// only ever asserted `== 0` against a fixture with no commits, so a
+    /// mutation zeroing all four at the return site (or transposing any two
+    /// of them) left the full suite green. This builds a fixture with four
+    /// distinct, non-zero counts.
+    ///
+    /// The counts are 1 stash, 2 untracked, 3 staged, 4 unstaged -- not the
+    /// 3-unstaged/4-staged split one might reach for first. Measured directly
+    /// with `git diff-index`, `--cached HEAD` (`stagedCount`'s probe) and
+    /// plain `HEAD` (`unstagedCount`'s probe, `WhereAmI.swift:252-258`) do not
+    /// partition the working tree into disjoint staged/unstaged sets: a path
+    /// staged via `git add`, with its working-tree copy then rewritten back
+    /// to byte-identical HEAD content (confirmed with `git hash-object`
+    /// matching `git rev-parse HEAD:<path>`), still shows `M` under plain
+    /// `HEAD`. `diff-index` without `--cached` reports every path whose index
+    /// differs from `HEAD` *plus* any path whose working tree differs from
+    /// the index -- it does not report only the latter. So every staged path
+    /// always lands in `unstagedCount`'s probe too, and `unstagedCount` can
+    /// never be smaller than `stagedCount` for a real repository. This
+    /// fixture respects that: 3 files are staged only, and those same 3 plus
+    /// 1 more file modified in the working tree only make up the 4 that
+    /// `unstagedCount` reports.
+    @Test func asymmetricWorkingTreeCountsReportDistinctValues() throws {
+        var repo = try FixtureRepository(refFormat: .files)
+        defer { repo.destroy() }
+
+        // Base commit: three files that become staged-only changes, one that
+        // becomes an unstaged-only change, and one used solely to produce
+        // the stash entry.
+        try repo.build([FixtureRepository.Commit("base", files: [
+            "s1.txt": "s1\n",
+            "s2.txt": "s2\n",
+            "s3.txt": "s3\n",
+            "x1.txt": "x1\n",
+            "stashfile.txt": "stashfile\n",
+        ])])
+
+        // 1 stash: modify stashfile only, then stash it with a targeted
+        // pathspec so the push does not also sweep up the staged and
+        // unstaged changes built below.
+        try "stashfile\nstashed-change\n".write(
+            to: repo.url.appendingPathComponent("stashfile.txt"),
+            atomically: true, encoding: .utf8)
+        try git.run(["stash", "push", "-q", "-m", "probe", "--", "stashfile.txt"],
+                    workingDirectory: repo.url.path)
+
+        // 3 staged: modify and `git add` three distinct files, with no
+        // further edit afterward.
+        for name in ["s1", "s2", "s3"] {
+            try "\(name)\nstaged-change\n".write(
+                to: repo.url.appendingPathComponent("\(name).txt"),
+                atomically: true, encoding: .utf8)
+            try git.run(["add", "\(name).txt"], workingDirectory: repo.url.path)
+        }
+
+        // +1 unstaged-only file, never staged, on top of the 3 staged paths
+        // above -- bringing unstagedCount to 4.
+        try "x1\nunstaged-change\n".write(
+            to: repo.url.appendingPathComponent("x1.txt"),
+            atomically: true, encoding: .utf8)
+
+        // 2 untracked.
+        try repo.writeUntracked([
+            "new1.txt": "untracked1\n",
+            "new2.txt": "untracked2\n",
+        ])
+
+        // Confirm the fixture actually reached the intended state before
+        // trusting whereAmI's report of it.
+        let stashList = try git.capture(["stash", "list"], workingDirectory: repo.url.path)
+        #expect(stashList.text.split(separator: "\n", omittingEmptySubsequences: true).count == 1,
+                "exactly one stash entry")
+
+        let status = try git.capture(["status", "--porcelain"], workingDirectory: repo.url.path)
+        let statusLines = status.text.split(separator: "\n", omittingEmptySubsequences: true)
+        #expect(statusLines.count == 6, "3 staged + 1 unstaged-only + 2 untracked")
+
+        let r = try whereAmI(path: repo.url.path, git: git)
+        #expect(r.stashCount == 1, "one stash entry")
+        #expect(r.untrackedCount == 2, "two untracked files")
+        #expect(r.stagedCount == 3, "three files staged only")
+        #expect(r.unstagedCount == 4, "the three staged paths plus the one unstaged-only path")
+        #expect(
+            Set([r.stashCount, r.untrackedCount, r.stagedCount, r.unstagedCount]).count == 4,
+            "all four counts are pairwise distinct -- a mutation transposing any two must fail"
+        )
+    }
+
 }
