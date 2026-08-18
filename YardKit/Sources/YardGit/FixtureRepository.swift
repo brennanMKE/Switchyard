@@ -225,6 +225,22 @@ public struct FixtureRepository {
                     workingDirectory: url.path)
     }
 
+    /// Adds a local bare repository as a remote, pushes `branch` to it, and
+    /// sets the branch's upstream tracking ref -- the shape `whereAmI`'s
+    /// upstream/ahead/behind fields need a real fixture for (#0247). Returns
+    /// the bare repository's URL so a test can diverge it from the local
+    /// branch directly, e.g. by pushing a commit built off-branch straight
+    /// into the bare repo's ref and then fetching to pick it up locally.
+    @discardableResult
+    public func addUpstream(branch: String = "main", remoteName: String = "origin") throws -> URL {
+        let bareURL = url.deletingLastPathComponent()
+            .appendingPathComponent("\(url.lastPathComponent)-bare-\(remoteName)")
+        try git.run(["init", "-q", "--bare", "--ref-format=\(refFormat.rawValue)", bareURL.path])
+        try git.run(["remote", "add", remoteName, bareURL.path], workingDirectory: url.path)
+        try git.run(["push", "-q", "-u", remoteName, branch], workingDirectory: url.path)
+        return bareURL
+    }
+
     /// Writes files without staging them.
     public func writeUntracked(_ files: [String: String]) throws {
         for (path, contents) in files {

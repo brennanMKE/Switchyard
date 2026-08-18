@@ -40,7 +40,46 @@ struct WhereAmITests {
 
         let r = try whereAmI(path: repo.url.path, git: git)
         #expect(r.branch == "main")
-        // Without explicit upstream on this branch, ahead/behind stay nil.
+        #expect(r.upstream == nil, "no remote configured means no upstream")
+        #expect(r.ahead == nil, "no upstream means ahead cannot be computed")
+        #expect(r.behind == nil, "no upstream means behind cannot be computed")
+    }
+
+    @Test func branchWithUpstreamReportsAsymmetricAheadAndBehind() throws {
+        var repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+
+        // linear() leaves HEAD attached to main at commit "c". Add a real
+        // upstream now, so origin/main starts out equal to local main.
+        _ = try repo.addUpstream(branch: "main")
+
+        // Diverge the upstream by one commit the local branch never sees:
+        // build a commit off "c" that lands on no local branch, push it
+        // straight into the bare repo's main ref, then fetch so the local
+        // remote-tracking ref picks it up.
+        try repo.checkoutDetached(repo.oids["c"]!)
+        try repo.build([FixtureRepository.Commit("upstreamOnly", parents: ["c"])])
+        let upstreamOnlyOID = repo.oids["upstreamOnly"]!
+        try git.run(["push", "-q", "origin", "\(upstreamOnlyOID):refs/heads/main", "--force"],
+                    workingDirectory: repo.url.path)
+        try git.run(["fetch", "-q", "origin"], workingDirectory: repo.url.path)
+
+        // Advance local main by two commits the upstream never sees, so the
+        // branch is ahead by 2 and behind by 1 -- deliberately asymmetric,
+        // so a mutation that transposes ahead and behind fails.
+        try repo.build([
+            FixtureRepository.Commit("ahead1", parents: ["c"]),
+            FixtureRepository.Commit("ahead2", parents: ["ahead1"]),
+        ])
+        try repo.branch("main", at: "ahead2")
+        try repo.checkout("main")
+
+        let r = try whereAmI(path: repo.url.path, git: git)
+        #expect(r.branch == "main")
+        #expect(r.upstream == "origin/main")
+        #expect(r.ahead == 2)
+        #expect(r.behind == 1)
+        #expect(r.ahead != r.behind, "asymmetric on purpose -- a transposed ahead/behind must fail")
     }
 
     @Test func detachedHeadReportsNilBranchAndRawIsFullSHA() throws {
