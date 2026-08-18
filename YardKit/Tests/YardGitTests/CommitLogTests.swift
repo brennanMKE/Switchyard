@@ -117,6 +117,43 @@ struct CommitLogTests {
         #expect(entries.first?.signatureStatus == .bad)
     }
 
+    // MARK: - Author field (end-to-end, through CommitLog.run)
+
+    @Test func runParsesAuthorDistinctFromCommitter() throws {
+        var repo = try FixtureRepository(refFormat: .files)
+        defer { repo.destroy() }
+
+        // `FixtureRepository.init` sets the repo-level committer identity to
+        // "Fixture <fixture@example.invalid>". Overriding GIT_AUTHOR_NAME/
+        // GIT_AUTHOR_EMAIL for this one commit only, via extraEnvironment,
+        // leaves the committer as "Fixture" -- so %an and %cn genuinely
+        // diverge and a %cn mis-index cannot masquerade as a correct %an.
+        let authorName = "Ada Lovelace #0269"
+        try git.run(
+            ["commit", "-q", "--allow-empty", "-m", "distinctive author commit"],
+            workingDirectory: repo.url.path,
+            extraEnvironment: [
+                "GIT_AUTHOR_NAME": authorName,
+                "GIT_AUTHOR_EMAIL": "ada@example.invalid",
+            ]
+        )
+
+        // Confirm the divergence actually happened before trusting anything
+        // CommitLog.parse reports about it.
+        let identities = try git.run(
+            ["log", "-1", "--format=%an|%cn"], workingDirectory: repo.url.path
+        ).text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let identityParts = identities.split(separator: "|", maxSplits: 1).map(String.init)
+        #expect(identityParts.count == 2)
+        #expect(identityParts[0] == authorName)
+        #expect(identityParts[1] == "Fixture")
+        #expect(identityParts[0] != identityParts[1])
+
+        let entries = try CommitLog.run(path: repo.url.path, rangeArguments: ["-1", "HEAD"])
+        #expect(entries.count == 1)
+        #expect(entries.first?.author == authorName)
+    }
+
     // MARK: - Embedded delimiter in message
 
     @Test func parsePreservesEmbeddedDelimiterInMessage() throws {
