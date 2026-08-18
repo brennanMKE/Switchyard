@@ -35,6 +35,22 @@ struct JournalUndoTests {
         return try JournalWorktreeScope.state(of: nodes, in: ctx.worktreeName)
     }
 
+    /// Every ref (and `HEAD`) `recorded` captured is present in the live
+    /// state at its recorded value. True whether or not a ref created since
+    /// the capture still exists — restore/undo/redo no longer delete those
+    /// (guide §11 decision 20), so this is the round-trip check to use
+    /// instead of full-snapshot equality wherever a ref may have been
+    /// created after `recorded` was captured.
+    private func expectRecordedRefsRoundTrip(
+        _ recorded: RefSnapshot, in ctx: WorktreeContext
+    ) throws {
+        let live = try RefSnapshot.capture(in: ctx)
+        #expect(live.head == recorded.head)
+        #expect(recorded.refs.allSatisfy { want in
+            live.refs.contains(where: { $0.name == want.name && $0.oid == want.oid })
+        })
+    }
+
     /// A commit reachable from nothing, with unique content — mirrors
     /// `JournalRestoreTests` (private there, cannot be shared).
     private func unreachableCommit(in repo: FixtureRepository, marker: String) throws -> String {
@@ -65,13 +81,14 @@ struct JournalUndoTests {
     // MARK: - The round trip
 
     @Test(arguments: FixtureRepository.RefFormat.supported())
-    func undoRestoresTheCheckpointAndRedoReturnsByteExactly(format: FixtureRepository.RefFormat) throws {
+    func undoRestoresTheCheckpointAndLeavesTheNewBranchInPlace(format: FixtureRepository.RefFormat) throws {
         var repo = try FixtureRepository.linear(refFormat: format)
         defer { repo.destroy() }
         let ctx = try context(of: repo)
         let atCheckpoint = try RefSnapshot.capture(in: ctx)
         let c1 = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
         try repo.branch("feature")
+        let featureOid = try #require(repo.oids["c"])
         let present = try RefSnapshot.capture(in: ctx)
         try #require(present != atCheckpoint)  // vacuity guard
 
@@ -80,31 +97,52 @@ struct JournalUndoTests {
         // decision 1) and the undo proceeds without any force path.
         let undone = try JournalUndo.undo(in: ctx)
         #expect(undone.map(\.entry.id) == [c1.id])
-        #expect(try RefSnapshot.capture(in: ctx) == atCheckpoint)
-        #expect(try ctx.resolveRef("refs/heads/feature", inWorktree: nil) == nil)
+        try expectRecordedRefsRoundTrip(atCheckpoint, in: ctx)
+        // `feature` did not exist at the checkpoint, so undo under option A
+        // (guide §11 decision 20) leaves it alone rather than deleting it.
+        #expect(try ctx.resolveRef("refs/heads/feature", inWorktree: nil) == featureOid)
         // Honesty rides through each step's report. Since #0171 the index and
         // worktree ARE captured and restored, so only the sequencer is left.
         #expect(undone[0].notRestored.map(\.piece) == [.sequencer])
         #expect(undone[0].restored.contains(.index))
         #expect(undone[0].restored.contains(.worktree))
 
-        let redone = try JournalUndo.redo(in: ctx)
-        #expect(redone.count == 1)
-        #expect(try RefSnapshot.capture(in: ctx) == present)
-        #expect(try ctx.resolveRef("refs/heads/feature", inWorktree: nil) != nil)
+        // Redo is where option A's own trade-off surfaces (guide §11
+        // decision 20, which names #0232 for this exact gap): the cursor now
+        // stands on c1, whose own recorded snapshot never had `feature`, but
+        // `feature` is still live because undo left it alone. The guard
+        // cannot tell "restore chose not to touch this" from "another tool
+        // moved something behind the journal's back", so the ordinary
+        // unforced redo refuses -- "refuses the caller's traversal from step
+        // two onward", in decision 20's own words, until #0232 scopes it.
+        let thrown = #expect(throws: CrossToolGuard.Error.self) {
+            try JournalUndo.redo(in: ctx)
+        }
+        #expect(try #require(thrown) == .repositoryChanged(divergences: [
+            .init(ref: "refs/heads/feature", expected: nil, actual: featureOid),
+        ]))
     }
 
     @Test(arguments: FixtureRepository.RefFormat.supported())
     func twoUndosThenTwoRedosReplayTheChainAndReturnToTheExactPresent(format: FixtureRepository.RefFormat) throws {
-        var repo = try FixtureRepository.linear(refFormat: format)
+        let repo = try FixtureRepository.linear(refFormat: format)
         defer { repo.destroy() }
         let ctx = try context(of: repo)
         let stateAtC1 = try RefSnapshot.capture(in: ctx)
         let c1 = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
-        try repo.branch("first")
+        // Move `main` between checkpoints rather than create a new branch: a
+        // branch created here would survive every undo/redo below untouched
+        // (guide §11 decision 20), permanently diverging the cursor's own
+        // snapshot from live reality and refusing every step from the second
+        // onward (#0232's gap) -- moving a ref the checkpoints already
+        // record stays outside that gap and keeps this test about what it
+        // names: multi-step traversal.
+        let b = try #require(repo.oids["b"])
+        try git.run(["update-ref", "refs/heads/main", b], workingDirectory: repo.url.path)
         let stateAtC2 = try RefSnapshot.capture(in: ctx)
         let c2 = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
-        try repo.branch("second")
+        let a = try #require(repo.oids["a"])
+        try git.run(["update-ref", "refs/heads/main", a], workingDirectory: repo.url.path)
         let present = try RefSnapshot.capture(in: ctx)
 
         // Undo walks operations newest-first: c2, then c1.
@@ -130,13 +168,17 @@ struct JournalUndoTests {
 
     @Test(arguments: FixtureRepository.RefFormat.supported())
     func stepsTwoEqualsTwoSingleSteps(format: FixtureRepository.RefFormat) throws {
-        var repo = try FixtureRepository.linear(refFormat: format)
+        let repo = try FixtureRepository.linear(refFormat: format)
         defer { repo.destroy() }
         let ctx = try context(of: repo)
         let c1 = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
-        try repo.branch("first")
+        // Move `main` rather than create a new branch -- see the comment in
+        // `twoUndosThenTwoRedosReplayTheChainAndReturnToTheExactPresent`.
+        let b = try #require(repo.oids["b"])
+        try git.run(["update-ref", "refs/heads/main", b], workingDirectory: repo.url.path)
         let c2 = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
-        try repo.branch("second")
+        let a = try #require(repo.oids["a"])
+        try git.run(["update-ref", "refs/heads/main", a], workingDirectory: repo.url.path)
 
         let batch = try JournalUndo.undo(steps: 2, in: ctx)
         #expect(batch.map(\.entry.id) == [c2.id, c1.id])
@@ -177,11 +219,17 @@ struct JournalUndoTests {
 
     @Test(arguments: FixtureRepository.RefFormat.supported())
     func redoAtThePresentRefusesTypedWithNothingWritten(format: FixtureRepository.RefFormat) throws {
-        var repo = try FixtureRepository.linear(refFormat: format)
+        let repo = try FixtureRepository.linear(refFormat: format)
         defer { repo.destroy() }
         let ctx = try context(of: repo)
         try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
-        try repo.branch("feature")
+        // Move `main` rather than create a new branch -- see the comment in
+        // `twoUndosThenTwoRedosReplayTheChainAndReturnToTheExactPresent`:
+        // the redo below is a second guarded step, and a surviving new
+        // branch would make it refuse via the cross-tool guard instead of
+        // the position check this test is about.
+        let a = try #require(repo.oids["a"])
+        try git.run(["update-ref", "refs/heads/main", a], workingDirectory: repo.url.path)
         let countBefore = try JournalAnchor.list(in: ctx).count
         let stateBefore = try RefSnapshot.capture(in: ctx)
 
@@ -245,11 +293,17 @@ struct JournalUndoTests {
 
     @Test(arguments: FixtureRepository.RefFormat.supported())
     func traversalEntriesRecordOperationRestoredAndResultingPosition(format: FixtureRepository.RefFormat) throws {
-        var repo = try FixtureRepository.linear(refFormat: format)
+        let repo = try FixtureRepository.linear(refFormat: format)
         defer { repo.destroy() }
         let ctx = try context(of: repo)
         let c1 = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
-        try repo.branch("feature")
+        // Move `main` rather than create a new branch -- the redo below is a
+        // second guarded step, and a surviving new branch would make it
+        // refuse via the cross-tool guard (guide §11 decision 20, #0232's
+        // gap) instead of exercising what this test is about: the traversal
+        // entries' own recorded metadata.
+        let a = try #require(repo.oids["a"])
+        try git.run(["update-ref", "refs/heads/main", a], workingDirectory: repo.url.path)
 
         let undone = try JournalUndo.undo(
             command: "switchyard undo",
@@ -290,12 +344,21 @@ struct JournalUndoTests {
         let c1 = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: mainCtx)
         let w1 = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: wtCtx)
         try repo.branch("main-only")
+        let mainOnlyOid = try #require(try mainCtx.resolveRef("refs/heads/main-only", inWorktree: nil))
 
         // The sibling's newer entry is not this worktree's undo target: the
         // walk scopes to entries recorded here (#0044 decision 1).
         let undone = try JournalUndo.undo(in: mainCtx)
         #expect(undone.map(\.entry.id) == [c1.id])
-        #expect(try RefSnapshot.capture(in: mainCtx) == atC1)
+        // Every ref c1 recorded round-trips. `main-only` did not exist at
+        // c1's capture, so undo under option A (guide §11 decision 20)
+        // leaves it alone rather than deleting it.
+        let afterUndo = try RefSnapshot.capture(in: mainCtx)
+        #expect(afterUndo.head == atC1.head)
+        #expect(atC1.refs.allSatisfy { want in
+            afterUndo.refs.contains(where: { $0.name == want.name && $0.oid == want.oid })
+        })
+        #expect(try mainCtx.resolveRef("refs/heads/main-only", inWorktree: nil) == mainOnlyOid)
 
         // And the sibling's chain is untouched by this traversal: its undo
         // still targets its own entry, and it has nothing to redo.
