@@ -241,20 +241,31 @@ struct AppConnectionTests {
             private(set) var count = 0
             func increment() { count += 1 }
         }
-        let counter = Counter()
+        let fetchCount = Counter()
+        let sleepCount = Counter()
 
         // `poll` checks before it waits: a value that is already there does
-        // not pay for an `interval`'s sleep. Proven by invocation count, not
-        // elapsed time (Rule 7c) -- exactly one fetch is required when the
-        // very first one succeeds, regardless of how long `interval` is or
-        // how contended this suite's run is.
-        let result: String? = try await AppConnection.poll(timeout: .seconds(60)) {
-            await counter.increment()
+        // not pay for an `interval`'s sleep. Pinned by counting real
+        // *sleeps*, not fetches -- a fetch-count assertion alone cannot
+        // distinguish fetch-before-sleep from sleep-before-fetch when
+        // `sleep` is a no-op, since either ordering still calls `fetch`
+        // exactly once for a first-try success (moving `sleep` back above
+        // `fetch` and re-running this test proves it: fetch count stays 1).
+        // Counting sleep invocations does distinguish them -- zero means
+        // `fetch` ran and returned before any wait was ever needed, which
+        // is the actual claim "needs no wait" makes. Neither count reads a
+        // clock (Rule 7c).
+        let result: String? = try await AppConnection.poll(
+            timeout: .seconds(60),
+            sleep: { _ in await sleepCount.increment() }
+        ) {
+            await fetchCount.increment()
             return "already-registered"
         }
 
         #expect(result == "already-registered")
-        #expect(await counter.count == 1)
+        #expect(await fetchCount.count == 1)
+        #expect(await sleepCount.count == 0)
     }
 
     // MARK: A nil result is not a failure
