@@ -278,6 +278,35 @@ struct JournalObservedTests {
         #expect(bytes == expected)
     }
 
+    /// Mirrors `aForeignRewriteRecordWritesTheExactPinnedBytes` for the
+    /// `ref_updates` kind (#0238): the `ref_updates` overload of `record`
+    /// sets `encoder.dateEncodingStrategy = .iso8601` independently of the
+    /// rewrite overload above, and nothing pinned it. Read through the
+    /// production accessor (#0236) now that it takes a `namespace:`.
+    @Test func aForeignRefUpdateRecordWritesTheExactPinnedBytes() throws {
+        let repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let context = try WorktreeContext.resolve(path: repo.url.path)
+        let base = try #require(context.topLevel)
+        let head = try repo.revParse("HEAD")
+
+        let updates = [
+            ReferenceTransaction.RefUpdate(
+                oldValue: String(repeating: "0", count: 40),
+                newValue: head, refName: "refs/heads/main"),
+        ]
+
+        let entry = try JournalObserved.record(
+            updates, in: context, now: Date(timeIntervalSince1970: 0))
+
+        let json = try JournalAnchor.metadata(
+            for: entry.id, in: context, namespace: JournalObserved.refPrefix)
+        #expect(!json.isEmpty)
+        let bytes = String(decoding: json, as: UTF8.self)
+        let expected = #"{"kind":"ref_updates","schemaVersion":1,"timestamp":"1970-01-01T00:00:00Z","updates":[{"newValue":"\#(head)","oldValue":"0000000000000000000000000000000000000000","refName":"refs/heads/main"}],"worktree":{"path":"\#(base)"}}"#
+        #expect(bytes == expected)
+    }
+
     /// #0221's boundary: this issue only ever persists a foreign decision.
     /// An own invocation writes nothing here, so once #0221 lands, the two
     /// halves cannot both record the same rewrite.
