@@ -175,6 +175,48 @@ func detachedWorktreeHasNoBranch(format: FixtureRepository.RefFormat) throws {
     #expect(entry.head == base)
 }
 
+// `detachedWorktreeHasNoBranch` above passes a raw SHA, and git detaches on
+// a raw SHA with or without `--detach` (measured) — the fixture cannot
+// produce the distinguishing state. This one passes a branch name instead,
+// which is the only committish shape `--detach` actually matters for, and
+// checks the two engine functions agree via `worktreeList` rather than
+// trusting `worktreeAdd`'s own report of itself. It also proves the branch
+// was not claimed — the user-visible harm — which `branch == nil` alone
+// cannot distinguish, since the engine reports `nil` for `.detached`
+// whether or not the branch was actually claimed underneath.
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func detachedWorktreeGivenABranchNameIsGenuinelyDetachedAndDoesNotClaimTheBranch(
+    format: FixtureRepository.RefFormat
+) throws {
+    var repo = try FixtureRepository(refFormat: format)
+    defer { repo.destroy() }
+    try repo.build([.init("base")])
+    try repo.branch("docs")
+    let path = siblingPath(for: repo, "detached-branch")
+
+    let result = try worktreeAdd(
+        at: repo.url.path, path: path, target: .detached(at: "docs"))
+    #expect(result.success)
+    #expect(result.branch == nil)
+    #expect(result.head == repo.oids["base"])
+
+    // `wt list` must agree with `wt new`: genuinely detached, not attached
+    // to `docs`. This is what the raw-SHA fixture cannot exercise — git
+    // detaches on a SHA regardless of `--detach`, so only a branch-name
+    // committish depends on the flag actually being passed.
+    let entry = try #require(try listedEntry(in: repo, at: path))
+    #expect(entry.detached)
+    #expect(entry.branch == nil)
+
+    // The branch must not have been silently claimed: a second worktreeAdd
+    // onto `docs` still succeeds.
+    let secondPath = siblingPath(for: repo, "docs-checkout")
+    let second = try worktreeAdd(
+        at: repo.url.path, path: secondPath, target: .branch("docs"))
+    #expect(second.success)
+    #expect(second.branch == "docs")
+}
+
 @Test(arguments: FixtureRepository.RefFormat.supported())
 func newBranchStartsAtTheNamedStartPoint(format: FixtureRepository.RefFormat) throws {
     var repo = try FixtureRepository(refFormat: format)
