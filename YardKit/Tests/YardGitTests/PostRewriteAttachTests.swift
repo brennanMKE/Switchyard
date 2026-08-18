@@ -915,6 +915,8 @@ struct PostRewriteAttachTests {
             serialized: try JournalAnchor.metadata(for: checkpointEntry.id, in: context))
         let mapping = try #require(after.rewrite)
         #expect(!mapping.rewrites.isEmpty)
+        #expect(mapping.source == "rebase",
+                "the final, authoritative invocation is the rebase; its source must survive composing")
 
         // The assertion that matters: the entry's pre-checkpoint HEAD must
         // be reachable through the stored mapping, chained to the operation's
