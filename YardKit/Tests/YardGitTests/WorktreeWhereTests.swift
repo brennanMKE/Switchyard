@@ -57,7 +57,13 @@ struct WorktreeWhereTests {
         defer { try? FileManager.default.removeItem(at: wtPath) }
 
         let result = try yardWhere(path: wtPath.path)
-        #expect(result.worktreeName != nil, "linked worktree must have a name")
+        // Git names a linked worktree after the basename of the directory it
+        // was created at (`addWorktree(named:)` builds that as
+        // "<fixture>-wt-agent-a") -- not the literal fixture label passed in.
+        // `WorktreeContextTests.readsAnotherWorktreesHead` confirms the same
+        // thing indirectly, for `WorktreeContext.worktreeName`.
+        #expect(result.worktreeName == wtPath.lastPathComponent,
+                "linked worktree must report its actual name")
 
         // The key assertion: $GIT_DIR != $GIT_COMMON_DIR in a linked worktree.
         #expect(result.gitDir != result.commonDir,
