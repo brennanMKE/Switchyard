@@ -38,6 +38,60 @@ esac
     return shimPath
 }
 
+/// Writes an executable shim that forwards every invocation to
+/// `/usr/bin/git`, capturing its real stdout, then for the exact argv shape
+/// `diff --name-only -z` (with or without a trailing `--diff-filter=U`) —
+/// the only two commands in the package that use it, both in `WhereAmI.swift`
+/// — prints that real, genuine stdout back out and forces exit 1 anyway.
+/// Every other command passes through with git's own exit code untouched, so
+/// `whereAmI`'s other probes still see a working repository.
+///
+/// This is the "#0298" construction: the review that filed #0298 could not
+/// make real `/usr/bin/git` alone exit non-zero from either command while
+/// still writing anything to stdout — measured directly (an unreadable
+/// working-tree file, a corrupted blob for a modified path, a corrupted
+/// conflict stage entry all produced fatal errors with **empty** stdout,
+/// because `git diff --name-only` computes its whole output queue before
+/// writing any of it). A shim is the one way to produce the combination: it
+/// does not fabricate the stdout content (it is `/usr/bin/git`'s own real
+/// output, verified byte-for-byte), it only overrides the exit code
+/// afterward, standing in for anything that could make a git-compatible
+/// process report failure after already having produced good output — a
+/// killed process reaped after a partial write, a wrapping script, a
+/// corporate git substitute. Returns the shim's path; the caller owns (and
+/// removes) the containing directory.
+func writeDiffFailsAfterRealOutputShim(in dir: String) throws -> String {
+    let shimPath = dir + "/git-diff-fails-shim.sh"
+    // `GitProcess.capture` always prepends `-C <workingDirectory>` ahead of
+    // the caller's own arguments (see `GitProcess.swift`'s `argv` assembly),
+    // so `diff`/`--name-only`/`-z` never land in `$1`/`$2`/`$3` -- they sit
+    // after `-C` and the path. Matching the joined `"$*"` string for the
+    // literal substring `diff --name-only -z` sidesteps that positional
+    // shift and still matches only these two probes' argv shape (neither
+    // `diff-index` nor any other command in the package produces that exact
+    // three-token run — confirmed by grep before writing this).
+    let script = """
+#!/bin/sh
+tmp="$(mktemp -p "$(dirname "$0")")"
+/usr/bin/git "$@" > "$tmp"
+status=$?
+case "$*" in
+  *"diff --name-only -z"*)
+    cat "$tmp"
+    rm -f "$tmp"
+    exit 1
+    ;;
+esac
+cat "$tmp"
+rm -f "$tmp"
+exit $status
+"""
+    try script.write(toFile: shimPath, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes(
+        [.posixPermissions: 0o755], ofItemAtPath: shimPath)
+    return shimPath
+}
+
 @Test func countsAreZeroWhenGitRunsNonZero() throws {
     // The production code that reads stash/untracked/staged/unstaged counts
     // does not care whether the command failed to launch; it only cares about

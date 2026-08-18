@@ -267,7 +267,8 @@ public func whereAmI(
     // repository would overcount unstagedCount by one per conflicted path.
     let unstagedCount: Int = {
         guard let out = try? git.capture(
-            ["diff", "--name-only", "-z"], workingDirectory: path) else { return 0 }
+            ["diff", "--name-only", "-z"], workingDirectory: path),
+              out.exitCode == 0 else { return 0 }
         // `out.standardOutput` is NUL-terminated, same convention as
         // `conflictCount` below.
         let bytes = out.standardOutput
@@ -295,7 +296,8 @@ public func whereAmI(
     // so it does not silently drop a hand-edited conflict.
     let conflictCount: Int = {
         guard let out = try? git.capture(
-            ["diff", "--name-only", "-z", "--diff-filter=U"], workingDirectory: path) else { return 0 }
+            ["diff", "--name-only", "-z", "--diff-filter=U"], workingDirectory: path),
+              out.exitCode == 0 else { return 0 }
         // `out.standardOutput` is NUL-terminated. A clean index produces empty data;
         // each conflicted path contributes one non-empty field separated by \0.
         let bytes = out.standardOutput

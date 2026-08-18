@@ -513,4 +513,77 @@ struct WhereAmITests {
                 "only the genuinely untracked file counts -- the ignored file must be excluded")
     }
 
+    // MARK: - Issue 0298 Required Tests — exit-code guard on unstagedCount and conflictCount
+
+    /// #0298: `unstagedCount` and `conflictCount` were the only two of five
+    /// `whereAmI` probes that did not guard `exitCode == 0` before trusting
+    /// their stdout. The M1 review that found the inconsistency could not
+    /// make real `/usr/bin/git` exit non-zero from either probe's command
+    /// while still writing anything to stdout -- measured directly against
+    /// git 2.50.1: an unreadable working-tree file, a corrupted blob behind a
+    /// modified path, and a corrupted conflict stage entry all produced
+    /// fatal errors with **empty** stdout, because `git diff --name-only`
+    /// builds its whole output queue before writing any of it, so a fatal
+    /// error anywhere in the walk discards everything already found.
+    ///
+    /// `writeDiffFailsAfterRealOutputShim` (`FailingGitFixture.swift`)
+    /// constructs the combination anyway: it runs real `/usr/bin/git`,
+    /// captures its genuine stdout, then forces the exit code to 1 for
+    /// exactly the argv shape these two probes use. The stdout it returns is
+    /// not fabricated -- it is real git's own output for this exact
+    /// repository, checked below before trusting anything built on it -- so
+    /// this proves the code path *is* reachable by anything that can behave
+    /// this way (a killed process reaped mid-write, a wrapping script), even
+    /// though plain `/usr/bin/git` alone was not shown to. That reachability
+    /// is why this landed as a real guard, not only a consistency change.
+    @Test func unstagedCountIsZeroWhenDiffExitsNonZeroWithRealOutput() throws {
+        var repo = try FixtureRepository(refFormat: .files)
+        defer { repo.destroy() }
+
+        try repo.build([FixtureRepository.Commit("base", files: ["f.txt": "original\n"])])
+        try "changed\n".write(
+            to: repo.url.appendingPathComponent("f.txt"),
+            atomically: true, encoding: .utf8)
+
+        let shimDir = NSTemporaryDirectory() + "yard-0298-shim-\(UUID().uuidString)"
+        try FileManager.default.createDirectory(atPath: shimDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: shimDir) }
+        let shimGit = GitProcess(executablePath: try writeDiffFailsAfterRealOutputShim(in: shimDir))
+
+        // Confirm the shim actually reaches the pathological state before
+        // trusting anything built on it: a non-zero exit alongside real,
+        // non-empty, parseable stdout.
+        let raw = try shimGit.capture(["diff", "--name-only", "-z"], workingDirectory: repo.url.path)
+        #expect(raw.exitCode != 0, "the shim forces a non-zero exit")
+        #expect(!raw.standardOutput.isEmpty, "the shim's stdout is real git's own output, not empty")
+        #expect(raw.text.contains("f.txt"), "the real diff output names the changed file")
+
+        let r = try whereAmI(path: repo.url.path, git: shimGit)
+        #expect(r.unstagedCount == 0,
+                "a non-zero exit must not be trusted, even though its stdout looks like a real count of 1")
+    }
+
+    /// The `conflictCount` sibling of the test above -- see its doc comment
+    /// for the full reachability argument, which applies identically here.
+    @Test func conflictCountIsZeroWhenDiffExitsNonZeroWithRealOutput() throws {
+        let repo = try FixtureRepository.conflicted()
+        defer { repo.destroy() }
+
+        let shimDir = NSTemporaryDirectory() + "yard-0298-shim-\(UUID().uuidString)"
+        try FileManager.default.createDirectory(atPath: shimDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: shimDir) }
+        let shimGit = GitProcess(executablePath: try writeDiffFailsAfterRealOutputShim(in: shimDir))
+
+        let raw = try shimGit.capture(
+            ["diff", "--name-only", "-z", "--diff-filter=U"], workingDirectory: repo.url.path)
+        #expect(raw.exitCode != 0, "the shim forces a non-zero exit")
+        #expect(!raw.standardOutput.isEmpty, "the shim's stdout is real git's own output, not empty")
+        #expect(raw.text.contains("f.txt"), "the real diff output names the conflicted file")
+
+        let r = try whereAmI(path: repo.url.path, git: shimGit)
+        #expect(r.conflictCount == 0,
+                "a non-zero exit must not be trusted, even though its stdout looks like a real conflicted path")
+        #expect(!r.hasConflicts, "hasConflicts is derived from conflictCount and must agree with it")
+    }
+
 }
