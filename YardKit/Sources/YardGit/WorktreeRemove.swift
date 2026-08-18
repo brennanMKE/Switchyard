@@ -130,8 +130,15 @@ public func worktreeRemove(
     // 3. Try the removal without --force first, exactly like `git worktree remove`
     //    would. We use capture() so a non-zero exit does not propagate as an error —
     //    we interpret it ourselves.
+    //
+    //    `-c status.showUntrackedFiles=normal`: `git worktree remove` reuses the
+    //    same dirty-worktree check as `git status`, so under a repository config
+    //    of `status.showUntrackedFiles = no` it removes a worktree holding
+    //    untracked files instead of refusing — silently destroying them (#0319,
+    //    measured on git 2.50.1). Pinning the config here makes the refusal
+    //    independent of what the user or repo has configured.
     let outcome = try git.capture(
-        ["worktree", "remove", normalizedTarget],
+        ["-c", "status.showUntrackedFiles=normal", "worktree", "remove", normalizedTarget],
         workingDirectory: repositoryPath
     )
 
@@ -158,6 +165,12 @@ public func worktreeRemove(
     //    the issue specifies we must never pass --force on an agent's behalf. The
     //    first attempt failing is what *triggers* the second, which is not the same
     //    as "we told git to force from the start".
+    //
+    //    No `-c status.showUntrackedFiles=…` pin here: `--force` bypasses git's
+    //    dirty-worktree check entirely rather than relaxing it, so the config has
+    //    no effect on this call either way — measured directly (#0319): a forced
+    //    removal deletes an untracked file identically whether the config is unset
+    //    or `no`. The pin belongs only where the *refusal* is the thing at stake.
     let forced = try git.capture(
         ["worktree", "remove", "--force", normalizedTarget],
         workingDirectory: repositoryPath
@@ -199,7 +212,13 @@ private func extractDirtyPaths(
     // parse the XY records, keeping only entries whose worktree-or-staged side is
     // modified/added/deleted/untracked. This keeps the interface deterministic — we
     // always return a list of paths instead of "maybe".
-    let statusArgs: [String] = ["status", "--porcelain=v2", "-z"]
+    //
+    // `-c status.showUntrackedFiles=normal`: under `status.showUntrackedFiles = no`
+    // this probe drops every untracked entry, so a refusal's `paths` list degrades
+    // to `[]` even though the removal itself was correctly refused — undoing
+    // #0300's guarantee that an agent can act on the dirty-paths list (#0319,
+    // measured on git 2.50.1).
+    let statusArgs: [String] = ["-c", "status.showUntrackedFiles=normal", "status", "--porcelain=v2", "-z"]
     let statusOut = try? git.capture(statusArgs, workingDirectory: path)
     guard let statusOut = statusOut else { return [] }
 
