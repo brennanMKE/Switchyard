@@ -431,8 +431,10 @@ public extension JournalCheckpoint {
 
         guard decision.isOwnInvocation else { return nil }
 
-        // The file is read only when the environment carried no id -- `??`
-        // never even resolves the live sequencer otherwise. `fromFile` also
+        // The file is read only when the environment carried no id -- the
+        // ternary's own `entryID == nil` branch guards the read explicitly;
+        // by the time `??` runs below, `fromFile` is already a materialized
+        // value, so `??`'s autoclosure buys nothing here. `fromFile` also
         // carries the path the id came from, so it can be cleared below
         // without touching a sequencer this call resolved nothing from.
         let fromFile = entryID == nil

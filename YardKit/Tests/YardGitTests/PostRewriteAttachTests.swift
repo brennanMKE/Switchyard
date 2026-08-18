@@ -1808,12 +1808,15 @@ struct PostRewriteAttachTests {
     /// vacuity #0255 exists to remove.
     ///
     /// The file sits behind a genuinely live rebase for the same reason as
-    /// the test above: under the *correct* precedence the environment id is
-    /// read eagerly and the file is never even opened (`??`'s right side is
-    /// an autoclosure), so this fixture's liveness only matters for the
-    /// mutant, which does open it -- and must find a real, resolvable entry
-    /// there, or the mutant would wrongly fall through to the environment id
-    /// anyway and this test would stop catching the swap.
+    /// the test above: under the *correct* precedence `attachRewrite`'s own
+    /// ternary guards the read -- `entryID == nil` is false here, so
+    /// `inFlightEntryID` is never called and the file is never opened. That
+    /// is the ternary's own condition, not `??`'s autoclosure: `fromFile` is
+    /// already a materialized value by the time `??` runs below it. So this
+    /// fixture's liveness only matters for the mutant, which does open the
+    /// file -- and must find a real, resolvable entry there, or the mutant
+    /// would wrongly fall through to the environment id anyway and this test
+    /// would stop catching the swap.
     @Test func precedenceLandsOnTheEnvironmentEntryNotTheFileEntryWhenBothNameLiveEntries() throws {
         let repo = try FixtureRepository.linear()
         defer { repo.destroy() }
@@ -1850,6 +1853,9 @@ struct PostRewriteAttachTests {
         let fileAfter = try JournalEntryMetadata(
             serialized: try JournalAnchor.metadata(for: fileEntry.id, in: context))
         #expect(fileAfter.rewrite == nil, "the file's entry must stay untouched")
+
+        #expect(FileManager.default.fileExists(atPath: pendingPath),
+                "the other operation's in-flight file must not be cleared by this call")
     }
 
     /// **3 of 3.** Deleting `try? fileManager.removeItem(atPath:
