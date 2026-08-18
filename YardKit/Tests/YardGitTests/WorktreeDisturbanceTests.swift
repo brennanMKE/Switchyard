@@ -166,6 +166,102 @@ struct WorktreeDisturbanceTests {
         #expect(try disturbances(restoring: recorded, at: repo.url.path).isEmpty)
     }
 
+    // MARK: - A sibling stopped mid-rebase or mid-bisect still holds its
+    // branch, even though porcelain calls it `detached` (#0256)
+
+    private func moveSiblingsBranch(at wt: URL) throws -> String {
+        try "w\n".write(to: wt.appendingPathComponent("w.txt"),
+                        atomically: true, encoding: .utf8)
+        try git.run(["add", "-A"], workingDirectory: wt.path)
+        try git.run(["commit", "-qm", "sibling work"], workingDirectory: wt.path)
+        return try line(of: ["rev-parse", "refs/heads/agent-branch"], at: wt.path)
+    }
+
+    @Test func aMidRebaseSiblingIsNamedAsADisturbance() throws {
+        var repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let wt = try repo.addWorktree(named: "agent-a", branch: "agent-branch")
+        defer { try? FileManager.default.removeItem(at: wt) }
+        let c = try #require(repo.oids["c"])
+
+        let recorded = try capture(at: repo.url.path)
+        let moved = try moveSiblingsBranch(at: wt)
+
+        // Paused on "edit": HEAD detaches to the stopped commit, but the
+        // sequencer still names the branch the rebase will resume onto.
+        try git.run(
+            ["rebase", "-i", "-q", "HEAD~1"], workingDirectory: wt.path,
+            extraEnvironment: ["GIT_SEQUENCE_EDITOR": "sed -i '' -e '1s/^pick/edit/'",
+                               "GIT_EDITOR": "true"])
+
+        // Porcelain calls this sibling detached, with no `branch` line.
+        let entries = try worktreeList(path: repo.url.path)
+        let entry = try #require(entries.first { $0.path == wt.path })
+        #expect(entry.detached)
+        #expect(entry.branch == nil)
+
+        // But its sequencer state still claims the branch, so restoring the
+        // snapshot would still wreck it — reported by name, same shape as
+        // an ordinary live checkout.
+        let report = try disturbances(restoring: recorded, at: repo.url.path)
+        #expect(report == [WorktreeDisturbance.Disturbance(
+            worktreePath: wt.path, branch: "refs/heads/agent-branch",
+            current: moved, target: c, prunable: false)])
+    }
+
+    @Test func aMidBisectSiblingIsNamedAsADisturbance() throws {
+        var repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let wt = try repo.addWorktree(named: "agent-a", branch: "agent-branch")
+        defer { try? FileManager.default.removeItem(at: wt) }
+        let a = try #require(repo.oids["a"])
+        let c = try #require(repo.oids["c"])
+
+        let recorded = try capture(at: repo.url.path)
+        let moved = try moveSiblingsBranch(at: wt)
+
+        // Bisecting detaches HEAD but records the branch it started from,
+        // in `BISECT_START` -- a short name, not a full ref.
+        try git.run(["bisect", "start"], workingDirectory: wt.path)
+        try git.run(["bisect", "bad"], workingDirectory: wt.path)
+        try git.run(["bisect", "good", a], workingDirectory: wt.path)
+
+        let entries = try worktreeList(path: repo.url.path)
+        let entry = try #require(entries.first { $0.path == wt.path })
+        #expect(entry.detached)
+        #expect(entry.branch == nil)
+
+        let report = try disturbances(restoring: recorded, at: repo.url.path)
+        #expect(report == [WorktreeDisturbance.Disturbance(
+            worktreePath: wt.path, branch: "refs/heads/agent-branch",
+            current: moved, target: c, prunable: false)])
+    }
+
+    // A dead agent's directory can vanish mid-rebase without `git worktree
+    // remove` or `rebase --abort` -- the same recovery case decision 5's
+    // prunable rule already covers. Confirms that case needs no new
+    // handling: the administrative record (and its sequencer state) still
+    // exists until `git worktree prune`, but `WorktreeContext.resolve` can
+    // no longer stand up a context for a path that is no longer a working
+    // directory, so the new lookup finds nothing -- exactly the same
+    // "detached, no branch attribute, never a disturbance" outcome this had
+    // before #0256.
+    @Test func aPrunableFormerlyMidRebaseSiblingGetsNoNewHandling() throws {
+        var repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let wt = try repo.addWorktree(named: "agent-a", branch: "agent-branch")
+        let recorded = try capture(at: repo.url.path)
+        _ = try moveSiblingsBranch(at: wt)
+        try git.run(
+            ["rebase", "-i", "-q", "HEAD~1"], workingDirectory: wt.path,
+            extraEnvironment: ["GIT_SEQUENCE_EDITOR": "sed -i '' -e '1s/^pick/edit/'",
+                               "GIT_EDITOR": "true"])
+
+        try FileManager.default.removeItem(at: wt)
+
+        #expect(try disturbances(restoring: recorded, at: repo.url.path).isEmpty)
+    }
+
     @Test func theCallersOwnCheckedOutBranchIsNotADisturbance() throws {
         var repo = try FixtureRepository.linear()
         defer { repo.destroy() }

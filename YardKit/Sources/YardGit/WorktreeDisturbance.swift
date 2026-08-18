@@ -28,12 +28,20 @@ import Foundation
 /// treats it differently from a live disturbance: it is not left alone, and
 /// its branch is written back like any other ref the snapshot recorded.
 ///
-/// A **detached** sibling holds no branch and is never disturbed — restoring
-/// shared refs cannot move a detached `HEAD`, which is per-worktree state.
-/// The calling worktree's own checked-out branch is deliberately not a
-/// disturbance: moving it is what restoring one's own checkpoint *is*, and
-/// the caller's index and files are the checkpoint's business, not a
-/// sibling casualty.
+/// A sibling porcelain reports **`detached`** usually holds no branch and is
+/// never disturbed — restoring shared refs cannot move a detached `HEAD`,
+/// which is per-worktree state. But a sibling stopped mid-rebase or
+/// mid-bisect **does** hold a branch — git tracks it in
+/// `rebase-merge/head-name`, `rebase-apply/head-name`, or `BISECT_START` —
+/// and porcelain's `detached` attribute says nothing about it (measured,
+/// git 2.50.1: `git worktree list --porcelain` reports `detached` with no
+/// `branch` line for such a worktree, while `git checkout`/`git branch -f`/
+/// `git branch -d` all still refuse to touch its branch). `disturbances`
+/// reads that sequencer state to fill the gap (#0256); a sibling with no
+/// sequencer state at all is still never a disturbance. The calling
+/// worktree's own checked-out branch is deliberately not a disturbance:
+/// moving it is what restoring one's own checkpoint *is*, and the caller's
+/// index and files are the checkpoint's business, not a sibling casualty.
 public enum WorktreeDisturbance {
 
     /// One sibling checkout the restore would leave inconsistent.
@@ -153,17 +161,97 @@ public enum WorktreeDisturbance {
     /// Captures the current state and worktree list, then diffs. The listing
     /// and capture run in the calling context — shared refs are visible from
     /// any worktree, so the sibling comparison is worktree-independent.
+    ///
+    /// The worktree list is enriched with `withSequencerBranches` before the
+    /// diff runs, so a sibling stopped mid-rebase or mid-bisect is seen as
+    /// holding a branch even though porcelain calls it `detached` (#0256).
     public static func disturbances(
         restoring recorded: RefSnapshot,
         in context: WorktreeContext,
         git: GitProcess = GitProcess()
     ) throws -> [Disturbance] {
         let base = context.topLevel ?? context.gitDir
+        let worktrees = withSequencerBranches(
+            try worktreeList(path: base, git: git), in: context, git: git)
         return disturbances(
             restoring: recorded,
             current: try RefSnapshot.capture(in: context, git: git),
-            worktrees: try worktreeList(path: base, git: git),
+            worktrees: worktrees,
             callerPath: context.topLevel)
+    }
+
+    // MARK: - Learning a held branch from sequencer state (#0256)
+
+    /// Fills in `branch` for every entry porcelain reports `detached`, when
+    /// its sequencer state says it actually holds one.
+    public static func withSequencerBranches(
+        _ entries: [WorktreeEntry], in context: WorktreeContext, git: GitProcess
+    ) -> [WorktreeEntry] {
+        entries.map { withSequencerBranch($0, in: context, git: git) }
+    }
+
+    /// A **prunable** sibling's working directory is gone, so its name
+    /// cannot be resolved into a `WorktreeContext` at all here — there is no
+    /// rebase left for it to protect, and decision 5's existing prunable
+    /// rule (porcelain's own `branch` attribute, when it has one) is
+    /// unaffected either way. Confirmed rather than assumed: a live entry
+    /// resolves fine (its directory exists); a prunable one's `path` no
+    /// longer names a real repository, so `WorktreeContext.resolve` fails
+    /// and this returns the entry unchanged, same as before #0256.
+    private static func withSequencerBranch(
+        _ entry: WorktreeEntry, in context: WorktreeContext, git: GitProcess
+    ) -> WorktreeEntry {
+        guard entry.branch == nil, !entry.prunable, let path = entry.path,
+              let siblingName = try? WorktreeContext.resolve(path: path, git: git).worktreeName,
+              let branch = sequencerHeldBranch(ofSibling: siblingName, in: context, git: git)
+        else { return entry }
+        return WorktreeEntry(
+            path: entry.path, head: entry.head, branch: branch,
+            locked: entry.locked, lockReason: entry.lockReason,
+            bare: entry.bare, detached: entry.detached,
+            prunable: entry.prunable, prunableReason: entry.prunableReason,
+            isMainWorktree: entry.isMainWorktree)
+    }
+
+    /// The branch a sibling's sequencer state claims, as the short name
+    /// `WorktreeEntry.branch` uses everywhere else — or nil when none of the
+    /// three files exist, or none names an actual branch.
+    ///
+    /// **`rebase-merge/head-name` holds a full ref name**
+    /// (`refs/heads/<name>`) — unless the rebase itself started from a
+    /// detached `HEAD`, in which case it holds the literal text
+    /// `detached HEAD` (measured), which does not have the `refs/heads/`
+    /// prefix and so is correctly read as "no branch". `rebase-apply/
+    /// head-name` (the `--apply`/`git am` backend) has the same shape.
+    /// **`BISECT_START` holds a short name directly** — unless bisect
+    /// itself started from a detached `HEAD`, in which case it holds a raw
+    /// commit oid (measured). Normalising that to `refs/heads/<oid>`
+    /// anyway is harmless: no recorded snapshot ever names a branch that
+    /// looks like a 40-character oid, so it can never match and can never
+    /// become a disturbance.
+    private static func sequencerHeldBranch(
+        ofSibling name: String, in context: WorktreeContext, git: GitProcess
+    ) -> String? {
+        for file in ["rebase-merge/head-name", "rebase-apply/head-name"] {
+            guard let ref = readTrimmed("worktrees/\(name)/\(file)", in: context, git: git)
+            else { continue }
+            guard ref.hasPrefix("refs/heads/") else { continue }
+            return String(ref.dropFirst("refs/heads/".count))
+        }
+        return readTrimmed("worktrees/\(name)/BISECT_START", in: context, git: git)
+    }
+
+    /// Reads a git-internal file through `WorktreeContext.path(for:)` —
+    /// never by concatenating onto `.git/` — and returns its trimmed
+    /// contents, or nil when the file does not exist or is empty.
+    private static func readTrimmed(
+        _ name: String, in context: WorktreeContext, git: GitProcess
+    ) -> String? {
+        guard let path = try? context.path(for: name, git: git),
+              let text = try? String(contentsOfFile: path, encoding: .utf8)
+        else { return nil }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     /// Throws `Error.wouldDisturb` naming every disturbed sibling unless the
