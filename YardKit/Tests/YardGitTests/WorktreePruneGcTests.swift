@@ -185,6 +185,41 @@ struct WorktreePruneGcTests {
         #expect(!pruned.isEmpty, "mutation1: if runPrune reads Output.text instead of .standardError, this array is empty")
     }
 
+    // MARK: - #0265 — GCResult.pruned's elements, not just its emptiness
+
+    /// M1 milestone review, fourth pass, 2026-08-18: every prior assertion on
+    /// `pruned` checked only emptiness, which two independent mutations of
+    /// `WorktreePrune.runPrune` survive — dropping the trailing-empty-line
+    /// trim (leaves a spurious `""` element) and blanking every line's
+    /// content (keeps the array non-empty but content-free). This test
+    /// asserts on the elements themselves: no element is the empty string,
+    /// and some element names the reaped worktree. Either assertion alone
+    /// lets one of the two mutations through.
+    @Test func pruneElementsAreNonEmptyAndNameTheReapedWorktree() throws {
+        var repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+
+        let (_, _, _, unlockedPath) = try buildFourWorktrees(repo: &repo)
+
+        let result = try WorktreePrune.gc(repositoryPath: repo.url.path, prune: true)
+        let pruned = result.pruned
+
+        try #require(!pruned.isEmpty, "a real prune of the unlocked-deleted worktree must produce output")
+
+        // Mutation guard 1: dropping the trim at WorktreePrune.swift:157-159
+        // (`return lines`) leaves a trailing "" element from splitting on
+        // "\n" — git's stderr diagnostics are newline-terminated.
+        #expect(!pruned.contains(""), "no element of pruned may be the empty string")
+
+        // Mutation guard 2: erasing every line's content (`.map { _ in "" }`)
+        // keeps the array's shape but destroys the content this test checks.
+        let unlockedName = unlockedPath.lastPathComponent
+        #expect(
+            pruned.contains { $0.contains("Removing ") && $0.contains(unlockedName) },
+            "pruned must contain git's verbatim \"Removing <worktree>: <reason>\" line naming the reaped worktree \(unlockedName)"
+        )
+    }
+
     // MARK: - mutation 2 — make --prune the default (always prune)
 
     @Test func mutation2_defaultPruneRemovesThePrunableEntry() throws {
