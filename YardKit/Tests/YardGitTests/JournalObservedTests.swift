@@ -360,11 +360,15 @@ struct JournalObservedTests {
 
     /// Mid-rebase dedup, at the unit level: a rebase-merge directory at the
     /// resolved git-path (never a path built by string concatenation onto
-    /// ".git/") is git's own signal that a rebase is in progress, and an
-    /// `amend` invocation seen during one must not produce its own entry --
-    /// the rebase's own final invocation repeats the pair (measured, #0043's
-    /// Givens; see `rebaseMergeExistsDuringAMidRebaseAmendButNotAPlainAmend`
-    /// below for the real, end-to-end measurement).
+    /// ".git/") is git's own signal that a **merge-backend** rebase is in
+    /// progress, and an `amend` invocation seen during one must not produce
+    /// its own entry -- the rebase's own final invocation repeats the pair
+    /// (measured, #0043's Givens; see
+    /// `rebaseMergeExistsDuringAMidRebaseAmendButNotAPlainAmend` below for
+    /// the real, end-to-end measurement). The apply backend's equivalent
+    /// signal is `rebase-apply/rebasing`, covered by
+    /// `aMidRebaseAmendUnderTheApplyBackendDoesNotProduceItsOwnObservedEntry`
+    /// below (#0291).
     @Test func aMidRebaseAmendDoesNotProduceItsOwnObservedEntry() throws {
         let repo = try FixtureRepository.linear()
         defer { repo.destroy() }
@@ -402,6 +406,64 @@ struct JournalObservedTests {
 
         let entry = try JournalObserved.record(decision, in: context)
         #expect(entry != nil, "the authoritative rebase invocation must still be recorded")
+    }
+
+    /// #0291: the apply backend's equivalent of the merge-backend dedup
+    /// above. `rebase-apply` is shared by `git rebase --apply` and `git am`,
+    /// so the marker checked must be the one that distinguishes them --
+    /// `rebase-apply/rebasing`, not the directory's mere existence (see
+    /// `aGitAmAmendStillProducesItsOwnObservedEntry` below for why that
+    /// distinction matters). Measured, git 2.50.1:
+    /// `rebaseMergeExistsDuringAMidRebaseAmendButNotAPlainAmend`'s sibling
+    /// measurement for this backend is
+    /// `aMidRebaseAmendUnderTheApplyBackendProducesOnlyOneObservedEntryForTheWholeRebase`
+    /// below, which drives the real end-to-end scenario #0291's Description
+    /// measured.
+    @Test func aMidRebaseAmendUnderTheApplyBackendDoesNotProduceItsOwnObservedEntry() throws {
+        let repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let context = try WorktreeContext.resolve(path: repo.url.path)
+
+        let rebaseApplyPath = try context.path(for: "rebase-apply")
+        try FileManager.default.createDirectory(
+            atPath: rebaseApplyPath, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: rebaseApplyPath) }
+        try Data().write(to: URL(fileURLWithPath: rebaseApplyPath + "/rebasing"))
+
+        let decision = Self.rewriteDecision(
+            source: "amend", isOwn: false, pairs: [(Self.oidA, Self.oidB)])
+
+        let entry = try JournalObserved.record(decision, in: context)
+        #expect(entry == nil,
+                "a mid-rebase amend under the apply backend must not produce its own observed entry")
+        #expect(try JournalObserved.list(in: context).isEmpty)
+    }
+
+    /// #0291's discriminator, pinned from the other side: `git am` also uses
+    /// `rebase-apply`, but writes `applying` rather than `rebasing`, and has
+    /// no final `rebase` invocation to repeat the pair -- so an `amend`
+    /// invocation seen during one is its own event and must keep producing
+    /// its own observed entry. Widening the check to `rebase-apply`'s mere
+    /// existence (dropping the `rebasing` discriminator) wrongly suppresses
+    /// this and must redden it (mutation 2 in #0291).
+    @Test func aGitAmAmendStillProducesItsOwnObservedEntry() throws {
+        let repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let context = try WorktreeContext.resolve(path: repo.url.path)
+
+        let rebaseApplyPath = try context.path(for: "rebase-apply")
+        try FileManager.default.createDirectory(
+            atPath: rebaseApplyPath, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: rebaseApplyPath) }
+        try Data().write(to: URL(fileURLWithPath: rebaseApplyPath + "/applying"))
+
+        let decision = Self.rewriteDecision(
+            source: "amend", isOwn: false, pairs: [(Self.oidA, Self.oidB)])
+
+        let entry = try JournalObserved.record(decision, in: context)
+        #expect(entry != nil,
+                "a git am amend has no final rebase invocation to repeat the pair, so it must be recorded")
+        #expect(try JournalObserved.list(in: context).count == 1)
     }
 
     /// The totality invariant (#0043): a persistence failure never surfaces
@@ -520,5 +582,206 @@ struct JournalObservedTests {
         #expect(midProbes[0].source == "amend")
         #expect(midProbes[0].rebaseMergeExisted,
                 "the discriminator the mid-rebase skip depends on, measured against a real paused rebase")
+    }
+
+    // MARK: - #0291: the measured double-record scenario, end to end
+
+    /// One `post-rewrite` invocation as the log records it: the hook's `$1`
+    /// argument, whether `rebase-apply/rebasing` was live *at the instant
+    /// this invocation's hook fired* (captured synchronously, inside the
+    /// git process that owns the sequencer directory -- the same
+    /// precondition `PostRewriteAttachTests.swift`'s `installLoggingPostRewriteHook`
+    /// doc comment measures for `rebase-merge`; replaying later, after the
+    /// owning process has exited and the rebase has finished, cannot
+    /// recompute it), and stdin verbatim (old-oid/new-oid pairs, one per
+    /// line) -- enough to rebuild the real `PostRewrite.Decision` afterward
+    /// through `PostRewrite.decide`, the production entry point, rather than
+    /// a synthesized one.
+    private struct SourceMarkerAndStdin {
+        let source: String
+        let rebaseApplyRebasingWasLive: Bool
+        let stdin: Data
+    }
+
+    /// Installs a `post-rewrite` hook that appends `$1` on its own `=I=`
+    /// line, then whether `rebase-apply/rebasing` exists on an `=R=` line
+    /// (checked the same way `isMidRebaseAmend` does: `git rev-parse
+    /// --git-path rebase-apply`, then a file-existence check on
+    /// `<that path>/rebasing`), then stdin verbatim.
+    private static func installStdinAndRebaseApplyProbeHook(
+        in repo: FixtureRepository, loggingTo log: URL
+    ) throws {
+        let context = try WorktreeContext.resolve(path: repo.url.path)
+        let hooksDir = try context.path(for: "hooks")
+        try FileManager.default.createDirectory(
+            atPath: hooksDir, withIntermediateDirectories: true)
+        let hookPath = hooksDir + "/post-rewrite"
+        let script = """
+        #!/bin/sh
+        printf '=I= %s\\n' "$1" >> "\(log.path)"
+        ra=$(git rev-parse --path-format=absolute --git-path rebase-apply 2>/dev/null)
+        if [ -n "$ra" ] && [ -e "$ra/rebasing" ]; then
+            printf '=R= 1\\n' >> "\(log.path)"
+        else
+            printf '=R= 0\\n' >> "\(log.path)"
+        fi
+        cat >> "\(log.path)"
+        exit 0
+        """
+        try script.write(toFile: hookPath, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: hookPath)
+    }
+
+    private static func sourceMarkerAndStdinInvocations(in log: URL) throws -> [SourceMarkerAndStdin] {
+        let text = try String(contentsOf: log, encoding: .utf8)
+        var lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        if lines.last == "" { lines.removeLast() }
+        var result: [SourceMarkerAndStdin] = []
+        var index = 0
+        while index < lines.count {
+            guard lines[index].hasPrefix("=I= ") else { break }
+            let source = String(lines[index].dropFirst(4))
+            let rebasingLive = lines[index + 1].dropFirst(4) == "1"
+            index += 2
+            var stdinLines: [String] = []
+            while index < lines.count, !lines[index].hasPrefix("=I= ") {
+                stdinLines.append(lines[index])
+                index += 1
+            }
+            result.append(SourceMarkerAndStdin(
+                source: source,
+                rebaseApplyRebasingWasLive: rebasingLive,
+                stdin: Data((stdinLines.map { $0 + "\n" }.joined()).utf8)))
+        }
+        return result
+    }
+
+    /// The exact scenario #0291's Description measured, end to end: a
+    /// conflicting `--apply` rebase, resolved and continued once, stopped
+    /// again on the next patch by an independent conflict, then a user's own
+    /// `git commit --amend` in place of resolving that conflict through
+    /// `--continue` -- followed by the rebase's own final invocation.
+    /// Measured below: exactly two `post-rewrite` invocations fire (the
+    /// amend, then the authoritative `rebase`), both while
+    /// `rebase-apply/rebasing` is live. Without this issue's discriminator
+    /// both would be recorded, reproducing the Description's double-record
+    /// -- one entry carrying an oid that never existed pre-rewrite. With it,
+    /// exactly one observed entry survives.
+    @Test func aMidRebaseAmendUnderTheApplyBackendProducesOnlyOneObservedEntryForTheWholeRebase() throws {
+        let repo = try FixtureRepository(refFormat: .files)
+        defer { repo.destroy() }
+        let git = GitProcess()
+        let fileURL = repo.url.appendingPathComponent("f.txt")
+
+        func write(_ lines: [String]) throws {
+            try (lines.joined(separator: "\n") + "\n").write(
+                to: fileURL, atomically: true, encoding: .utf8)
+        }
+
+        try write(["l1", "l2", "l3", "l4", "l5"])
+        try git.run(["add", "-A"], workingDirectory: repo.url.path)
+        try git.run(["commit", "-qm", "base"], workingDirectory: repo.url.path)
+
+        try git.run(["checkout", "-qb", "side"], workingDirectory: repo.url.path)
+        try write(["C3", "l2", "l3", "l4", "l5"])
+        try git.run(["commit", "-qam", "c3"], workingDirectory: repo.url.path)
+        try write(["C3", "C4", "l3", "l4", "l5"])
+        try git.run(["commit", "-qam", "c4"], workingDirectory: repo.url.path)
+        try write(["C3", "C4", "C5", "l4", "l5"])
+        try git.run(["commit", "-qam", "c5"], workingDirectory: repo.url.path)
+
+        try git.run(["checkout", "-q", "main"], workingDirectory: repo.url.path)
+        try write(["M1", "M2", "M3", "M4", "M5"])
+        try git.run(["commit", "-qam", "mainchange"], workingDirectory: repo.url.path)
+        try git.run(["checkout", "-q", "side"], workingDirectory: repo.url.path)
+
+        let context = try WorktreeContext.resolve(path: repo.url.path)
+        let log = repo.url.appendingPathComponent("post-rewrite.log")
+
+        // `rebase --apply main` conflicts immediately on c3: whole-file, no
+        // context anywhere matches `mainchange`'s tree (measured).
+        #expect(throws: (any Error).self) {
+            try git.run(["rebase", "--apply", "main"], workingDirectory: repo.url.path)
+        }
+        try #require(repo.isMidRebase)
+        try write(["C3", "M2", "M3", "M4", "M5"])
+        try git.run(["add", "-A"], workingDirectory: repo.url.path)
+
+        // Installed only now: the hook must be live for the amend onward,
+        // not for c3's own (non-rewriting) continuation.
+        try Self.installStdinAndRebaseApplyProbeHook(in: repo, loggingTo: log)
+
+        // `--continue` commits the resolved c3, then stops again on c4 -- a
+        // second, independent conflict (measured: c4's patch context no
+        // longer matches the resolved tree).
+        #expect(throws: (any Error).self) {
+            try git.run(["rebase", "--continue"], workingDirectory: repo.url.path)
+        }
+        try #require(repo.isMidRebase)
+
+        // Instead of resolving c4 through `--continue`, the user amends
+        // directly -- the mid-rebase amend #0291 is about.
+        try write(["C3", "C4", "M3", "M4", "M5"])
+        try git.run(["add", "-A"], workingDirectory: repo.url.path)
+        try git.run(["commit", "--amend", "-q", "-m", "c4-amended"], workingDirectory: repo.url.path)
+
+        // The sequencer's own "next" pointer still targets c4's patch, so
+        // `--continue` here would retry applying a patch the amend already
+        // subsumed; `--skip` is the recipe #0291's Description measured. It
+        // fails on c5's own, independent conflict (measured, same reason as
+        // c4: c5's patch context no longer matches the amended tree) --
+        // resolve and finish the rebase.
+        #expect(throws: (any Error).self) {
+            try git.run(["rebase", "--skip"], workingDirectory: repo.url.path)
+        }
+        try #require(repo.isMidRebase)
+        try write(["C3", "C4", "C5", "M4", "M5"])
+        try git.run(["add", "-A"], workingDirectory: repo.url.path)
+        try git.run(["rebase", "--continue"], workingDirectory: repo.url.path)
+        #expect(!repo.isMidRebase, "the rebase must have finished")
+
+        let invocations = try Self.sourceMarkerAndStdinInvocations(in: log)
+        #expect(invocations.count == 2, "a mid-rebase amend, then the authoritative final rebase")
+        #expect(invocations.first?.source == "amend")
+        #expect(invocations.last?.source == "rebase")
+        let allLive = invocations.allSatisfy { $0.rebaseApplyRebasingWasLive }
+        #expect(allLive,
+                "the discriminator's precondition, measured against this real, conflicting rebase: rebase-apply/rebasing is live for both the mid-rebase amend and the final rebase invocation")
+
+        // The rebase has since finished and `rebase-apply` is gone, so
+        // `record`'s live check is driven here by recreating, for the
+        // instant of each call, the state the hook just measured as
+        // genuinely live at that invocation -- the same synchronous
+        // precondition a real post-rewrite hook gives `record` in
+        // production, which this replay cannot otherwise reproduce once the
+        // owning `git` process has exited.
+        let rebaseApplyPath = try context.path(for: "rebase-apply")
+        for invocation in invocations {
+            let decision = PostRewrite.decide(
+                sourceArgument: invocation.source,
+                environment: [:],
+                readStandardInput: { invocation.stdin })
+            if invocation.rebaseApplyRebasingWasLive {
+                try FileManager.default.createDirectory(
+                    atPath: rebaseApplyPath, withIntermediateDirectories: true)
+                try Data().write(to: URL(fileURLWithPath: rebaseApplyPath + "/rebasing"))
+            }
+            defer { try? FileManager.default.removeItem(atPath: rebaseApplyPath) }
+            try JournalObserved.record(decision, in: context)
+        }
+
+        let observed = try JournalObserved.list(in: context)
+        #expect(observed.count == 1,
+                "one rebase must produce one observed entry, not one per post-rewrite invocation")
+        let entry = try #require(observed.first)
+        let metadata = try JournalObserved.Metadata(
+            serialized: try GitProcess().run(
+                ["cat-file", "blob",
+                 JournalObserved.refPrefix + entry.id.string + ":" + JournalAnchor.metadataTreeEntryName],
+                workingDirectory: context.topLevel ?? context.gitDir
+            ).standardOutput)
+        #expect(metadata.source == "rebase",
+                "the surviving entry must be the authoritative final invocation, not the mid-rebase amend")
     }
 }

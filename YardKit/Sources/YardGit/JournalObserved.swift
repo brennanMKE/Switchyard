@@ -224,11 +224,30 @@ public enum JournalObserved {
     /// rest of its mapping, so skipping the mid-rebase amend loses nothing
     /// and the final invocation alone is authoritative.
     ///
-    /// Detected the way git itself exposes the state: `git rev-parse
-    /// --git-path rebase-merge` resolved through `WorktreeContext.path(for:)`,
-    /// then a `FileManager` existence check on *that resolved path* — never
-    /// a path built by string concatenation onto `.git/`. Measured to hold
-    /// for a real `post-rewrite amend` invocation; see `JournalObservedTests`.
+    /// Detected the way git itself exposes the state, resolved through
+    /// `WorktreeContext.path(for:)` (never a path built by string
+    /// concatenation onto `.git/`) — but **which marker file** depends on
+    /// the backend, because `rebase-merge` alone is only half the signal
+    /// (#0291):
+    ///
+    /// - The merge backend (the default, and `--interactive`) uses
+    ///   `rebase-merge`, whose mere presence is git's own signal that a
+    ///   rebase is in progress.
+    /// - The apply backend uses `rebase-apply` for **both** `git rebase
+    ///   --apply` and `git am`, distinguished by which marker file it
+    ///   writes inside that directory: `rebase-apply/rebasing` for the
+    ///   former, `rebase-apply/applying` for the latter (measured, git
+    ///   2.50.1). A user's own `commit --amend` during a stopped
+    ///   `--apply` rebase raises a mid-rebase amend exactly as the merge
+    ///   backend does, and that rebase's final invocation repeats the pair
+    ///   -- so the same dedup applies, keyed on `rebasing`. `git am` has no
+    ///   final `rebase` invocation to repeat the pair, so an amend fired
+    ///   during one is its own event and must keep producing its own
+    ///   observed entry -- checking `rebase-apply`'s mere existence, without
+    ///   `rebasing`, would wrongly suppress that.
+    ///
+    /// Measured to hold for a real `post-rewrite amend` invocation under
+    /// both backends; see `JournalObservedTests`.
     ///
     /// Called **before** the own/foreign split in both `record(_
     /// decision:)` below and `JournalCheckpoint.attachRewrite`, so the rule
@@ -242,7 +261,9 @@ public enum JournalObserved {
     ) throws -> Bool {
         guard decision.source == .amend else { return false }
         let rebaseMergePath = try context.path(for: "rebase-merge", git: git)
-        return fileManager.fileExists(atPath: rebaseMergePath)
+        if fileManager.fileExists(atPath: rebaseMergePath) { return true }
+        let rebaseApplyRebasingPath = try context.path(for: "rebase-apply/rebasing", git: git)
+        return fileManager.fileExists(atPath: rebaseApplyRebasingPath)
     }
 
     /// Writes one observed entry for a **foreign** rewrite decision (#0220).
