@@ -284,6 +284,15 @@ paths, guard clauses that skip. The question to answer is not "does the code do 
     when the queue looks quiet, to check `git worktree list` against what is actually running rather
     than trusting the status column.
 
+8j. **Does the assertion compare production output against the same production function?** #0160's
+    tenth review found `#expect(after == beforeAttach.attachingRewrite(mapping))` — where the value
+    under test was *built* by `attachingRewrite`, so both sides ran the same function on the same input
+    and any change to it applied to both. The test pins the serialize/deserialize round trip and cannot
+    pin the transformation its own comment claims. **Compare against literals, or against values the
+    test constructed independently — never against a re-application of the code under test.** The
+    comment even said "rather than through `attachRewrite` again", describing something the line did not
+    do, which is how it stayed hidden through nine passes.
+
 9. **Is there exactly one deliverable?** Not one theme — one file, one behaviour, one thing that is
    either done or not. If the Expected behavior names more than one new production file, it is more
    than one issue.
