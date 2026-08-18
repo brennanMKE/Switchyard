@@ -14,9 +14,15 @@ struct WorktreeRemoveWireTests {
     // MARK: - WorktreeRemoveResult
 
     /// A removal that released an agent lock first. The stored
-    /// `lockedRelease` / `forced` are the wire truth; the computed `success`,
-    /// `refusal`, `lockReleased`, `hadToForce` must NOT appear (#0129
-    /// Decision 7), and a success has no `error` key.
+    /// `lockedRelease` / `forced` are the wire truth. #0290 deleted the
+    /// computed `refusal`, `lockReleased`, and `hadToForce` properties
+    /// outright, so `success` — excluded via `CodingKeys` — is the only
+    /// computed member left on the type; it must NOT appear on the wire
+    /// (#0129 Decision 7), and a success has no `error` key. The
+    /// `lockReleased` check below no longer guards a live member, but it
+    /// stays: it pins that a future computed property reusing that name
+    /// (or added with its own `CodingKeys`) cannot leak onto the wire
+    /// without this test noticing.
     @Test func successResultEncodesToTheLiteralWireShape() throws {
         let value = WorktreeRemoveResult(
             worktreePath: "/Users/dev/repo-0042",

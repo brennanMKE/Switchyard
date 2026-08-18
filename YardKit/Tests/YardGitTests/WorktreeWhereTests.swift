@@ -197,8 +197,7 @@ struct WorktreeWhereTests {
         defer { repo.destroy() }
 
         let result = try yardWhere(path: repo.url.path)
-        #expect(result.mainWorktreePath != nil, "main path must be non-nil in a non-bare repo")
-        let mainPath = result.mainWorktreePath!
+        let mainPath = try #require(result.mainWorktreePath, "main path must be non-nil in a non-bare repo")
         #expect(!mainPath.isEmpty, "extraction must be non-empty before compare")
 
         let ctx = try WorktreeContext.resolve(path: repo.url.path)
@@ -211,8 +210,7 @@ struct WorktreeWhereTests {
         defer { repo.destroy() }
 
         let result = try yardWhere(path: repo.url.path)
-        #expect(result.mainWorktreePath != nil, "main path must be non-nil in \(format.rawValue)")
-        let mainPath = result.mainWorktreePath!
+        let mainPath = try #require(result.mainWorktreePath, "main path must be non-nil in \(format.rawValue)")
         #expect(!mainPath.isEmpty, "extraction non-empty in \(format.rawValue)")
     }
 
@@ -225,8 +223,7 @@ struct WorktreeWhereTests {
         defer { try? FileManager.default.removeItem(at: wtPath) }
 
         let result = try yardWhere(path: wtPath.path)
-        #expect(result.mainWorktreePath != nil, "main path must be non-nil in \(format.rawValue)")
-        let mainPath = result.mainWorktreePath!
+        let mainPath = try #require(result.mainWorktreePath, "main path must be non-nil in \(format.rawValue)")
         #expect(!mainPath.isEmpty, "main path non-empty in \(format.rawValue)")
         #expect(result.gitDir != result.commonDir,
                 "linked worktree git dir differs in \(format.rawValue)")

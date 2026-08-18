@@ -57,9 +57,10 @@ struct WhereAmITests {
         // build a commit off "c" that lands on no local branch, push it
         // straight into the bare repo's main ref, then fetch so the local
         // remote-tracking ref picks it up.
-        try repo.checkoutDetached(repo.oids["c"]!)
+        let cOID = try #require(repo.oids["c"])
+        try repo.checkoutDetached(cOID)
         try repo.build([FixtureRepository.Commit("upstreamOnly", parents: ["c"])])
-        let upstreamOnlyOID = repo.oids["upstreamOnly"]!
+        let upstreamOnlyOID = try #require(repo.oids["upstreamOnly"])
         try git.run(["push", "-q", "origin", "\(upstreamOnlyOID):refs/heads/main", "--force"],
                     workingDirectory: repo.url.path)
         try git.run(["fetch", "-q", "origin"], workingDirectory: repo.url.path)
@@ -88,7 +89,8 @@ struct WhereAmITests {
 
         // Detach HEAD. checkoutDetached takes an OID; "a" is a commit name
         // stored in repo.oids, not a ref that git can resolve directly.
-        try repo.checkoutDetached(repo.oids["a"]!)
+        let aOID = try #require(repo.oids["a"])
+        try repo.checkoutDetached(aOID)
         let r = try whereAmI(path: repo.url.path, git: git)
 
         #expect(r.branch == nil, "detached HEAD has no branch name")
@@ -124,7 +126,7 @@ struct WhereAmITests {
         // Stop a rebase at the first commit by causing it to fail. The
         // `onto` argument must resolve; on a reftable repo "a" is not
         // a ref name, so use the OID.
-        let baseOID = repo.oids["a"]!
+        let baseOID = try #require(repo.oids["a"])
         _ = try? git.capture(["rebase", "--exec", "false", baseOID], workingDirectory: repo.url.path)
 
         let r = try whereAmI(path: repo.url.path, git: git)
@@ -152,8 +154,9 @@ struct WhereAmITests {
 
         // We are now detached on branch2. Switch main to branch1, then merge
         // branch2 into main.
-        let branch2OID = repo.oids["branch2"]!
-        try repo.checkoutDetached(repo.oids["base"]!)
+        let branch2OID = try #require(repo.oids["branch2"])
+        let baseOID = try #require(repo.oids["base"])
+        try repo.checkoutDetached(baseOID)
         try repo.branch("main", at: "branch1")
         try repo.checkout("main")
 
@@ -178,9 +181,11 @@ struct WhereAmITests {
         try repo.build([FixtureRepository.Commit("a1", parents: ["base"], files: ["f.txt": "ours\n"])])
         try repo.build([FixtureRepository.Commit("a2", parents: ["base"], files: ["f.txt": "theirs\n"])])
 
-        try repo.checkoutDetached(repo.oids["a1"]!)
+        let a1OID = try #require(repo.oids["a1"])
+        try repo.checkoutDetached(a1OID)
+        let a2OID = try #require(repo.oids["a2"])
         let cherryResult = try git.capture(
-            ["cherry-pick", repo.oids["a2"]!], workingDirectory: repo.url.path)
+            ["cherry-pick", a2OID], workingDirectory: repo.url.path)
 
         #expect(cherryResult.exitCode != 0, "the cherry-pick should conflict")
 
@@ -435,8 +440,10 @@ struct WhereAmITests {
         try repo.build([FixtureRepository.Commit("theirs", parents: ["base"], files: [
             "f.txt": "theirs\n",
         ])])
-        try repo.checkoutDetached(repo.oids["ours"]!)
-        _ = try? git.run(["merge", "--no-commit", repo.oids["theirs"]!],
+        let oursOID = try #require(repo.oids["ours"])
+        try repo.checkoutDetached(oursOID)
+        let theirsOID = try #require(repo.oids["theirs"])
+        _ = try? git.run(["merge", "--no-commit", theirsOID],
                          workingDirectory: repo.url.path)
 
         // +1 ordinary unstaged path, never part of the conflict.
