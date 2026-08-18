@@ -46,6 +46,38 @@ func newBranchWorktreeIsCreatedAndListed(format: FixtureRepository.RefFormat) th
 }
 
 @Test(arguments: FixtureRepository.RefFormat.supported())
+func existingBranchTargetReportsItsShortNameAndHead(format: FixtureRepository.RefFormat) throws {
+    var repo = try FixtureRepository(refFormat: format)
+    defer { repo.destroy() }
+    try repo.build([.init("base")])
+    try repo.branch("feature")
+    let path = siblingPath(for: repo, "existing-short")
+
+    let result = try worktreeAdd(
+        at: repo.url.path, path: path, target: .branch("feature"))
+    #expect(result.success)
+    #expect(result.branch == "feature")
+    #expect(result.head == repo.oids["base"])
+}
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func existingBranchTargetGivenAFullRefStillReportsTheShortName(
+    format: FixtureRepository.RefFormat
+) throws {
+    var repo = try FixtureRepository(refFormat: format)
+    defer { repo.destroy() }
+    try repo.build([.init("base")])
+    try repo.branch("feature")
+    let path = siblingPath(for: repo, "existing-fullref")
+
+    let result = try worktreeAdd(
+        at: repo.url.path, path: path, target: .branch("refs/heads/feature"))
+    #expect(result.success)
+    #expect(result.branch == "feature")
+    #expect(result.head == repo.oids["base"])
+}
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
 func agentIDLocksAtCreationWithThePrefixedReason(format: FixtureRepository.RefFormat) throws {
     var repo = try FixtureRepository(refFormat: format)
     defer { repo.destroy() }
