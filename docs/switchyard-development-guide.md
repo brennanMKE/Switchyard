@@ -1168,6 +1168,35 @@ a feature at any milestone on the grounds that GitUp had it.
     totality invariant — a journal that cannot record must never break a commit), and the timeout must
     be short enough that an unreachable app costs a ref update nothing measurable.
 
+23. **A restore leaves a live sibling's held branch alone and reports it, rather than refusing the
+    whole operation.** Decided 2026-08-17 in Brennan's absence, on decisions 14–20's terms — reversible,
+    flagged here, and taken on a measurement. **#0251** is the finding and states the case for
+    overruling it.
+
+    Measured (#0044's fourth umbrella review): agent A checkpoints and works; agent B makes **one
+    ordinary commit** in its own worktree on its own branch; A's undo is refused. And because every
+    checkpoint captures every ref, **A's entire history before that commit becomes unreachable** — a
+    fresh checkpoint buys exactly one step and truncates the redo tail.
+
+    The refusal is individually correct: restoring really would move a branch out from under B. What
+    was missing is any decision about restoring **partially**. Decision 2 says refuse the whole
+    operation; **decision 20 has already established the opposite instinct for refs** — touch only what
+    you recorded, leave the rest alone — and #0211 established the shape for reporting what was given
+    up, via `Report.detachedFrom`.
+
+    So: restore everything else, leave a **live** sibling's held branch at its current value, and name
+    every branch left alone in the `Report`. Keyed on liveness exactly as #0211 is — a prunable holder
+    holds nothing.
+
+    **What this spends, stated plainly:** a restore no longer means "the repository matches this
+    snapshot". An agent that undoes and then reads its own refs may find one it did not expect, and the
+    only thing standing between that and confusion is the `Report` naming it. That is a real cost, and
+    it is the reason B (keep refusing, add a force path) is the defensible alternative — but B needs a
+    flag surface that does not exist until M3, and until then the deadlock stands in the milestone
+    whose stated premise is two agents in two worktrees.
+
+    **#0256 widens this**: a sibling stopped mid-rebase is one more holder. It applies uniformly.
+
 
 ### Still open
 

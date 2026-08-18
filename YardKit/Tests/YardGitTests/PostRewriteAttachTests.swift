@@ -907,4 +907,168 @@ struct PostRewriteAttachTests {
         ).lines.first
         #expect(final == winner.commit, "the ref must still point at whoever actually won")
     }
+
+    // MARK: - Three `attachRewrite` decisions nothing pinned (#0255)
+
+    /// A dummy rewrite pair, shaped like real hex object names -- these
+    /// three tests never inspect the mapping's content, only which entry (if
+    /// any) it landed on.
+    private static let dummyOldOid = String(repeating: "a", count: 40)
+    private static let dummyNewOid = String(repeating: "b", count: 40)
+
+    /// **1 of 3.** Deleting `guard decision.isOwnInvocation else { return
+    /// nil }` from `attachRewrite` left the whole suite green (#0255's
+    /// Finding 1) -- the mirror of `JournalObservedTests
+    /// .anOwnInvocationDecisionWritesNothing`, which pins the opposite half
+    /// of this same boundary (#0220) for `JournalObserved.record`.
+    ///
+    /// A **foreign** decision, with the in-flight file present and naming a
+    /// live entry, must attach nothing -- `entryID` is `nil`, so without the
+    /// guard the file alone is enough to resolve an id and attach to it.
+    ///
+    /// The file names a real `checkpoint` entry sitting behind a genuinely
+    /// live rebase (an empty `rebase-merge` directory, which is all
+    /// `SequencerSnapshot.capture` checks for). That is deliberate, not
+    /// incidental: #0253 is landing at the same time and will make
+    /// `inFlightEntryID` require `SequencerSnapshot.capture(in:) != nil`
+    /// before trusting the file at all. Without a live rebase here, a
+    /// mutant that reads the file anyway would find `inFlightEntryID`
+    /// answering `nil` regardless -- for the wrong reason -- and this test
+    /// would redden today and pass again, silently, the moment #0253 lands.
+    /// With a live rebase, the mutant's file read succeeds either way, so
+    /// the guard is what this test is actually pinned to.
+    @Test func aForeignDecisionWithALiveFilePresentAttachesNothing() throws {
+        let repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let context = try WorktreeContext.resolve(path: repo.url.path)
+
+        let liveEntry = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: context)
+        let pendingPath = try context.path(for: RepositoryLayout.inFlightEntryIDRelativePath)
+        try liveEntry.id.string.write(toFile: pendingPath, atomically: true, encoding: .utf8)
+
+        let rebaseMergePath = try context.path(for: "rebase-merge")
+        try FileManager.default.createDirectory(
+            atPath: rebaseMergePath, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: rebaseMergePath) }
+
+        let decision = PostRewrite.decide(
+            sourceArgument: "rebase",
+            environment: [:],
+            readStandardInput: {
+                Data("\(Self.dummyOldOid) \(Self.dummyNewOid)\n".utf8)
+            })
+        #expect(!decision.isOwnInvocation, "the whole point of this test is a foreign decision")
+
+        let attached = try JournalCheckpoint.attachRewrite(decision, entryID: nil, in: context)
+        #expect(attached == nil, "a foreign decision must attach nothing, however live the file is")
+
+        #expect(FileManager.default.fileExists(atPath: pendingPath),
+                "a foreign decision must never even reach, let alone remove, the in-flight file")
+
+        let after = try JournalEntryMetadata(
+            serialized: try JournalAnchor.metadata(for: liveEntry.id, in: context))
+        #expect(after.rewrite == nil, "the live entry the file named must stay untouched")
+    }
+
+    /// **2 of 3.** Inverting `entryID ?? inFlightEntryID(...)` so the file
+    /// beats the environment left the suite green (#0255's Finding 2). Both
+    /// an environment id and a file are present here, and -- the part that
+    /// makes this observable at all -- they name **two different live
+    /// entries**: `environmentEntry` (passed as `entryID:`, as the
+    /// checkpoint-scoped `GitProcess` would export it) and `fileEntry`
+    /// (written to the in-flight file, as `around` would leave it behind).
+    /// If both named the same entry, the mapping would land in the right
+    /// place under either precedence and this would pin nothing -- the exact
+    /// vacuity #0255 exists to remove.
+    ///
+    /// The file sits behind a genuinely live rebase for the same #0253
+    /// reason as the test above: under the *correct* precedence the
+    /// environment id is read eagerly and the file is never even opened
+    /// (`??`'s right side is an autoclosure), so this fixture's liveness
+    /// only matters for the mutant, which does open it -- and must find a
+    /// real, resolvable entry there both today and after #0253 lands, or
+    /// the mutant would wrongly fall through to the environment id anyway
+    /// and this test would stop catching the swap.
+    @Test func precedenceLandsOnTheEnvironmentEntryNotTheFileEntryWhenBothNameLiveEntries() throws {
+        let repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let context = try WorktreeContext.resolve(path: repo.url.path)
+
+        let environmentEntry = try JournalCheckpoint.checkpoint(
+            operation: "environment-entry", in: context)
+        let fileEntry = try JournalCheckpoint.checkpoint(operation: "file-entry", in: context)
+        #expect(environmentEntry.id != fileEntry.id, "the two entries must be genuinely different")
+
+        let pendingPath = try context.path(for: RepositoryLayout.inFlightEntryIDRelativePath)
+        try fileEntry.id.string.write(toFile: pendingPath, atomically: true, encoding: .utf8)
+
+        let rebaseMergePath = try context.path(for: "rebase-merge")
+        try FileManager.default.createDirectory(
+            atPath: rebaseMergePath, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: rebaseMergePath) }
+
+        let decision = PostRewrite.decide(
+            sourceArgument: "rebase",
+            environment: [GitProcess.markerVariable: "1"],
+            readStandardInput: {
+                Data("\(Self.dummyOldOid) \(Self.dummyNewOid)\n".utf8)
+            })
+        #expect(decision.isOwnInvocation)
+
+        let attached = try #require(
+            try JournalCheckpoint.attachRewrite(decision, entryID: environmentEntry.id, in: context))
+        #expect(attached.id == environmentEntry.id,
+                "the environment id must win over the file when both name live entries")
+
+        let environmentAfter = try JournalEntryMetadata(
+            serialized: try JournalAnchor.metadata(for: environmentEntry.id, in: context))
+        #expect(environmentAfter.rewrite != nil, "the environment's entry must carry the mapping")
+
+        let fileAfter = try JournalEntryMetadata(
+            serialized: try JournalAnchor.metadata(for: fileEntry.id, in: context))
+        #expect(fileAfter.rewrite == nil, "the file's entry must stay untouched")
+    }
+
+    /// **3 of 3.** Deleting `try? fileManager.removeItem(atPath:
+    /// pendingPath)` from the end of `attachRewrite` left the suite green
+    /// (#0255's Finding 3). After a successful attach resolved through the
+    /// file (not the environment -- `entryID: nil`), the file must be gone,
+    /// or a slot outlives its own successful attach, exactly the
+    /// stale-file hazard #0253 and #0254 are about.
+    ///
+    /// As in the two tests above, the file sits behind a genuinely live
+    /// `rebase-merge` directory so this attach still resolves through the
+    /// file once #0253 tightens `inFlightEntryID` to require a live
+    /// resumable operation -- without it, this test would stop exercising
+    /// the removal at all and would pass for the wrong reason.
+    @Test func aSuccessfulAttachThroughTheFileRemovesIt() throws {
+        let repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let context = try WorktreeContext.resolve(path: repo.url.path)
+
+        let liveEntry = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: context)
+        let pendingPath = try context.path(for: RepositoryLayout.inFlightEntryIDRelativePath)
+        try liveEntry.id.string.write(toFile: pendingPath, atomically: true, encoding: .utf8)
+        #expect(FileManager.default.fileExists(atPath: pendingPath))
+
+        let rebaseMergePath = try context.path(for: "rebase-merge")
+        try FileManager.default.createDirectory(
+            atPath: rebaseMergePath, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: rebaseMergePath) }
+
+        let decision = PostRewrite.decide(
+            sourceArgument: "rebase",
+            environment: [GitProcess.markerVariable: "1"],
+            readStandardInput: {
+                Data("\(Self.dummyOldOid) \(Self.dummyNewOid)\n".utf8)
+            })
+        #expect(decision.isOwnInvocation)
+
+        let attached = try #require(
+            try JournalCheckpoint.attachRewrite(decision, entryID: nil, in: context))
+        #expect(attached.id == liveEntry.id, "the file must have resolved to the live entry")
+
+        #expect(!FileManager.default.fileExists(atPath: pendingPath),
+                "the in-flight file must be removed once its attach succeeds")
+    }
 }

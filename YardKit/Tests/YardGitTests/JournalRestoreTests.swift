@@ -427,8 +427,11 @@ struct JournalRestoreTests {
 
     // MARK: - The sibling-disturbance check
 
+    // Renamed from `restoreRefusesToDisturbASiblingsCheckout` (#0251, guide
+    // §11 decision 23): the refusal it pinned is gone. A live sibling's held
+    // branch is left at its current value instead, and the restore succeeds.
     @Test(arguments: FixtureRepository.RefFormat.supported())
-    func restoreRefusesToDisturbASiblingsCheckout(format: FixtureRepository.RefFormat) throws {
+    func restoreLeavesALiveSiblingsCheckoutAloneAndReportsIt(format: FixtureRepository.RefFormat) throws {
         var repo = try FixtureRepository.linear(refFormat: format)
         defer { repo.destroy() }
         let wtURL = try repo.addWorktree(named: "agent", branch: "agent-branch")
@@ -437,29 +440,28 @@ struct JournalRestoreTests {
         let entry = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
 
         // Move the sibling's branch with plumbing — which git allows
-        // silently at exit 0 (#0044). Restore would move it back.
+        // silently at exit 0 (#0044). Restoring the checkpoint verbatim
+        // would move it back; decision 23 leaves it alone instead.
         let moved = try #require(repo.oids["a"])
-        let target = try #require(repo.oids["c"])
         try git.run(["update-ref", "refs/heads/agent-branch", moved],
                     workingDirectory: repo.url.path)
-        let countBefore = try JournalAnchor.list(in: ctx).count
-        let stateBefore = try RefSnapshot.capture(in: ctx)
 
-        let thrown = #expect(throws: WorktreeDisturbance.Error.self) {
-            try JournalRestore.restore(entry.id, in: ctx)
-        }
-        let error = try #require(thrown)
-        #expect(error == .wouldDisturb(disturbances: [
-            .init(worktreePath: wtPath, branch: "refs/heads/agent-branch",
-                  current: moved, target: target, prunable: false),
-        ]))
-        // Nothing was written.
-        #expect(try JournalAnchor.list(in: ctx).count == countBefore)
-        #expect(try RefSnapshot.capture(in: ctx) == stateBefore)
+        let report = try JournalRestore.restore(entry.id, in: ctx)
+
+        #expect(report.leftAlone == ["refs/heads/agent-branch"])
+        // The branch is exactly where the sibling's own move put it, not
+        // the checkpoint's recorded value.
+        #expect(try ctx.resolveRef("refs/heads/agent-branch", inWorktree: nil) == moved)
+        // The sibling's checkout stays consistent with the branch it holds.
+        #expect(try git.run(["rev-parse", "HEAD"], workingDirectory: wtPath).lines.first == moved)
     }
 
+    // Renamed from `restoreRefusesToDisturbASiblingsCheckoutEvenWithBypassGuard`
+    // (#0251, guide §11 decision 23): same rename as above, and it still
+    // pins that bypassGuard skips only step 4, never step 5 — the
+    // disturbance check runs, and leaves the branch alone, either way.
     @Test(arguments: FixtureRepository.RefFormat.supported())
-    func restoreRefusesToDisturbASiblingsCheckoutEvenWithBypassGuard(format: FixtureRepository.RefFormat) throws {
+    func restoreLeavesALiveSiblingsCheckoutAloneEvenWithBypassGuard(format: FixtureRepository.RefFormat) throws {
         var repo = try FixtureRepository.linear(refFormat: format)
         defer { repo.destroy() }
         let wtURL = try repo.addWorktree(named: "agent", branch: "agent-branch")
@@ -468,26 +470,246 @@ struct JournalRestoreTests {
         let entry = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
 
         // Move the sibling's branch with plumbing — which git allows
-        // silently at exit 0 (#0044). Restore would move it back.
+        // silently at exit 0 (#0044).
+        let moved = try #require(repo.oids["a"])
+        try git.run(["update-ref", "refs/heads/agent-branch", moved],
+                    workingDirectory: repo.url.path)
+
+        // bypassGuard skips step 4, the cross-tool guard, never step 5, the
+        // sibling-disturbance check (#0044 decision 3) — the check still
+        // runs, and still leaves the branch alone, with the guard bypassed.
+        let report = try JournalRestore.restore(entry.id, bypassGuard: true, in: ctx)
+
+        #expect(report.leftAlone == ["refs/heads/agent-branch"])
+        #expect(try ctx.resolveRef("refs/heads/agent-branch", inWorktree: nil) == moved)
+        #expect(try git.run(["rev-parse", "HEAD"], workingDirectory: wtPath).lines.first == moved)
+    }
+
+    // MARK: - #0251's headline: a sibling's ordinary commit no longer
+    // blocks the caller's undo (guide §11 decision 23)
+
+    /// The measured probe from #0251 itself: agent A checkpoints and works;
+    /// agent B makes one ordinary commit in its own worktree, on its own
+    /// branch. Before decision 23, A's undo refused outright, and because
+    /// every checkpoint captures every ref, A's entire history before B's
+    /// commit became permanently unreachable. A's undo now succeeds, B's
+    /// commit survives at its new value, and the branch is named in the
+    /// report rather than silently overwritten or silently refused.
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func aSiblingsOrdinaryCommitLeavesTheCallersUndoReachable(format: FixtureRepository.RefFormat) throws {
+        var repo = try FixtureRepository.linear(refFormat: format)
+        defer { repo.destroy() }
+        let wtURL = try repo.addWorktree(named: "agent-b", branch: "agent-branch")
+        let ctx = try context(of: repo)
+
+        // A checkpoints, then does its own work.
+        let checkpoint = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+        let mainAtCheckpoint = try #require(
+            try git.run(["rev-parse", "refs/heads/main"], workingDirectory: repo.url.path).lines.first)
+        try "a work\n".write(to: repo.url.appendingPathComponent("a.txt"),
+                             atomically: true, encoding: .utf8)
+        try git.run(["add", "-A"], workingDirectory: repo.url.path)
+        try git.run(["commit", "-qm", "a's work"], workingDirectory: repo.url.path)
+
+        // B makes one ordinary commit in its own worktree, on its own
+        // branch — no sibling casualty from B's side of it.
+        try "b work\n".write(to: wtURL.appendingPathComponent("b.txt"),
+                             atomically: true, encoding: .utf8)
+        try git.run(["add", "-A"], workingDirectory: wtURL.path)
+        try git.run(["commit", "-qm", "b's work"], workingDirectory: wtURL.path)
+        let bsCommit = try #require(try git.run(
+            ["rev-parse", "refs/heads/agent-branch"], workingDirectory: repo.url.path).lines.first)
+
+        // A's undo succeeds rather than refusing.
+        let report = try JournalRestore.restore(
+            checkpoint.id, operation: "undo",
+            traversal: .init(restored: checkpoint.id, resultingPosition: checkpoint.id), in: ctx)
+
+        #expect(report.leftAlone == ["refs/heads/agent-branch"])
+        // A's own branch is genuinely back — the undo happened, not merely
+        // "did not throw".
+        #expect(try git.run(
+            ["rev-parse", "refs/heads/main"], workingDirectory: repo.url.path).lines.first == mainAtCheckpoint)
+        // B's commit survives untouched.
+        #expect(try git.run(
+            ["rev-parse", "refs/heads/agent-branch"], workingDirectory: repo.url.path).lines.first == bsCommit)
+    }
+
+    /// A's entire history before B's commit stays reachable, not merely one
+    /// step of it — the property #0251 exists for. Before decision 23, a
+    /// fresh checkpoint bought exactly one undo step and truncated the redo
+    /// tail; the underlying entries recorded before B's commit stayed
+    /// permanently unreachable because every one of them carried B's
+    /// pre-commit value for `agent-branch`.
+    ///
+    /// Both restores pass `bypassGuard: true`: the point of this test is
+    /// the disturbance check recurring across two traversal steps, not the
+    /// cross-tool guard's own chain-cursor bookkeeping, which is exercised
+    /// elsewhere.
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func aSecondUndoPastTheSiblingsCommitAlsoSucceeds(format: FixtureRepository.RefFormat) throws {
+        var repo = try FixtureRepository.linear(refFormat: format)
+        defer { repo.destroy() }
+        let wtURL = try repo.addWorktree(named: "agent-b", branch: "agent-branch")
+        let ctx = try context(of: repo)
+
+        let c0 = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+        let mainAtC0 = try #require(
+            try git.run(["rev-parse", "refs/heads/main"], workingDirectory: repo.url.path).lines.first)
+
+        try "a1\n".write(to: repo.url.appendingPathComponent("a1.txt"),
+                         atomically: true, encoding: .utf8)
+        try git.run(["add", "-A"], workingDirectory: repo.url.path)
+        try git.run(["commit", "-qm", "a work 1"], workingDirectory: repo.url.path)
+        let c1 = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+        let mainAtC1 = try #require(
+            try git.run(["rev-parse", "refs/heads/main"], workingDirectory: repo.url.path).lines.first)
+
+        try "a2\n".write(to: repo.url.appendingPathComponent("a2.txt"),
+                         atomically: true, encoding: .utf8)
+        try git.run(["add", "-A"], workingDirectory: repo.url.path)
+        try git.run(["commit", "-qm", "a work 2"], workingDirectory: repo.url.path)
+
+        // B commits once, after both of A's checkpoints -- both c0 and c1
+        // recorded agent-branch at its pre-commit value. Content deliberately
+        // differs from fixture commit "b"'s own "b.txt" ("b\n"), or `git add`
+        // stages nothing and the commit below fails with exit 1.
+        try "b sibling work\n".write(to: wtURL.appendingPathComponent("b-sibling.txt"),
+                                     atomically: true, encoding: .utf8)
+        try git.run(["add", "-A"], workingDirectory: wtURL.path)
+        try git.run(["commit", "-qm", "b work"], workingDirectory: wtURL.path)
+        let bsCommit = try #require(try git.run(
+            ["rev-parse", "refs/heads/agent-branch"], workingDirectory: repo.url.path).lines.first)
+
+        // First undo: back to c1.
+        let report1 = try JournalRestore.restore(
+            c1.id, operation: "undo",
+            traversal: .init(restored: c1.id, resultingPosition: c1.id),
+            bypassGuard: true, in: ctx)
+        #expect(report1.leftAlone == ["refs/heads/agent-branch"])
+        #expect(try git.run(
+            ["rev-parse", "refs/heads/main"], workingDirectory: repo.url.path).lines.first == mainAtC1)
+        #expect(try git.run(
+            ["rev-parse", "refs/heads/agent-branch"], workingDirectory: repo.url.path).lines.first == bsCommit)
+
+        // Second undo: back past B's commit, to c0. This is the step that
+        // was permanently unreachable before #0251.
+        let report2 = try JournalRestore.restore(
+            c0.id, operation: "undo",
+            traversal: .init(restored: c0.id, resultingPosition: c0.id),
+            bypassGuard: true, in: ctx)
+        #expect(report2.leftAlone == ["refs/heads/agent-branch"])
+        #expect(try git.run(
+            ["rev-parse", "refs/heads/main"], workingDirectory: repo.url.path).lines.first == mainAtC0)
+        #expect(try git.run(
+            ["rev-parse", "refs/heads/agent-branch"], workingDirectory: repo.url.path).lines.first == bsCommit)
+    }
+
+    // MARK: - Liveness, not refusal: prunable and the caller's own branch
+
+    /// A prunable holder holds nothing (guide §11 decision 23, same liveness
+    /// key #0211's `detachingHeldHead` reads): its branch is written back
+    /// like any other recorded ref, not left alone and not refused.
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func aPrunableHoldersBranchIsStillRestoredNotLeftAlone(format: FixtureRepository.RefFormat) throws {
+        var repo = try FixtureRepository.linear(refFormat: format)
+        defer { repo.destroy() }
+        let wtURL = try repo.addWorktree(named: "agent", branch: "agent-branch")
+        let ctx = try context(of: repo)
+        let entry = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+
+        // Move the branch with plumbing, then the sibling's directory
+        // vanishes without `git worktree remove` — its administrative entry
+        // survives until `git worktree prune` (#0044 decision 5), but it
+        // holds nothing a live agent is standing on.
         let moved = try #require(repo.oids["a"])
         let target = try #require(repo.oids["c"])
         try git.run(["update-ref", "refs/heads/agent-branch", moved],
                     workingDirectory: repo.url.path)
+        try FileManager.default.removeItem(at: wtURL)
+
+        let report = try JournalRestore.restore(entry.id, in: ctx)
+
+        #expect(report.leftAlone.isEmpty)
+        #expect(try ctx.resolveRef("refs/heads/agent-branch", inWorktree: nil) == target)
+    }
+
+    /// The restore end of `theCallersOwnCheckedOutBranchIsNotADisturbance`
+    /// (`WorktreeDisturbanceTests.swift`), which covers the detection side
+    /// only: the caller's own checked-out branch is genuinely restored to
+    /// its recorded value, never left alone — moving it back is what
+    /// undoing one's own operation *is*.
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func theCallersOwnCheckedOutBranchIsStillRestored(format: FixtureRepository.RefFormat) throws {
+        var repo = try FixtureRepository.linear(refFormat: format)
+        defer { repo.destroy() }
+        let ctx = try context(of: repo)
+        let entry = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+        let captured = try #require(repo.oids["c"])
+
+        // Move the caller's own branch after the checkpoint.
+        let a = try #require(repo.oids["a"])
+        try git.run(["update-ref", "refs/heads/main", a], workingDirectory: repo.url.path)
+
+        let report = try JournalRestore.restore(entry.id, in: ctx)
+
+        #expect(report.leftAlone.isEmpty)
+        #expect(try ctx.resolveRef("refs/heads/main", inWorktree: nil) == captured)
+    }
+
+    // MARK: - The trap: dropping a left-alone branch must not blind the guard
+
+    /// #0251's trap: dropping a disturbed branch from the snapshot BEFORE
+    /// step 4's cross-tool guard runs would also drop it from the guard's
+    /// scope, hiding a foreign move to a third value. The drop happens only
+    /// after step 4 (a comment on `JournalRestore.swift` says why), so a
+    /// foreign move on a branch that step 5 will otherwise leave alone is
+    /// still refused.
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func aForeignMoveOnABranchThatWillBeLeftAloneIsStillRefusedByTheGuard(
+        format: FixtureRepository.RefFormat
+    ) throws {
+        var repo = try FixtureRepository.linear(refFormat: format)
+        defer { repo.destroy() }
+        try repo.addWorktree(named: "agent", branch: "agent-branch")
+        let ctx = try context(of: repo)
+
+        // c1: agent-branch is "c" here (its start point).
+        let c1 = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+        let cOid = try #require(repo.oids["c"])
+        // Ordinary history: move agent-branch, then record it at the new
+        // value in c2's own capture — the traversal this restore walks.
+        let b = try #require(repo.oids["b"])
+        try git.run(["update-ref", "refs/heads/agent-branch", b],
+                    workingDirectory: repo.url.path)
+        let c2 = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+        // Undo-style restore back to c1, standing the chain's cursor there.
+        // agent-branch is a live sibling's branch, so it is left alone —
+        // still at "b" afterward, not moved back to "c".
+        try JournalRestore.restore(
+            c1.id, operation: "undo",
+            traversal: .init(restored: c1.id, resultingPosition: c1.id), in: ctx)
+
+        // A foreign move, AFTER c1's restore, to a THIRD value neither c1's
+        // belief ("c") nor c2's target ("b") ever recorded.
+        let a = try #require(repo.oids["a"])
+        try git.run(["update-ref", "refs/heads/agent-branch", a],
+                    workingDirectory: repo.url.path)
         let countBefore = try JournalAnchor.list(in: ctx).count
         let stateBefore = try RefSnapshot.capture(in: ctx)
 
-        // bypassGuard skips step 4, the cross-tool guard, never step 5, the
-        // sibling-disturbance check (#0044 decision 3) — the check must
-        // still refuse even when the guard is bypassed.
-        let thrown = #expect(throws: WorktreeDisturbance.Error.self) {
-            try JournalRestore.restore(entry.id, bypassGuard: true, in: ctx)
+        // Redo to c2: agent-branch is still a live sibling's branch, so
+        // step 5 would leave it alone — but step 4's guard runs first,
+        // against the undropped snapshot, and still catches the foreign
+        // move.
+        let thrown = #expect(throws: CrossToolGuard.Error.self) {
+            try JournalRestore.restore(c2.id, in: ctx)
         }
         let error = try #require(thrown)
-        #expect(error == .wouldDisturb(disturbances: [
-            .init(worktreePath: wtPath, branch: "refs/heads/agent-branch",
-                  current: moved, target: target, prunable: false),
+        #expect(error == .repositoryChanged(divergences: [
+            .init(ref: "refs/heads/agent-branch", expected: cOid, actual: a),
         ]))
-        // Nothing was written, even with the guard bypassed.
+        // Nothing was written: no entry, no ref moved.
         #expect(try JournalAnchor.list(in: ctx).count == countBefore)
         #expect(try RefSnapshot.capture(in: ctx) == stateBefore)
     }
@@ -755,15 +977,20 @@ struct JournalRestoreTests {
             calling: nil, recordedStillExists: true))
     }
 
-    /// #0175's own Expected-behavior list says `WorktreeDisturbance` still
-    /// refuses a sibling-disturbing restore under the override. #0210: the
-    /// "agent" worktree from `crossWorktreeFixture` is itself the sibling
-    /// relative to the caller (`mainCtx`) here, so moving its checked-out
-    /// branch after the entry was recorded — the same `update-ref` plumbing
-    /// as `restoreRefusesToDisturbASiblingsCheckoutEvenWithBypassGuard` —
-    /// makes the cross-worktree apply disturb it.
+    /// Renamed from
+    /// `restoreRefusesToDisturbASiblingsCheckoutEvenUnderTheCrossWorktreeOverride`
+    /// (#0251, guide §11 decision 23). #0210: the "agent" worktree from
+    /// `crossWorktreeFixture` is itself the sibling relative to the caller
+    /// (`mainCtx`) here, so moving its checked-out branch after the entry
+    /// was recorded — the same `update-ref` plumbing as the bypassGuard
+    /// variant above — makes the cross-worktree apply a disturbance. It is
+    /// also the entry's own recorded `HEAD` target (`crossWorktreeFixture`
+    /// captures inside the "agent" worktree), so `detachedFrom` and
+    /// `leftAlone` name the same branch for two different reasons: `HEAD`
+    /// gives it up rather than dual-claiming it (#0211), and the ref entry
+    /// that would otherwise move it is dropped (#0251).
     @Test(arguments: FixtureRepository.RefFormat.supported())
-    func restoreRefusesToDisturbASiblingsCheckoutEvenUnderTheCrossWorktreeOverride(
+    func restoreLeavesALiveSiblingsCheckoutAloneEvenUnderTheCrossWorktreeOverride(
         format: FixtureRepository.RefFormat
     ) throws {
         let (repo, mainCtx, wtCtx, entry, _, _) = try crossWorktreeFixture(format: format)
@@ -772,25 +999,18 @@ struct JournalRestoreTests {
 
         // Move the sibling's checked-out branch with plumbing after the
         // entry was recorded — which git allows silently at exit 0 (#0044).
-        // Restoring under the override would move it back.
         let moved = try #require(repo.oids["a"])
-        let target = try #require(repo.oids["c"])
         try git.run(["update-ref", "refs/heads/agent-branch", moved],
                     workingDirectory: repo.url.path)
-        let countBefore = try JournalAnchor.list(in: mainCtx).count
-        let stateBefore = try RefSnapshot.capture(in: mainCtx)
 
-        let thrown = #expect(throws: WorktreeDisturbance.Error.self) {
-            try JournalRestore.restore(entry.id, allowDifferentWorktree: true, in: mainCtx)
-        }
-        let error = try #require(thrown)
-        #expect(error == .wouldDisturb(disturbances: [
-            .init(worktreePath: wtPath, branch: "refs/heads/agent-branch",
-                  current: moved, target: target, prunable: false),
-        ]))
-        // Nothing was written, even under the cross-worktree override.
-        #expect(try JournalAnchor.list(in: mainCtx).count == countBefore)
-        #expect(try RefSnapshot.capture(in: mainCtx) == stateBefore)
+        let report = try JournalRestore.restore(entry.id, allowDifferentWorktree: true, in: mainCtx)
+
+        #expect(report.leftAlone == ["refs/heads/agent-branch"])
+        #expect(report.detachedFrom == "refs/heads/agent-branch")
+        // The branch is exactly where the sibling's own move put it, even
+        // under the cross-worktree override.
+        #expect(try mainCtx.resolveRef("refs/heads/agent-branch", inWorktree: nil) == moved)
+        #expect(try git.run(["rev-parse", "HEAD"], workingDirectory: wtPath).lines.first == moved)
     }
 
     // MARK: - Detach on collision, not only under the override (#0211)
