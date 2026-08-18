@@ -195,16 +195,17 @@ struct PostRewriteAttachTests {
         #expect(oldParents == newParents)
     }
 
-    /// The honest options for an own invocation with no entry id are
-    /// "record nothing" and "fall back to an observed entry" (#0221's
-    /// Expected behavior). This picks "record nothing": an own invocation
-    /// with no id is one that took no `JournalCheckpoint.around`, so there
-    /// is no in-flight entry to attach to, and routing it to an observed
-    /// entry would misrepresent it as foreign-sourced -- exactly the
-    /// distinction `JournalObserved.Metadata.kind` exists to preserve
-    /// (#0220). Nothing is invented and nothing throws; the `nil` return is
-    /// the documented, tested signal, not a swallowed failure.
-    @Test func noEntryIDRecordsNothingRatherThanInventingOrFallingBackToObserved() throws {
+    /// The honest options for an own invocation with no entry id anywhere
+    /// are "record nothing" and "fall back to an observed entry" (#0221's
+    /// Expected behavior). This picks "record nothing": with no
+    /// `entryVariable` in the environment and no `inFlightEntryIDRelativePath`
+    /// file on disk either (#0237, guide §11 decision 19), there is no
+    /// in-flight entry to attach to, and routing it to an observed entry
+    /// would misrepresent it as foreign-sourced -- exactly the distinction
+    /// `JournalObserved.Metadata.kind` exists to preserve (#0220). Nothing is
+    /// invented and nothing throws; the `nil` return is the documented,
+    /// tested signal, not a swallowed failure.
+    @Test func noEntryIDAndNoFileRecordsNothingRatherThanInventingOrFallingBackToObserved() throws {
         let repo = try FixtureRepository.linear()
         defer { repo.destroy() }
         let context = try WorktreeContext.resolve(path: repo.url.path)
@@ -221,6 +222,44 @@ struct PostRewriteAttachTests {
         #expect(attached == nil)
         #expect(try JournalAnchor.list(in: context).isEmpty)
         #expect(try JournalObserved.list(in: context).isEmpty)
+    }
+
+    /// A file naming a pruned or fabricated entry id must degrade to
+    /// today's no-attach behaviour, not attach to whatever else this
+    /// worktree happens to have recorded -- "the part most likely to be got
+    /// wrong" per #0237's own issue text. Written by hand at
+    /// `RepositoryLayout.inFlightEntryIDRelativePath`, resolved exactly the
+    /// way `JournalCheckpoint.around` resolves it, rather than through
+    /// `around` itself, so the fixture can plant an id that is guaranteed
+    /// never to have existed.
+    @Test func aStaleFileAttachesNothingAndIsRemoved() throws {
+        let repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let context = try WorktreeContext.resolve(path: repo.url.path)
+
+        let fabricated = try #require(JournalEntryID(String(repeating: "0", count: JournalEntryID.length)))
+        let pendingPath = try context.path(for: RepositoryLayout.inFlightEntryIDRelativePath)
+        try FileManager.default.createDirectory(
+            atPath: URL(fileURLWithPath: pendingPath).deletingLastPathComponent().path,
+            withIntermediateDirectories: true)
+        try fabricated.string.write(toFile: pendingPath, atomically: true, encoding: .utf8)
+        #expect(FileManager.default.fileExists(atPath: pendingPath))
+        #expect(try JournalAnchor.list(in: context).isEmpty, "the fabricated id must name nothing real")
+
+        let decision = PostRewrite.decide(
+            sourceArgument: "amend",
+            environment: [GitProcess.markerVariable: "1"],
+            readStandardInput: {
+                Data("\(String(repeating: "a", count: 40)) \(String(repeating: "b", count: 40))\n".utf8)
+            })
+        #expect(decision.isOwnInvocation)
+
+        let attached = try JournalCheckpoint.attachRewrite(decision, entryID: nil, in: context)
+        #expect(attached == nil, "a stale file must attach nothing, never an unrelated entry")
+        #expect(try JournalAnchor.list(in: context).isEmpty)
+        #expect(try JournalObserved.list(in: context).isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: pendingPath),
+                "the stale file must be removed once it is found unresolvable")
     }
 
     /// Attach must target the entry named by `entryID`, never "the newest
@@ -304,6 +343,113 @@ struct PostRewriteAttachTests {
         let after = try JournalEntryMetadata(
             serialized: try JournalAnchor.metadata(for: checkpointEntry.id, in: context))
         #expect(after.rewrite == nil, "the entry's metadata must still carry no rewrite mapping")
+    }
+
+    /// #0237's own probe, made a test: a conflicting `Fixup.run(target:)`
+    /// stops with the rebase in progress -- `Fixup.run`'s scoped `GitProcess`
+    /// stops existing at the throw -- and whatever runs `git rebase
+    /// --continue` afterwards is a brand new, unscoped `GitProcess`: an own
+    /// invocation with no `entryVariable` in its environment. Before this
+    /// issue that quadrant attached nothing anywhere (probed with c1/c2/c3
+    /// all touching `f.txt`, staged content that conflicts on replay --
+    /// `FixupTests.conflictBlocksAndLeavesTheRebaseResumable`'s own fixture
+    /// shape). Now the mapping must land on the entry `around` wrote before
+    /// the rebase started, found through the file at
+    /// `RepositoryLayout.inFlightEntryIDRelativePath` rather than the
+    /// environment.
+    @Test func aConflictingFixupResolvedAndContinuedAttachesToItsPreOperationEntry() throws {
+        var repo = try FixtureRepository()
+        try repo.build([
+            .init("c1", files: ["f.txt": "a\n"]),
+            .init("c2", files: ["f.txt": "b\n"]),
+            .init("c3", files: ["f.txt": "c\n"]),
+        ])
+        defer { repo.destroy() }
+        let target = try #require(repo.oids["c2"])
+        let context = try WorktreeContext.resolve(path: repo.url.path)
+        let log = repo.url.appendingPathComponent("post-rewrite.log")
+        try installLoggingPostRewriteHook(in: repo, loggingTo: log)
+
+        let headBefore = try #require(
+            git.run(["rev-parse", "HEAD"], workingDirectory: repo.url.path).lines.first)
+
+        try repo.writeUntracked(["f.txt": "z\n"])
+        try git.run(["add", "-A"], workingDirectory: repo.url.path)
+
+        let thrown = #expect(throws: FixupError.self) {
+            _ = try Fixup.run(target: target, at: repo.url.path, extraEnvironment: hermetic)
+        }
+        guard case .blockedOnConflicts = try #require(thrown) else {
+            Issue.record("expected .blockedOnConflicts, got \(String(describing: thrown))")
+            return
+        }
+        #expect(repo.isMidRebase, "the rebase must be left resumable, not aborted")
+
+        // Exactly one entry -- the one `around` wrote before the rebase
+        // started, and the one the in-flight file must now be pointing at.
+        let entries = try JournalAnchor.list(in: context)
+        #expect(entries.count == 1)
+        let checkpointEntry = try #require(entries.first)
+        let beforeAttach = try JournalEntryMetadata(
+            serialized: try JournalAnchor.metadata(for: checkpointEntry.id, in: context))
+        #expect(beforeAttach.rewrite == nil)
+
+        // Resolve and continue through a brand new, UNSCOPED GitProcess --
+        // the exact process boundary #0237 is about. The autosquash reorders
+        // the fixup right after its target, so this fixture's conflicting
+        // content conflicts twice on replay (the squash, then `c3`'s own
+        // diff against the squashed tree) -- loop until the rebase reports
+        // done, bounded so a real failure to converge fails loudly rather
+        // than hanging.
+        let continueGit = GitProcess()
+        let continueEnvironment = hermetic.merging(["GIT_EDITOR": "true"]) { _, new in new }
+        for _ in 0..<5 where repo.isMidRebase {
+            if repo.hasConflicts {
+                try repo.writeUntracked(["f.txt": "resolved\n"])
+                try git.run(["add", "-A"], workingDirectory: repo.url.path)
+            }
+            _ = try continueGit.capture(
+                ["rebase", "--continue"], workingDirectory: repo.url.path,
+                extraEnvironment: continueEnvironment)
+        }
+        #expect(!repo.isMidRebase, "the continue loop must have finished the rebase")
+
+        // Only the final invocation is replayed, exactly as
+        // `attachingAnOwnFixupRebaseMappingLandsOnTheInFlightEntry` above
+        // replays a successful autosquash: `isMidRebaseAmend`'s check is a
+        // LIVE read of whether `rebase-merge` exists right now, which only
+        // answers correctly at the moment each hook actually fires. Replayed
+        // after the whole rebase has finished and torn that directory down,
+        // the mid-rebase `amend` would misclassify as foreign-to-rebase and
+        // consume the in-flight file itself, starving the authoritative
+        // final invocation of the very id it needs -- a replay artifact, not
+        // a claim about production, where the mid-rebase invocation fires
+        // while the directory is still live and is filtered correctly.
+        let invocation = try finalInvocation(in: log)
+        #expect(invocation.source == "rebase")
+        #expect(invocation.entryID == nil,
+                "the continue ran through an unscoped GitProcess and must export no entry id")
+        let decision = PostRewrite.decide(
+            sourceArgument: invocation.source,
+            environment: [GitProcess.markerVariable: invocation.marker ?? ""],
+            readStandardInput: { invocation.stdin })
+        #expect(decision.isOwnInvocation, "the marker must still be set on our own continue")
+        _ = try #require(try JournalCheckpoint.attachRewrite(decision, entryID: nil, in: context))
+
+        let after = try JournalEntryMetadata(
+            serialized: try JournalAnchor.metadata(for: checkpointEntry.id, in: context))
+        let mapping = try #require(
+            after.rewrite, "the mapping must be findable, attached to the pre-operation entry")
+
+        let head = try #require(
+            git.run(["rev-parse", "HEAD"], workingDirectory: repo.url.path).lines.first)
+        let fromHeadBefore = try #require(
+            mapping.rewrites.first(where: { $0.oldOid == headBefore }),
+            "the entry's snapshot HEAD must be reachable through the stored mapping")
+        #expect(fromHeadBefore.newOid == head)
+
+        #expect(try JournalObserved.list(in: context).isEmpty,
+                "the mapping belongs on the journal entry that captured pre-operation state, not as an observed one")
     }
 
     /// #0234's own test: `Fixup.run(source:target:)` (#0214's existing-commit

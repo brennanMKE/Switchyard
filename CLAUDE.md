@@ -174,6 +174,13 @@ The prompt carries, and nothing more:
   claims — that a bounded loop **terminates**, that a call **succeeds** — and give any deadline in a
   test a generous value. Production defaults stay small; a CLI is one process making one call.
 
+**A round must run `swift test` in the foreground.** Backgrounding it and waiting for a notification
+ends the turn before the answer arrives, and the round cannot tell a slow suite from a hung one —
+#0163 lost two turns that way and #0240 lost one. When a round needs a second suite running
+concurrently, that goes inside a single foreground command: `( cd other && swift test > A.log 2>&1 ) &`
+then `swift test > B.log 2>&1`, then `wait`. Put this in the dispatch prompt for anything that measures
+the suite itself.
+
 **Never `git add -A` in the primary checkout, and never let a review agent mutate it.** On
 2026-08-17 the #0044 umbrella review was running mutations against `JournalRestore.swift` in the
 primary checkout to find out which of that issue's decisions were pinned. One of its mutations was

@@ -254,12 +254,23 @@ public extension JournalCheckpoint {
     /// and a rewrite run through it attaches to nothing. Nothing is
     /// process-global: the id lives only on this one `GitProcess` value,
     /// which stops existing when `around` returns.
+    ///
+    /// **The entry id also goes on disk, at
+    /// `RepositoryLayout.inFlightEntryIDRelativePath` (guide §11 decision
+    /// 19, #0237).** The environment cannot survive a body that deliberately
+    /// leaves an operation in progress — `Fixup.run` throwing
+    /// `.blockedOnConflicts` leaves a rebase for the caller to resolve and
+    /// continue, and whatever runs `git rebase --continue` is a new process
+    /// with no scoped `GitProcess` to carry the id. The file is written here,
+    /// before `body` runs, and removed on a normal return; a throw leaves it
+    /// behind on purpose, and `attachRewrite` is what reads it back.
     static func around<T>(
         operation: String,
         at path: String,
         command: String? = nil,
         agent: JournalEntryMetadata.Agent? = nil,
         git: GitProcess = GitProcess(),
+        fileManager: FileManager = .default,
         _ body: (GitProcess) throws -> T
     ) throws -> T {
         let context = try WorktreeContext.resolve(path: path, git: git)
@@ -267,7 +278,19 @@ public extension JournalCheckpoint {
             operation: operation, command: command, agent: agent,
             in: context, git: git)
         let scoped = GitProcess(executablePath: git.executablePath, journalEntryID: entry.id)
-        return try body(scoped)
+
+        let pendingPath = try context.path(
+            for: RepositoryLayout.inFlightEntryIDRelativePath, git: git)
+        try fileManager.createDirectory(
+            atPath: URL(fileURLWithPath: pendingPath).deletingLastPathComponent().path,
+            withIntermediateDirectories: true)
+        try entry.id.string.write(toFile: pendingPath, atomically: true, encoding: .utf8)
+
+        let result = try body(scoped)
+        // Reached only on a normal return -- a throw leaves the file behind,
+        // which is the whole point (see the doc comment above).
+        try? fileManager.removeItem(atPath: pendingPath)
+        return result
     }
 
     /// Attaches an own-invocation rewrite mapping to the journal entry that
@@ -277,18 +300,33 @@ public extension JournalCheckpoint {
     /// environment; parsing that environment is the hook glue's job (#0217),
     /// not this function's.
     ///
-    /// **No entry id records nothing, deliberately, and says so by
-    /// returning `nil`.** An own invocation whose git subprocess ran with no
-    /// `entryVariable` set is one that took no `JournalCheckpoint.around` —
-    /// there is no in-flight entry to attach to, and no entry at all is the
-    /// honest state: falling back to an observed entry would misrepresent
-    /// the mapping as foreign-sourced, which is exactly the distinction
+    /// **Neither an environment id nor a file means nothing is attached
+    /// (guide §11 decision 19, #0237).** Before that decision, the
+    /// environment was the only carrier and a `nil` here always meant "took
+    /// no `JournalCheckpoint.around`". Now a second source exists — the file
+    /// `around` leaves behind when its body throws mid-operation — so `nil`
+    /// means both were checked and neither named a live entry: no
+    /// `entryVariable` in the environment, and either no file, an
+    /// unparseable one, or one naming an entry that no longer exists.
+    /// Falling back to an observed entry would still misrepresent the
+    /// mapping as foreign-sourced, which is exactly the distinction
     /// `JournalObserved.Metadata.kind` exists to preserve (#0220), and
     /// inventing a new entry with nothing else to anchor would fabricate
     /// state nothing captured. This is a documented, tested `nil`, not a
     /// swallowed failure — the same shape #0220's own-invocation guard on
     /// `JournalObserved.record` already uses for the opposite half of this
     /// boundary.
+    ///
+    /// **The environment wins when both are present.** A scoped `GitProcess`
+    /// means the operation is running right now; the file is the fallback
+    /// for when it is not, read only when `entryID` is `nil`.
+    ///
+    /// **A stale file attaches nothing, never an unrelated entry.** The id it
+    /// names must still be a live journal entry (`JournalAnchor.list`); if
+    /// not — a crash left the file behind for an entry later pruned, or the
+    /// file was fabricated — it is removed and treated as absent, degrading
+    /// to today's no-attach behaviour rather than mapping onto whatever else
+    /// this worktree happens to have recorded.
     ///
     /// **Mid-rebase dedup (#0233).** `JournalObserved.isMidRebaseAmend` is
     /// checked first, before the own/foreign split, so a mid-rebase `amend`
@@ -313,14 +351,51 @@ public extension JournalCheckpoint {
             return nil
         }
 
-        guard decision.isOwnInvocation, let entryID else { return nil }
+        guard decision.isOwnInvocation else { return nil }
+
+        let pendingPath = try context.path(
+            for: RepositoryLayout.inFlightEntryIDRelativePath, git: git)
+        guard let resolvedID = try entryID ?? inFlightEntryID(
+            at: pendingPath, in: context, git: git, fileManager: fileManager)
+        else { return nil }
 
         let existing = try JournalEntryMetadata(
-            serialized: try JournalAnchor.metadata(for: entryID, in: context, git: git))
+            serialized: try JournalAnchor.metadata(for: resolvedID, in: context, git: git))
         let mapping = JournalEntryMetadata.RewriteMapping(
             source: decision.source.gitArgument, rewrites: decision.rewrites)
         let updated = existing.attachingRewrite(mapping)
-        return try JournalAnchor.updateMetadata(
-            try updated.serialized(), for: entryID, in: context, git: git)
+        let attached = try JournalAnchor.updateMetadata(
+            try updated.serialized(), for: resolvedID, in: context, git: git)
+        // The operation is over at this point: remove whatever the file
+        // held, if anything -- a no-op when the id came from the
+        // environment and `around` already cleaned it up.
+        try? fileManager.removeItem(atPath: pendingPath)
+        return attached
+    }
+
+    /// Reads the entry id `around` leaves at `pendingPath` when its body
+    /// throws mid-operation, validating it still names a live journal entry
+    /// before trusting it. A stale or unparseable file is removed and
+    /// treated as absent -- the part of #0237 "most likely to be got
+    /// wrong": a crash between `around` writing the file and the operation
+    /// finishing must degrade to no-attach, never attach to an unrelated,
+    /// possibly months-old entry.
+    private static func inFlightEntryID(
+        at pendingPath: String,
+        in context: WorktreeContext,
+        git: GitProcess,
+        fileManager: FileManager
+    ) throws -> JournalEntryID? {
+        guard fileManager.fileExists(atPath: pendingPath),
+              let contents = try? String(contentsOfFile: pendingPath, encoding: .utf8),
+              let id = JournalEntryID(contents.trimmingCharacters(in: .whitespacesAndNewlines))
+        else { return nil }
+
+        let stillLive = try JournalAnchor.list(in: context, git: git).contains { $0.id == id }
+        guard stillLive else {
+            try? fileManager.removeItem(atPath: pendingPath)
+            return nil
+        }
+        return id
     }
 }
