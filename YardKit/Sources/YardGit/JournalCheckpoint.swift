@@ -350,6 +350,25 @@ public extension JournalCheckpoint {
     /// nothing on the foreign path: the rebase's own final `rebase`-sourced
     /// invocation repeats the pair and is the authoritative one.
     ///
+    /// **`stillInProgress` (#0253) lets a caller who already observed the
+    /// sequencer supply that answer instead of forcing a re-probe here.**
+    /// `nil` (the default) re-checks fresh via `SequencerSnapshot.capture`,
+    /// exactly `inFlightEntryID`'s own doc comment describes. That default
+    /// is right for a caller with no better information, but it is *stale
+    /// by construction* for the one caller that matters most: a real
+    /// `post-rewrite` hook script (#0217) runs as a child of the git process
+    /// that is *still holding the sequencer directory open* — measured,
+    /// git 2.50.1: the hook fires and only *after it returns* does git
+    /// remove `rebase-merge`. A hook that checks synchronously, inline, sees
+    /// the operation genuinely still in progress; a caller that checks after
+    /// that git process has already exited never can, no matter when it
+    /// asks — the directory is provably gone by then (measured with a
+    /// direct `FileManager` probe on this exact fixture). `writeEntry`'s own
+    /// `sequencer: SequencerSnapshot? = nil` parameter is the same shape for
+    /// the same reason: let whoever is positioned to observe the truth
+    /// supply it, rather than re-derive a value that may no longer be
+    /// derivable.
+    ///
     /// Throws only on a genuine persistence failure once there is an id to
     /// attach to. The totality invariant (#0043, #0191) — a failed attach
     /// must never surface as a non-zero hook exit — is the caller's job,
@@ -358,6 +377,7 @@ public extension JournalCheckpoint {
     static func attachRewrite(
         _ decision: PostRewrite.Decision,
         entryID: JournalEntryID?,
+        stillInProgress: Bool? = nil,
         in context: WorktreeContext,
         git: GitProcess = GitProcess(),
         fileManager: FileManager = .default
@@ -371,8 +391,11 @@ public extension JournalCheckpoint {
 
         let pendingPath = try context.path(
             for: RepositoryLayout.inFlightEntryIDRelativePath, git: git)
+        let resolvedStillInProgress = try stillInProgress
+            ?? (SequencerSnapshot.capture(in: context, git: git) != nil)
         guard let resolvedID = try entryID ?? inFlightEntryID(
-            at: pendingPath, in: context, git: git, fileManager: fileManager)
+            at: pendingPath, stillInProgress: resolvedStillInProgress,
+            in: context, git: git, fileManager: fileManager)
         else { return nil }
 
         let existing = try JournalEntryMetadata(
@@ -390,14 +413,35 @@ public extension JournalCheckpoint {
     }
 
     /// Reads the entry id `around` leaves at `pendingPath` when its body
-    /// throws mid-operation, validating it still names a live journal entry
-    /// before trusting it. A stale or unparseable file is removed and
-    /// treated as absent -- the part of #0237 "most likely to be got
-    /// wrong": a crash between `around` writing the file and the operation
-    /// finishing must degrade to no-attach, never attach to an unrelated,
-    /// possibly months-old entry.
+    /// throws mid-operation, validating it names both a live journal entry
+    /// *and* a still-in-progress git operation before trusting it. A stale
+    /// or unparseable file is removed and treated as absent -- the part of
+    /// #0237 "most likely to be got wrong": a crash between `around`
+    /// writing the file and the operation finishing must degrade to
+    /// no-attach, never attach to an unrelated, possibly months-old entry.
+    ///
+    /// **Guide §11 decision 19, as amended (#0253).** The original check
+    /// here validated only that the id still named a live journal entry --
+    /// almost always true, since entries persist until pruned. That let an
+    /// operation abandoned *outside* `switchyard` -- an out-of-band `git
+    /// rebase --abort` the caller runs directly, the documented alternative
+    /// to continuing -- leave the file in place with nothing left to clear
+    /// it (`Fixup`'s own abort arms never run for this path at all: nobody
+    /// called `Fixup`). A later, wholly unrelated own rewrite would then
+    /// read the stale file back and attach to the abandoned operation's
+    /// entry. So the file is now trusted only when
+    /// `stillInProgress` is true -- resolved by `attachRewrite` from either
+    /// a caller-supplied answer or a fresh `SequencerSnapshot.capture(in:)`,
+    /// the same rebase-merge/rebase-apply probe `around`'s own catch clause
+    /// already runs when it decides whether to write the file in the first
+    /// place. Not in progress means either the operation finished (and
+    /// whoever finished it should have consumed and removed the file
+    /// already) or it was abandoned out of band -- both degrade the same
+    /// way, to no-attach, which is the safe direction on both sides of that
+    /// distinction.
     private static func inFlightEntryID(
         at pendingPath: String,
+        stillInProgress: Bool,
         in context: WorktreeContext,
         git: GitProcess,
         fileManager: FileManager
@@ -408,7 +452,7 @@ public extension JournalCheckpoint {
         else { return nil }
 
         let stillLive = try JournalAnchor.list(in: context, git: git).contains { $0.id == id }
-        guard stillLive else {
+        guard stillLive, stillInProgress else {
             try? fileManager.removeItem(atPath: pendingPath)
             return nil
         }
