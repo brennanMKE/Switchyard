@@ -266,6 +266,15 @@ paths, guard clauses that skip. The question to answer is not "does the code do 
     proposal that keeps surviving is a candidate for measurement, not evidence that it was right** —
     the argument gets re-read each pass and the claim never gets tested.
 
+8h. **Does the mutation's replacement value collide with what the test already uses?** #0160's ninth
+    review mutated a timestamp to `Date(0)` and recorded it as **invalid rather than surviving** —
+    every pinning test passes exactly that value as its own `now:`, so the edit was a no-op wearing a
+    survivor's clothes. Re-run with a distinguishable value it died immediately. **A survivor is only
+    evidence if the mutated code could have produced a different answer**; pick a replacement no
+    fixture in the suite would supply. Same family as the no-op transposition (swapping two independent
+    assignments) and the non-compiling mutation (a bare `try` inside an `if let` chain) — all three
+    read exactly like a real survivor and none is one.
+
 9. **Is there exactly one deliverable?** Not one theme — one file, one behaviour, one thing that is
    either done or not. If the Expected behavior names more than one new production file, it is more
    than one issue.
