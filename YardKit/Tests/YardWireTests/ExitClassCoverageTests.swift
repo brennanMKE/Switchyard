@@ -107,6 +107,12 @@ struct ExitClassCoverageTests {
             // → 8, signingFailed → 9); this row exercises the repositoryError
             // case, the same shape as the sibling errors above.
             Row("FixupError", FixupError.targetNotAncestor(target: "probe-target"), .repositoryError),
+            // #0242: JournalObserved.Metadata gained a production
+            // serialization path; its error carries the same class as
+            // JournalEntryMetadata.SerializationError above.
+            Row("JournalObserved.Metadata.SerializationError",
+                JournalObserved.Metadata.SerializationError.undecodable(detail: "not JSON"),
+                .repositoryError),
         ]
     }
 

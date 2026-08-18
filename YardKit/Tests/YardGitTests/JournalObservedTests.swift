@@ -67,16 +67,6 @@ struct JournalObservedTests {
         #expect(listing.items.compactMap(\.defect).isEmpty)
     }
 
-    /// Decodes observed metadata bytes through the production type,
-    /// `JournalObserved.Metadata` itself (#0236) -- no mirrored struct.
-    /// `record` writes with `dateEncodingStrategy = .iso8601`, so decode
-    /// must match or `timestamp` fails to parse.
-    private static func decodeMetadata(_ json: Data) throws -> JournalObserved.Metadata {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return try decoder.decode(JournalObserved.Metadata.self, from: json)
-    }
-
     @Test func observedEntriesRoundTripTheirRefUpdates() throws {
         let repo = try FixtureRepository.linear()
         defer { repo.destroy() }
@@ -100,12 +90,55 @@ struct JournalObservedTests {
 
         let json = try Self.observedMetadataJSON(for: entry.id, in: context)
         #expect(!json.isEmpty)
-        let decoded = try Self.decodeMetadata(json)
+        let decoded = try JournalObserved.Metadata(serialized: json)
         #expect(decoded.kind == .refUpdates)
         let decodedUpdates = try #require(decoded.updates)
         #expect(!decodedUpdates.isEmpty)
         #expect(decodedUpdates.count == updates.count)
         #expect(decodedUpdates == updates)
+    }
+
+    /// The point of #0242, end to end: `record` -> `JournalAnchor.metadata(…,
+    /// namespace:)` -> `Metadata(serialized:)` -> equality against the value
+    /// that was recorded, for both kinds `record` supports. Full `Metadata`
+    /// equality (`Equatable`), not per-field spot checks: if any field
+    /// failed to round-trip -- including `timestamp`, which is the field
+    /// that silently fails without a matching `dateDecodingStrategy` -- this
+    /// reddens.
+    @Test func metadataRoundTripsThroughProductionSerializationForBothKinds() throws {
+        let repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let context = try WorktreeContext.resolve(path: repo.url.path)
+        let base = try #require(context.topLevel)
+        let head = try repo.revParse("HEAD")
+        let now = Date(timeIntervalSince1970: 0)
+
+        let refUpdates = [
+            ReferenceTransaction.RefUpdate(
+                oldValue: String(repeating: "0", count: 40),
+                newValue: head, refName: "refs/heads/main"),
+        ]
+        let expectedRef = JournalObserved.Metadata(
+            updates: refUpdates, timestamp: now,
+            worktree: .init(name: context.worktreeName, path: base))
+        let refEntry = try JournalObserved.record(refUpdates, in: context, now: now)
+        let refJSON = try JournalAnchor.metadata(
+            for: refEntry.id, in: context, namespace: JournalObserved.refPrefix)
+        #expect(!refJSON.isEmpty)
+        let decodedRef = try JournalObserved.Metadata(serialized: refJSON)
+        #expect(decodedRef == expectedRef)
+
+        let decision = Self.rewriteDecision(
+            source: "amend", isOwn: false, pairs: [(Self.oidA, Self.oidB)])
+        let expectedRewrite = JournalObserved.Metadata(
+            source: decision.source, rewrites: decision.rewrites, timestamp: now,
+            worktree: .init(name: context.worktreeName, path: base))
+        let rewriteEntry = try #require(try JournalObserved.record(decision, in: context, now: now))
+        let rewriteJSON = try JournalAnchor.metadata(
+            for: rewriteEntry.id, in: context, namespace: JournalObserved.refPrefix)
+        #expect(!rewriteJSON.isEmpty)
+        let decodedRewrite = try JournalObserved.Metadata(serialized: rewriteJSON)
+        #expect(decodedRewrite == expectedRewrite)
     }
 
     @Test func theObservedNamespaceIsNotTheJournalNamespace() throws {
@@ -158,7 +191,7 @@ struct JournalObservedTests {
         let refJSON = try JournalAnchor.metadata(
             for: refEntry.id, in: context, namespace: JournalObserved.refPrefix)
         #expect(!refJSON.isEmpty)
-        let decodedRef = try Self.decodeMetadata(refJSON)
+        let decodedRef = try JournalObserved.Metadata(serialized: refJSON)
         #expect(decodedRef.kind == .refUpdates)
         let decodedUpdates = try #require(decodedRef.updates)
         #expect(!decodedUpdates.isEmpty)
@@ -171,7 +204,7 @@ struct JournalObservedTests {
         let rewriteJSON = try JournalAnchor.metadata(
             for: rewriteEntry.id, in: context, namespace: JournalObserved.refPrefix)
         #expect(!rewriteJSON.isEmpty)
-        let decodedRewrite = try Self.decodeMetadata(rewriteJSON)
+        let decodedRewrite = try JournalObserved.Metadata(serialized: rewriteJSON)
         #expect(decodedRewrite.kind == .rewrites)
         let source = try #require(decodedRewrite.source)
         #expect(source == "amend")
@@ -219,7 +252,7 @@ struct JournalObservedTests {
 
         let json = try Self.observedMetadataJSON(for: recorded.id, in: context)
         #expect(!json.isEmpty)
-        let decoded = try Self.decodeMetadata(json)
+        let decoded = try JournalObserved.Metadata(serialized: json)
         #expect(decoded.schemaVersion == JournalObserved.Metadata.currentSchemaVersion)
         #expect(decoded.kind == .rewrites)
         let source = try #require(decoded.source)
