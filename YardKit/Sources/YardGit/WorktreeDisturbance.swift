@@ -13,15 +13,20 @@ import Foundation
 /// path). But `git update-ref` — including the `--stdin` transactions
 /// `RefSnapshot.restore` is built on — moves or deletes the same branch
 /// **silently, exit 0**, leaving the sibling's checkout inconsistent with
-/// its own `HEAD`. So the engine adds the refusal git's plumbing does not:
-/// before applying a snapshot, name every sibling checkout it would disturb,
-/// and refuse while any exists.
+/// its own `HEAD`. `disturbances` names every sibling checkout a snapshot
+/// would disturb; what a caller does with that list is its own decision —
+/// `requireUndisturbed` refuses while any exists (#0173's original answer),
+/// and `JournalRestore` instead leaves a **live** one alone and reports it
+/// (guide §11 decision 23, `leavingLiveDisturbances` below).
 ///
 /// A **prunable** worktree (directory deleted without `git worktree remove`)
 /// still holds its branch: porcelain still lists it, and git's porcelain
-/// refusals still fire for it (measured). The refusal here matches, with
-/// `prunable: true` carried so the caller can say how to release the claim
-/// (`git worktree prune` / `switchyard wt gc`). Honesty over recovery.
+/// refusals still fire for it (measured), so `disturbances` still names it
+/// — with `prunable: true` carried so a refusing caller can say how to
+/// release the claim (`git worktree prune` / `switchyard wt gc`). But it
+/// holds nothing a live agent is standing on, which is why `JournalRestore`
+/// treats it differently from a live disturbance: it is not left alone, and
+/// its branch is written back like any other ref the snapshot recorded.
 ///
 /// A **detached** sibling holds no branch and is never disturbed — restoring
 /// shared refs cannot move a detached `HEAD`, which is per-worktree state.
@@ -162,12 +167,16 @@ public enum WorktreeDisturbance {
     }
 
     /// Throws `Error.wouldDisturb` naming every disturbed sibling unless the
-    /// snapshot can apply without wrecking one. Restore flows (#0168) call
-    /// this on the snapshot **being applied**, after the cross-tool guard
-    /// and regardless of whether the guard was bypassed — the guard answers
-    /// "did refs move behind the journal's back", this answers "would
-    /// applying the target snapshot wreck a sibling's checkout", and neither
-    /// question substitutes for the other.
+    /// snapshot can apply without wrecking one.
+    ///
+    /// **`JournalRestore` does not call this.** It answers "would applying
+    /// the target snapshot wreck a sibling's checkout" the way #0173
+    /// originally needed, but guide §11 decision 23 changed what restore
+    /// does with that answer: a **live** sibling's held branch is left
+    /// alone (`leavingLiveDisturbances` above) rather than refusing the
+    /// whole operation. This keeps the strict refusal #0044 decision 2
+    /// described, for a caller that still wants it — a future force
+    /// surface — and is exercised directly by its own tests today.
     public static func requireUndisturbed(
         by recorded: RefSnapshot,
         in context: WorktreeContext,
@@ -219,6 +228,37 @@ public enum WorktreeDisturbance {
             return (snapshot, nil)
         }
         return (RefSnapshot(head: .detached(oid: oid), refs: snapshot.refs), target)
+    }
+
+    // MARK: - Leave live siblings alone rather than refuse (guide §11 decision 23)
+
+    /// The snapshot to apply, with each **live** sibling's held branch
+    /// dropped so restore leaves it exactly as it stands, and the branches
+    /// left alone, sorted the same way `disturbances` is.
+    ///
+    /// Keyed on liveness, the same field `detachingHeldHead` above already
+    /// reads: a **prunable** holder holds nothing (#0211, decision 16), so
+    /// `disturbances` still names it here but this function does not drop
+    /// its branch — the branch is written back like any other ref the
+    /// snapshot recorded (decision 20's ordinary case), which is the
+    /// dead-agent recovery #0175 exists for.
+    ///
+    /// `disturbances` must be computed against the *same* `snapshot` passed
+    /// here, and by the caller — not by this function — so a caller that
+    /// needs the pre-drop set for something else (the cross-tool guard,
+    /// #0251's trap) computes it exactly once and this only ever filters,
+    /// never re-derives.
+    public static func leavingLiveDisturbances(
+        _ disturbances: [Disturbance],
+        from snapshot: RefSnapshot
+    ) -> (snapshot: RefSnapshot, leftAlone: [String]) {
+        let live = disturbances.filter { !$0.prunable }
+        guard !live.isEmpty else { return (snapshot, []) }
+        let names = Set(live.map(\.branch))
+        let filtered = RefSnapshot(
+            head: snapshot.head,
+            refs: snapshot.refs.filter { !names.contains($0.name) })
+        return (filtered, live.map(\.branch))
     }
 }
 
