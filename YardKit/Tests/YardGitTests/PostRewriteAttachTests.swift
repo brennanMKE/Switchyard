@@ -243,7 +243,27 @@ struct PostRewriteAttachTests {
 
         #expect(try JournalAnchor.list(in: context).isEmpty)
 
-        _ = try Fixup.run(target: target, at: repo.url.path, extraEnvironment: hermetic)
+        // A non-nil `command`/`agent` on the checkpoint entry, so there is
+        // something for the attach below to carry through or lose (#0303).
+        // No in-tree caller passes either to `around` today -- that is
+        // M3's CLI's job -- so `Fixup.run` (which has no parameter for
+        // either) is bypassed here in favor of calling `around` directly
+        // with the same two git invocations `Fixup.run` makes internally:
+        // `commit --fixup=`, then the non-interactive autosquash rebase
+        // (Fixup.swift's `performFixup`/`autosquashRebase`, no `-i`, no
+        // sequence editor needed on git 2.50.1).
+        let agent = JournalEntryMetadata.Agent(name: "claude-code", session: "session-0303")
+        _ = try JournalCheckpoint.around(
+            operation: "fixup", at: repo.url.path,
+            command: "switchyard fixup \(target)", agent: agent
+        ) { scoped in
+            try scoped.run(
+                ["commit", "--fixup=\(target)"], workingDirectory: repo.url.path,
+                extraEnvironment: hermetic)
+            try scoped.run(
+                ["rebase", "--autosquash", "\(target)^"], workingDirectory: repo.url.path,
+                extraEnvironment: hermetic)
+        }
 
         // Exactly one checkpoint entry for the whole fixup (#0212) — the one
         // `around` wrote is the in-flight entry the id must have been
@@ -285,12 +305,39 @@ struct PostRewriteAttachTests {
         #expect(mapping.source == "rebase")
         #expect(mapping.rewrites == decision.rewrites)
 
-        // Every other field comes back byte-identical: comparing the
-        // re-read metadata to the pre-attach value with the mapping added
-        // by hand (rather than through `attachRewrite` again) proves the
-        // persisted bytes, not just the in-memory value, carry every
-        // untouched field forward.
-        #expect(after == beforeAttach.attachingRewrite(mapping))
+        // Every other field comes back unchanged -- pinned against
+        // `beforeAttach`'s own stored values field by field, never by
+        // calling `attachingRewrite` on `beforeAttach` a second time: that
+        // runs the exact function under test on both sides of `==`, so a
+        // field dropped *inside* `attachingRewrite` would be dropped
+        // identically on both sides and the comparison could never notice
+        // (#0303). `command` and `agent` are non-nil above (asserted again
+        // just below) so there is something here to lose; a mutation that
+        // blanks either now reddens on the matching line.
+        //
+        // `guardRefs` and `traversal` are pinned too, but honestly: no
+        // in-tree writer ever populates `guardRefs` (it stays `[:]` on
+        // every real entry today), and `traversal` is set only on
+        // undo/redo entries, which never rewrite a commit and so never
+        // reach `attachRewrite`. No fixture in this file can put a
+        // non-default value in either field ahead of a real attach, so
+        // these two assertions pin "stays at its received value" rather
+        // than "survives being non-default" -- the mutation that blanks
+        // all five fields at once still reddens, but through `command`/
+        // `agent`, not through these two.
+        #expect(beforeAttach.command != nil, "must be non-nil or the pin below proves nothing")
+        #expect(beforeAttach.agent != nil, "must be non-nil or the pin below proves nothing")
+        #expect(after.schemaVersion == beforeAttach.schemaVersion)
+        #expect(after.id == beforeAttach.id)
+        #expect(after.operation == beforeAttach.operation)
+        #expect(after.command == beforeAttach.command)
+        #expect(after.label == beforeAttach.label)
+        #expect(after.timestamp == beforeAttach.timestamp)
+        #expect(after.worktree == beforeAttach.worktree)
+        #expect(after.captured == beforeAttach.captured)
+        #expect(after.guardRefs == beforeAttach.guardRefs)
+        #expect(after.agent == beforeAttach.agent)
+        #expect(after.traversal == beforeAttach.traversal)
 
         // The rest of the anchor's tree -- everything but metadata.json --
         // and the commit's parents are unchanged, byte for byte.
