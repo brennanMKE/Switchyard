@@ -156,6 +156,15 @@ struct WorktreeRepairTests {
         let added = try repo.addWorktree(named: "agent-01", branch: "agent-01")
         defer { try? fm.removeItem(at: added) }
 
+        // Capture the worktree's own administrative gitdir path before it
+        // moves. Measured (git 2.50.1): `git worktree repair` reports
+        // `repair: gitdir incorrect: <this path>/gitdir` on stderr once the
+        // worktree moves, so this is what `run` must return -- not a
+        // hardcoded guess at git's naming scheme.
+        let gitDirBefore = try git.run(
+            ["rev-parse", "--absolute-git-dir"], workingDirectory: added.path
+        ).text.trimmingCharacters(in: .whitespacesAndNewlines)
+
         let moved = added.deletingLastPathComponent()
             .appendingPathComponent("\(added.lastPathComponent)-moved")
 
@@ -165,7 +174,11 @@ struct WorktreeRepairTests {
             repositoryPath: repo.url.path, atPaths: [moved.path]
         )
 
-        #expect(!reports.isEmpty, "expected git to report the repaired path on stderr")
+        let repaired = try #require(reports.first, "expected git to report the repaired path on stderr")
+        #expect(reports.count == 1)
+        #expect(repaired.reason == "gitdir incorrect")
+        #expect(repaired.path == "\(gitDirBefore)/gitdir",
+                "the reported path should name this worktree's own administrative gitdir file, not a placeholder")
     }
 
     @Test func runFromInsideTheMovedWorktreeExitsZeroRegardlessOfReport() throws {
@@ -186,6 +199,38 @@ struct WorktreeRepairTests {
         )
 
         #expect(!reports.isEmpty, "git worktree repair from inside a moved linked worktree reports at least one repaired path")
+    }
+
+    @Test func runFromInsideTheMovedWorktreeReportsItsOwnGitDirAndReason() throws {
+        var repo = try FixtureRepository(refFormat: .files)
+        defer { repo.destroy() }
+        try repo.build([FixtureRepository.Commit("a")])
+
+        let added = try repo.addWorktree(named: "agent-inner-2", branch: "agent-inner-2")
+        defer { try? fm.removeItem(at: added) }
+
+        // Same measured relationship as the by-path case above: the
+        // administrative gitdir this worktree already had, captured before
+        // the move, is exactly the path git reports repairing.
+        let gitDirBefore = try git.run(
+            ["rev-parse", "--absolute-git-dir"], workingDirectory: added.path
+        ).text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let moved = added.deletingLastPathComponent()
+            .appendingPathComponent("\(added.lastPathComponent)-moved")
+
+        try fm.moveItem(atPath: added.path, toPath: moved.path)
+
+        let reports = try WorktreeRepair.run(
+            repositoryPath: moved.path, atPaths: []
+        )
+
+        let repaired = try #require(
+            reports.first,
+            "git worktree repair from inside a moved linked worktree reports at least one repaired path")
+        #expect(repaired.reason == "gitdir incorrect")
+        #expect(repaired.path == "\(gitDirBefore)/gitdir",
+                "reported path should be this worktree's own administrative gitdir file")
     }
 
 
@@ -256,6 +301,16 @@ struct WorktreeRepairTests {
         let addedA = try repo.addWorktree(named: "pair-a", branch: "branch-pair-a")
         let addedB = try repo.addWorktree(named: "pair-b", branch: "branch-pair-b")
 
+        // Capture each worktree's own administrative gitdir path before
+        // either moves, the same way as the single-repair case above --
+        // this is what each entry's `path` must equal after repair.
+        let gitDirBeforeA = try git.run(
+            ["rev-parse", "--absolute-git-dir"], workingDirectory: addedA.path
+        ).text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let gitDirBeforeB = try git.run(
+            ["rev-parse", "--absolute-git-dir"], workingDirectory: addedB.path
+        ).text.trimmingCharacters(in: .whitespacesAndNewlines)
+
         let movedA = addedA.deletingLastPathComponent()
             .appendingPathComponent("\(addedA.lastPathComponent)-moved")
 
@@ -270,6 +325,16 @@ struct WorktreeRepairTests {
         )
 
         #expect(reports.count == 2, "both moves should be reported as repaired")
+        #expect(reports.allSatisfy { $0.reason == "gitdir incorrect" })
+
+        // Assert both paths, not just the count: a mutation that returns the
+        // right cardinality with the same (or a wrong) record twice must
+        // still fail here.
+        let reportedPaths = Set(reports.map(\.path))
+        #expect(
+            reportedPaths == Set(["\(gitDirBeforeA)/gitdir", "\(gitDirBeforeB)/gitdir"]),
+            "each repair should name the administrative gitdir file for its own worktree"
+        )
     }
 
     // MARK: - Verify the broken precondition is measured correctly.
