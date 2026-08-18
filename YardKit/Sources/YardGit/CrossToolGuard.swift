@@ -15,14 +15,20 @@ import Foundation
 ///
 /// **What is compared:** the recorded `RefSnapshot` — the exact value restore
 /// would write back — against a fresh capture taken under the same listing
-/// rules. Restore (#0027) moves every recorded ref, re-creates deleted ones,
-/// and deletes refs created since capture, so the set the guard inspects —
-/// the union of recorded and current names, plus `HEAD` — is precisely the
-/// set restore would touch. Guarding any subset would let restore clobber
-/// unguarded state, which is the failure this type exists to prevent.
-/// Pseudo-refs (`ORIG_HEAD`, `MERGE_HEAD`, `AUTO_MERGE`) are outside
-/// `for-each-ref` and outside the snapshot, so they are outside the guard;
-/// the index and worktree are the other primitives' business (#0151, #0152).
+/// rules. Restore (#0027) writes back only the refs its snapshot recorded and
+/// never deletes a ref created since (guide §11 decision 20), so "the set
+/// restore would touch" is exactly that snapshot's ref names, plus `HEAD`.
+/// The unscoped `diff` overload below checks the union of both sides' names
+/// instead, for a caller with no narrower notion of "what will be written."
+/// A caller that does know — `JournalRestore` does, from the snapshot it is
+/// about to apply — passes `scope`, so a ref outside it is not evidence the
+/// caller's world moved, only that some *other* ref exists that this restore
+/// will never touch (#0232). Guarding a wider set than the caller passes as
+/// `scope` would let restore clobber unguarded state, which is the failure
+/// this type exists to prevent. Pseudo-refs (`ORIG_HEAD`, `MERGE_HEAD`,
+/// `AUTO_MERGE`) are outside `for-each-ref` and outside the snapshot, so they
+/// are outside the guard; the index and worktree are the other primitives'
+/// business (#0151, #0152).
 ///
 /// **The value vocabulary matches the `reference-transaction` hook (#0042):**
 /// a symbolic `HEAD` reports as `ref:<target>`, everything else as an object
@@ -96,7 +102,25 @@ public enum CrossToolGuard {
     /// Pure diff of two snapshots: `HEAD` first when it diverged, then every
     /// divergent ref name in sorted order, so the report is deterministic and
     /// two agents comparing reports see the same bytes.
+    ///
+    /// Unscoped: every name either side recorded is checked. This is what a
+    /// caller uses when it has no narrower notion of "what will be written" —
+    /// `divergences(from:in:git:)` and `requireUnchanged` below both compare
+    /// the whole repository. `JournalRestore` uses the scoped overload
+    /// instead (#0232).
     public static func diff(recorded: RefSnapshot, current: RefSnapshot) -> [Divergence] {
+        let allNames = Set(recorded.refs.map(\.name)).union(current.refs.map(\.name))
+        return diff(recorded: recorded, current: current, scope: allNames)
+    }
+
+    /// Divergences limited to `scope`, the ref names the caller is about to
+    /// write. A ref outside it cannot be disturbed by this restore, so a
+    /// change to one is not evidence that the caller's world moved under it
+    /// (#0232). `HEAD` is always checked: restore always writes it, and it
+    /// has no place in `scope`'s vocabulary of ref *names*.
+    public static func diff(
+        recorded: RefSnapshot, current: RefSnapshot, scope: Set<String>
+    ) -> [Divergence] {
         var divergences: [Divergence] = []
         if recorded.head != current.head {
             divergences.append(Divergence(
@@ -107,7 +131,7 @@ public enum CrossToolGuard {
         }
         let recordedByName = Dictionary(uniqueKeysWithValues: recorded.refs.map { ($0.name, $0.oid) })
         let currentByName = Dictionary(uniqueKeysWithValues: current.refs.map { ($0.name, $0.oid) })
-        for name in Set(recordedByName.keys).union(currentByName.keys).sorted() {
+        for name in Set(recordedByName.keys).union(currentByName.keys).intersection(scope).sorted() {
             let expected = recordedByName[name]
             let actual = currentByName[name]
             if expected != actual {

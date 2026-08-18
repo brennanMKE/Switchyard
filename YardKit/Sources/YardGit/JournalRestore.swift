@@ -317,7 +317,29 @@ public enum JournalRestore {
                of: nodes, in: context.worktreeName).cursor,
            entries.contains(where: { $0.id == cursor }) {
             let believed = try refsSnapshot(of: cursor, at: base, git: git)
-            let divergences = CrossToolGuard.diff(recorded: believed, current: current)
+
+            // Scope: every ref name where `believed` (what the journal
+            // currently thinks is true) and `applied` (what this restore is
+            // about to write) AGREE -- including agreeing that neither has
+            // ever recorded it. A name where they disagree is exactly the
+            // ref this restore's own history is changing (an ordinary
+            // undo/redo across checkpoints that recorded different values,
+            // or a ref neither end ever captured), so a live mismatch there
+            // is not foreign interference to refuse -- it is the traversal
+            // itself, and refusing it would make every such step impossible
+            // (#0232). Scoping to `applied`'s own names alone is not enough:
+            // a redo target that captured "present" also captured every ref
+            // decision 20 chose to leave alone, so it would still be
+            // in scope and the guard would still refuse (measured).
+            let believedByName = Dictionary(uniqueKeysWithValues: believed.refs.map { ($0.name, $0.oid) })
+            let appliedByName = Dictionary(uniqueKeysWithValues: applied.refs.map { ($0.name, $0.oid) })
+            let scope = Set(believedByName.keys)
+                .union(appliedByName.keys)
+                .union(current.refs.map(\.name))
+                .filter { believedByName[$0] == appliedByName[$0] }
+
+            let divergences = CrossToolGuard.diff(
+                recorded: believed, current: current, scope: scope)
             guard divergences.isEmpty else {
                 throw CrossToolGuard.Error.repositoryChanged(divergences: divergences)
             }
