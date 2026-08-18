@@ -62,6 +62,114 @@ struct ConflictsTests {
         #expect(try git.capture(["cat-file", "-p", theirs.oid], workingDirectory: repo.url.path).text == "theirs d\n")
     }
 
+    // #0311: `deleteModifyReportsNoOursStage` above pins DU (deleted by us).
+    // This is its mirror — ours modifies, theirs deletes — which is UD
+    // (deleted by them), the case the M1 review found unasserted end-to-end
+    // through `conflictedFiles` against real git output.
+    @Test("modifyDeleteReportsDeletedByThem", arguments: FixtureRepository.RefFormat.supported())
+    func modifyDeleteReportsDeletedByThem(format: FixtureRepository.RefFormat) throws {
+        var repo = try FixtureRepository(refFormat: format)
+        defer { repo.destroy() }
+
+        try repo.build([.init("base", files: ["d.txt": "original d\n", "keep.txt": "keep\n"])])
+        try repo.build([.init("ours", parents: ["base"], files: ["d.txt": "ours d\n"])])
+
+        let git = GitProcess()
+        let baseOID = try #require(repo.oids["base"])
+        try repo.checkoutDetached(baseOID)
+        try git.run(["rm", "-q", "d.txt"], workingDirectory: repo.url.path)
+        try git.run(["commit", "-qm", "theirs deletes d"], workingDirectory: repo.url.path)
+        let theirsDeleteOID = try repo.revParse("HEAD")
+
+        let oursOID = try #require(repo.oids["ours"])
+        try repo.checkoutDetached(oursOID)
+        _ = try git.capture(["merge", "--no-commit", theirsDeleteOID],
+                            workingDirectory: repo.url.path)
+
+        // Ground truth from git itself (#0281 pattern): confirm the fixture
+        // actually produced a "UD" record before trusting the parser under test.
+        let statusLines = try git.run(["status", "--porcelain=v2"], workingDirectory: repo.url.path).lines
+        let dLine = try #require(statusLines.first(where: { $0.hasSuffix(" d.txt") }))
+        #expect(dLine.hasPrefix("u UD "))
+
+        let files = try conflictedFiles(at: repo.url.path)
+        #expect(files.map(\.path) == ["d.txt"])
+
+        let entry = try #require(files.first(where: { $0.path == "d.txt" }))
+        #expect(entry.kind == .deletedByThem)
+        #expect(entry.theirs == nil)
+
+        let base = try #require(entry.base)
+        let ours = try #require(entry.ours)
+
+        #expect(try git.capture(["cat-file", "-p", base.oid], workingDirectory: repo.url.path).text == "original d\n")
+        #expect(try git.capture(["cat-file", "-p", ours.oid], workingDirectory: repo.url.path).text == "ours d\n")
+    }
+
+    // #0311: `AU` and `UA` are the two remaining unasserted-end-to-end kinds
+    // alongside `UD`. Neither arises from a plain add/add or modify/delete
+    // merge (measured: those produce `AA` and `UD`/`DU`) — they come from a
+    // rename/rename(1to2) conflict, where the same base path is renamed to
+    // two different names on each side. One such merge produces both in a
+    // single fixture: the "ours" rename target is `AU` (added by us, no
+    // theirs stage at all), the "theirs" rename target is `UA` (its mirror),
+    // and the original path itself goes `DD` — measured directly below
+    // before trusting the parser, per the issue's own instruction.
+    @Test("renameRenameConflictReportsAddedByUsAndAddedByThem", arguments: FixtureRepository.RefFormat.supported())
+    func renameRenameConflictReportsAddedByUsAndAddedByThem(format: FixtureRepository.RefFormat) throws {
+        var repo = try FixtureRepository(refFormat: format)
+        defer { repo.destroy() }
+
+        // Content shared verbatim by both renamed copies, well past git's
+        // default 50% similarity threshold, so both sides are detected as
+        // renames of `base.txt` rather than independent adds.
+        let original = (0..<20).map { "line \($0)\n" }.joined()
+        try repo.build([.init("base", files: ["base.txt": original])])
+
+        let git = GitProcess()
+        let baseOID = try #require(repo.oids["base"])
+
+        try repo.checkoutDetached(baseOID)
+        try git.run(["mv", "base.txt", "a.txt"], workingDirectory: repo.url.path)
+        try git.run(["commit", "-qm", "ours renames base.txt to a.txt"], workingDirectory: repo.url.path)
+        let oursOID = try repo.revParse("HEAD")
+
+        try repo.checkoutDetached(baseOID)
+        try git.run(["mv", "base.txt", "b.txt"], workingDirectory: repo.url.path)
+        try git.run(["commit", "-qm", "theirs renames base.txt to b.txt"], workingDirectory: repo.url.path)
+        let theirsOID = try repo.revParse("HEAD")
+
+        try repo.checkoutDetached(oursOID)
+        _ = try git.capture(["merge", "--no-commit", theirsOID], workingDirectory: repo.url.path)
+
+        // Ground truth from git itself (#0281 pattern): confirm the
+        // rename/rename(1to2) fixture actually produced AU at a.txt and UA
+        // at b.txt before trusting the parser under test.
+        let statusLines = try git.run(["status", "--porcelain=v2"], workingDirectory: repo.url.path).lines
+        let aLine = try #require(statusLines.first(where: { $0.hasSuffix(" a.txt") }))
+        #expect(aLine.hasPrefix("u AU "))
+        let bLine = try #require(statusLines.first(where: { $0.hasSuffix(" b.txt") }))
+        #expect(bLine.hasPrefix("u UA "))
+
+        let files = try conflictedFiles(at: repo.url.path)
+        #expect(files.map(\.path) == ["a.txt", "b.txt", "base.txt"])
+
+        let aEntry = try #require(files.first(where: { $0.path == "a.txt" }))
+        #expect(aEntry.kind == .addedByUs)
+        #expect(aEntry.base == nil)
+        #expect(aEntry.theirs == nil)
+        let ours = try #require(aEntry.ours)
+
+        let bEntry = try #require(files.first(where: { $0.path == "b.txt" }))
+        #expect(bEntry.kind == .addedByThem)
+        #expect(bEntry.base == nil)
+        #expect(bEntry.ours == nil)
+        let theirs = try #require(bEntry.theirs)
+
+        #expect(try git.capture(["cat-file", "-p", ours.oid], workingDirectory: repo.url.path).text == original)
+        #expect(try git.capture(["cat-file", "-p", theirs.oid], workingDirectory: repo.url.path).text == original)
+    }
+
     @Test("addAddReportsNoBaseStage", arguments: FixtureRepository.RefFormat.supported())
     func addAddReportsNoBaseStage(format: FixtureRepository.RefFormat) throws {
         var repo = try FixtureRepository(refFormat: format)
