@@ -47,10 +47,13 @@ public enum RepositoryLayout {
     /// decision 19, #0237).
     ///
     /// Contents: the entry id's `description`, nothing else — one line, no
-    /// JSON. `JournalCheckpoint.around` writes it right after minting the
-    /// entry and removes it when its body returns normally; a body that
-    /// throws mid-operation (`Fixup.run`'s `.blockedOnConflicts`) leaves it
-    /// behind on purpose, and `JournalCheckpoint.attachRewrite` reads it back
+    /// JSON. `JournalCheckpoint.around` writes it only once its body has
+    /// thrown *and* a resumable git operation is still live — validated
+    /// against `SequencerSnapshot` right there, never assumed from the throw
+    /// alone (#0241) — which is exactly `Fixup.run`'s `.blockedOnConflicts`
+    /// case. Nothing is ever written on a normal return, so a call that
+    /// completes cleanly can never overwrite a slot another, still-resumable
+    /// call already occupies. `JournalCheckpoint.attachRewrite` reads it back
     /// when the environment carries no id.
     public static let inFlightEntryIDRelativePath = stateDirectoryName + "/in-flight-entry-id"
 

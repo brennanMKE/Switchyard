@@ -257,13 +257,24 @@ public extension JournalCheckpoint {
     ///
     /// **The entry id also goes on disk, at
     /// `RepositoryLayout.inFlightEntryIDRelativePath` (guide §11 decision
-    /// 19, #0237).** The environment cannot survive a body that deliberately
-    /// leaves an operation in progress — `Fixup.run` throwing
-    /// `.blockedOnConflicts` leaves a rebase for the caller to resolve and
-    /// continue, and whatever runs `git rebase --continue` is a new process
-    /// with no scoped `GitProcess` to carry the id. The file is written here,
-    /// before `body` runs, and removed on a normal return; a throw leaves it
-    /// behind on purpose, and `attachRewrite` is what reads it back.
+    /// 19, #0237, amended by #0241).** The environment cannot survive a body
+    /// that deliberately leaves an operation in progress — `Fixup.run`
+    /// throwing `.blockedOnConflicts` leaves a rebase for the caller to
+    /// resolve and continue, and whatever runs `git rebase --continue` is a
+    /// new process with no scoped `GitProcess` to carry the id.
+    ///
+    /// **The file names an operation that is still in progress, not merely
+    /// an entry that still exists (#0241).** So it is written only once
+    /// `body` has already thrown *and* a resumable git operation is still
+    /// live — `SequencerSnapshot.capture` answering non-nil, the same
+    /// `rebase-merge`/`rebase-apply` probe `Fixup`'s own conflict path
+    /// answers "resumable" with. A `body` that cleans up before throwing —
+    /// every `git rebase --abort` arm in `Fixup` — leaves no such state, so
+    /// nothing is written for it. And nothing is ever written on a normal
+    /// return: a call that never throws has nothing resumable to record, so
+    /// (#0241's second symptom) it can never clobber a slot some other,
+    /// still-in-progress call already occupies. `attachRewrite` is what
+    /// reads the file back.
     static func around<T>(
         operation: String,
         at path: String,
@@ -279,18 +290,23 @@ public extension JournalCheckpoint {
             in: context, git: git)
         let scoped = GitProcess(executablePath: git.executablePath, journalEntryID: entry.id)
 
-        let pendingPath = try context.path(
-            for: RepositoryLayout.inFlightEntryIDRelativePath, git: git)
-        try fileManager.createDirectory(
-            atPath: URL(fileURLWithPath: pendingPath).deletingLastPathComponent().path,
-            withIntermediateDirectories: true)
-        try entry.id.string.write(toFile: pendingPath, atomically: true, encoding: .utf8)
-
-        let result = try body(scoped)
-        // Reached only on a normal return -- a throw leaves the file behind,
-        // which is the whole point (see the doc comment above).
-        try? fileManager.removeItem(atPath: pendingPath)
-        return result
+        do {
+            return try body(scoped)
+        } catch {
+            // Only a body that leaves a resumable git operation behind gets
+            // its id persisted -- validated against the live sequencer right
+            // here, not inferred from the throw alone, since `Fixup`'s own
+            // `git rebase --abort` arms throw too and must leave nothing.
+            if try SequencerSnapshot.capture(in: context, git: git) != nil {
+                let pendingPath = try context.path(
+                    for: RepositoryLayout.inFlightEntryIDRelativePath, git: git)
+                try fileManager.createDirectory(
+                    atPath: URL(fileURLWithPath: pendingPath).deletingLastPathComponent().path,
+                    withIntermediateDirectories: true)
+                try entry.id.string.write(toFile: pendingPath, atomically: true, encoding: .utf8)
+            }
+            throw error
+        }
     }
 
     /// Attaches an own-invocation rewrite mapping to the journal entry that
