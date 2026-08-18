@@ -267,6 +267,16 @@ is there to read it.
 It also destroys the one signal you have: a backgrounded suite that is slow and a backgrounded suite
 that is hung look identical. In the foreground they do not — one returns and one hits your timeout.
 
+**The mechanism that keeps catching rounds is subtler than a stray `&`, and it caught two in one day
+even after this rule was written.** When a Bash command runs past the tool's *default* timeout, the
+harness **auto-backgrounds it**. You did not choose that, but the effect is identical: control comes
+back with no result, and if you then wait for it, your turn ends.
+
+So the rule in practice is: **pass an explicit `timeout` of 900000 on the `swift test` call itself.**
+Then the command blocks and hands you its output directly. And if a run gets auto-backgrounded anyway,
+**keep taking tool calls until you have the result** — poll the output file in a loop. Do not end your
+turn waiting for a notification; there is nobody to deliver it to.
+
 So: **one blocking command, with a generous timeout.** This package runs seventy-odd suites in
 parallel, most of them blocked in `git` subprocesses, so a full run takes 45–130 seconds depending on
 what else the machine is doing. Set the timeout to 900000 ms and simply wait. That is not a long time
