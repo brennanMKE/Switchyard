@@ -39,6 +39,20 @@ private func stagedRenameRepo(_ format: FixtureRepository.RefFormat) throws -> F
     return repo
 }
 
+// MARK: - Non-ASCII paths (fixture-backed, #0283)
+
+/// A committed file with a non-ASCII name, edited in the worktree. Measured:
+/// without `-c core.quotepath=false`, git C-quotes `café.txt` as
+/// `"caf\303\251.txt"` in both `diff --name-only` and the `diff --git`
+/// header, which `HunkParser.pathFromDiffGitLine` cannot parse -- it requires
+/// the header to start with the literal `a/` prefix.
+private func nonASCIIPathRepo(_ format: FixtureRepository.RefFormat) throws -> FixtureRepository {
+    var repo = try FixtureRepository(refFormat: format)
+    try repo.build([.init("base", files: ["café.txt": base20()])])
+    try repo.writeUntracked(["café.txt": edited20()])
+    return repo
+}
+
 // MARK: - Listing and id stability (fixture-backed)
 
 @Test(arguments: FixtureRepository.RefFormat.supported())
@@ -527,4 +541,27 @@ func listHunksIgnoresDiffNoprefixConfig(format: FixtureRepository.RefFormat) thr
 
     let files = try listHunks(at: repo.url.path, area: .unstaged)
     #expect(files.map(\.path) == ["f.txt"])
+}
+
+/// `listHunks` pins `core.quotepath=false` in its argument vector precisely
+/// because git C-quotes a non-ASCII path otherwise, which
+/// `HunkParser.pathFromDiffGitLine` cannot parse -- the failure is a thrown
+/// error, not a cosmetic mis-render, on any ordinary repository that merely
+/// contains a non-ASCII filename.
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func listHunksHandlesANonASCIIPath(format: FixtureRepository.RefFormat) throws {
+    let repo = try nonASCIIPathRepo(format)
+    defer { repo.destroy() }
+
+    // Confirm git actually would quote this name before trusting the
+    // assertion below -- a name git does not quote pins nothing.
+    let nameOnly = try GitProcess().run(
+        ["-c", "core.quotepath=true", "diff", "--name-only"],
+        workingDirectory: repo.url.path
+    ).text
+    #expect(nameOnly.hasPrefix("\""))
+
+    let files = try listHunks(at: repo.url.path, area: .unstaged)
+    let file = try #require(files.first { $0.path == "café.txt" })
+    #expect(file.hunks.count == 2)
 }
