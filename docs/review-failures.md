@@ -257,6 +257,15 @@ paths, guard clauses that skip. The question to answer is not "does the code do 
     *upstream* of an existing one, re-run the existing one's mutation rather than trusting the last
     review that saw it.
 
+8g. **Has this proposal survived more than two review passes unchanged?** If so, measure it instead of
+    re-reading it. #0160's `isMidRebaseAmend` was recorded as a proposal by three consecutive passes,
+    each accepting the same argument — *"`git rebase --apply` never amends internally"* — which was
+    true and was **not what the criterion said**. The criterion was about mid-rebase `amend`
+    *invocations*, and a user's own `git commit --amend` raises one. The eighth pass asked what the
+    criterion actually claimed, built the fixture, and found two observed entries for one rebase. **A
+    proposal that keeps surviving is a candidate for measurement, not evidence that it was right** —
+    the argument gets re-read each pass and the claim never gets tested.
+
 9. **Is there exactly one deliverable?** Not one theme — one file, one behaviour, one thing that is
    either done or not. If the Expected behavior names more than one new production file, it is more
    than one issue.
