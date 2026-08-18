@@ -190,15 +190,6 @@ public enum WorktreePrune {
     }
 }
 
-// MARK: - Readability helpers
-
-extension WorktreePrune.Report {
-    /// Groups the reports by type. The engine always emits all of them on a
-    /// single `report` call; the caller decides what to surface or act on.
-    var isPrunable: Bool { type == .prunable }
-    var isAbandonedSession: Bool { type == .abandonedSession }
-}
-
 // MARK: - Wire encoding (#0135)
 
 /// String-raw enum: encodes as its raw value, a single JSON string (#0129

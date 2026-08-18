@@ -118,19 +118,10 @@ public struct CommitLogOptions: OptionSet, Sendable {
 
     public init(rawValue: Int) { self.rawValue = rawValue }
 
-    /// Pass `--since=... --until=...` style range arguments, rather than
-    /// constructing a refname prefix by hand. Used internally only; callers
-    /// build the argument array themselves.
-    public static let includeRefs = CommitLogOptions(rawValue: 1 << 0)
-
     /// Only return commits that carry a trailer whose key is `Agent-Name`
     /// (case-insensitive). This is the basis for issue #0014's `--agent-only`
-    /// flag.
+    /// flag. This is the only option `run`/`parse` ever read (#0290).
     public static let agentOnly = CommitLogOptions(rawValue: 1 << 1)
-
-    /// Emit the full commit body. Without this option, only `subject` is
-    /// available in the returned entries.
-    public static let includeBody = CommitLogOptions(rawValue: 1 << 2)
 }
 
 /// Internal symbol for `git log --format` delimiters. Used by the parser but
@@ -354,15 +345,6 @@ extension CommitLogEntry {
     /// Whether any trailer in the list matches `Agent-Name` (case-insensitive).
     public static func hasAgentName(trailers: [Trailer]) -> Bool {
         return trailers.contains(where: { $0.key.lowercased() == "agent-name" })
-    }
-}
-
-// MARK: - Convenience for parse output in tests
-
-extension CommitLog {
-    /// Parse output without range filtering. Exposed for testability; production code uses `run(path:rangeArguments:)`.
-    static func parseClean(output: String) -> [CommitLogEntry] {
-        return CommitLog.parse(output: output, options: [])
     }
 }
 

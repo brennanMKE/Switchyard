@@ -30,15 +30,6 @@ public struct WorktreeRemoveResult: Sendable {
 
     /// True when the removal succeeded (no structured error).
     public var success: Bool { error == nil }
-
-    /// True when the removal was refused without force.
-    public var refusal: Bool { if case .unclean = error { return true } else { return false } }
-
-    /// True when the worktree was locked by an agent session and had to release.
-    public var lockReleased: Bool { lockedRelease }
-
-    /// True when force was needed to remove the worktree.
-    public var hadToForce: Bool { forced }
 }
 
 /// Errors raised by `worktreeRemove`. Each case carries enough information for a structured
@@ -243,9 +234,8 @@ private func canonicalize(_ path: String) -> String {
 /// Plain-stdlib `Encodable` — the engine still imports nothing.
 extension WorktreeRemoveResult: Encodable {
     /// Stable wire keys, identical to the stored-member names; no raw values.
-    /// The computed `success` / `refusal` / `lockReleased` / `hadToForce` are
-    /// not encoded — the stored `lockedRelease` and `forced` are the wire
-    /// truth. `WorktreeRemoveWireTests` pins the bytes.
+    /// The computed `success` is not encoded — the stored `lockedRelease` and
+    /// `forced` are the wire truth. `WorktreeRemoveWireTests` pins the bytes.
     private enum CodingKeys: String, CodingKey {
         case worktreePath, lockedRelease, forced, error
     }
