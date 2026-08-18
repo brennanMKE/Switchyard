@@ -131,6 +131,26 @@ struct WorktreeDisturbanceTests {
                          at: repo.url.path) == c)
     }
 
+    // MARK: - Error.description's fallback for a nil target (#0250)
+
+    // `disturbances(...)` can never produce a `target: nil` entry (#0244's
+    // guard filters unrecorded refs out before construction), but the field
+    // stays `String?` for wire stability, so `description` still needs a
+    // fallback for one. Before #0250 the fallback claimed "delete it",
+    // which restore can no longer do at all (guide §11 decision 20) — this
+    // hand-builds the otherwise-unreachable case and pins the honest
+    // replacement text.
+    @Test func aHandBuiltDisturbanceWithNoTargetGetsATrueDescription() {
+        let error = WorktreeDisturbance.Error.wouldDisturb(disturbances: [
+            WorktreeDisturbance.Disturbance(
+                worktreePath: "/w/sibling", branch: "refs/heads/agent-branch",
+                current: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                target: nil, prunable: false),
+        ])
+        #expect(error.description.contains("touch it"))
+        #expect(!error.description.contains("delete it"))
+    }
+
     // MARK: - What is deliberately not a disturbance
 
     @Test func aDetachedSiblingHoldsNoBranchAndIsNeverDisturbed() throws {
