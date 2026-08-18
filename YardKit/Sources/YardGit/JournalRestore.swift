@@ -34,7 +34,11 @@ import Foundation
 /// 5. **The sibling-disturbance check** (#0173) on the snapshot being
 ///    applied, regardless of `bypassGuard` — it answers a question the guard
 ///    cannot (it names the worktree), and `update-ref` would wreck the
-///    sibling silently at exit 0 (#0044 decision 2).
+///    sibling silently at exit 0 (#0044 decision 2). A **live** sibling's
+///    held branch is left alone rather than refusing the whole restore
+///    (guide §11 decision 23): dropped from the snapshot actually applied
+///    and named in the `Report`; a **prunable** holder holds nothing, so its
+///    branch is written back like any other recorded ref.
 /// 6. **Every oid the snapshot writes must still exist.** A deleted
 ///    annotated tag's object outlives capture only until maintenance — the
 ///    keep-alive parent preserves its peeled commit, never the tag object
@@ -102,15 +106,21 @@ public enum JournalRestore {
         /// oid instead (#0211, guide §11 decision 16). Nil when nothing was
         /// given up, which is the ordinary case.
         public let detachedFrom: String?
+        /// Branches a live sibling worktree has checked out, which this
+        /// restore left at their current values rather than moving (guide
+        /// §11 decision 23). Empty in the ordinary case. `HEAD`'s own
+        /// equivalent is `detachedFrom`.
+        public let leftAlone: [String]
 
         public init(entry: JournalAnchor.Entry, restored: [Piece],
                     notRestored: [Omission], checkpoint: JournalAnchor.Entry,
-                    detachedFrom: String? = nil) {
+                    detachedFrom: String? = nil, leftAlone: [String] = []) {
             self.entry = entry
             self.restored = restored
             self.notRestored = notRestored
             self.checkpoint = checkpoint
             self.detachedFrom = detachedFrom
+            self.leftAlone = leftAlone
         }
     }
 
@@ -343,20 +353,35 @@ public enum JournalRestore {
             }
         }
 
-        // 5. The sibling-disturbance check, on the snapshot being
-        // applied, regardless of bypassGuard.
+        // 5. The sibling-disturbance check, on the snapshot being applied,
+        // regardless of bypassGuard.
+        //
+        // Computed against `applied` -- the SAME snapshot step 4's guard
+        // just diffed. Dropping a disturbed branch BEFORE the guard runs
+        // would also drop it from the guard's scope, and a foreign move to
+        // a third value on that branch would stop being reported (#0232,
+        // #0248's trap) -- so the drop below happens only now, after step 4
+        // has already seen every branch `applied` records.
+        //
+        // A live sibling's held branch is left alone rather than refusing
+        // the whole restore (guide §11 decision 23): `leavingLiveDisturbances`
+        // drops it from the snapshot about to be applied and returns it for
+        // the `Report`. A prunable holder holds nothing -- its branch stays
+        // in `toApply` and is written back like any other recorded ref.
         let disturbances = WorktreeDisturbance.disturbances(
             restoring: applied,
             current: current,
             worktrees: worktrees,
             callerPath: context.topLevel)
-        guard disturbances.isEmpty else {
-            throw WorktreeDisturbance.Error.wouldDisturb(disturbances: disturbances)
-        }
+        let (toApply, leftAlone) = WorktreeDisturbance.leavingLiveDisturbances(
+            disturbances, from: applied)
 
         // 6. Every recorded oid must still exist, or the refusal comes
         // after HEAD has already moved (measured — see the type comment).
-        let missing = try missingObjects(in: applied, at: base, git: git)
+        // Checked against `toApply`: an object a left-alone branch recorded
+        // is not something this restore is about to write, so it must not
+        // be able to refuse one.
+        let missing = try missingObjects(in: toApply, at: base, git: git)
         guard missing.isEmpty else {
             throw Error.unrestorableObjects(missing: missing)
         }
@@ -385,7 +410,7 @@ public enum JournalRestore {
         // command at a temporary index via `GIT_INDEX_FILE`, so it cannot
         // clobber the index just restored. Swapping the two changes nothing,
         // and no mutation catches it — measured, not assumed.
-        try applied.restore(in: context, git: git)
+        try toApply.restore(in: context, git: git)
 
         var restored: [Piece] = [.refs, .head]
         let slots = try anchoredSlots(of: entry, at: base, git: git)
@@ -447,14 +472,16 @@ public enum JournalRestore {
             restored.append(.sequencer)
         }
 
-        // 9. Report honestly — only what was NOT put back, and what HEAD gave
-        // up rather than adopted.
+        // 9. Report honestly — only what was NOT put back, what HEAD gave up
+        // rather than adopted, and every branch left alone for a live
+        // sibling.
         return Report(
             entry: entry,
             restored: restored,
             notRestored: omissions(of: metadata.captured, restored: restored),
             checkpoint: checkpoint,
-            detachedFrom: headDetach.detachedFrom)
+            detachedFrom: headDetach.detachedFrom,
+            leftAlone: leftAlone)
     }
 
     // MARK: - Pieces
