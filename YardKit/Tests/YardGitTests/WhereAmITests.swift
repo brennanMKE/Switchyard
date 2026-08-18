@@ -460,4 +460,50 @@ struct WhereAmITests {
                 "the conflicted path counted once, plus the one ordinary unstaged path -- would read 3 if the doubled conflict entry were not deduplicated")
     }
 
+    // MARK: - Issue 0288 Required Test — untrackedCount must honor --exclude-standard
+
+    /// `untrackedCount` is backed by `git ls-files -o --exclude-standard`
+    /// (`WhereAmI.swift:245`). Dropping `--exclude-standard` makes every
+    /// ignored file count as untracked too, which would tell an agent it has
+    /// untracked work when it has none, in any repository with a populated
+    /// ignore list. This fixture commits a `.gitignore` naming `junk/`, then
+    /// writes one file inside `junk/` (must be ignored) and one file outside
+    /// it (must be genuinely untracked), and verifies both halves of that
+    /// split independently before trusting `untrackedCount`.
+    @Test func untrackedCountExcludesIgnoredFiles() throws {
+        var repo = try FixtureRepository(refFormat: .files)
+        defer { repo.destroy() }
+
+        // Commit the .gitignore itself so it never shows up as untracked.
+        try repo.build([FixtureRepository.Commit("base", files: [
+            ".gitignore": "junk/\n",
+        ])])
+
+        // One file inside the ignored directory, one genuinely untracked
+        // file elsewhere.
+        try repo.writeUntracked([
+            "junk/ignored.txt": "ignored\n",
+            "real-untracked.txt": "real\n",
+        ])
+
+        // Verify the ignore actually takes effect before trusting anything
+        // built on top of it. `git status --porcelain` must not list the
+        // ignored file; `git ls-files -o` without the flag must.
+        let status = try git.capture(["status", "--porcelain"], workingDirectory: repo.url.path)
+        #expect(!status.text.contains("junk/ignored.txt"),
+                "git status must not report the ignored file")
+        #expect(status.text.contains("real-untracked.txt"),
+                "git status must report the genuinely untracked file")
+
+        let rawUntracked = try git.capture(["ls-files", "-o"], workingDirectory: repo.url.path)
+        let rawLines = rawUntracked.text.split(separator: "\n", omittingEmptySubsequences: true)
+        #expect(rawLines.contains { $0 == "junk/ignored.txt" },
+                "git ls-files -o without --exclude-standard must list the ignored file -- otherwise this fixture proves nothing")
+        #expect(rawLines.contains { $0 == "real-untracked.txt" })
+
+        let r = try whereAmI(path: repo.url.path, git: git)
+        #expect(r.untrackedCount == 1,
+                "only the genuinely untracked file counts -- the ignored file must be excluded")
+    }
+
 }
