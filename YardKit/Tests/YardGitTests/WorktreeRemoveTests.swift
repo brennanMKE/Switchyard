@@ -282,6 +282,86 @@ struct WorktreeRemoveTests {
         #expect(detail.contains("Permission denied"))
     }
 
+    /// **Verifies the fixture actually reproduces the bug before trusting it** (#0319).
+    /// Plain `git worktree remove` — no `-c` pin, no `--force` — must *destroy* an
+    /// untracked file rather than refuse, once the repository has
+    /// `status.showUntrackedFiles = no` set. Measured directly against git 2.50.1
+    /// (see the issue's Description for the same recipe run by hand). If this ever
+    /// stopped reproducing — a git version that refused regardless of the config,
+    /// say — the regression test below would be pinning nothing.
+    @Test("plain git worktree remove destroys an untracked file under showUntrackedFiles=no")
+    func rawGitDestroysUntrackedFileUnderUnpinnedConfig() throws {
+        var fixture = try FixtureRepository()
+        let git = GitProcess()
+        let repoPath = try repoPath(for: fixture, git: git)
+
+        let worktreeURL: URL = try fixture.addWorktree(named: "raw-probe-wt", branch: "raw-probe-branch")
+        let untrackedFile = worktreeURL.appendingPathComponent("precious.txt")
+        try "do not delete me".write(to: untrackedFile, atomically: true, encoding: .utf8)
+
+        // The config a real user's `.git/config` could carry — set on the
+        // repository the removal is invoked against, exactly as `worktreeRemove`
+        // does with `workingDirectory: repositoryPath`.
+        try git.run(["config", "status.showUntrackedFiles", "no"], workingDirectory: repoPath)
+
+        // Plain, unpinned `git worktree remove` — no --force. This is the exact
+        // call the production code used to make at WorktreeRemove.swift:134.
+        let outcome = try git.capture(
+            ["worktree", "remove", worktreeURL.path],
+            workingDirectory: repoPath
+        )
+
+        #expect(outcome.exitCode == 0, "unpinned git worktree remove should succeed (not refuse) under this config — that is the bug the fix below must prevent")
+        #expect(!exists(at: worktreeURL), "the worktree, and the untracked file inside it, should be gone — this reproduces the finding before the regression test below proves it is fixed")
+    }
+
+    /// The regression this issue tracks (#0319): `wt rm` must still refuse a
+    /// worktree holding only an untracked file when the repository has
+    /// `status.showUntrackedFiles = no` set — honouring the same config
+    /// `git worktree remove` itself reads, which the unpinned invocation let
+    /// silently destroy the file instead. Assert the file's *survival*, not only
+    /// the refusal: a build that refuses and still deletes the file would pass a
+    /// test that checked only `result.success == false`. The second assertion
+    /// checks #0300's guarantee: the refusal's `paths` list still names the file,
+    /// even though the same config would otherwise degrade that scan to `[]`.
+    @Test("still refuses and preserves an untracked file under showUntrackedFiles=no", arguments: FixtureRepository.RefFormat.supported())
+    func refusesAndPreservesUntrackedFileUnderShowUntrackedFilesNo(format: FixtureRepository.RefFormat) throws {
+        var fixture = try FixtureRepository(refFormat: format)
+        let git = GitProcess()
+        let repoPath = try repoPath(for: fixture, git: git)
+
+        try git.run(["config", "status.showUntrackedFiles", "no"], workingDirectory: repoPath)
+
+        let worktreeURL: URL = try fixture.addWorktree(named: "untracked-only-wt", branch: "untracked-only-branch")
+        let untrackedFile = worktreeURL.appendingPathComponent("precious.txt")
+        try "do not delete me".write(to: untrackedFile, atomically: true, encoding: .utf8)
+
+        #expect(exists(at: worktreeURL), "worktree should exist before removal attempt")
+
+        let result: WorktreeRemoveResult = try worktreeRemove(
+            at: repoPath,
+            worktreeURL.path,
+            force: false,
+            git: git
+        )
+
+        #expect(!result.success, "wt rm must still refuse an untracked-only worktree under showUntrackedFiles=no")
+
+        // The harm this issue tracks is deletion, not merely a wrong return
+        // value — so assert survival directly, both the directory and the file.
+        #expect(exists(at: worktreeURL), "worktree directory must still exist after refusal")
+        #expect(
+            FileManager.default.fileExists(atPath: untrackedFile.path),
+            "the untracked file itself must survive the refusal"
+        )
+
+        if case let .unclean(paths) = result.error {
+            #expect(paths.contains("precious.txt"), "refusal's dirty-paths list should still name the untracked file under showUntrackedFiles=no (#0300)")
+        } else {
+            Issue.record("expected .unclean error, got \(String(describing: result.error))")
+        }
+    }
+
     /// Unknown path returns a structured error, not a crash.
     @Test("returns unknown-error for a path that is not a worktree", arguments: FixtureRepository.RefFormat.supported())
     func refusesUnknownPath(format: FixtureRepository.RefFormat) throws {
