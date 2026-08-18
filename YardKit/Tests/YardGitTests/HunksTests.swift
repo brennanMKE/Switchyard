@@ -28,6 +28,17 @@ private func twoHunkRepo(_ format: FixtureRepository.RefFormat) throws -> Fixtur
     return repo
 }
 
+// MARK: - Renames (#0267)
+
+/// A committed `old.txt`, then `git mv old.txt new.txt` staged in the index
+/// — a pure rename (100% similarity), well past git's detection threshold.
+private func stagedRenameRepo(_ format: FixtureRepository.RefFormat) throws -> FixtureRepository {
+    var repo = try FixtureRepository(refFormat: format)
+    try repo.build([.init("base", files: ["old.txt": base20()])])
+    try GitProcess().run(["mv", "old.txt", "new.txt"], workingDirectory: repo.url.path)
+    return repo
+}
+
 // MARK: - Listing and id stability (fixture-backed)
 
 @Test(arguments: FixtureRepository.RefFormat.supported())
@@ -475,4 +486,45 @@ func stagedAreaListsTheIndexNotTheWorktree(format: FixtureRepository.RefFormat) 
     let files = try HunkParser().parse(text)
     #expect(files.map(\.path) == ["z.txt"])
     #expect(files.first?.hunks.count == 1)
+}
+
+// MARK: - Rename handling (fixture-backed, #0267)
+
+/// `listHunks` pins `--no-renames` in its argument vector precisely because a
+/// rename puts two different paths on the `diff --git` line, which
+/// `HunkParser.pathFromDiffGitLine` cannot parse. Without the flag this
+/// throws `Failure.malformedFileHeader` on any repository with a rename in
+/// the diff -- the ordinary case, since `diff.renames` is on by default.
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func listHunksHandlesADetectedRenameInStagedArea(format: FixtureRepository.RefFormat) throws {
+    let repo = try stagedRenameRepo(format)
+    defer { repo.destroy() }
+
+    // Confirm git actually reports this as a rename before trusting the
+    // assertion below -- a fixture that yields A/D instead of R passes with
+    // or without --no-renames and pins nothing.
+    let status = try GitProcess().run(["diff", "--cached", "--name-status"],
+                                       workingDirectory: repo.url.path).text
+    #expect(status.hasPrefix("R"))
+
+    // With rename detection off, git reports this as two files -- new.txt
+    // added, old.txt deleted -- rather than one rename record. The point
+    // pinned here is that parsing succeeds and the new path is present, not
+    // that it is the only file.
+    let files = try listHunks(at: repo.url.path, area: .staged)
+    let newFile = try #require(files.first { $0.path == "new.txt" })
+    #expect(newFile.newMode != nil)
+}
+
+/// `--default-prefix` overrides `diff.noprefix`, which otherwise drops the
+/// `a/`/`b/` prefix `pathFromDiffGitLine` requires. Same fixture shape as
+/// the two-hunk listing tests above, just with the config flipped first.
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func listHunksIgnoresDiffNoprefixConfig(format: FixtureRepository.RefFormat) throws {
+    let repo = try twoHunkRepo(format)
+    defer { repo.destroy() }
+    try GitProcess().run(["config", "diff.noprefix", "true"], workingDirectory: repo.url.path)
+
+    let files = try listHunks(at: repo.url.path, area: .unstaged)
+    #expect(files.map(\.path) == ["f.txt"])
 }
