@@ -204,6 +204,34 @@ func orphanRootReusesAFreedLane(format: FixtureRepository.RefFormat) throws {
 }
 
 @Test(arguments: FixtureRepository.RefFormat.supported())
+func revisionNamedLikeADirectoryDoesNotThrow(format: FixtureRepository.RefFormat) throws {
+    // `docs`, `test` and `build` are ordinary as both a branch name and a
+    // tracked directory. A commit under `docs/` makes the directory really
+    // exist in the checkout, and a branch named `docs` makes the ref really
+    // exist too -- the two-way ambiguity `graphRows`'s trailing `--` exists
+    // to resolve.
+    var repo = try FixtureRepository(refFormat: format)
+    defer { repo.destroy() }
+    try repo.build([.init("a", files: ["docs/readme.txt": "docs\n"])])
+    try repo.branch("docs", at: "a")
+
+    // Verify the ambiguity is real in this fixture: without a trailing `--`,
+    // git itself refuses the bare name. A fixture where git resolves it
+    // anyway would pin nothing.
+    let git = GitProcess()
+    do {
+        _ = try git.run(["rev-list", "docs"], workingDirectory: repo.url.path)
+        Issue.record("expected git to refuse 'docs' as ambiguous")
+    } catch let GitProcess.Failure.exited(_, stderr, _) {
+        #expect(stderr.contains("ambiguous argument"))
+    }
+
+    // graphRows appends its own trailing `--`, so the same name must not throw.
+    let rows = try graphRows(at: repo.url.path, revisions: ["docs"])
+    #expect(rows.map(\.oid) == [repo.oids["a"]])
+}
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
 func unbornRepositoryThrows(format: FixtureRepository.RefFormat) throws {
     let repo = try FixtureRepository(refFormat: format)
     defer { repo.destroy() }
