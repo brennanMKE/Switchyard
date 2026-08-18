@@ -580,8 +580,16 @@ struct PostRewriteAttachTests {
             readStandardInput: { invocation.stdin })
         #expect(decision.isOwnInvocation)
 
+        // Deliberately NOT passing `stillInProgress:` -- the default nil
+        // makes `attachRewrite` re-probe the sequencer itself, which is the
+        // path a real `post-rewrite` hook (#0217) takes. Injecting the
+        // answer here would leave that re-probe unpinned: review measured
+        // that replacing it with a constant `true` kept the whole suite
+        // green. The abort has already torn the sequencer down, so the
+        // re-probe answers false and this asserts exactly what the injected
+        // value would have.
         let attached = try JournalCheckpoint.attachRewrite(
-            decision, entryID: nil, stillInProgress: invocation.resumable, in: context)
+            decision, entryID: nil, in: context)
         #expect(attached == nil,
                 "a file naming an already-abandoned operation must never capture a later, unrelated rewrite")
         #expect(!FileManager.default.fileExists(atPath: pendingPath),
