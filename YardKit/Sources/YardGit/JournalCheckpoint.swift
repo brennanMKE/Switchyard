@@ -300,6 +300,16 @@ public extension JournalCheckpoint {
         _ body: (GitProcess) throws -> T
     ) throws -> T {
         let context = try WorktreeContext.resolve(path: path, git: git)
+        // #0264: the answer to "was a sequencer already live when THIS call
+        // started" is the one question #0253/#0254/#0261 never asked -- each
+        // reasoned about the worktree ("is any rebase live", "does the slot
+        // name a live entry"), never about this call. Bound once, before
+        // `body` runs, and required again in the catch below: a body can
+        // only have left a resumable operation behind if none was live when
+        // it started. A foreign rebase already live at this point belongs to
+        // nobody switchyard knows about and must never be claimed on its
+        // behalf.
+        let sequencerWasLiveBefore = try SequencerSnapshot.capture(in: context, git: git) != nil
         // #0261: a slot left by an operation that has since ended -- an
         // out-of-band `git rebase --abort` is the reachable case -- names a
         // live ENTRY long after its operation is gone, and #0254's
@@ -307,7 +317,7 @@ public extension JournalCheckpoint {
         // divert its rewrite onto the older entry (measured). Nothing is live
         // yet at this point in the call, so an existing slot here is stale by
         // construction.
-        if try SequencerSnapshot.capture(in: context, git: git) == nil {
+        if !sequencerWasLiveBefore {
             let pendingPath = try context.path(
                 for: RepositoryLayout.inFlightEntryIDRelativePath, git: git)
             try? fileManager.removeItem(atPath: pendingPath)
@@ -324,48 +334,43 @@ public extension JournalCheckpoint {
             // its id persisted -- validated against the live sequencer right
             // here, not inferred from the throw alone, since `Fixup`'s own
             // `git rebase --abort` arms throw too and must leave nothing.
-            if try SequencerSnapshot.capture(in: context, git: git) != nil {
-                let pendingPath = try context.path(
-                    for: RepositoryLayout.inFlightEntryIDRelativePath, git: git)
-                // #0254: first-writer-wins. The sequencer being live does not
-                // mean THIS body is the one that left it live -- a second,
-                // unrelated call can throw while an earlier call's rebase is
-                // still in progress, and must not steal its slot.
-                if try !slotNamesALiveEntry(at: pendingPath, in: context, git: git, fileManager: fileManager) {
+            if let sequencerNow = try SequencerSnapshot.capture(in: context, git: git) {
+                // #0264: a body can only have left ITS OWN resumable
+                // operation behind if nothing was already live when this
+                // call started. `!sequencerWasLiveBefore` replaces #0254's
+                // `slotNamesALiveEntry` first-writer-wins check: every
+                // reachable case that check caught -- a second call's own
+                // body throwing while an earlier call's rebase is still
+                // live -- already has `sequencerWasLiveBefore == true` for
+                // the second call, so this condition refuses the claim
+                // before `slotNamesALiveEntry` would ever have been asked
+                // (`aSecondConflictingFixupCannotClobberTheFirstsInFlightSlot`
+                // still passes on this alone -- see this issue's Work log for
+                // confirmation it was run). No test in this suite can reach a
+                // case where `slotNamesALiveEntry` would refuse a claim this
+                // condition allows, so keeping it as a second, unpinned check
+                // would be dead protection; removed instead.
+                if !sequencerWasLiveBefore {
+                    let pendingPath = try context.path(
+                        for: RepositoryLayout.inFlightEntryIDRelativePath, git: git)
                     try fileManager.createDirectory(
                         atPath: URL(fileURLWithPath: pendingPath).deletingLastPathComponent().path,
                         withIntermediateDirectories: true)
-                    try entry.id.string.write(toFile: pendingPath, atomically: true, encoding: .utf8)
+                    // Stamped with the live operation's own `orig-head`
+                    // (measured, git 2.50.1: both `rebase-merge` and
+                    // `rebase-apply` write one) so the read side can tell
+                    // "the operation this slot was written for" from "some
+                    // other operation that happens to be live now" -- read
+                    // fresh, here, at the only moment this call can be sure
+                    // `sequencerNow` is the operation the write is about.
+                    let origHead: String? = (try? liveSequencerOrigHead(
+                        for: sequencerNow.layout, in: context, git: git)).flatMap { $0 }
+                    let stamp = "\(entry.id.string) \(origHead ?? "")"
+                    try stamp.write(toFile: pendingPath, atomically: true, encoding: .utf8)
                 }
             }
             throw error
         }
-    }
-
-    /// Whether `pendingPath` already exists and names a journal entry that
-    /// is still live (#0254) -- the first-writer-wins check `around`'s catch
-    /// runs before claiming the slot for its own throw. Deliberately does
-    /// **not** also require the operation still be in progress, unlike
-    /// `inFlightEntryID`'s `stillInProgress` check: this runs only when the
-    /// caller has already confirmed *some* sequencer is live in this
-    /// worktree, and a worktree holds at most one rebase at a time, so a
-    /// pre-existing file naming a still-live entry can only be describing
-    /// that same live operation. An unparseable file, or one naming an
-    /// entry that no longer exists, is treated as an empty slot -- the same
-    /// stale-file handling `inFlightEntryID` gives the read side, applied
-    /// here on the write side instead of removing the file outright, since
-    /// removing it here would race whatever left it.
-    private static func slotNamesALiveEntry(
-        at pendingPath: String,
-        in context: WorktreeContext,
-        git: GitProcess,
-        fileManager: FileManager
-    ) throws -> Bool {
-        guard fileManager.fileExists(atPath: pendingPath),
-              let contents = try? String(contentsOfFile: pendingPath, encoding: .utf8),
-              let id = JournalEntryID(contents.trimmingCharacters(in: .whitespacesAndNewlines))
-        else { return false }
-        return try JournalAnchor.list(in: context, git: git).contains { $0.id == id }
     }
 
     /// Attaches an own-invocation rewrite mapping to the journal entry that
@@ -437,6 +442,7 @@ public extension JournalCheckpoint {
         _ decision: PostRewrite.Decision,
         entryID: JournalEntryID?,
         stillInProgress: Bool? = nil,
+        liveOrigHead: String? = nil,
         in context: WorktreeContext,
         git: GitProcess = GitProcess(),
         fileManager: FileManager = .default
@@ -450,10 +456,21 @@ public extension JournalCheckpoint {
 
         let pendingPath = try context.path(
             for: RepositoryLayout.inFlightEntryIDRelativePath, git: git)
-        let resolvedStillInProgress = try stillInProgress
-            ?? (SequencerSnapshot.capture(in: context, git: git) != nil)
+        // `stillInProgress` and `liveOrigHead` both default to a fresh read,
+        // exactly `inFlightEntryID`'s own doc comment already describes for
+        // `stillInProgress` alone -- right for a caller with no better
+        // information, but *stale by construction* for a real
+        // `post-rewrite` hook (#0217), which must supply both, captured
+        // synchronously while it still holds the sequencer directory open
+        // (#0253's own reasoning, extended by #0264 to the stamp).
+        let currentSequencer = try SequencerSnapshot.capture(in: context, git: git)
+        let resolvedStillInProgress = stillInProgress ?? (currentSequencer != nil)
+        let resolvedLiveOrigHead = try liveOrigHead ?? currentSequencer.flatMap {
+            try liveSequencerOrigHead(for: $0.layout, in: context, git: git)
+        }
         guard let resolvedID = try entryID ?? inFlightEntryID(
             at: pendingPath, stillInProgress: resolvedStillInProgress,
+            liveOrigHead: resolvedLiveOrigHead,
             in: context, git: git, fileManager: fileManager)
         else { return nil }
 
@@ -501,20 +518,62 @@ public extension JournalCheckpoint {
     private static func inFlightEntryID(
         at pendingPath: String,
         stillInProgress: Bool,
+        liveOrigHead: String?,
         in context: WorktreeContext,
         git: GitProcess,
         fileManager: FileManager
     ) throws -> JournalEntryID? {
         guard fileManager.fileExists(atPath: pendingPath),
-              let contents = try? String(contentsOfFile: pendingPath, encoding: .utf8),
-              let id = JournalEntryID(contents.trimmingCharacters(in: .whitespacesAndNewlines))
+              let contents = try? String(contentsOfFile: pendingPath, encoding: .utf8)
         else { return nil }
 
+        // #0264: the slot's contents are `<entry-id> <orig-head-oid>`,
+        // written by `around`'s catch. A slot with no stamp -- written
+        // before this change, or otherwise malformed -- cannot be checked
+        // against the live operation and is treated as stale: the safe
+        // direction, costing one missed attach, once.
+        let fields = contents
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: " ", omittingEmptySubsequences: true)
+        guard fields.count == 2, let id = JournalEntryID(String(fields[0])) else {
+            try? fileManager.removeItem(atPath: pendingPath)
+            return nil
+        }
+        let stampedOrigHead = String(fields[1])
+
         let stillLive = try JournalAnchor.list(in: context, git: git).contains { $0.id == id }
-        guard stillLive, stillInProgress else {
+        // The slot must name a still-live journal entry, an operation that
+        // is genuinely still in progress (#0253), AND -- #0264 -- the
+        // currently live operation's own `orig-head` must be the one this
+        // slot was stamped for. A slot surviving from a different, unrelated
+        // live operation (route 2: an out-of-band abort followed by a
+        // foreign rebase) is stale by construction even though "some
+        // sequencer is live" alone would say otherwise.
+        guard stillLive, stillInProgress,
+              let liveOrigHead, liveOrigHead == stampedOrigHead
+        else {
             try? fileManager.removeItem(atPath: pendingPath)
             return nil
         }
         return id
+    }
+
+    /// The pre-rebase oid a live sequencer directory recorded in its own
+    /// `orig-head` file -- measured, git 2.50.1: both `rebase-merge` and
+    /// `rebase-apply` write one, the same oid recorded in both layouts for
+    /// one stopped rebase (this issue's own Work log). Resolved through
+    /// `WorktreeContext.path(for:)` -- `worktrees/<name>/rebase-merge/
+    /// orig-head` -- never by concatenating onto `.git/`. `nil` when the
+    /// file is missing or empty, which the stamp comparison in
+    /// `inFlightEntryID` treats as a non-match, not a crash.
+    private static func liveSequencerOrigHead(
+        for layout: SequencerSnapshot.Layout,
+        in context: WorktreeContext,
+        git: GitProcess
+    ) throws -> String? {
+        let path = try context.path(for: layout.rawValue + "/orig-head", git: git)
+        guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
+        let oid = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return oid.isEmpty ? nil : oid
     }
 }
