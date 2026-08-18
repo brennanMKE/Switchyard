@@ -74,7 +74,14 @@ public enum WorktreeDisturbance {
             switch self {
             case let .wouldDisturb(disturbances):
                 let details = disturbances.map { d in
-                    let change = d.target.map { "move to \($0)" } ?? "delete it"
+                    // `d.target` is never nil for a `Disturbance` this type
+                    // actually produces (#0244's guard proves it), but the
+                    // field stays `String?` for wire stability (#0130), so
+                    // this still needs a fallback. "delete it" would be
+                    // false — restore no longer deletes anything (guide §11
+                    // decision 20) — so the fallback says only what is true
+                    // regardless of which of the two real cases applies.
+                    let change = d.target.map { "move to \($0)" } ?? "touch it"
                     let claim = d.prunable
                         ? " (worktree directory is gone; release with git worktree prune)"
                         : ""
