@@ -2046,4 +2046,132 @@ struct PostRewriteAttachTests {
         #expect(!FileManager.default.fileExists(atPath: entryIDPath),
                 "no file can exist at a path around never successfully resolved")
     }
+
+    /// #0292 (proposal 1 of #0160's eighth umbrella review): the same
+    /// principle extends one call earlier -- the `try?
+    /// SequencerSnapshot.capture` immediately above the `--git-path`
+    /// resolution the previous test pins. Failing it must degrade the same
+    /// way: `around`'s catch finds nothing to write into and rethrows the
+    /// body's own error unchanged, not a `GitProcess.Failure` from the
+    /// capture itself.
+    ///
+    /// Extends the shim above rather than inventing a third technique, but
+    /// it cannot simply fail every `--git-path rebase-merge` call the way
+    /// the previous test fails every `--git-path
+    /// <sequencerEntryIDFileName>` call: `around` (`sequencerWasLiveBefore`)
+    /// and `checkpoint` (inside `JournalLock.withLock`) each call
+    /// `SequencerSnapshot.capture` with an unguarded `try` *before* `body`
+    /// ever runs, so an unconditional failure would abort `around` before
+    /// the body's real conflict ever happens, and this test would pin
+    /// nothing. Instead the shim only starts failing `--git-path
+    /// rebase-merge` once a marker file exists, and the marker is created by
+    /// the body itself -- after its own real rebase has already conflicted
+    /// and left `rebase-apply/` live on disk, immediately before
+    /// rethrowing -- so the only `--git-path rebase-merge` query the shim
+    /// ever fails is the one `around`'s catch makes afterward.
+    @Test func aFailedSequencerCaptureDoesNotReplaceTheBodysError() throws {
+        var repo = try FixtureRepository(refFormat: .files)
+        defer { repo.destroy() }
+
+        // c1, on main: f = "a"
+        try "a\n".write(to: repo.url.appendingPathComponent("f"),
+                        atomically: true, encoding: .utf8)
+        try git.run(["add", "-A"], workingDirectory: repo.url.path)
+        try git.run(["commit", "-qm", "c1"], workingDirectory: repo.url.path,
+                    extraEnvironment: hermetic)
+
+        // A side branch off c1.
+        try git.run(["checkout", "-qb", "side"], workingDirectory: repo.url.path,
+                    extraEnvironment: hermetic)
+
+        // c2, back on main: f = "b" -- main moves past c1 on the same line.
+        try git.run(["checkout", "-q", "main"], workingDirectory: repo.url.path,
+                    extraEnvironment: hermetic)
+        try "b\n".write(to: repo.url.appendingPathComponent("f"),
+                        atomically: true, encoding: .utf8)
+        try git.run(["commit", "-qam", "c2"], workingDirectory: repo.url.path,
+                    extraEnvironment: hermetic)
+
+        // c3, on side: f = "c" -- a conflicting edit to the same line.
+        try git.run(["checkout", "-q", "side"], workingDirectory: repo.url.path,
+                    extraEnvironment: hermetic)
+        try "c\n".write(to: repo.url.appendingPathComponent("f"),
+                        atomically: true, encoding: .utf8)
+        try git.run(["commit", "-qam", "c3"], workingDirectory: repo.url.path,
+                    extraEnvironment: hermetic)
+
+        // A shim that is real git for everything except `--git-path
+        // rebase-merge` once the marker file below exists.
+        let shimDir = NSTemporaryDirectory() + "yard-shim-\(UUID().uuidString)"
+        try FileManager.default.createDirectory(
+            atPath: shimDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: shimDir) }
+        let shimPath = shimDir + "/git-shim.sh"
+        let markerPath = shimDir + "/fail-now"
+        let script = """
+        #!/bin/sh
+        case "$*" in
+          *--git-path*rebase-merge*) [ -f "\(markerPath)" ] && exit 1; exec /usr/bin/git "$@" ;;
+          *) exec /usr/bin/git "$@" ;;
+        esac
+        """
+        try script.write(toFile: shimPath, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: shimPath)
+        let flakyGit = GitProcess(executablePath: shimPath)
+
+        var caught: Error?
+        do {
+            _ = try JournalCheckpoint.around(
+                operation: "apply-backend-capture-failure", at: repo.url.path, git: flakyGit
+            ) { scoped in
+                do {
+                    try scoped.run(["rebase", "--apply", "main"], workingDirectory: repo.url.path,
+                                   extraEnvironment: hermetic)
+                } catch {
+                    // The conflict has already left `rebase-apply/` live --
+                    // arm the shim now, so the only `--git-path rebase-merge`
+                    // query it ever fails is the one `around`'s catch makes
+                    // after this rethrow, not the two that already succeeded
+                    // before the body ran (`sequencerWasLiveBefore` and
+                    // `checkpoint`'s own capture).
+                    try "1".write(toFile: markerPath, atomically: true, encoding: .utf8)
+                    throw error
+                }
+            }
+            Issue.record("expected around to rethrow the body's error")
+        } catch {
+            caught = error
+        }
+
+        // Both the body's own conflict and the shim's induced failure throw
+        // `GitProcess.Failure`, so the type alone cannot tell them apart --
+        // `arguments` can: only the body's real `rebase --apply` command
+        // names `"rebase"` as an element, and only the shim-failed capture
+        // names `"--git-path"`.
+        let error = try #require(caught, "around must rethrow something")
+        guard case let .exited(_, _, arguments) = try #require(error as? GitProcess.Failure) else {
+            Issue.record("expected a GitProcess.Failure(.exited), got \(error)")
+            return
+        }
+        #expect(arguments.contains("rebase"),
+                "the body's own conflicting rebase must be what around rethrows")
+        #expect(!arguments.contains("--git-path"),
+                "the sequencer capture's own failure must not have replaced the body's error")
+
+        // The shim's fail branch was genuinely exercised, not merely
+        // present: once the marker is cleared, real git still finds
+        // `rebase-apply/` live, and no entry-id file exists at the path
+        // `around` never got far enough to resolve.
+        try FileManager.default.removeItem(atPath: markerPath)
+        let context = try WorktreeContext.resolve(path: repo.url.path)
+        defer { _ = try? SequencerSnapshot.clear(in: context, git: git) }
+        let sequencer = try #require(try SequencerSnapshot.capture(in: context, git: git))
+        #expect(sequencer.layout == .rebaseApply)
+        let entryIDPath = try context.path(
+            for: sequencer.layout.rawValue + "/" + RepositoryLayout.sequencerEntryIDFileName,
+            git: git)
+        #expect(!FileManager.default.fileExists(atPath: entryIDPath),
+                "no file can exist at a path around never successfully resolved")
+    }
 }
