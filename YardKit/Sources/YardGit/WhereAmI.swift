@@ -39,10 +39,11 @@ public struct WhereAmI: Sendable, Equatable {
     /// `git ls-files --others --exclude-standard`.
     public let untrackedCount: Int
 
-    /// Number of files with unstaged changes, as returned by
-    /// `git diff-index --name-status HEAD`. The code splits stdout on `\n` and
-    /// counts non-empty lines; a non-zero exit on a fresh repository (no HEAD)
-    /// is treated as zero files.
+    /// Number of files differing between the index and the working tree, as
+    /// returned by `git diff --name-only -z`. A file that is staged and left
+    /// otherwise untouched is **not** counted here — see the probe at
+    /// `WhereAmI.swift:250-278` for the measurements that pin this against
+    /// `git diff-index HEAD`, which counted it wrongly (#0262).
     public let unstagedCount: Int
 
     /// Number of files with staged changes, as returned by
@@ -247,14 +248,34 @@ public func whereAmI(
         return text.count
     }()
 
-    // Unstaged: `diff-index HEAD --name-status` lists entries with unstaged
-    // changes, one per line. Each line is a file in modified state.
+    // Unstaged: `git diff-index HEAD` compares HEAD to the working tree, so a
+    // file that is staged and then left alone still shows up as "changed"
+    // there — measured, git 2.50.1: one file staged via `git add` with the
+    // working tree otherwise matching the index gives `git diff --name-only`
+    // empty output but `git diff-index --name-status HEAD` reports `M`. The
+    // correct probe for index-vs-working-tree is `git diff --name-only`
+    // (equivalently `git diff-files`, measured identical here, including for
+    // a file deleted from the working tree and a mode-only change — both
+    // detect the deletion because the path simply does not exist to stat).
+    // `-z` is used, matching `conflictCount` below, because the non-`-z` form
+    // quotes paths with special characters. Fields are deduplicated through a
+    // `Set` rather than simply counted: measured against a repository with an
+    // unmerged (conflicted) path, plain `git diff --name-only -z` (no
+    // `--diff-filter`) lists that path *twice* — once against each side of
+    // the conflict — where `git diff-index HEAD` and `conflictCount`'s
+    // `--diff-filter=U` each list it once. Without the dedup, a conflicted
+    // repository would overcount unstagedCount by one per conflicted path.
     let unstagedCount: Int = {
         guard let out = try? git.capture(
-            ["diff-index", "--name-status", "HEAD"], workingDirectory: path),
-              out.exitCode == 0 else { return 0 }
-        let text = out.text.split(separator: "\n", omittingEmptySubsequences: true)
-        return text.count
+            ["diff", "--name-only", "-z"], workingDirectory: path) else { return 0 }
+        // `out.standardOutput` is NUL-terminated, same convention as
+        // `conflictCount` below.
+        let bytes = out.standardOutput
+        guard !bytes.isEmpty else { return 0 }
+        // Strip the trailing NUL that `--name-only -z` appends.
+        let trimmed = bytes.dropLast(1)
+        guard !trimmed.isEmpty else { return 0 }
+        return Set(trimmed.split(whereSeparator: { $0 == 0 })).count
     }()
 
     // Staged: `diff-index --cached HEAD` lists entries with staged changes.
