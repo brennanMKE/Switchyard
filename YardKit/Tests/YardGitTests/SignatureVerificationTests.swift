@@ -85,6 +85,67 @@ private func craftedCommit(in repo: FixtureRepository, block: String) throws -> 
     #expect(result.state != .noSignature)
 }
 
+/// Writes `script` into the fixture worktree, marks it executable, and
+/// points `gpg.program` at it -- the same shape as `CommitCreateGPGTests.
+/// installFakeGpg` (#0037), duplicated here rather than shared across files.
+/// `installFakeGpg` is declared `private` there, and Swift's top-level
+/// `private` is file-scoped, so it is not visible from this file; promoting
+/// it to module-visible would collide with the two *other* files that
+/// already carry their own private copy of this exact helper for the same
+/// reason (`FixupTests.swift`, and `GitProcessTimeoutTests.swift` -- whose
+/// own comment reads "duplicated here so this file has no cross-file
+/// private dependency"). De-duplicating three call sites at once is outside
+/// #0270's scope, which names only this file and the one already holding
+/// the helper, so this follows the pattern already established rather than
+/// inventing a fourth approach.
+private func installFakeGpg(_ script: String, in repo: FixtureRepository) throws {
+    try repo.writeUntracked(["fake-gpg.sh": script])
+    let path = repo.url.appendingPathComponent("fake-gpg.sh").path
+    try FileManager.default.setAttributes(
+        [.posixPermissions: 0o755], ofItemAtPath: path)
+    try GitProcess().run(
+        ["config", "gpg.program", path], workingDirectory: repo.url.path)
+}
+
+/// Reports a good, trusted signature the way `%G?`/`%GS`/`%GK` read it,
+/// measured against git 2.50.1: git invokes `gpg.program` with
+/// `--keyid-format=long --status-fd=1 --verify <tmp> -` for `git log`'s
+/// `%G?` family, so status lines belong on stdout here (unlike the
+/// signing-time scripts in `CommitCreateGPGTests`, which write to stderr
+/// because git passes `--status-fd=2` when signing).
+private let verifyingGpgScript = """
+#!/bin/sh
+echo "[GNUPG:] NEWSIG"
+echo "[GNUPG:] GOODSIG DEADBEEFCAFE1234 Fixture <f@example.invalid>"
+echo "[GNUPG:] VALIDSIG ABCDEF0123456789ABCDEF0123456789ABCDEF01 2026-01-01 1700000000 0 4 0 1 8 00 ABCDEF0123456789ABCDEF0123456789ABCDEF01"
+echo "[GNUPG:] TRUST_ULTIMATE 0 pgp"
+exit 0
+"""
+
+/// `run`'s `%GS`/`%GK` extraction (`fields[1]`/`fields[2]`), reached through
+/// `run` itself rather than through `parse` alone. No real signing key is
+/// involved: `craftedCommit` fabricates a `gpgsig` header directly (as the
+/// other tests here do), and `installFakeGpg` — reused from
+/// `CommitCreateGPGTests` rather than reimplemented — points `gpg.program`
+/// at a script that reports success the way `git log` invokes it for
+/// verification. Measured: `git -c gpg.program=./fakegpg.sh log -1
+/// --format='%G?%x01%GS%x01%GK' <sha> --` prints
+/// `G\u{01}Fixture <f@example.invalid>\u{01}DEADBEEFCAFE1234`.
+@Test func goodSignatureReportsSignerAndKeyFromFakeGpg() throws {
+    var repo = try FixtureRepository()
+    defer { repo.destroy() }
+    try repo.build([FixtureRepository.Commit("a")])
+
+    let sha = try craftedCommit(in: repo, block: fakePGPSignatureBlock)
+    try installFakeGpg(verifyingGpgScript, in: repo)
+
+    let result = try SignatureVerification.run(revision: sha, in: repo.url.path, extraEnvironment: hermetic)
+    #expect(result.state == .good)
+    #expect(result.format == .openpgp)
+    #expect(result.signer == "Fixture <f@example.invalid>")
+    #expect(result.key == "DEADBEEFCAFE1234")
+}
+
 @Test func missingGpgToolReportsCannotCheckWithOpenPGPFormat() throws {
     var repo = try FixtureRepository()
     defer { repo.destroy() }
