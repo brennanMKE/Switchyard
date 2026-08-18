@@ -1261,6 +1261,45 @@ a feature at any milestone on the grounds that GitUp had it.
 
 ### Still open
 
+**Is M1's criterion 5 closable as written, and should it be restated?** Raised by the twelfth M1
+milestone review, 2026-08-18, after twelve passes and thirty-nine findings. **This is Brennan's call; it
+is recorded rather than acted on.**
+
+**The reviewer's finding, which I think is right:** the criterion *as literally written* — "every engine
+function has tests that can fail: each has a mutation recorded against a named test that dies under it"
+— **was met around pass 1 and has been re-met every pass since.** Every function named in criteria 1 and
+2 has a named killer on record. What twelve passes have actually been testing is an unwritten and
+stronger criterion — *no reachable behaviour is unasserted* — whose search space is git's output
+vocabulary × git's configuration surface × every branch and ordering in the parsers. Pass 10 was clean;
+pass 11 found four; pass 12 found seven. **A clean pass has meant "this reviewer looked elsewhere", not
+"the seam is exhausted."**
+
+**The residue is not shapeless, which is the way out.** Every finding since pass 2 lands in one of five
+classes: (1) a vocabulary element git can emit that no fixture produces; (2) a config-pinning flag whose
+opposing config no fixture sets; (3) a scan direction where both directions agree on every fixture; (4) a
+field asserted only at its zero value; (5) a hand-written conformance silently omitting a member.
+
+**A bounded restatement**, which a review could exhaustively discharge rather than sample — for each
+engine function named in criteria 1 and 2: **(a)** every case of every enum parsed out of git output
+appears in a table-driven test fed the real git bytes, with the case count asserted; **(b)** every flag
+or `-c` that pins git's output against user config has one test setting the opposing config, with the row
+count asserted; **(c)** every hand-written `==`, `encode(to:)` and `description` is checked against its
+type's stored members; **(d)** every scan whose direction is load-bearing has an input with at least two
+candidates; **(e)** no field is asserted only at its zero value.
+
+(a), (b) and (c) are derived **from the source**, so two reviewers get the same answer — and (a) and (c)
+can be enforced *inside the suite*, which is **#0316**. That issue is worth doing whichever way this
+question goes.
+
+**The counter-argument, and it is real:** sampling has paid. #0262, #0280, #0283, #0288, #0293, #0296,
+#0310, #0311, #0313 and #0314 are genuine defects, several of them outright failures on ordinary
+repositories. What the enumeration gives up is the class *"git does something nobody has seen"* — and
+that is not a property any milestone can be **shown** to have. It belongs in a standing practice (add a
+fixture whenever a real repository surprises the engine) rather than in an exit criterion.
+
+**Until this is answered, M1 stays open and the clean-review count stays at 0.** The milestone must not
+close on a pass that only means one reviewer ran out of ideas.
+
 Decide these with Brennan, do not decide them in code.
 
 1. **Rebase engine scope.** GitUp wrote its own. How much of one does M5 actually require, and
