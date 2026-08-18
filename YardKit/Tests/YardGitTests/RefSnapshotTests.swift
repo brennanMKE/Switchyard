@@ -58,7 +58,9 @@ struct RefSnapshotTests {
     // MARK: - Round trips
 
     @Test(arguments: FixtureRepository.RefFormat.supported())
-    func roundTripRestoresMovedCreatedAndDeletedRefs(format: FixtureRepository.RefFormat) throws {
+    func roundTripRestoresMovedAndDeletedRefsButLeavesRefsCreatedSinceAlone(
+        format: FixtureRepository.RefFormat
+    ) throws {
         var repo = try FixtureRepository.linear(refFormat: format)
         defer { repo.destroy() }
         try repo.branch("side", at: "b")
@@ -73,7 +75,18 @@ struct RefSnapshotTests {
         #expect(try snapshot(of: repo) != snap)
 
         try snap.restore(in: WorktreeContext.resolve(path: repo.url.path))
-        #expect(try snapshot(of: repo) == snap)
+
+        // Every ref the snapshot recorded round-trips: `main` moved back,
+        // `side` re-created.
+        let after = try snapshot(of: repo)
+        #expect(snap.refs.allSatisfy { want in
+            after.refs.contains(where: { $0.name == want.name && $0.oid == want.oid })
+        })
+        // `extra` was created after capture, so restore under option A
+        // (guide §11 decision 20) leaves it alone rather than deleting it as
+        // an "extra" ref.
+        #expect(try WorktreeContext.resolve(path: repo.url.path)
+            .resolveRef("refs/heads/extra", inWorktree: nil) == a)
     }
 
     /// The measured trap this design exists for: restoring while standing on
@@ -81,20 +94,28 @@ struct RefSnapshotTests {
     /// no-deref transaction — dereferenced, `symref-update HEAD` corrupts the
     /// current branch into a self-referential symref, and a single combined
     /// transaction is a multiple-updates fatal.
-    @Test func restoreRetargetsSymbolicHeadAndDeletesTheBranchItWasOn() throws {
+    @Test func restoreRetargetsSymbolicHeadWithoutDeletingTheBranchItWasOn() throws {
         var repo = try FixtureRepository.linear()
         defer { repo.destroy() }
         let snap = try snapshot(of: repo)
 
         try git.run(["checkout", "-q", "-b", "temp"], workingDirectory: repo.url.path)
+        let tempOid = try repo.revParse("refs/heads/temp")
         try snap.restore(in: WorktreeContext.resolve(path: repo.url.path))
 
         let head = try git.run(["symbolic-ref", "HEAD"], workingDirectory: repo.url.path)
         #expect(head.lines.first == "refs/heads/main")
+        // `temp` was created after capture and restore under option A (guide
+        // §11 decision 20) no longer deletes refs it did not record — it
+        // survives, at the oid it held when the branch was on it.
         let temp = try git.capture(["rev-parse", "--verify", "-q", "refs/heads/temp"],
                                    workingDirectory: repo.url.path)
-        #expect(temp.exitCode != 0, "refs/heads/temp must not survive, or be resurrected by, restore")
-        #expect(try snapshot(of: repo) == snap)
+        #expect(temp.exitCode == 0, "refs/heads/temp must survive restore")
+        #expect(temp.lines.first == tempOid)
+        let after = try snapshot(of: repo)
+        #expect(snap.refs.allSatisfy { want in
+            after.refs.contains(where: { $0.name == want.name && $0.oid == want.oid })
+        })
     }
 
     @Test func restoreDetachesHead() throws {

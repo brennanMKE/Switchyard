@@ -2,12 +2,20 @@
 
 import Foundation
 
-/// A point-in-time capture of every direct ref plus this worktree's `HEAD`,
-/// restorable exactly. The first journal snapshot primitive: refs are a list
-/// of name/OID pairs read with `git for-each-ref`, and restore applies the
-/// whole list — updates, re-creations, and deletions of refs created since —
+/// A point-in-time capture of every direct ref plus this worktree's `HEAD`.
+/// The first journal snapshot primitive: refs are a list of name/OID pairs
+/// read with `git for-each-ref`, and restore writes the whole list back
 /// through `git update-ref --stdin`, one transaction, so a partial
 /// application of the ref list is impossible.
+///
+/// Restore does **not** delete refs the snapshot did not record: the
+/// repository matches the snapshot **except** for refs created since the
+/// capture, which restore leaves untouched. **Guide §11 decision 20**
+/// (2026-08-17, on #0231): restore previously deleted every direct ref
+/// absent from the snapshot, so a branch or tag a sibling worktree created
+/// after the checkpoint was removed silently — no refusal, nothing in the
+/// report. What that gave up, and what this type comment used to promise,
+/// is that the repository would match the snapshot exactly.
 ///
 /// Three git behaviors, all measured on 2.50.1, dictate the shape:
 ///
@@ -163,9 +171,11 @@ public struct RefSnapshot: Sendable, Equatable {
 
     // MARK: - Restore
 
-    /// Restores `HEAD` and then every ref, deleting refs that did not exist
-    /// at capture. The ref transaction is atomic: if any single update cannot
-    /// apply, git rejects the batch and no ref moves.
+    /// Restores `HEAD` and then writes back every ref the snapshot recorded.
+    /// A ref created since capture is left untouched — restore no longer
+    /// deletes refs it did not record (guide §11 decision 20). The ref
+    /// transaction is atomic: if any single update cannot apply, git rejects
+    /// the batch and no ref moves.
     ///
     /// `HEAD` goes first, alone, per the type comment: git rejects a
     /// transaction that touches both `HEAD` and its referent, and restore
@@ -190,15 +200,10 @@ public struct RefSnapshot: Sendable, Equatable {
         try git.run(["update-ref", "--stdin"], workingDirectory: base,
                     standardInput: Data(headCommands.utf8))
 
-        // Deletions are planned from the same listing rules as capture, so a
-        // symref (origin/HEAD) is never deleted as "extra" and the journal
-        // namespace is never touched.
+        // Every recorded ref is written back. Anything not recorded — a
+        // symref like origin/HEAD, the journal's own namespace, or a ref
+        // created since capture — is never touched (guide §11 decision 20).
         var commands = ""
-        let wanted = Set(refs.map(\.name))
-        for current in try Self.listDirectRefs(at: base, git: git)
-        where !wanted.contains(current.name) {
-            commands += "delete \(current.name)\n"
-        }
         for entry in refs {
             commands += "update \(entry.name) \(entry.oid)\n"
         }

@@ -97,9 +97,18 @@ struct JournalRestoreTests {
         // guard has nothing to verify and the restore proceeds unforced.
         let report = try JournalRestore.restore(entry.id, in: ctx)
 
-        #expect(try RefSnapshot.capture(in: ctx) == before)
-        // The union restore deleted the branch that did not exist at capture.
-        #expect(try ctx.resolveRef("refs/heads/created-after", inWorktree: nil) == nil)
+        let after = try RefSnapshot.capture(in: ctx)
+        #expect(after.head == before.head)
+        // Every ref the checkpoint recorded round-trips, including `main`,
+        // which the wreck moved.
+        #expect(before.refs.allSatisfy { want in
+            after.refs.contains(where: { $0.name == want.name && $0.oid == want.oid })
+        })
+        // `created-after` did not exist at capture, so restore under option A
+        // (guide §11 decision 20) leaves it alone rather than deleting it as
+        // an "extra" ref.
+        #expect(try ctx.resolveRef("refs/heads/created-after", inWorktree: nil)
+            == repo.oids["a"])
         #expect(report.entry == entry)
         // No sibling in sight -- HEAD adopts, and nothing was given up.
         #expect(report.detachedFrom == nil)
@@ -107,12 +116,17 @@ struct JournalRestoreTests {
 
     @Test(arguments: FixtureRepository.RefFormat.supported())
     func restoreItselfIsUndoableThroughItsPreRestoreCheckpoint(format: FixtureRepository.RefFormat) throws {
-        var repo = try FixtureRepository.linear(refFormat: format)
+        let repo = try FixtureRepository.linear(refFormat: format)
         defer { repo.destroy() }
         let ctx = try context(of: repo)
         let entry = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
 
-        try repo.branch("later-work")
+        // Move `main` rather than create a new branch: a branch created here
+        // would survive the restore below untouched either way (guide §11
+        // decision 20), so it would no longer make the vacuity check below
+        // true -- moving a recorded ref still does.
+        let a = try #require(repo.oids["a"])
+        try git.run(["update-ref", "refs/heads/main", a], workingDirectory: repo.url.path)
         let beforeRestore = try RefSnapshot.capture(in: ctx)
 
         let report = try JournalRestore.restore(entry.id, in: ctx)
@@ -227,6 +241,13 @@ struct JournalRestoreTests {
         let (repo, ctx, redoTarget, _, rogueOid) =
             try standingOnAnEntryWithARogueRef(format: format)
         defer { repo.destroy() }
+        // `feature` (created inside the fixture, before its internal
+        // undo-style restore back to c1) is a second divergence now, not
+        // just `rogue`: that internal restore no longer deletes it as an
+        // "extra" ref (guide §11 decision 20), so it survives alongside
+        // `rogue` and the guard -- comparing the cursor's own c1 snapshot,
+        // which has neither -- names both.
+        let featureOid = try #require(try ctx.resolveRef("refs/heads/feature", inWorktree: nil))
         let countBefore = try JournalAnchor.list(in: ctx).count
         let stateBefore = try RefSnapshot.capture(in: ctx)
 
@@ -235,6 +256,7 @@ struct JournalRestoreTests {
         }
         let error = try #require(thrown)
         #expect(error == .repositoryChanged(divergences: [
+            .init(ref: "refs/heads/feature", expected: nil, actual: featureOid),
             .init(ref: "refs/heads/rogue", expected: nil, actual: rogueOid),
         ]))
         // Nothing was written: no entry, no ref moved.
@@ -250,16 +272,23 @@ struct JournalRestoreTests {
     // pins below.
     @Test(arguments: FixtureRepository.RefFormat.supported())
     func bypassGuardSkipsTheCrossToolGuard(format: FixtureRepository.RefFormat) throws {
-        let (repo, ctx, redoTarget, redoState, _) =
+        let (repo, ctx, redoTarget, redoState, rogueOid) =
             try standingOnAnEntryWithARogueRef(format: format)
         defer { repo.destroy() }
 
         try JournalRestore.restore(redoTarget.id, bypassGuard: true, in: ctx)
 
-        // The target snapshot applied whole: feature is back, rogue —
-        // created after the target's capture — is deleted by the union
-        // restore, exactly what the skipped guard existed to point out.
-        #expect(try RefSnapshot.capture(in: ctx) == redoState)
+        // The target snapshot's own refs round-trip -- feature is back.
+        let after = try RefSnapshot.capture(in: ctx)
+        #expect(after.head == redoState.head)
+        #expect(redoState.refs.allSatisfy { want in
+            after.refs.contains(where: { $0.name == want.name && $0.oid == want.oid })
+        })
+        // `rogue` was created after the target's capture, so it survives:
+        // restore under option A (guide §11 decision 20) deletes only refs
+        // the snapshot itself recorded -- skipping the cross-tool guard no
+        // longer implies deleting refs the guard would have flagged.
+        #expect(try ctx.resolveRef("refs/heads/rogue", inWorktree: nil) == rogueOid)
     }
 
     // MARK: - The worktree gate
@@ -421,6 +450,75 @@ struct JournalRestoreTests {
         // Nothing was written, even with the guard bypassed.
         #expect(try JournalAnchor.list(in: ctx).count == countBefore)
         #expect(try RefSnapshot.capture(in: ctx) == stateBefore)
+    }
+
+    // MARK: - A sibling's newly created ref survives a restore (#0231)
+
+    /// The issue's own probe, guide §11 decision 20: a linked worktree
+    /// creates a branch after the main worktree's checkpoint, while standing
+    /// on its own branch -- ordinary plumbing, not a checkout. Main's
+    /// restore must leave the branch alone rather than deleting it as an
+    /// "extra" ref absent from the snapshot. Measured before the fix:
+    /// `exit=128 fatal: Needed a single revision` reading the branch back,
+    /// because restore had deleted it.
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func aSiblingsNewlyCreatedBranchSurvivesARestore(format: FixtureRepository.RefFormat) throws {
+        let repo = try FixtureRepository.linear(refFormat: format)
+        defer { repo.destroy() }
+        let wtURL = try repo.addWorktree(named: "agent", branch: "agent-branch")
+        let wtCtx = try WorktreeContext.resolve(path: wtURL.path)
+        let ctx = try context(of: repo)
+        let entry = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+
+        let target = try #require(repo.oids["c"])
+        try git.run(["branch", "sibling-wip", target],
+                    workingDirectory: wtCtx.topLevel ?? wtCtx.gitDir)
+
+        try JournalRestore.restore(entry.id, in: ctx)
+
+        #expect(try ctx.resolveRef("refs/heads/sibling-wip", inWorktree: nil) == target)
+    }
+
+    /// The same probe with a tag -- the issue measured that `git tag
+    /// sibling-tag` was deleted identically to the branch case.
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func aSiblingsNewlyCreatedTagSurvivesARestore(format: FixtureRepository.RefFormat) throws {
+        let repo = try FixtureRepository.linear(refFormat: format)
+        defer { repo.destroy() }
+        let wtURL = try repo.addWorktree(named: "agent", branch: "agent-branch")
+        let wtCtx = try WorktreeContext.resolve(path: wtURL.path)
+        let ctx = try context(of: repo)
+        let entry = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+
+        let target = try #require(repo.oids["c"])
+        try git.run(["tag", "sibling-tag", target],
+                    workingDirectory: wtCtx.topLevel ?? wtCtx.gitDir)
+
+        try JournalRestore.restore(entry.id, in: ctx)
+
+        #expect(try ctx.resolveRef("refs/tags/sibling-tag", inWorktree: nil) == target)
+    }
+
+    /// A ref the snapshot DOES carry is still restored to its recorded
+    /// value, including one that moved since the capture -- the assertion
+    /// that stops the fix from becoming "restore stopped writing refs".
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func aRecordedRefIsStillRestoredToItsCaptureEvenAfterItMoved(
+        format: FixtureRepository.RefFormat
+    ) throws {
+        let repo = try FixtureRepository.linear(refFormat: format)
+        defer { repo.destroy() }
+        let ctx = try context(of: repo)
+        let entry = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+        let recordedOid = try #require(repo.oids["c"])
+
+        let movedTo = try #require(repo.oids["a"])
+        try git.run(["update-ref", "refs/heads/main", movedTo], workingDirectory: repo.url.path)
+        try #require(try ctx.resolveRef("refs/heads/main", inWorktree: nil) == movedTo)
+
+        try JournalRestore.restore(entry.id, in: ctx)
+
+        #expect(try ctx.resolveRef("refs/heads/main", inWorktree: nil) == recordedOid)
     }
 
     // MARK: - The unrestorable-object surface
