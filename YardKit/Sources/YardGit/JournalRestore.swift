@@ -289,14 +289,18 @@ public enum JournalRestore {
         // verbatim: `for-each-ref` lists the CAPTURING worktree's
         // `refs/worktree/*` and `refs/rewritten/*` under plain names, so
         // applying it here would write that worktree's private refs into
-        // ours and delete ours as extras (measured, #0044). Take the
-        // recorded shared refs, and carry our own per-worktree entries
-        // through unchanged so deletion planning leaves them alone.
+        // ours (measured, #0044). Strip them from the recorded refs; our own
+        // per-worktree entries need no carry-through to survive, because
+        // restore no longer deletes a ref its snapshot did not record (guide
+        // §11 decision 20) — a name `candidate.refs` never lists is a name
+        // this restore leaves exactly as it stands. (#0252: the carry-
+        // through this comment used to describe was dead weight from before
+        // decision 20, when restore's own deletion planning would otherwise
+        // have removed our refs as "extras"; `theRecordedWorktreesPrivateRefs
+        // AreNotWrittenIntoOurs` and `aForeignEntryRestoresUnderTheOverride
+        // AndLeavesOurPrivateRefsAlone` cover both halves of this without it.)
         let candidate: RefSnapshot = allowDifferentWorktree && metadata.worktree.name != context.worktreeName
-            ? RefSnapshot(
-                head: recorded.head,
-                refs: recorded.withoutPerWorktreeRefs.refs
-                    + current.refs.filter { WorktreeContext.isPerWorktree($0.name) })
+            ? recorded.withoutPerWorktreeRefs
             : recorded
 
         // Detach HEAD instead of adopting it when its branch is checked out
