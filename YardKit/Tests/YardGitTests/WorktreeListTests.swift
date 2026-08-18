@@ -372,9 +372,15 @@ struct WorktreeListTests {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
 
-        #expect(throws: WorktreeListError.self) {
+        let error = #expect(throws: WorktreeListError.self) {
             _ = try worktreeList(path: dir.path)
         }
+        guard case let .couldNotList(detail) = try #require(error) else {
+            Issue.record("expected couldNotList, got \(String(describing: error))")
+            return
+        }
+        #expect(detail.contains("not a git repository"),
+                "the error carries git's own stderr as the detail")
     }
 
     // MARK: - The prunable flag (#0148)

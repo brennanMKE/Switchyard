@@ -380,9 +380,16 @@ struct WorktreeRepairTests {
         try fm.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: dir) }
 
-        #expect(throws: WorktreeRepair.Error.self) {
+        let error = #expect(throws: WorktreeRepair.Error.self) {
             _ = try WorktreeRepair.run(repositoryPath: dir.path)
         }
+        guard case let .notRepaired(detail, exitCode) = try #require(error) else {
+            Issue.record("expected notRepaired, got \(String(describing: error))")
+            return
+        }
+        #expect(detail.contains("not a git repository"),
+                "the error carries git's own stderr as the detail")
+        #expect(exitCode != 0, "the error carries git's real non-zero exit code")
     }
 
     // MARK: - Position 3 — main repo itself moved.
