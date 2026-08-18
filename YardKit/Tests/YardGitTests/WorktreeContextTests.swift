@@ -167,6 +167,43 @@ struct WorktreeContextTests {
         #expect(ctx.topLevel != nil)
     }
 
+    // MARK: - Newline safety (#0285)
+
+    /// The case #0284's round deliberately deferred: resolving *from inside*
+    /// a worktree whose own path contains a newline exercises
+    /// `WorktreeContext.resolve`'s own `rev-parse` parsing, not
+    /// `worktree list --porcelain`'s. Models
+    /// `WorktreeListTests.newlineInPathRoundTrips` and
+    /// `WorktreeWhereTests.newlineInLinkedWorktreePathDoesNotCorruptParsing`,
+    /// which cover the porcelain-listing layer this issue sits underneath.
+    @Test func newlineInOwnPathDoesNotTruncateOrShiftAnyValue() throws {
+        let repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+
+        let nameWithNewline = "has\nnewline"
+        let wtPath = try repo.addWorktree(path: nameWithNewline, branch: "nlbranch")
+        defer { try? FileManager.default.removeItem(at: wtPath) }
+
+        let ctx = try WorktreeContext.resolve(path: wtPath.path)
+
+        // topLevel must retain the embedded newline whole, not truncate at
+        // the first line break.
+        #expect(ctx.topLevel == WorktreeContext.canonicalize(wtPath.path),
+                "topLevel must round-trip the newline in the worktree's own path")
+
+        // gitDir must resolve to this worktree's private state under
+        // <common>/worktrees/<name> -- not get shifted onto the wrong line
+        // by a newline earlier in some combined multi-value read.
+        #expect(ctx.gitDir.contains("/worktrees/"), "gitDir must resolve whole")
+        #expect(ctx.isLinkedWorktree)
+
+        // commonDir must land on the parent repository's own $GIT_COMMON_DIR
+        // (its `.git`), not on a newline-shifted fragment of gitDir.
+        let main = try WorktreeContext.resolve(path: repo.url.path)
+        #expect(ctx.commonDir == main.commonDir,
+                "commonDir must not be corrupted by a newline in gitDir")
+    }
+
     // MARK: - Failure
 
     @Test func nonRepositoryThrows() throws {
