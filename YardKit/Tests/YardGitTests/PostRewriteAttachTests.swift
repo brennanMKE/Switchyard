@@ -368,6 +368,100 @@ struct PostRewriteAttachTests {
                 "the file must never be written beside the sequencer directory")
     }
 
+    /// #0263's own gap, reopened by this issue and closed here: every other
+    /// test in this file drives the `-i`/`--merge` backend through `Fixup`,
+    /// which never touches `rebase-apply/` at all. `around`'s catch and
+    /// `attachRewrite`'s read both resolve the entry-id file from
+    /// *whatever layout `SequencerSnapshot.capture` reports live*, joined
+    /// through `WorktreeContext.path(for:)` -- never a hardcoded
+    /// `"rebase-merge/"`. Nothing in this file pinned that claim for the
+    /// `--apply` backend, so a mutant that hardcodes `"rebase-merge/"` on
+    /// the read side passed the full suite silently -- the exact shape
+    /// #0263 already named once, for `WorktreeDisturbance`.
+    ///
+    /// `git rebase --apply main` (the `git am`-backed engine) only ever
+    /// stops mid-sequence on a genuinely conflicting patch (measured, same
+    /// as `WorktreeDisturbanceTests.aMidRebaseApplySiblingIsNamedAsADisturbance`,
+    /// whose fixture this mirrors), so `around`'s body must hit a real
+    /// conflict, not a clean stop, to leave `rebase-apply/` live.
+    @Test func aConflictingApplyBackendRebaseWritesAndReadsTheEntryIDFromRebaseApply() throws {
+        var repo = try FixtureRepository(refFormat: .files)
+        defer { repo.destroy() }
+
+        // c1, on main: f = "a"
+        try "a\n".write(to: repo.url.appendingPathComponent("f"),
+                        atomically: true, encoding: .utf8)
+        try git.run(["add", "-A"], workingDirectory: repo.url.path)
+        try git.run(["commit", "-qm", "c1"], workingDirectory: repo.url.path,
+                    extraEnvironment: hermetic)
+
+        // A side branch off c1.
+        try git.run(["checkout", "-qb", "side"], workingDirectory: repo.url.path,
+                    extraEnvironment: hermetic)
+
+        // c2, back on main: f = "b" -- main moves past c1 on the same line.
+        try git.run(["checkout", "-q", "main"], workingDirectory: repo.url.path,
+                    extraEnvironment: hermetic)
+        try "b\n".write(to: repo.url.appendingPathComponent("f"),
+                        atomically: true, encoding: .utf8)
+        try git.run(["commit", "-qam", "c2"], workingDirectory: repo.url.path,
+                    extraEnvironment: hermetic)
+
+        // c3, on side: f = "c" -- a conflicting edit to the same line.
+        try git.run(["checkout", "-q", "side"], workingDirectory: repo.url.path,
+                    extraEnvironment: hermetic)
+        try "c\n".write(to: repo.url.appendingPathComponent("f"),
+                        atomically: true, encoding: .utf8)
+        try git.run(["commit", "-qam", "c3"], workingDirectory: repo.url.path,
+                    extraEnvironment: hermetic)
+
+        let context = try WorktreeContext.resolve(path: repo.url.path)
+
+        // `--apply` replays c3 onto main's c2, conflicts on f, and stops --
+        // `around`'s body throws a real `GitProcess.Failure`, exactly as an
+        // unresolved `-i` conflict does for `Fixup`.
+        #expect(throws: GitProcess.Failure.self) {
+            _ = try JournalCheckpoint.around(operation: "apply-backend", at: repo.url.path) { scoped in
+                try scoped.run(["rebase", "--apply", "main"], workingDirectory: repo.url.path,
+                               extraEnvironment: hermetic)
+            }
+        }
+
+        // Confirm the fixture actually reached the `--apply` backend and
+        // not `-i`'s `rebase-merge` -- through `WorktreeContext.path(for:)`,
+        // never by concatenating onto `.git/`, the same check #0263's own
+        // test makes before trusting anything else.
+        let applyHeadName = try context.path(for: "rebase-apply/head-name")
+        #expect(FileManager.default.fileExists(atPath: applyHeadName))
+        let mergeHeadName = try context.path(for: "rebase-merge/head-name")
+        #expect(!FileManager.default.fileExists(atPath: mergeHeadName))
+
+        let entry = try #require(try JournalAnchor.list(in: context).first)
+
+        // Write side: `around`'s catch must have resolved the LIVE layout
+        // (`rebase-apply`), not assumed `rebase-merge`.
+        let applyEntryIDPath = try context.path(
+            for: "rebase-apply/" + RepositoryLayout.sequencerEntryIDFileName)
+        let writtenContents = try #require(
+            try? String(contentsOfFile: applyEntryIDPath, encoding: .utf8))
+        #expect(writtenContents.trimmingCharacters(in: .whitespacesAndNewlines) == entry.id.string,
+                "the entry id must be written to rebase-apply/, not rebase-merge/")
+
+        // Read side: `attachRewrite`, with no environment id, must resolve
+        // the same file back through the live layout too.
+        let decision = PostRewrite.decide(
+            sourceArgument: "rebase",
+            environment: [GitProcess.markerVariable: "1"],
+            readStandardInput: {
+                Data("\(String(repeating: "a", count: 40)) \(String(repeating: "b", count: 40))\n".utf8)
+            })
+        #expect(decision.isOwnInvocation)
+        let attached = try #require(
+            try JournalCheckpoint.attachRewrite(decision, entryID: nil, in: context))
+        #expect(attached.id == entry.id,
+                "attachRewrite must read the id back from rebase-apply/, not rebase-merge/")
+    }
+
     /// The honest options for an own invocation with no entry id anywhere
     /// are "record nothing" and "fall back to an observed entry" (#0221's
     /// Expected behavior). This picks "record nothing": with no
