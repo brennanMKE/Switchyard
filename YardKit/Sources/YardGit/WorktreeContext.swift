@@ -46,17 +46,41 @@ public struct WorktreeContext: Sendable, Equatable {
         path: String,
         git: GitProcess = GitProcess()
     ) throws -> WorktreeContext {
-        // The two directories come from one invocation so they cannot
-        // disagree by being sampled at different moments.
-        let dirs = try git.capture(
-            ["rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir"],
+        // One call per value, not the combined `--git-dir --git-common-dir`
+        // call this used to make (#0285). `git rev-parse` has no `-z`
+        // (confirmed against git 2.50.1's own help text), so a combined
+        // call's two-line output cannot be split apart safely: a newline
+        // inside `gitDir` does not just truncate it, it shifts `commonDir`
+        // onto the wrong line entirely. A single-value call has no second
+        // line to shift onto — whatever the whole output is, minus its one
+        // trailing terminator, *is* the value, embedded newlines included.
+        //
+        // Measured 2026-08-18 (200 iterations, this machine): the combined
+        // two-value call ran ~26ms/call; two single-value calls ran
+        // ~50ms/call — roughly double, from one extra subprocess. That
+        // matters because `resolve` runs on every invocation, but a wrong
+        // `-C` for the rest of the engine costs more than 26ms. The other
+        // candidate the issue named — sampling `gitDir` and `commonDir` in
+        // one instant so they cannot disagree — is given up here in
+        // exchange: two calls a few milliseconds apart could in principle
+        // observe a repository mutated between them, but that risk is
+        // theoretical, and a newline-truncated or line-shifted path is not.
+        let gitDirOutput = try git.capture(
+            ["rev-parse", "--path-format=absolute", "--git-dir"],
             workingDirectory: path
         )
-        guard dirs.exitCode == 0, dirs.lines.count >= 2 else {
-            throw Error.notARepository(path: path, detail: dirs.standardError)
+        guard gitDirOutput.exitCode == 0, let rawGitDir = singleValue(gitDirOutput) else {
+            throw Error.notARepository(path: path, detail: gitDirOutput.standardError)
         }
-        let gitDir = canonicalize(dirs.lines[0])
-        let commonDir = canonicalize(dirs.lines[1])
+        let commonDirOutput = try git.capture(
+            ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+            workingDirectory: path
+        )
+        guard commonDirOutput.exitCode == 0, let rawCommonDir = singleValue(commonDirOutput) else {
+            throw Error.notARepository(path: path, detail: commonDirOutput.standardError)
+        }
+        let gitDir = canonicalize(rawGitDir)
+        let commonDir = canonicalize(rawCommonDir)
 
         // --show-toplevel is asked separately because in a bare repository it
         // *fails* ("this operation must be run in a work tree") rather than
@@ -67,7 +91,7 @@ public struct WorktreeContext: Sendable, Equatable {
             workingDirectory: path
         )
         let topLevel: String? = {
-            guard top.exitCode == 0, let line = top.lines.first, !line.isEmpty else { return nil }
+            guard top.exitCode == 0, let line = singleValue(top) else { return nil }
             return canonicalize(line)
         }()
 
@@ -88,6 +112,28 @@ public struct WorktreeContext: Sendable, Equatable {
             commonDir: commonDir,
             worktreeName: worktreeName
         )
+    }
+
+    /// Reads a `rev-parse` call's entire stdout as one value, instead of
+    /// `.lines.first` splitting it into lines and keeping only the first.
+    ///
+    /// That split truncates a value that itself contains a newline at the
+    /// first line break — a worktree's path is free to contain one, and
+    /// this is the exact bug #0285 fixed. Git terminates a single
+    /// requested value with exactly one trailing newline, so stripping
+    /// only that terminator recovers the value whole no matter what is
+    /// inside it.
+    ///
+    /// This is only sound for a call that requested **one** value. A call
+    /// requesting more than one has no newline-safe way to tell the values
+    /// apart without `-z`, which `rev-parse` does not support — which is
+    /// why `resolve` above makes two single-value calls instead of the one
+    /// two-value call it used to.
+    private static func singleValue(_ output: GitProcess.Output) -> String? {
+        var text = output.text
+        guard text.hasSuffix("\n") else { return text.isEmpty ? nil : text }
+        text.removeLast()
+        return text.isEmpty ? nil : text
     }
 
     /// Resolves symlinks while **preserving** a leading `/private`.
@@ -139,7 +185,7 @@ public struct WorktreeContext: Sendable, Equatable {
         let base = topLevel ?? gitDir
         let out = try git.run(["rev-parse", "--path-format=absolute", "--git-path", name],
                               workingDirectory: base)
-        guard let first = out.lines.first, !first.isEmpty else {
+        guard let first = Self.singleValue(out) else {
             throw Error.pathNotResolved(name: name)
         }
         // Canonicalized so it compares against gitDir/commonDir, which are.
@@ -190,7 +236,7 @@ public struct WorktreeContext: Sendable, Equatable {
         let base = topLevel ?? gitDir
         let out = try git.capture(["rev-parse", "--verify", "--quiet", name],
                                   workingDirectory: base)
-        guard out.exitCode == 0, let line = out.lines.first, !line.isEmpty else { return nil }
+        guard out.exitCode == 0, let line = Self.singleValue(out) else { return nil }
         return line
     }
 
