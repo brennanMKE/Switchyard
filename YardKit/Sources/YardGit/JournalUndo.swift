@@ -138,31 +138,37 @@ public enum JournalUndo {
     ) throws -> [JournalRestore.Report] {
         guard steps > 0 else { return [] }
         return try JournalLock(context: context).withLock(timeout: lockTimeout) {
-            // This worktree's chain, replayed from the anchored entry list
-            // alone — no cursor file (#0166). An entry whose metadata does
-            // not decode throws typed here, before anything mutates: the
-            // chain cannot be resolved while an entry's kind is unknown.
-            // (#0170's read-only listing tolerates such an entry and shows
-            // its defect; traversal refuses.)
-            var scoped: [JournalChain.Node] = []
+            // Every anchored entry, decoded once, with the worktree name its
+            // metadata recorded — no cursor file (#0166). An entry whose
+            // metadata does not decode throws typed here, before anything
+            // mutates: the chain cannot be resolved while an entry's kind is
+            // unknown. (#0170's read-only listing tolerates such an entry and
+            // shows its defect; traversal refuses.) The scoping key itself —
+            // which entries belong to this worktree — lives once, in
+            // `JournalWorktreeScope`; this used to filter the same
+            // comparison locally, which is what #0252 folded away.
+            var nodes: [JournalWorktreeScope.Node] = []
             for entry in try JournalAnchor.list(in: context, git: git) {
                 let metadata = try JournalEntryMetadata(
                     serialized: JournalAnchor.metadata(for: entry.id, in: context, git: git))
-                if metadata.worktree.name == context.worktreeName {
-                    scoped.append(metadata.chainNode)
-                }
+                nodes.append(.init(node: metadata.chainNode, worktree: metadata.worktree.name))
             }
 
             // Plan the whole walk before mutating anything. The synthetic
             // ids only order the simulation; the real entries mint their own.
-            var simulated = scoped
+            // Each synthetic node is recorded as belonging to this worktree —
+            // the traversal entries a real walk writes are always recorded
+            // here, so the simulation must scope them the same way.
+            var simulated = nodes
             var planned: [JournalChain.Traversal] = []
             while planned.count < steps {
-                let state = try JournalChain.state(of: simulated)
+                let state = try JournalWorktreeScope.state(of: simulated, in: context.worktreeName)
                 guard let traversal = nextTraversal(direction, state: state) else { break }
                 simulated.append(.init(
-                    id: JournalEntryID.generate(after: simulated.last?.id),
-                    traversal: traversal))
+                    node: .init(
+                        id: JournalEntryID.generate(after: simulated.last?.node.id),
+                        traversal: traversal),
+                    worktree: context.worktreeName))
                 planned.append(traversal)
             }
             guard planned.count == steps else {
