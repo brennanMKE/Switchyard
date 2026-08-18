@@ -110,6 +110,86 @@ public enum JournalObserved {
             self.timestamp = timestamp
             self.worktree = worktree
         }
+
+        // MARK: - Wire form (#0242)
+
+        /// Bytes this type could not decode -- not JSON, missing or
+        /// mistyped fields, an invalid enum raw value. No
+        /// `unsupportedSchemaVersion` case, unlike
+        /// `JournalEntryMetadata.SerializationError`: this type's doc
+        /// comment above explains why -- every field this schema has ever
+        /// added arrived as a new required key alongside `schemaVersion`
+        /// staying at `1`, so there is no older wire shape a version check
+        /// would need to reject yet.
+        public enum SerializationError: Swift.Error, Equatable, CustomStringConvertible, Sendable {
+            case undecodable(detail: String)
+
+            public var description: String {
+                switch self {
+                case let .undecodable(detail):
+                    "observed entry metadata does not decode: \(detail)"
+                }
+            }
+        }
+
+        /// The entry as `metadata.json` bytes, ready for
+        /// `JournalAnchor.Contents.metadataJSON`. Sorted keys make the
+        /// bytes deterministic; unescaped slashes keep paths and ref names
+        /// readable in `git cat-file` output. Mirrors
+        /// `JournalEntryMetadata.serialized()`. Both `record` overloads
+        /// below call this rather than building their own `JSONEncoder` --
+        /// before this they each configured `dateEncodingStrategy = .iso8601`
+        /// independently, two places that could silently drift from each
+        /// other and from whatever a reader expected. Now there is exactly
+        /// one encode site, and `init(serialized:)` below is the one decode
+        /// site that must keep matching it.
+        public func serialized() throws -> Data {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+            encoder.dateEncodingStrategy = .iso8601
+            do {
+                return try encoder.encode(self)
+            } catch {
+                // Unreachable for any value this type can hold; surfaced
+                // typed rather than trapped so the contract has no crash
+                // path.
+                throw SerializationError.undecodable(detail: String(describing: error))
+            }
+        }
+
+        /// Decodes bytes `serialized()` wrote -- or whatever actually sits
+        /// in an observed entry's `metadata.json`. The point of #0242: this
+        /// is the production read path a consumer in `Sources/` calls,
+        /// where before this only a test (`JournalObservedTests
+        /// .decodeMetadata`, now deleted) had a decoder whose
+        /// `dateDecodingStrategy` matched `record`'s encoder.
+        public init(serialized data: Data) throws {
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            do {
+                self = try decoder.decode(Metadata.self, from: data)
+            } catch {
+                throw SerializationError.undecodable(detail: Self.detail(of: error))
+            }
+        }
+
+        /// A one-line account of a `DecodingError`, for the typed error.
+        /// Mirrors `JournalEntryMetadata.detail(of:)`.
+        private static func detail(of error: any Error) -> String {
+            guard let decoding = error as? DecodingError else {
+                return String(describing: error)
+            }
+            switch decoding {
+            case let .dataCorrupted(context),
+                 let .typeMismatch(_, context),
+                 let .valueNotFound(_, context):
+                return context.debugDescription
+            case let .keyNotFound(key, _):
+                return "missing key: \(key.stringValue)"
+            @unknown default:
+                return String(describing: decoding)
+            }
+        }
     }
 
     /// Writes one observed entry for a foreign `reference-transaction`.
@@ -123,15 +203,12 @@ public enum JournalObserved {
         git: GitProcess = GitProcess()
     ) throws -> JournalAnchor.Entry {
         let base = context.topLevel ?? context.gitDir
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        encoder.dateEncodingStrategy = .iso8601
-        let json = try encoder.encode(Metadata(
+        let metadata = Metadata(
             updates: updates,
             timestamp: now,
-            worktree: .init(name: context.worktreeName, path: base)))
+            worktree: .init(name: context.worktreeName, path: base))
         return try JournalAnchor.write(
-            JournalAnchor.Contents(metadataJSON: json),
+            JournalAnchor.Contents(metadataJSON: try metadata.serialized()),
             id: JournalEntryID.generate(now: now, after: try list(in: context, git: git).last?.id),
             in: context,
             namespace: refPrefix,
@@ -203,16 +280,12 @@ public enum JournalObserved {
         guard !decision.isOwnInvocation else { return nil }
 
         let base = context.topLevel ?? context.gitDir
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        encoder.dateEncodingStrategy = .iso8601
-        let json = try encoder.encode(
-            Metadata(
-                source: decision.source, rewrites: decision.rewrites,
-                timestamp: now,
-                worktree: .init(name: context.worktreeName, path: base)))
+        let metadata = Metadata(
+            source: decision.source, rewrites: decision.rewrites,
+            timestamp: now,
+            worktree: .init(name: context.worktreeName, path: base))
         return try JournalAnchor.write(
-            JournalAnchor.Contents(metadataJSON: json),
+            JournalAnchor.Contents(metadataJSON: try metadata.serialized()),
             id: JournalEntryID.generate(now: now, after: try list(in: context, git: git).last?.id),
             in: context,
             namespace: refPrefix,
@@ -239,4 +312,12 @@ public enum JournalObserved {
             return JournalAnchor.Entry(id: id, commit: String(fields[0]))
         }.sorted { $0.id.string < $1.id.string }
     }
+}
+
+// MARK: - §6 exit class (#0141)
+
+/// Metadata that will not decode is repository-state damage — guide §6
+/// code 6, the same class `JournalEntryMetadata.SerializationError` carries.
+extension JournalObserved.Metadata.SerializationError: ExitClassCarrying {
+    public var exitClass: ExitClass { .repositoryError }
 }
