@@ -173,12 +173,16 @@ public enum CommitLog {
         }
 
         let output = try git.run(args, workingDirectory: path)
-        var entries = parse(output: output.text, options: options)
+        let entries = parse(output: output.text, options: options)
 
-        if options.contains(.agentOnly) {
-            entries = entries.filter { $0.hasAgentName }
-        }
-
+        // `agentOnly` is applied once, inside `parse`'s loop (see the comment
+        // there) -- a second pass here used to re-check the identical value:
+        // `parse` builds each `CommitLogEntry.trailers` from the very same
+        // `trailers` array the in-loop filter tests, with no transformation
+        // in between, and `parse` is the only site that ever appends to
+        // `entries`. The two checks could never disagree, so re-filtering
+        // here was dead weight -- see #0302.
+        //
         // `git log` already emits newest-first and `parse` preserves that order,
         // so returning it unchanged is what matches the comment. Reversing here
         // made the array oldest-first and broke eight assertions.
