@@ -351,11 +351,18 @@ Consequences for undo:
   records which worktree, and restore refuses if run from a different one without `--worktree`.
 - Restoring `refs/heads/*` affects **every worktree**. If another worktree has that branch checked
   out, its working copy is now inconsistent with its `HEAD`. The guard must check other worktrees'
-  `HEAD` values, and `undo` **refuses**, naming the worktree and branch — corrected 2026-08-17; this
-  line said "must warn by name", and #0044 decision 2 settled it as a refusal rather than a warning
-  because `update-ref` clobbers a sibling's checked-out branch at exit 0 with no message, so a warning
-  would arrive after the damage. Implemented as `WorktreeDisturbance` (#0173), which refuses with exit
-  class 6 and names every disturbance.
+  `HEAD` values, and `undo` must **name** the worktree and branch rather than clobbering silently —
+  `update-ref` moves a sibling's checked-out branch at exit 0 with no message, so a warning printed
+  afterwards arrives after the damage. Implemented as `WorktreeDisturbance` (#0173).
+
+  **What happens next was settled twice.** #0044 decision 2 first made it a refusal (exit class 6).
+  Guide §11 decision 23 (#0251) then narrowed that, because refusing let a sibling's ordinary commit
+  block the caller's undo forever: `JournalRestore` now leaves a **live** holder's branch exactly where
+  it stands, applies the rest, and reports it in `Report.leftAlone`. A **prunable** holder holds
+  nothing a live agent is standing on, so its branch is restored normally. The strict refusal survives
+  as `requireUndisturbed` for a future force surface, with no production caller today. A sibling
+  stopped **mid-rebase or mid-bisect** counts as a live holder even though porcelain reports it
+  detached — its branch is read from the sequencer state (#0256).
 - `refs/rewritten/*` is per-worktree and holds interactive rebase label state. A journal snapshot
   taken mid-rebase must capture it or the rebase cannot be resumed after restore.
 
