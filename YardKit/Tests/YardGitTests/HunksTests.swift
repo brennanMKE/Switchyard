@@ -39,6 +39,42 @@ private func stagedRenameRepo(_ format: FixtureRepository.RefFormat) throws -> F
     return repo
 }
 
+// MARK: - External diff driver and textconv (fixture-backed, #0289)
+
+/// A committed `f.txt`, edited in the worktree, with `diff.external` pointed
+/// at a script that writes nothing and exits 0 -- the shape that would
+/// silently blank the diff if `--no-ext-diff` were ever dropped. Measured
+/// (git 2.50.1): with the driver active and no `--no-ext-diff`, `git diff`
+/// prints nothing at all for the file -- not even a `diff --git` header,
+/// since the external program's stdout *is* the file's whole diff output.
+private func extDiffDriverRepo(_ format: FixtureRepository.RefFormat) throws -> FixtureRepository {
+    var repo = try FixtureRepository(refFormat: format)
+    try repo.build([.init("base", files: ["f.txt": base20()])])
+    try repo.writeUntracked(["f.txt": edited20()])
+    let script = repo.url.appendingPathComponent("noop-diff.sh")
+    try "#!/bin/sh\nexit 0\n".write(to: script, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+    try GitProcess().run(["config", "diff.external", script.path], workingDirectory: repo.url.path)
+    return repo
+}
+
+/// A committed `up.txt`, edited in the worktree, with a `diff=up` attribute
+/// and `diff.up.textconv` pointed at a script that upper-cases the file's
+/// content. Measured (git 2.50.1): with the filter active and no
+/// `--no-textconv`, `git diff` reports the *converted* body -- `-ORIG LINE 1`
+/// -- not the file's own bytes.
+private func textconvRepo(_ format: FixtureRepository.RefFormat) throws -> FixtureRepository {
+    var repo = try FixtureRepository(refFormat: format)
+    try repo.build([.init("base", files: ["up.txt": "keep\norig line 1\n"])])
+    try repo.writeUntracked(["up.txt": "keep\n"])
+    let script = repo.url.appendingPathComponent("upcase.sh")
+    try "#!/bin/sh\ntr 'a-z' 'A-Z' < \"$1\"\n".write(to: script, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+    try repo.writeUntracked([".gitattributes": "up.txt diff=up\n"])
+    try GitProcess().run(["config", "diff.up.textconv", script.path], workingDirectory: repo.url.path)
+    return repo
+}
+
 // MARK: - Non-ASCII paths (fixture-backed, #0283)
 
 /// A committed file with a non-ASCII name, edited in the worktree. Measured:
@@ -564,4 +600,49 @@ func listHunksHandlesANonASCIIPath(format: FixtureRepository.RefFormat) throws {
     let files = try listHunks(at: repo.url.path, area: .unstaged)
     let file = try #require(files.first { $0.path == "café.txt" })
     #expect(file.hunks.count == 2)
+}
+
+// MARK: - External diff driver and textconv (fixture-backed, #0289)
+
+/// `listHunks` pins `--no-ext-diff` precisely because an external diff
+/// driver's stdout replaces git's own diff output wholesale -- with a no-op
+/// driver configured, an un-pinned `git diff` returns nothing for the
+/// changed file, which `listHunks` would read as "no changes" rather than
+/// throwing or degrading visibly.
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func listHunksIgnoresExternalDiffDriver(format: FixtureRepository.RefFormat) throws {
+    let repo = try extDiffDriverRepo(format)
+    defer { repo.destroy() }
+
+    // Confirm the driver actually takes effect before trusting the
+    // assertion below -- a driver git silently ignores pins nothing. With
+    // no --no-ext-diff, the no-op script's empty stdout becomes the file's
+    // entire diff.
+    let plain = try GitProcess().run(["diff"], workingDirectory: repo.url.path).text
+    #expect(plain.isEmpty)
+
+    let files = try listHunks(at: repo.url.path, area: .unstaged)
+    #expect(files.map(\.path) == ["f.txt"])
+}
+
+/// `listHunks` pins `--no-textconv` precisely because a `textconv` filter
+/// substitutes converted text for the file's own bytes in the diff body --
+/// without the flag, an agent staging or reverting from the reported hunk
+/// would be acting on text that is not actually in the file.
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func listHunksIgnoresTextconvFilter(format: FixtureRepository.RefFormat) throws {
+    let repo = try textconvRepo(format)
+    defer { repo.destroy() }
+
+    // Confirm the filter actually takes effect before trusting the
+    // assertion below -- a driver git silently ignores pins nothing.
+    let converted = try GitProcess().run(["diff"], workingDirectory: repo.url.path).text
+    #expect(converted.contains("-ORIG LINE 1"))
+    #expect(!converted.contains("-orig line 1"))
+
+    let files = try listHunks(at: repo.url.path, area: .unstaged)
+    let file = try #require(files.first { $0.path == "up.txt" })
+    let body = file.hunks.flatMap(\.body)
+    #expect(body.contains("-orig line 1"))
+    #expect(!body.contains { $0.contains("ORIG LINE 1") })
 }
