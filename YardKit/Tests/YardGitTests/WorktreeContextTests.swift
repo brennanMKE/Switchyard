@@ -75,6 +75,51 @@ struct WorktreeContextTests {
                 "worktree and main must share GIT_COMMON_DIR — repository identity")
     }
 
+    /// #0307: a repository whose own path contains a `worktrees` path
+    /// component makes `gitDir` contain **two** `/worktrees/` occurrences —
+    /// one from the repository's own path, one from git's real
+    /// `worktrees/<name>` layout. A forward search on `/worktrees/` matches
+    /// the first (wrong) occurrence and returns everything after it,
+    /// including the rest of the repository path; only a backward search
+    /// lands on git's own `worktrees/<name>` and yields the bare name.
+    ///
+    /// Naming the *worktree* itself `worktrees` would not reproduce this —
+    /// the ambiguity requires the **repository's own path** to contain the
+    /// component, which is why this fixture is created under a directory
+    /// literally named `worktrees` rather than under a plain temp directory.
+    @Test func worktreeNameIsCleanWhenRepositoryPathContainsWorktreesComponent() throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("yard-wt-ambiguous-\(UUID().uuidString)")
+        let repo = root.appendingPathComponent("worktrees").appendingPathComponent("repo")
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try git.run(["init", "-q", repo.path])
+        try git.run(["config", "user.name", "Test"], workingDirectory: repo.path)
+        try git.run(["config", "user.email", "test@example.invalid"], workingDirectory: repo.path)
+        try git.run(["commit", "-q", "--allow-empty", "-m", "base"], workingDirectory: repo.path)
+
+        let linked = root.appendingPathComponent("wt1")
+        try git.run(["worktree", "add", "-q", "-b", "agent-b", linked.path], workingDirectory: repo.path)
+
+        let ctx = try WorktreeContext.resolve(path: linked.path)
+
+        // Confirm the fixture actually reproduces the ambiguity: a forward
+        // (first-match) search on the same marker used in production would
+        // land on the repository's own `worktrees` path component and
+        // return a tail that still contains a slash, not a bare name.
+        let marker = "/worktrees/"
+        let forwardRange = try #require(
+            ctx.gitDir.range(of: marker),
+            "gitDir should contain the worktrees/ marker at all")
+        let forwardTail = String(ctx.gitDir[forwardRange.upperBound...])
+        #expect(forwardTail.contains("/"),
+                "fixture must reproduce the ambiguity: a forward search's tail should still contain a path separator")
+
+        let name = try #require(ctx.worktreeName)
+        #expect(name == "wt1")
+        #expect(!name.contains("/"), "worktreeName must be a bare name, never a path fragment")
+    }
+
     /// `.git` in a linked worktree is a file holding a `gitdir:` pointer, not a
     /// directory. Anything that assumed a directory would fail here.
     @Test func linkedWorktreeDotGitIsAFile() throws {
