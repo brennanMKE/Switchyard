@@ -234,6 +234,26 @@ exit 0
     #expect(SignatureVerification.detectFormat(rawCommit: unrecognizedHeader) == .unrecognized)
 }
 
+/// Pins the `gpgsig-sha256` clause at `SignatureVerification.swift:158` —
+/// git's header name for a commit signature in a SHA-256 repository
+/// (`--object-format=sha256`), measured to be written as `gpgsig-sha256
+/// -----BEGIN PGP SIGNATURE-----` by git 2.50.1 during the M1 milestone
+/// review that found this gap (#0306).
+///
+/// Route taken: a fabricated header through a raw string, the same shape as
+/// `detectFormatRecognizesEachArmor` above, rather than building a real
+/// `--object-format=sha256` fixture repository. This pins the *detection*
+/// clause `detectFormat` is missing — the thing the mutation at line 158
+/// removes — at the cost of a string literal. It does **not** exercise
+/// `SignatureVerification.run` end to end against a real SHA-256 repository,
+/// so it says nothing about `%G?`/`%GS`/`%GK` parsing, `git cat-file`, or any
+/// other git behavior specific to that ref/object format; #0308 tracks
+/// whether SHA-256 repositories are supported by the engine at all.
+@Test func detectFormatRecognizesSha256Header() {
+    let sha256PgpHeader = "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nauthor x <x@x> 0 +0000\ncommitter y <y@y> 0 +0000\ngpgsig-sha256 -----BEGIN PGP SIGNATURE-----\n iQFAKEFAKEFAKE=\n =fake\n -----END PGP SIGNATURE-----"
+    #expect(SignatureVerification.detectFormat(rawCommit: sha256PgpHeader) == .openpgp)
+}
+
 @Test func detectFormatIgnoresGpgsigTextInMessageBody() {
     let commit = """
     tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
