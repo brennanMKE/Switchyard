@@ -61,6 +61,11 @@ public struct WorktreeEntry: Sendable, Equatable {
         self.isMainWorktree = isMainWorktree
     }
 
+    // `prunableReason` is deliberately included: it is not derived from
+    // `prunable` (which is a bool) — it is git's own free-text explanation
+    // of *why* the worktree is prunable ("gitdir file points to
+    // non-existent location", "stale lockfile", ...), and two entries can
+    // share `prunable == true` while disagreeing on the reason (#0312).
     public static func == (lhs: WorktreeEntry, rhs: WorktreeEntry) -> Bool {
         lhs.path == rhs.path &&
             lhs.head == rhs.head &&
@@ -70,6 +75,7 @@ public struct WorktreeEntry: Sendable, Equatable {
             lhs.bare == rhs.bare &&
             lhs.detached == rhs.detached &&
             lhs.prunable == rhs.prunable &&
+            lhs.prunableReason == rhs.prunableReason &&
             lhs.isMainWorktree == rhs.isMainWorktree
     }
 }

@@ -286,6 +286,81 @@ struct WorktreeListTests {
         #expect(first == second)
     }
 
+    /// `WorktreeEntry.==` must compare every stored member (#0312). This
+    /// varies exactly one field at a time from a common baseline and asserts
+    /// the resulting entries are unequal — if any field is missing from the
+    /// operator's body, that field's case here reddens. Mutation-tested
+    /// directly: dropping `lhs.lockReason == rhs.lockReason` from the
+    /// operator reddens the `lockReason` case; dropping
+    /// `lhs.prunableReason == rhs.prunableReason` (the field this issue
+    /// fixes) reddens the `prunableReason` case.
+    @Test func equalityComparesEveryStoredField() throws {
+        let base = WorktreeEntry(
+            path: "/a", head: "aaaa", branch: "main",
+            locked: true, lockReason: "reason-a",
+            bare: false, detached: false,
+            prunable: true, prunableReason: "prunable-a",
+            isMainWorktree: true)
+
+        let variants: [(field: String, entry: WorktreeEntry)] = [
+            ("path", WorktreeEntry(path: "/b", head: base.head, branch: base.branch,
+                                    locked: base.locked, lockReason: base.lockReason,
+                                    bare: base.bare, detached: base.detached,
+                                    prunable: base.prunable, prunableReason: base.prunableReason,
+                                    isMainWorktree: base.isMainWorktree)),
+            ("head", WorktreeEntry(path: base.path, head: "bbbb", branch: base.branch,
+                                    locked: base.locked, lockReason: base.lockReason,
+                                    bare: base.bare, detached: base.detached,
+                                    prunable: base.prunable, prunableReason: base.prunableReason,
+                                    isMainWorktree: base.isMainWorktree)),
+            ("branch", WorktreeEntry(path: base.path, head: base.head, branch: "other",
+                                      locked: base.locked, lockReason: base.lockReason,
+                                      bare: base.bare, detached: base.detached,
+                                      prunable: base.prunable, prunableReason: base.prunableReason,
+                                      isMainWorktree: base.isMainWorktree)),
+            ("locked", WorktreeEntry(path: base.path, head: base.head, branch: base.branch,
+                                      locked: false, lockReason: base.lockReason,
+                                      bare: base.bare, detached: base.detached,
+                                      prunable: base.prunable, prunableReason: base.prunableReason,
+                                      isMainWorktree: base.isMainWorktree)),
+            ("lockReason", WorktreeEntry(path: base.path, head: base.head, branch: base.branch,
+                                          locked: base.locked, lockReason: "other-reason",
+                                          bare: base.bare, detached: base.detached,
+                                          prunable: base.prunable, prunableReason: base.prunableReason,
+                                          isMainWorktree: base.isMainWorktree)),
+            ("bare", WorktreeEntry(path: base.path, head: base.head, branch: base.branch,
+                                    locked: base.locked, lockReason: base.lockReason,
+                                    bare: true, detached: base.detached,
+                                    prunable: base.prunable, prunableReason: base.prunableReason,
+                                    isMainWorktree: base.isMainWorktree)),
+            ("detached", WorktreeEntry(path: base.path, head: base.head, branch: base.branch,
+                                        locked: base.locked, lockReason: base.lockReason,
+                                        bare: base.bare, detached: true,
+                                        prunable: base.prunable, prunableReason: base.prunableReason,
+                                        isMainWorktree: base.isMainWorktree)),
+            ("prunable", WorktreeEntry(path: base.path, head: base.head, branch: base.branch,
+                                        locked: base.locked, lockReason: base.lockReason,
+                                        bare: base.bare, detached: base.detached,
+                                        prunable: false, prunableReason: base.prunableReason,
+                                        isMainWorktree: base.isMainWorktree)),
+            ("prunableReason", WorktreeEntry(path: base.path, head: base.head, branch: base.branch,
+                                              locked: base.locked, lockReason: base.lockReason,
+                                              bare: base.bare, detached: base.detached,
+                                              prunable: base.prunable, prunableReason: "other-prunable-reason",
+                                              isMainWorktree: base.isMainWorktree)),
+            ("isMainWorktree", WorktreeEntry(path: base.path, head: base.head, branch: base.branch,
+                                              locked: base.locked, lockReason: base.lockReason,
+                                              bare: base.bare, detached: base.detached,
+                                              prunable: base.prunable, prunableReason: base.prunableReason,
+                                              isMainWorktree: false)),
+        ]
+
+        for variant in variants {
+            #expect(base != variant.entry,
+                     "changing only \(variant.field) must make entries unequal")
+        }
+    }
+
     // MARK: - Output ordering: main first regardless of CWD
 
     @Test func mainEntryComesFirstFromALinkedWorktree() throws {
