@@ -218,7 +218,7 @@ struct AppConnectionTests {
         let timeout: Duration = .milliseconds(300)
         let interval: Duration = .milliseconds(50)
 
-        let result: Int? = await AppConnection.poll(timeout: timeout, interval: interval) {
+        let result: Int? = try await AppConnection.poll(timeout: timeout, interval: interval) {
             await counter.increment()
             return nil
         }
@@ -234,6 +234,40 @@ struct AppConnectionTests {
         #expect(invocations <= maxInvocations)
     }
 
+    // MARK: A value on the first attempt needs no wait
+
+    @Test func aValueAvailableOnTheFirstAttemptNeedsNoWait() async throws {
+        actor Counter {
+            private(set) var count = 0
+            func increment() { count += 1 }
+        }
+        let fetchCount = Counter()
+        let sleepCount = Counter()
+
+        // `poll` checks before it waits: a value that is already there does
+        // not pay for an `interval`'s sleep. Pinned by counting real
+        // *sleeps*, not fetches -- a fetch-count assertion alone cannot
+        // distinguish fetch-before-sleep from sleep-before-fetch when
+        // `sleep` is a no-op, since either ordering still calls `fetch`
+        // exactly once for a first-try success (moving `sleep` back above
+        // `fetch` and re-running this test proves it: fetch count stays 1).
+        // Counting sleep invocations does distinguish them -- zero means
+        // `fetch` ran and returned before any wait was ever needed, which
+        // is the actual claim "needs no wait" makes. Neither count reads a
+        // clock (Rule 7c).
+        let result: String? = try await AppConnection.poll(
+            timeout: .seconds(60),
+            sleep: { _ in await sleepCount.increment() }
+        ) {
+            await fetchCount.increment()
+            return "already-registered"
+        }
+
+        #expect(result == "already-registered")
+        #expect(await fetchCount.count == 1)
+        #expect(await sleepCount.count == 0)
+    }
+
     // MARK: A nil result is not a failure
 
     @Test func aNilResultRightAfterLaunchIsNotAFailure() async throws {
@@ -246,14 +280,30 @@ struct AppConnectionTests {
         }
         let counter = Counter()
 
-        // A generous timeout, not a tight one: this test asserts the poll
-        // returns the value the moment it appears, not how fast it appears.
-        // Under this suite's full parallel run a scheduling stall costs the
-        // test wall-clock time, not correctness -- 60s is comfortably more
-        // than any stall observed (~25s, see pollIsBoundedByItsTimeout above).
+        // The criterion this test exists for is logic, not timing: does a
+        // transient nil get treated as fatal, or does polling continue past
+        // it to the eventual value? Proving that requires the loop to
+        // actually iterate past a nil, which needs `sleep` to return
+        // between attempts -- and asserting on the outcome of a *real*
+        // sleep completing within any wall-clock deadline is exactly what
+        // Rule 7c forbids, just reached through a dependency instead of a
+        // direct `#expect(elapsed...)`. Two stacked real sleeps were enough
+        // to make this test flake under two concurrent full suites even
+        // with a 60s deadline (measured, issue #0240) -- a single delayed
+        // `Task.sleep` can run tens of seconds under this suite's
+        // contention regardless of the requested duration (#0048), and nothing
+        // stops that delay from recurring on every attempt.
+        //
+        // So `sleep` is a no-op here: the loop's logic — keep going on nil,
+        // return the value once `fetch` provides one — is exercised for
+        // real, with nothing about the result depending on real time or
+        // this machine's scheduling. `timeout` and `interval` stay
+        // meaningful to `poll`'s bookkeeping (the deadline check still
+        // reads the real clock) but are never actually waited on.
         let result: String? = await AppConnection.poll(
             timeout: .seconds(60),
-            interval: .milliseconds(10)
+            interval: .milliseconds(10),
+            sleep: { _ in }
         ) {
             let attempt = await counter.next()
             return attempt < 3 ? nil : "registered"

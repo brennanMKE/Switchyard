@@ -99,25 +99,41 @@ public final class AppConnection: @unchecked Sendable {
 
     /// Polls `fetch` until it returns a value or `timeout` elapses.
     ///
+    /// Checks before it waits: the first attempt happens immediately, and
+    /// `interval` is only paid between attempts, not before the first one.
     /// A nil result immediately after launching the app is normal, not a
     /// failure: app registration races app launch. The bound is what
     /// matters — without it a broken app hangs the CLI forever.
+    ///
+    /// - Parameter sleep: The wait between attempts, injectable for the same
+    ///   reason `clock` is: a test proving "a transient nil eventually
+    ///   yields the value" needs the loop to actually iterate, and this
+    ///   suite's own contention can delay a real `Task.sleep` by tens of
+    ///   seconds regardless of the duration requested (measured, #0048).
+    ///   That makes any assertion depending on a real sleep completing
+    ///   within a deadline a measurement of the machine, not of `poll` —
+    ///   the same defect Rule 7c names for elapsed-time assertions, just
+    ///   reached through a dependency instead of a direct `#expect`. A test
+    ///   for that property injects a no-op here so the loop's *logic* is
+    ///   exercised without paying for a real, delay-prone suspension.
+    ///   Production never overrides this.
     public static func poll<Value: Sendable>(
         timeout: Duration,
         interval: Duration = .milliseconds(250),
         clock: ContinuousClock = ContinuousClock(),
+        sleep: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
         _ fetch: @Sendable () async throws -> Value?
     ) async rethrows -> Value? {
         let deadline = clock.now + timeout
 
         while clock.now < deadline {
-            // `rethrows` may only throw from `fetch`, so a cancellation from
-            // `Task.sleep` itself is swallowed here rather than propagated —
-            // the loop's own bound (`clock.now < deadline`) is what ends it.
-            try? await Task.sleep(for: interval)
             if let value = try await fetch() {
                 return value
             }
+            // `rethrows` may only throw from `fetch`, so a cancellation from
+            // `sleep` itself is swallowed here rather than propagated — the
+            // loop's own bound (`clock.now < deadline`) is what ends it.
+            try? await sleep(interval)
         }
         return nil
     }
