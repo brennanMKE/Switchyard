@@ -293,7 +293,12 @@ public enum JournalRestore {
         // and the disturbance check (step 5) need the same worktree listing,
         // and the transformation must run before step 5 sees the snapshot it
         // will actually inspect.
-        let worktrees = try worktreeList(path: base, git: git)
+        // #0256: porcelain reports a sibling stopped mid-rebase or mid-bisect
+        // as `detached` with no `branch` line, though it does hold one. Both
+        // consumers below need that filled in -- the head-detach transformation
+        // and step 5's disturbance check -- so it is enriched once, here.
+        let worktrees = WorktreeDisturbance.withSequencerBranches(
+            try worktreeList(path: base, git: git), in: context, git: git)
 
         // Under the override the recorded snapshot cannot be applied
         // verbatim: `for-each-ref` lists the CAPTURING worktree's
