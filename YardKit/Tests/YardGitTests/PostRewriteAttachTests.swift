@@ -513,6 +513,192 @@ struct PostRewriteAttachTests {
         #expect(fromHeadBefore.newOid == result.head)
     }
 
+    // MARK: - #0241: the in-flight file names an in-progress operation
+
+    /// #0241's first probe, made a test: a fixup whose signing fails
+    /// *during the rebase* runs `git rebase --abort` and throws
+    /// (`Fixup.classifiedRebaseFailure`'s signing branch, the same arm
+    /// `FixupTests.signingSucceedsForTheFixupCommitThenFailsDuringTheRebase`
+    /// exercises). Before this issue, `JournalCheckpoint.around` wrote the
+    /// in-flight file unconditionally before `body` ran and only ever
+    /// removed it on a normal return, so the abort left the file behind
+    /// naming the abandoned fixup's own entry. A later, unrelated own
+    /// rewrite -- here a plain `git commit --amend` with signing turned back
+    /// off -- would then read that stale file back and attach to an entry
+    /// that has nothing to do with it. Now the file must never exist at all
+    /// once the abort has run, and the later rewrite must attach nothing.
+    @Test func anAbandonedFixupAbortLeavesNoFileAndALaterUnrelatedRewriteAttachesNothing() throws {
+        var repo = try FixtureRepository()
+        defer { repo.destroy() }
+        try repo.build([.init("c1"), .init("c2"), .init("c3")])
+        let target = try #require(repo.oids["c2"])
+        let context = try WorktreeContext.resolve(path: repo.url.path)
+        let log = repo.url.appendingPathComponent("post-rewrite.log")
+        try installLoggingPostRewriteHook(in: repo, loggingTo: log)
+
+        try git.run(["config", "commit.gpgsign", "true"], workingDirectory: repo.url.path)
+        try git.run(["config", "gpg.format", "openpgp"], workingDirectory: repo.url.path)
+        // Succeeds once (the `git commit --fixup=` step), then fails every
+        // call after (the rebase's own signature attempt) -- the same shape
+        // `FixupTests.succeedThenFailGpgScript(succeedingCalls: 1)` uses, to
+        // land inside `classifiedRebaseFailure`'s signing/abort branch
+        // rather than `classifiedCommitFailure`, which never touches the
+        // sequencer at all.
+        let gpgScript = """
+        #!/bin/sh
+        cat > /dev/null
+        count_file="gpg-call-count.txt"
+        count=0
+        if [ -f "$count_file" ]; then count=$(wc -c < "$count_file" | tr -d ' '); fi
+        printf 'x' >> "$count_file"
+        if [ "$count" -lt 1 ]; then
+            printf '[GNUPG:] SIG_CREATED D\\n' >&2
+            printf -- '-----BEGIN PGP SIGNATURE-----\\n\\nfakefakefakefake\\n-----END PGP SIGNATURE-----\\n'
+            exit 0
+        else
+            echo "gpg: signing failed: No secret key" >&2
+            exit 2
+        fi
+        """
+        try repo.writeUntracked(["fake-gpg.sh": gpgScript])
+        let gpgPath = repo.url.appendingPathComponent("fake-gpg.sh").path
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: gpgPath)
+        try git.run(["config", "gpg.program", gpgPath], workingDirectory: repo.url.path)
+
+        try repo.writeUntracked(["staged.txt": "staged content\n"])
+        try git.run(["add", "-A"], workingDirectory: repo.url.path)
+
+        let thrown = #expect(throws: FixupError.self) {
+            _ = try Fixup.run(target: target, signing: .config, at: repo.url.path, extraEnvironment: hermetic)
+        }
+        guard case .signingFailed = try #require(thrown) else {
+            Issue.record("expected .signingFailed, got \(String(describing: thrown))")
+            return
+        }
+        #expect(!repo.isMidRebase, "the signing failure must abort the rebase, not leave it resumable")
+
+        let pendingPath = try context.path(for: RepositoryLayout.inFlightEntryIDRelativePath, git: git)
+        #expect(!FileManager.default.fileExists(atPath: pendingPath),
+                "an operation that aborted before throwing must leave no in-flight file")
+
+        let entries = try JournalAnchor.list(in: context)
+        #expect(entries.count == 1, "just the pre-operation checkpoint for the abandoned fixup")
+        let abandoned = try #require(entries.first)
+
+        // A later, unrelated own rewrite -- signing turned back off, since
+        // the fake gpg above only ever succeeds once.
+        try git.run(["config", "commit.gpgsign", "false"], workingDirectory: repo.url.path)
+        try git.run(
+            ["commit", "--amend", "--no-edit"], workingDirectory: repo.url.path,
+            extraEnvironment: hermetic.merging(["GIT_EDITOR": "true"]) { _, new in new })
+
+        let invocation = try finalInvocation(in: log)
+        #expect(invocation.source == "amend")
+        #expect(invocation.entryID == nil, "the amend ran through an unscoped GitProcess")
+        let markerValue = try #require(invocation.marker)
+        let decision = PostRewrite.decide(
+            sourceArgument: invocation.source,
+            environment: [GitProcess.markerVariable: markerValue],
+            readStandardInput: { invocation.stdin })
+        #expect(decision.isOwnInvocation)
+
+        let attached = try JournalCheckpoint.attachRewrite(decision, entryID: nil, in: context)
+        #expect(attached == nil, "an abandoned entry must never capture a later, unrelated rewrite")
+
+        let after = try JournalEntryMetadata(
+            serialized: try JournalAnchor.metadata(for: abandoned.id, in: context))
+        #expect(after.rewrite == nil, "the abandoned fixup's own entry must stay untouched")
+    }
+
+    /// #0241's second probe, made a test: a conflicting fixup leaves the
+    /// in-flight file naming its own entry; a wholly unrelated, fully
+    /// successful `JournalCheckpoint.around` call runs in between; then the
+    /// rebase is resolved and continued. Before this issue `around` wrote
+    /// the file unconditionally at the start of *every* call and removed it
+    /// on every normal return, so the unrelated call clobbered the fixup's
+    /// entry on the way in and erased it on the way out -- by the time the
+    /// continue ran, there was nothing left to attach to. The unrelated
+    /// call must now touch neither the file's presence nor its contents.
+    @Test func anUnrelatedSuccessfulOperationBetweenAConflictAndItsContinueDoesNotClobberTheSlot() throws {
+        var repo = try FixtureRepository()
+        try repo.build([
+            .init("c1", files: ["f.txt": "a\n"]),
+            .init("c2", files: ["f.txt": "b\n"]),
+            .init("c3", files: ["f.txt": "c\n"]),
+        ])
+        defer { repo.destroy() }
+        let target = try #require(repo.oids["c2"])
+        let context = try WorktreeContext.resolve(path: repo.url.path)
+        let log = repo.url.appendingPathComponent("post-rewrite.log")
+        try installLoggingPostRewriteHook(in: repo, loggingTo: log)
+
+        try repo.writeUntracked(["f.txt": "z\n"])
+        try git.run(["add", "-A"], workingDirectory: repo.url.path)
+
+        let thrown = #expect(throws: FixupError.self) {
+            _ = try Fixup.run(target: target, at: repo.url.path, extraEnvironment: hermetic)
+        }
+        guard case .blockedOnConflicts = try #require(thrown) else {
+            Issue.record("expected .blockedOnConflicts, got \(String(describing: thrown))")
+            return
+        }
+        #expect(repo.isMidRebase, "the rebase must be left resumable, not aborted")
+
+        let entries = try JournalAnchor.list(in: context)
+        #expect(entries.count == 1)
+        let fixupEntry = try #require(entries.first)
+
+        let pendingPath = try context.path(for: RepositoryLayout.inFlightEntryIDRelativePath, git: git)
+        let beforeContents = try #require(
+            try? String(contentsOfFile: pendingPath, encoding: .utf8),
+            "the conflict must leave the in-flight file naming the fixup's own entry")
+        #expect(beforeContents.trimmingCharacters(in: .whitespacesAndNewlines) == fixupEntry.id.string)
+
+        // A wholly unrelated, fully successful `around` in the same
+        // worktree -- must not touch the fixup's slot at all.
+        _ = try JournalCheckpoint.around(operation: "unrelated", at: repo.url.path, git: git) { _ in 0 }
+
+        let afterUnrelated = try #require(try? String(contentsOfFile: pendingPath, encoding: .utf8))
+        #expect(afterUnrelated == beforeContents,
+                "a successful unrelated operation must not overwrite or remove the fixup's in-flight file")
+
+        let entriesAfterUnrelated = try JournalAnchor.list(in: context)
+        #expect(entriesAfterUnrelated.count == 2, "the unrelated operation checkpoints its own entry too")
+
+        let continueGit = GitProcess()
+        let continueEnvironment = hermetic.merging(["GIT_EDITOR": "true"]) { _, new in new }
+        for _ in 0..<5 where repo.isMidRebase {
+            if repo.hasConflicts {
+                try repo.writeUntracked(["f.txt": "resolved\n"])
+                try git.run(["add", "-A"], workingDirectory: repo.url.path)
+            }
+            _ = try continueGit.capture(
+                ["rebase", "--continue"], workingDirectory: repo.url.path,
+                extraEnvironment: continueEnvironment)
+        }
+        #expect(!repo.isMidRebase, "the continue loop must have finished the rebase")
+
+        let invocation = try finalInvocation(in: log)
+        #expect(invocation.source == "rebase")
+        #expect(invocation.entryID == nil,
+                "the continue ran through an unscoped GitProcess and must export no entry id")
+        let decision = PostRewrite.decide(
+            sourceArgument: invocation.source,
+            environment: [GitProcess.markerVariable: invocation.marker ?? ""],
+            readStandardInput: { invocation.stdin })
+        #expect(decision.isOwnInvocation)
+
+        let attached = try #require(try JournalCheckpoint.attachRewrite(decision, entryID: nil, in: context))
+        #expect(attached.id == fixupEntry.id,
+                "the mapping must land on the fixup's own entry, not the unrelated one")
+
+        let unrelatedID = try #require(
+            entriesAfterUnrelated.first(where: { $0.id != fixupEntry.id })?.id)
+        let unrelatedMetadata = try JournalEntryMetadata(
+            serialized: try JournalAnchor.metadata(for: unrelatedID, in: context))
+        #expect(unrelatedMetadata.rewrite == nil, "the unrelated entry must stay untouched")
+    }
+
     // MARK: - The compare-and-swap guard
 
     /// `updateRefCommand`'s literal output, old oid included. `update-ref

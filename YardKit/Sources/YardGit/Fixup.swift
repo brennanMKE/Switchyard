@@ -181,6 +181,7 @@ public struct Fixup: Equatable, Sendable {
                 // caller could usefully continue.
                 _ = try? git.run(
                     ["rebase", "--abort"], workingDirectory: path, extraEnvironment: extraEnvironment)
+                clearInFlightFile(at: path, git: git)
                 throw classifyTimeout(failure, signingInEffect: inEffect)
             }
             throw failure
@@ -257,6 +258,7 @@ public struct Fixup: Equatable, Sendable {
             stderr: output.standardError, signingInEffect: inEffect) {
             _ = try? git.run(
                 ["rebase", "--abort"], workingDirectory: path, extraEnvironment: extraEnvironment)
+            clearInFlightFile(at: path, git: git)
             switch failure {
             case let .signingFailed(reason):
                 return FixupError.signingFailed(reason: reason)
@@ -265,8 +267,23 @@ public struct Fixup: Equatable, Sendable {
 
         _ = try? git.run(
             ["rebase", "--abort"], workingDirectory: path, extraEnvironment: extraEnvironment)
+        clearInFlightFile(at: path, git: git)
         return GitProcess.Failure.exited(
             code: output.exitCode, stderr: output.standardError, arguments: arguments)
+    }
+
+    /// Removes the in-flight entry-id file after an abort, if any is
+    /// present — a second, independent guard alongside `JournalCheckpoint.
+    /// around`'s own live-sequencer check (#0241), so an operation that just
+    /// aborted its own rebase never leaves the slot occupied, whatever wrote
+    /// it. Best-effort: a repository that never had the file, or whose
+    /// worktree cannot be re-resolved here, leaves nothing to clean up.
+    private static func clearInFlightFile(at path: String, git: GitProcess) {
+        guard let context = try? WorktreeContext.resolve(path: path, git: git),
+              let pendingPath = try? context.path(
+                for: RepositoryLayout.inFlightEntryIDRelativePath, git: git)
+        else { return }
+        try? FileManager.default.removeItem(atPath: pendingPath)
     }
 
     /// Classifies a `GitProcess.Failure.timedOut` from the `git rebase
