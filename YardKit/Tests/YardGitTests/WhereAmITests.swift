@@ -94,6 +94,29 @@ struct WhereAmITests {
         #expect(r.branch == nil, "detached HEAD has no branch name")
     }
 
+    // MARK: - Issue 0268 Required Test — headOID and rawHead derived from real HEAD
+
+    /// Every prior assertion on `headOID` and `rawHead` was a length check, a
+    /// non-emptiness check, or the unborn-HEAD zero value, so both fields
+    /// could be replaced by constants (`WhereAmI.swift:160`, `:316`) with the
+    /// full suite staying green. This resolves HEAD independently via
+    /// `repo.revParse("HEAD")` and compares both fields against it.
+    @Test func headOIDAndRawHeadMatchRealHeadResolvedIndependently() throws {
+        var repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+
+        try repo.build([FixtureRepository.Commit("tip", parents: ["c"])])
+
+        let r = try whereAmI(path: repo.url.path, git: git)
+        let realHead = try repo.revParse("HEAD")
+
+        #expect(!realHead.isEmpty, "the fixture has a real HEAD to compare against")
+        #expect(r.rawHead == realHead,
+                "rawHead must equal the repository's real HEAD, resolved independently")
+        #expect(r.headOID == String(r.rawHead.prefix(7)),
+                "headOID must be the short form of rawHead")
+    }
+
     @Test func interruptedRebaseSetsMidRebaseFlagOnReftable() throws {
         let repo = try FixtureRepository.linear(refFormat: .reftable)
         defer { repo.destroy() }
