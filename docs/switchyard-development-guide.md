@@ -650,13 +650,18 @@ documented. This validates the engine and settles the response contract.
 
 **Exit criteria, as a checklist** — the milestone review reads these and only these:
 
-- [ ] The engine function behind each of `whereami`, `graph`, `status`, `hunks`, `conflicts`, `log`,
+- [x] The engine function behind each of `whereami`, `graph`, `status`, `hunks`, `conflicts`, `log`,
       `verify` exists in `YardGit`, is tested, and returns a type that encodes to a
-      `schemaVersion: 1` envelope.
-- [ ] The engine behind each of `wt list`, `wt new`, `wt rm`, `wt where`, `wt gc`, `wt repair`
-      likewise.
-- [ ] Every failure mode returns a structured error carrying the exit code from §6 — not a trap, and
-      not a success value with empty fields.
+      `schemaVersion: 1` envelope. **Verified entry point by entry point** at the tenth review pass,
+      2026-08-18, with each one's file and line recorded.
+- [x] The engine behind each of `wt list`, `wt new`, `wt rm`, `wt where`, `wt gc`, `wt repair`
+      likewise. Same verification.
+- [x] Every failure mode returns a structured error carrying the exit code from §6 — not a trap, and
+      not a success value with empty fields. **This was the one criterion an M1 review found violated
+      rather than merely untested**: #0287 (2026-08-18) found `worktreeList`, `yardWhere` and
+      `WorktreeRepair.run` each returning an empty success value when their `git` command failed, and
+      #0301 then found their new tests asserting only *that* they threw and not *what the error
+      carried*. Thirty-five `exitClass` declarations now resolve to §6 codes.
 - [x] The response schemas are documented and versioned (#0026, and #0194 for payload shapes —
       guide §11 decision 21).
 - [ ] `swift test` is green, and every engine function has tests that can fail: each has a mutation
