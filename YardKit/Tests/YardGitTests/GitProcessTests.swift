@@ -106,11 +106,27 @@ struct GitProcessTests {
 
     @Test func environmentDisablesEditorsAndPagers() {
         let env = GitProcess.environment()
-        #expect(env["GIT_EDITOR"] == "false")
-        #expect(env["GIT_SEQUENCE_EDITOR"] == "false")
-        #expect(env["GIT_PAGER"] == "cat")
-        #expect(env["GIT_TERMINAL_PROMPT"] == "0")
-        #expect(env["LC_ALL"] == "C")
+
+        // The full non-interactivity guarantee `environment()` documents:
+        // no editor, no pager, no credential prompt, stable locale. Asserting
+        // the count alongside the values means a future addition to the
+        // guarantee set fails here until its own assertion is added too.
+        let guarantees: [String: String] = [
+            "GIT_EDITOR": "false",
+            "GIT_SEQUENCE_EDITOR": "false",
+            "EDITOR": "false",
+            "VISUAL": "false",
+            "GIT_PAGER": "cat",
+            "PAGER": "cat",
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_ASKPASS": "",
+            "SSH_ASKPASS": "",
+            "LC_ALL": "C",
+        ]
+        #expect(guarantees.count == 10)
+        for (key, value) in guarantees {
+            #expect(env[key] == value)
+        }
     }
 
     @Test func environmentSetsTheHookMarker() {
