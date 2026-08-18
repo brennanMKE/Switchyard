@@ -1300,6 +1300,31 @@ fixture whenever a real repository surprises the engine) rather than in an exit 
 **Until this is answered, M1 stays open and the clean-review count stays at 0.** The milestone must not
 close on a pass that only means one reviewer ran out of ideas.
 
+**Evidence from the thirteenth pass, 2026-08-18 — the classes were enumerated rather than sampled, and
+the numbers answer the question.** With classes 1 and 5 now enforced in-suite by #0316, that pass hunted
+the other three exhaustively:
+
+| class | enumerated | probed | already pinned | gaps |
+|---|---|---|---|---|
+| **2 — config-pinning flags** | 14 sites | 12 against real git | 9 | **3** (#0318, #0319, #0320) |
+| **3 — load-bearing scan direction** | 21 expressions, 12 judged load-bearing | 5 mutated | 4 | **1** (#0321) |
+| **4 — field asserted only at its zero value** | **60 public result fields across 13 types** | 12 | 12 | **0** |
+
+**Class 4 is empty** — the class #0245, #0247 and #0259 were about, checked field by field rather than
+sampled, with nothing left. **Class 2 is one issue from exhausted**, and its three gaps clustered in
+exactly two commands. **And all four findings fell in the classes that are not enforced by
+construction — none in 1 or 5 — which is direct evidence #0316 is holding.**
+
+**So four of the five clauses can be discharged exhaustively today.** (a) and (c) by the suite; (b) by
+enumerating argument vectors, which one reviewer did completely in a single pass; (e) likewise. **(d) is
+the one that resists mechanisation** — "load-bearing" is a judgment about whether an input with two
+candidates is constructible, not a property of the text — **but its site list is mechanical**, so a
+reviewer discharging it audits twenty-one named lines rather than searching an unbounded space.
+
+**What the enumeration still gives up**, and what belongs in standing practice rather than a criterion:
+*git does something nobody has seen*, and — #0321's shape — *our own helper is only ever called with
+degenerate input*. Neither is a property a milestone can be shown to have.
+
 Decide these with Brennan, do not decide them in code.
 
 1. **Rebase engine scope.** GitUp wrote its own. How much of one does M5 actually require, and
