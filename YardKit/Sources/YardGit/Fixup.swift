@@ -253,11 +253,13 @@ public struct Fixup: Equatable, Sendable {
     /// anything. Since the `git rebase --abort` just below already ends
     /// this rebase, `around` finds no live sequencer and writes nothing for
     /// this operation, so there was never a file here to clear. A
-    /// same-worktree file left behind by an *earlier*, different
-    /// interrupted operation is caught later, at read time, by
-    /// `JournalCheckpoint.attachRewrite`'s `stillInProgress` requirement
-    /// (guide §11 decision 19, as amended) — not by a proactive clear on
-    /// this operation's own abort. Measured: deleting both call sites this
+    /// A file left behind by an *earlier*, different interrupted operation
+    /// cannot be reached at all since **guide §11 decision 24** (#0273): the
+    /// entry id lives inside `rebase-merge/` / `rebase-apply/`, which git
+    /// deletes on both finish and abort, so it has the operation's own
+    /// lifetime and there is nothing stale to clear or to detect. This
+    /// comment previously pointed at `attachRewrite`'s `stillInProgress`
+    /// requirement, which #0273 deleted along with the file it guarded. Measured: deleting both call sites this
     /// function used to have leaves the full suite green.
     private static func classifiedRebaseFailure(
         output: GitProcess.Output,
