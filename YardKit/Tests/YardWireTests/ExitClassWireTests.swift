@@ -123,17 +123,58 @@ struct ExitClassWireTests {
 
 extension ExitClassWireTests {
 
-    /// `GitProcess.Failure`: both cases are repository-state failures — §6
-    /// code 6. `launchFailed` is a 6 and not a 4: codes 1–5 and 7 are decided
-    /// above the engine (#0141 Decision 3), so 6 is the engine's only honest
-    /// class for "the git operation could not be carried out".
-    @Test func gitProcessFailureCasesAreRepositoryErrors() {
-        let failures: [GitProcess.Failure] = [
+    /// Maps a `GitProcess.Failure` to a label naming its case. The `switch`
+    /// has no `default`, so the compiler requires a branch for every current
+    /// case of the enum -- `GitProcess.Failure` cannot be `CaseIterable`
+    /// (its cases carry associated values), so this is the compiler-checked
+    /// stand-in: a case added to `GitProcess.Failure` without a matching
+    /// branch here fails to compile right at this declaration, before the
+    /// suite can build at all (#0246 -- `timedOut`, added by #0239, slipped
+    /// past the old hardcoded `count == 2` because nothing forced this file
+    /// to notice the new case).
+    private func gitProcessFailureCaseLabel(_ failure: GitProcess.Failure) -> String {
+        switch failure {
+        case .exited: "exited"
+        case .launchFailed: "launchFailed"
+        case .timedOut: "timedOut"
+        }
+    }
+
+    /// One sample per current `GitProcess.Failure` case, shared by the two
+    /// tests below: the coverage check and the exit-class check are
+    /// different concerns and now assert separately rather than one test
+    /// silently doing both.
+    private func gitProcessFailureSamples() -> [GitProcess.Failure] {
+        [
             .exited(code: 128, stderr: "fatal: not a git repository", arguments: ["status"]),
             .launchFailed("posix_spawn failed"),
+            // 15 stands in for SIGTERM: the value is irrelevant to
+            // `exitClass`, which never reads it (see the doc comment below).
+            .timedOut(after: .seconds(30), arguments: ["fetch"], terminationStatus: 15),
         ]
-        #expect(failures.count == 2)
-        for failure in failures {
+    }
+
+    /// The property #0246 needs: one sample per case, with no case missing
+    /// and none doubled. `gitProcessFailureCaseLabel`'s switch is exhaustive
+    /// over `GitProcess.Failure` itself, so this is no longer a hardcoded
+    /// literal the enum can outgrow silently -- a case added to
+    /// `GitProcess.Failure` without a matching branch in
+    /// `gitProcessFailureCaseLabel` fails to compile before this test (or
+    /// this file) can build at all.
+    @Test func gitProcessFailureSamplesCoverEveryCase() {
+        let labels = gitProcessFailureSamples().map(gitProcessFailureCaseLabel)
+        #expect(Set(labels).count == labels.count, "two samples above share a case")
+    }
+
+    /// `GitProcess.Failure`: all three cases are repository-state failures —
+    /// §6 code 6. `launchFailed` and `timedOut` are 6s and not a 4: codes
+    /// 1–5 and 7 are decided above the engine (#0141 Decision 3), so 6 is
+    /// the engine's only honest class for "the git operation could not be
+    /// carried out". `timedOut` in particular is not classified by its
+    /// `terminationStatus` -- a SIGKILLed child reports 9, which collides
+    /// with `ExitClass.signingFailed`'s raw value (GitProcess.swift:51).
+    @Test func gitProcessFailureCasesAreRepositoryErrors() {
+        for failure in gitProcessFailureSamples() {
             #expect(failure.exitClass == .repositoryError)
             #expect(ExitCode(rawValue: Int(failure.exitClass.rawValue)) == .repositoryError)
         }
