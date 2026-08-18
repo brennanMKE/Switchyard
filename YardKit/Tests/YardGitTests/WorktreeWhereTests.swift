@@ -242,10 +242,38 @@ struct WorktreeWhereTests {
     /// `mainWorktreePath == nil`.
     ///
     /// `WorktreeContext.resolve` (the gate `yardWhere` calls first) issues
-    /// only `rev-parse` calls, so `writeRevParseOnlyShim`
-    /// (`FailingGitFixture.swift`) lets that gate succeed against a real
-    /// repository while `yardWhere`'s own `worktree list` call fails —
-    /// reusing the existing shim rather than writing a second one.
+    /// only `rev-parse` calls, so a shim that passes those through to real
+    /// git and forces everything else to fail lets that gate succeed against
+    /// a real repository while `yardWhere`'s own `worktree list` call fails.
+    ///
+    /// `FailingGitFixture.swift`'s `writeRevParseOnlyShim` does exactly that
+    /// but — measured directly — its non-`rev-parse` branch is a bare
+    /// `exit 1` with nothing written to stderr, so `list.standardError` in
+    /// production is genuinely the empty string for that shim. A `detail:
+    /// ""` mutation at `WorktreeWhere.swift:58` is then unobservable through
+    /// that shim: the real and the mutated value are both `""`. This test
+    /// uses its own shim, local to this file, whose failing branch writes a
+    /// stable, non-git string to stderr before exiting non-zero, so `detail`
+    /// carries real content the mutation can be checked against — without
+    /// asserting anything about git's own wording, since none of it is
+    /// git's.
+    private static let listFailureStderr = "yard-where-tests: forced worktree list failure"
+
+    private func writeRevParseOnlyShimWithStderr(in dir: String) throws -> String {
+        let shimPath = dir + "/git-shim.sh"
+        let script = """
+        #!/bin/sh
+        case "$*" in
+          *rev-parse*) exec /usr/bin/git "$@" ;;
+          *) echo "\(Self.listFailureStderr)" 1>&2; exit 1 ;;
+        esac
+        """
+        try script.write(toFile: shimPath, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: shimPath)
+        return shimPath
+    }
+
     @Test func couldNotListWorktreesThrowsWhenListFails() throws {
         let repo = try FixtureRepository.linear()
         defer { repo.destroy() }
@@ -255,11 +283,17 @@ struct WorktreeWhereTests {
             atPath: shimDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(atPath: shimDir) }
 
-        let git = GitProcess(executablePath: try writeRevParseOnlyShim(in: shimDir))
+        let git = GitProcess(executablePath: try writeRevParseOnlyShimWithStderr(in: shimDir))
 
-        #expect(throws: WorktreeWhere.Error.self) {
+        let error = #expect(throws: WorktreeWhere.Error.self) {
             _ = try yardWhere(path: repo.url.path, git: git)
         }
+        guard case let .couldNotListWorktrees(detail) = try #require(error) else {
+            Issue.record("expected couldNotListWorktrees, got \(String(describing: error))")
+            return
+        }
+        #expect(detail.contains(Self.listFailureStderr),
+                "the error carries the failing call's own stderr as the detail")
     }
 
     // MARK: - Newline safety (#0284)
