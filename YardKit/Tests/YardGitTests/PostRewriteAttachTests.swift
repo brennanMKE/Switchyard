@@ -986,6 +986,153 @@ struct PostRewriteAttachTests {
                 "the mapping belongs on the journal entry that captured pre-operation state, not as an observed one")
     }
 
+    // MARK: - #0261: a stale in-flight slot must not divert a later,
+    // unrelated operation's rewrite
+
+    /// The full reproduction #0261's probe measured, made permanent: a first
+    /// `Fixup.run` conflicts and leaves its own entry's id in the in-flight
+    /// slot; the caller aborts that rebase **directly** with `git rebase
+    /// --abort`, not through `Fixup`, so nothing switchyard-side clears the
+    /// slot and it is left naming an entry with no live operation behind it
+    /// -- "the slot names a still-live journal entry" and "the slot is held
+    /// by the operation that is live right now" are not the same claim,
+    /// because a journal entry outlives its operation. A second, wholly
+    /// unrelated `Fixup.run` then conflicts on its own and leaves its own
+    /// rebase live. Before #0261's fix, `around`'s first-writer-wins check
+    /// (#0254) could not tell the stale reference from a genuinely live one
+    /// -- `JournalAnchor.list` still contains entry A -- so the second
+    /// call's catch refused to claim the slot, and the eventual
+    /// `post-rewrite` hook attached the second operation's mapping to the
+    /// FIRST, unrelated entry: a corrupted journal, not merely a missing
+    /// one. #0261 clears a stale slot at the *start* of `around`, before the
+    /// second checkpoint is even written, so the second call claims the
+    /// (now-empty) slot for itself.
+    @Test func anOutOfBandAbortsStaleSlotMustNotDivertALaterUnrelatedOperationsRewrite() throws {
+        var repo = try FixtureRepository()
+        try repo.build([
+            .init("c1", files: ["f.txt": "a\n"]),
+            .init("c2", files: ["f.txt": "b\n"]),
+            .init("c3", files: ["f.txt": "c\n"]),
+        ])
+        defer { repo.destroy() }
+        let target = try #require(repo.oids["c2"])
+        let context = try WorktreeContext.resolve(path: repo.url.path)
+        let log = repo.url.appendingPathComponent("post-rewrite.log")
+        try installLoggingPostRewriteHook(in: repo, loggingTo: log)
+
+        // 1. A first `Fixup.run` conflicts, leaving its own entry's id in
+        //    the in-flight slot.
+        try repo.writeUntracked(["f.txt": "z\n"])
+        try git.run(["add", "-A"], workingDirectory: repo.url.path)
+
+        let firstThrown = #expect(throws: FixupError.self) {
+            _ = try Fixup.run(target: target, at: repo.url.path, extraEnvironment: hermetic)
+        }
+        guard case .blockedOnConflicts = try #require(firstThrown) else {
+            Issue.record("expected .blockedOnConflicts, got \(String(describing: firstThrown))")
+            return
+        }
+        #expect(repo.isMidRebase, "the first rebase must be left resumable, not aborted")
+
+        let entries = try JournalAnchor.list(in: context)
+        #expect(entries.count == 1)
+        let entryA = try #require(entries.first)
+
+        let pendingPath = try context.path(for: RepositoryLayout.inFlightEntryIDRelativePath, git: git)
+        let slotAfterA = try #require(
+            try? String(contentsOfFile: pendingPath, encoding: .utf8),
+            "the first conflict must leave the in-flight file naming its own entry")
+        #expect(slotAfterA.trimmingCharacters(in: .whitespacesAndNewlines) == entryA.id.string)
+
+        // 2. Out of band: the caller aborts directly, not through `Fixup` --
+        //    no switchyard code runs at all for this abort, so nothing
+        //    clears the slot here. It is left naming entry A, which no
+        //    longer has any live operation behind it.
+        _ = try git.run(["rebase", "--abort"], workingDirectory: repo.url.path)
+        #expect(!repo.isMidRebase, "the abort must have ended the first rebase")
+        let slotAfterAbort = try #require(
+            try? String(contentsOfFile: pendingPath, encoding: .utf8),
+            "an out-of-band abort must leave the file behind -- nothing switchyard-side ran to clear it")
+        #expect(slotAfterAbort.trimmingCharacters(in: .whitespacesAndNewlines) == entryA.id.string)
+
+        // 3. Before operation B starts, nothing is live -- the abort tore
+        //    down the only sequencer this worktree had.
+        #expect(try SequencerSnapshot.capture(in: context, git: git) == nil)
+
+        // 4. A second, wholly unrelated `Fixup.run` -- its own staged
+        //    change, same target, and it conflicts on its own (the abandoned
+        //    fixup commit from step 1 is still sitting on `HEAD`, and
+        //    replaying its diff onto `target` conflicts the same way it did
+        //    the first time). This is a genuinely new operation, not a retry
+        //    of the first: the abort left no unmerged index behind for `git
+        //    commit --fixup=` to refuse.
+        try repo.writeUntracked(["f.txt": "y\n"])
+        try git.run(["add", "-A"], workingDirectory: repo.url.path)
+
+        let secondThrown = #expect(throws: FixupError.self) {
+            _ = try Fixup.run(target: target, at: repo.url.path, extraEnvironment: hermetic)
+        }
+        guard case .blockedOnConflicts = try #require(secondThrown) else {
+            Issue.record("expected .blockedOnConflicts, got \(String(describing: secondThrown))")
+            return
+        }
+        #expect(repo.isMidRebase, "the second operation must leave its own rebase live")
+
+        let entriesAfterB = try JournalAnchor.list(in: context)
+        #expect(entriesAfterB.count == 2, "B's own pre-operation checkpoint is written alongside A's")
+        let entryB = try #require(entriesAfterB.first { $0.id != entryA.id })
+
+        // The fix under test: B's own `around` call cleared the stale slot
+        // at its start, before B's own checkpoint was written, so B's catch
+        // claims the (empty) slot for itself rather than finding A still
+        // "live" via #0254's first-writer-wins check.
+        let slotAfterB = try #require(try? String(contentsOfFile: pendingPath, encoding: .utf8))
+        #expect(slotAfterB.trimmingCharacters(in: .whitespacesAndNewlines) == entryB.id.string,
+                "B must claim its own slot -- the stale reference to A must not have survived")
+
+        // 5. Resolve and continue -- the only rebase live is B's.
+        let continueGit = GitProcess()
+        let continueEnvironment = hermetic.merging(["GIT_EDITOR": "true"]) { _, new in new }
+        for _ in 0..<10 where repo.isMidRebase {
+            if repo.hasConflicts {
+                try repo.writeUntracked(["f.txt": "resolved\n"])
+                try git.run(["add", "-A"], workingDirectory: repo.url.path)
+            }
+            _ = try continueGit.capture(
+                ["rebase", "--continue"], workingDirectory: repo.url.path,
+                extraEnvironment: continueEnvironment)
+        }
+        #expect(!repo.isMidRebase, "the continue loop must have finished B's rebase")
+
+        let invocation = try finalInvocation(in: log)
+        #expect(invocation.source == "rebase")
+        #expect(invocation.entryID == nil,
+                "the continue ran through an unscoped GitProcess and must export no entry id")
+        #expect(invocation.resumable,
+                "the hook fired while the rebase it was concluding was still live")
+        let decision = PostRewrite.decide(
+            sourceArgument: invocation.source,
+            environment: [GitProcess.markerVariable: invocation.marker ?? ""],
+            readStandardInput: { invocation.stdin })
+        #expect(decision.isOwnInvocation, "the marker must still be set on our own continue")
+
+        let attached = try #require(try JournalCheckpoint.attachRewrite(
+            decision, entryID: nil, stillInProgress: invocation.resumable, in: context))
+        #expect(attached.id == entryB.id,
+                "B's mapping must land on B's OWN entry, not the stale, unrelated A")
+
+        let afterB = try JournalEntryMetadata(
+            serialized: try JournalAnchor.metadata(for: entryB.id, in: context))
+        #expect(afterB.rewrite != nil, "B's own entry must carry B's own mapping")
+
+        let afterA = try JournalEntryMetadata(
+            serialized: try JournalAnchor.metadata(for: entryA.id, in: context))
+        #expect(afterA.rewrite == nil,
+                "entry A must stay untouched -- it never ran the operation now being recorded")
+
+        #expect(try JournalObserved.list(in: context).isEmpty)
+    }
+
     // MARK: - The compare-and-swap guard
 
     /// `updateRefCommand`'s literal output, old oid included. `update-ref
