@@ -1137,6 +1137,162 @@ struct JournalRestoreTests {
         #expect(claims.count == 1)
     }
 
+    // MARK: - A mid-rebase or mid-bisect sibling is wired into restore (#0256)
+
+    /// Advances the sibling's branch with one ordinary commit, so a restore
+    /// targeting the checkpoint recorded before it must move the branch back
+    /// to `c` -- the disturbance a mid-rebase or mid-bisect pause alone does
+    /// not create. Mirrors `WorktreeDisturbanceTests`' `moveSiblingsBranch`
+    /// (private there, cannot be shared).
+    private func moveSiblingsBranch(at wt: URL, branch: String) throws -> String {
+        try "w\n".write(to: wt.appendingPathComponent("w.txt"),
+                        atomically: true, encoding: .utf8)
+        try git.run(["add", "-A"], workingDirectory: wt.path)
+        try git.run(["commit", "-qm", "sibling work"], workingDirectory: wt.path)
+        return try #require(try git.run(
+            ["rev-parse", "refs/heads/\(branch)"], workingDirectory: wt.path).lines.first)
+    }
+
+    /// The data-loss test: before `JournalRestore.swift:296` enriched the
+    /// worktree list, a sibling stopped mid-rebase read as `detached` with no
+    /// `branch` line, so `disturbances` never saw it holding `agent-branch`
+    /// and restore moved the branch back to the checkpoint's recorded value
+    /// out from under it. Since guide §11 decision 23 (#0251), the right
+    /// outcome is not a refusal: restore succeeds, `agent-branch` is left
+    /// exactly where the sibling's own work put it, and named in
+    /// `report.leftAlone`. The claim that makes this a data-loss test, not
+    /// merely a mechanism test: the sibling's `git rebase --continue` must
+    /// then succeed -- before this fix it failed with `cannot lock ref …
+    /// is at <ours> but expected <theirs>`, because restore had moved the
+    /// branch out from under the rebase's own bookkeeping.
+    @Test func aMidRebaseSiblingIsLeftAloneAndItsRebaseContinueSucceeds() throws {
+        var repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let wt = try repo.addWorktree(named: "agent-a", branch: "agent-branch")
+        defer { try? FileManager.default.removeItem(at: wt) }
+        let ctx = try context(of: repo)
+        let entry = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+
+        // The sibling advances its own branch, then stops mid-rebase on it --
+        // paused on "edit", so HEAD detaches to the reapplied commit but the
+        // sequencer still names `agent-branch` as the branch rebase will
+        // resume onto.
+        let moved = try moveSiblingsBranch(at: wt, branch: "agent-branch")
+        try git.run(
+            ["rebase", "-i", "-q", "HEAD~1"], workingDirectory: wt.path,
+            extraEnvironment: ["GIT_SEQUENCE_EDITOR": "sed -i '' -e '1s/^pick/edit/'",
+                               "GIT_EDITOR": "true"])
+
+        // Porcelain calls the sibling detached, with no `branch` line --
+        // exactly the gap #0256 closes.
+        let listedBeforeRestore = try worktreeList(path: repo.url.path)
+        let siblingEntry = try #require(listedBeforeRestore.first { $0.path == wt.path })
+        #expect(siblingEntry.detached)
+        #expect(siblingEntry.branch == nil)
+
+        let report = try JournalRestore.restore(entry.id, in: ctx)
+
+        #expect(report.leftAlone == ["refs/heads/agent-branch"])
+        // The branch is exactly where the sibling's own work put it, not the
+        // checkpoint's recorded value.
+        #expect(try ctx.resolveRef("refs/heads/agent-branch", inWorktree: nil) == moved)
+
+        // The harm this test exists to catch: the sibling can still finish
+        // its rebase. Assert the continue's exit status, not just the ref --
+        // that is the difference between testing the mechanism and testing
+        // the harm.
+        let continued = try git.capture(["rebase", "--continue"], workingDirectory: wt.path)
+        #expect(continued.exitCode == 0)
+    }
+
+    /// The mid-bisect half of the same gap, to the `leftAlone` assertion --
+    /// the `rebase --continue` half above is rebase-specific.
+    @Test func aMidBisectSiblingIsLeftAlone() throws {
+        var repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let wt = try repo.addWorktree(named: "agent-a", branch: "agent-branch")
+        defer { try? FileManager.default.removeItem(at: wt) }
+        let a = try #require(repo.oids["a"])
+        let ctx = try context(of: repo)
+        let entry = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+
+        let moved = try moveSiblingsBranch(at: wt, branch: "agent-branch")
+
+        // Bisecting detaches HEAD but records the branch it started from, in
+        // `BISECT_START` -- a short name, not a full ref.
+        try git.run(["bisect", "start"], workingDirectory: wt.path)
+        try git.run(["bisect", "bad"], workingDirectory: wt.path)
+        try git.run(["bisect", "good", a], workingDirectory: wt.path)
+
+        let listedBeforeRestore = try worktreeList(path: repo.url.path)
+        let siblingEntry = try #require(listedBeforeRestore.first { $0.path == wt.path })
+        #expect(siblingEntry.detached)
+        #expect(siblingEntry.branch == nil)
+
+        let report = try JournalRestore.restore(entry.id, in: ctx)
+
+        #expect(report.leftAlone == ["refs/heads/agent-branch"])
+        #expect(try ctx.resolveRef("refs/heads/agent-branch", inWorktree: nil) == moved)
+    }
+
+    /// The second behaviour change from the same enrichment: `detachingHeldHead`
+    /// (step 5's neighbour, both consuming the same `worktrees` list) sees a
+    /// mid-rebase sibling as a live holder too. The caller's own checkpoint
+    /// recorded `HEAD` symbolic to `feature`; a sibling then checks out
+    /// `feature` and stops mid-rebase on it. Restoring must not hand `HEAD`
+    /// back to `feature` as recorded -- that would dual-claim a branch a live
+    /// sibling holds, the exact collision #0211 exists to prevent -- so `HEAD`
+    /// detaches at the recorded oid instead, same as it already does for an
+    /// ordinary live sibling checkout.
+    @Test func aMidRebaseSiblingHoldingTheRecordedHeadBranchDetachesInsteadOfAdopting() throws {
+        var repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let ctx = try context(of: repo)
+
+        try repo.branch("feature")
+        try repo.checkout("feature")
+        let featureOid = try #require(
+            try git.run(["rev-parse", "feature"], workingDirectory: repo.url.path).lines.first)
+
+        let entry = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+
+        // The caller moves off `feature` -- restoring back onto it is what
+        // undoing its own operation IS, not a sibling casualty.
+        try repo.checkout("main")
+
+        // A sibling checks out the same branch the checkpoint recorded, then
+        // stops mid-rebase on it -- so porcelain calls it detached, with no
+        // `branch` line, exactly like the disturbance tests above.
+        let siblingPath = repo.url.deletingLastPathComponent()
+            .appendingPathComponent("\(repo.url.lastPathComponent)-wt-sibling")
+        try git.run(["worktree", "add", "-q", siblingPath.path, "feature"],
+                    workingDirectory: repo.url.path)
+        defer { try? FileManager.default.removeItem(at: siblingPath) }
+        try git.run(
+            ["rebase", "-i", "-q", "HEAD~1"], workingDirectory: siblingPath.path,
+            extraEnvironment: ["GIT_SEQUENCE_EDITOR": "sed -i '' -e '1s/^pick/edit/'",
+                               "GIT_EDITOR": "true"])
+
+        let listedBeforeRestore = try worktreeList(path: repo.url.path)
+        let siblingEntry = try #require(listedBeforeRestore.first { $0.path == siblingPath.path })
+        #expect(siblingEntry.detached)
+        #expect(siblingEntry.branch == nil)
+
+        let report = try JournalRestore.restore(entry.id, in: ctx)
+
+        // HEAD comes back at the recorded commit, detached -- not the dual
+        // claim git's own porcelain refuses to create.
+        let after = try RefSnapshot.capture(in: ctx)
+        #expect(after.head == .detached(oid: featureOid))
+        #expect(report.detachedFrom == "refs/heads/feature")
+
+        // `feature` itself is untouched: the sibling still holds it, alone.
+        let branchOid = try #require(
+            try git.run(["rev-parse", "refs/heads/feature"],
+                        workingDirectory: repo.url.path).lines.first)
+        #expect(branchOid == featureOid)
+    }
+
     // MARK: - The lock wraps the whole flow
 
     /// Single format on purpose: the lock is `flock(2)` on a file under the
