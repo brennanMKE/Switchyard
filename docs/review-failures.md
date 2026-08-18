@@ -293,6 +293,14 @@ paths, guard clauses that skip. The question to answer is not "does the code do 
     comment even said "rather than through `attachRewrite` again", describing something the line did not
     do, which is how it stayed hidden through nine passes.
 
+8k. **Is any `## Sequencing` / `## Review` / `## Work log` heading above the content the checks read?**
+    `preflight-issue.sh` truncates the spec at the first of those headings — deliberately, so a work log
+    cannot satisfy a criterion. #0316 put `## Sequencing` *above* `## The files`, so the spec ended
+    before the paths and the issue reported **"names no source file"** while naming three. The guard
+    fired accurately about nothing, which is the same class as the staleness check that suppressed its
+    own stderr. The script now also guards `## The files` and `## Expected behavior` being below the
+    cut, but the habit is simpler: **those three sections go at the end of an issue, always.**
+
 9. **Is there exactly one deliverable?** Not one theme — one file, one behaviour, one thing that is
    either done or not. If the Expected behavior names more than one new production file, it is more
    than one issue.

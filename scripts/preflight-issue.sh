@@ -55,7 +55,12 @@ trap 'rm -f "$SPEC"' EXIT
 awk '/^## (Review|Work log|Sequencing)/{exit} {print}' "$FILE" > "$SPEC"
 
 CUT_AT=$(grep -n '^## \(Review\|Work log\|Sequencing\)' "$FILE" | head -1 | cut -d: -f1 || true)
-LAST_CHANGE=$(grep -n '^## Change' "$FILE" | tail -1 | cut -d: -f1 || true)
+# Also guard '## The files' and '## Expected behavior': #0316 put a '## Sequencing'
+# heading ABOVE '## The files', so the spec was truncated before the paths and the
+# issue read as naming no source file at all -- a guard that fired accurately about
+# nothing, which is the same class as the staleness check that suppressed its own
+# stderr. 2026-08-18.
+LAST_CHANGE=$(grep -n '^## \(Change\|The files\|Expected behavior\)' "$FILE" | tail -1 | cut -d: -f1 || true)
 if [[ -n "$CUT_AT" && -n "$LAST_CHANGE" ]] && (( CUT_AT < LAST_CHANGE )); then
   print -u2 "preflight: FAIL — a '## Review'/'## Work log'/'## Sequencing' heading at line $CUT_AT"
   print -u2 "         sits ABOVE the last '## Change' block at line $LAST_CHANGE, so the spec is"
