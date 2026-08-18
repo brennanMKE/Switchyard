@@ -463,16 +463,24 @@ public enum JournalAnchor {
     }
 
     /// The entry's metadata bytes, exactly as written. Reads
-    /// `<anchor-ref>:metadata.json` through `cat-file`, which is the same
+    /// `<namespace><id>:metadata.json` through `cat-file`, which is the same
     /// path #0030's rebuild uses — the repository alone suffices.
+    ///
+    /// Takes `namespace:` like `write` and `updateMetadata`, defaulting to
+    /// `refPrefix` so every existing call site keeps reading the journal's
+    /// own namespace unchanged (#0236) — before this, the ref name was built
+    /// from `refName(for:)`, which hardcodes `refPrefix` and so could never
+    /// read an entry anchored under a different namespace, such as
+    /// `JournalObserved.refPrefix`.
     public static func metadata(
         for id: JournalEntryID,
         in context: WorktreeContext,
+        namespace: String = refPrefix,
         git: GitProcess = GitProcess()
     ) throws -> Data {
         let base = context.topLevel ?? context.gitDir
         let output = try git.run(
-            ["cat-file", "blob", refName(for: id) + ":" + metadataTreeEntryName],
+            ["cat-file", "blob", namespace + id.string + ":" + metadataTreeEntryName],
             workingDirectory: base)
         return output.standardOutput
     }
