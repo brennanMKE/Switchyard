@@ -181,6 +181,12 @@ concurrently, that goes inside a single foreground command: `( cd other && swift
 then `swift test > B.log 2>&1`, then `wait`. Put this in the dispatch prompt for anything that measures
 the suite itself.
 
+**Give every concurrent agent its own scratch directory.** Two reviews running at once collided over
+a shared helper file in the scratchpad on 2026-08-17 — one overwrote the other's `mut.py` mid-run,
+aborting its revert step, which it recovered from by hand. Scratch paths get a per-agent suffix
+(`scratchpad/review-0044d`, not `scratchpad/`), and a round's scratch files go in `build/` inside its
+own worktree (`AGENTS.md` Rule 6).
+
 **Never `git add -A` in the primary checkout, and never let a review agent mutate it.** On
 2026-08-17 the #0044 umbrella review was running mutations against `JournalRestore.swift` in the
 primary checkout to find out which of that issue's decisions were pinned. One of its mutations was
