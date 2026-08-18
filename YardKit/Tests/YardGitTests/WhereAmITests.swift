@@ -388,4 +388,53 @@ struct WhereAmITests {
         #expect(r.stagedCount == 1, "the file is staged")
     }
 
+    /// `unstagedCount`'s probe, plain `git diff --name-only -z`, lists a
+    /// conflicted path *twice* -- once against each side of the conflict.
+    /// Measured directly below: the raw probe returns `f.txt` twice while
+    /// `conflictCount`'s `--diff-filter=U` returns it once. `unstagedCount`
+    /// deduplicates through a `Set` before counting so the doubled entry does
+    /// not inflate it; this test pins that so the dedup cannot silently
+    /// regress. `plain.txt` is an ordinary unstaged file, unrelated to the
+    /// conflict, so the assertion distinguishes "deduplicated to one" from
+    /// "only happened to see one path" -- if the dedup were dropped,
+    /// `unstagedCount` would read 3 (f.txt twice + plain.txt), not 2.
+    @Test func conflictedPathIsNotDoubleCountedInUnstaged() throws {
+        var repo = try FixtureRepository(refFormat: .files)
+        defer { repo.destroy() }
+
+        try repo.build([FixtureRepository.Commit("base", files: [
+            "f.txt": "original\n",
+            "plain.txt": "plain\n",
+        ])])
+        try repo.build([FixtureRepository.Commit("ours", parents: ["base"], files: [
+            "f.txt": "ours\n",
+        ])])
+        try repo.build([FixtureRepository.Commit("theirs", parents: ["base"], files: [
+            "f.txt": "theirs\n",
+        ])])
+        try repo.checkoutDetached(repo.oids["ours"]!)
+        _ = try? git.run(["merge", "--no-commit", repo.oids["theirs"]!],
+                         workingDirectory: repo.url.path)
+
+        // +1 ordinary unstaged path, never part of the conflict.
+        try "plain\nunstaged-change\n".write(
+            to: repo.url.appendingPathComponent("plain.txt"),
+            atomically: true, encoding: .utf8)
+
+        // Confirm the fixture actually reached the state this test depends
+        // on: the raw probe really does list the conflicted path twice, and
+        // the conflict machinery reports exactly one conflicted path.
+        let rawProbe = try git.capture(["diff", "--name-only", "-z"], workingDirectory: repo.url.path)
+        let rawFields = rawProbe.text.split(separator: "\0", omittingEmptySubsequences: true)
+        #expect(rawFields.filter { $0 == "f.txt" }.count == 2,
+                "git diff --name-only -z lists the conflicted path twice -- the defect this test guards")
+        #expect(rawFields.contains("plain.txt"),
+                "the ordinary unstaged file is also present in the raw probe")
+
+        let r = try whereAmI(path: repo.url.path, git: git)
+        #expect(r.conflictCount == 1, "one conflicted path")
+        #expect(r.unstagedCount == 2,
+                "the conflicted path counted once, plus the one ordinary unstaged path -- would read 3 if the doubled conflict entry were not deduplicated")
+    }
+
 }
