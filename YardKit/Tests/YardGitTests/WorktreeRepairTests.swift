@@ -368,6 +368,23 @@ struct WorktreeRepairTests {
         #expect(status.exitCode == 0, "git status inside a moved linked worktree exits 0 regardless of admin state")
     }
 
+    // MARK: - Failure path (#0287)
+
+    /// Criterion 3 forbids a success value with empty fields on a failed
+    /// `git` call. `WorktreeRepair.run` must throw `WorktreeRepair.Error`
+    /// when `git worktree repair` exits non-zero, not silently return `[]`.
+    /// An empty directory is not a git repository, so `git` exits 128.
+    @Test func notARepositoryThrowsNotRepaired() throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("yard-worktreerepair-not-a-repo-\(UUID().uuidString)")
+        try fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: dir) }
+
+        #expect(throws: WorktreeRepair.Error.self) {
+            _ = try WorktreeRepair.run(repositoryPath: dir.path)
+        }
+    }
+
     // MARK: - Position 3 — main repo itself moved.
 
     @Test func mainRepoMovedLinkedWorktreeIsPrunableThenRepaired() throws {

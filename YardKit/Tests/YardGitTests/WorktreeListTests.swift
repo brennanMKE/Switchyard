@@ -360,6 +360,23 @@ struct WorktreeListTests {
         #expect(le.lockReason == "debugging #123")
     }
 
+    // MARK: - Failure path (#0287)
+
+    /// Criterion 3 forbids a success value with empty fields on a failed
+    /// `git` call. `worktreeList` must throw `WorktreeListError.couldNotList`
+    /// when `git worktree list` exits non-zero, not silently return `[]`.
+    /// An empty directory is not a git repository, so `git` exits 128.
+    @Test func notARepositoryThrowsCouldNotList() throws {
+        let dir = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("yard-worktreelist-not-a-repo-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        #expect(throws: WorktreeListError.self) {
+            _ = try worktreeList(path: dir.path)
+        }
+    }
+
     // MARK: - The prunable flag (#0148)
 
     /// #0130 pins `prunable`/`prunableReason` on the wire, but from

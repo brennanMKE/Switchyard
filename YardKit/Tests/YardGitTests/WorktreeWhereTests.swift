@@ -237,6 +237,34 @@ struct WorktreeWhereTests {
                 "main path must not equal the linked worktree's top-level in \(format.rawValue)")
     }
 
+    // MARK: - Failure path (#0287)
+
+    /// Criterion 3 forbids a success value with empty fields on a failed
+    /// `git` call. `yardWhere` must throw `WorktreeWhere.Error` when
+    /// `git worktree list` exits non-zero, not silently return a result with
+    /// `mainWorktreePath == nil`.
+    ///
+    /// `WorktreeContext.resolve` (the gate `yardWhere` calls first) issues
+    /// only `rev-parse` calls, so `writeRevParseOnlyShim`
+    /// (`FailingGitFixture.swift`) lets that gate succeed against a real
+    /// repository while `yardWhere`'s own `worktree list` call fails —
+    /// reusing the existing shim rather than writing a second one.
+    @Test func couldNotListWorktreesThrowsWhenListFails() throws {
+        let repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+
+        let shimDir = NSTemporaryDirectory() + "yard-where-fail-git-\(UUID().uuidString)"
+        try FileManager.default.createDirectory(
+            atPath: shimDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: shimDir) }
+
+        let git = GitProcess(executablePath: try writeRevParseOnlyShim(in: shimDir))
+
+        #expect(throws: WorktreeWhere.Error.self) {
+            _ = try yardWhere(path: repo.url.path, git: git)
+        }
+    }
+
     // MARK: - Newline safety (#0284)
 
     @Test func newlineInLinkedWorktreePathDoesNotCorruptParsing() throws {

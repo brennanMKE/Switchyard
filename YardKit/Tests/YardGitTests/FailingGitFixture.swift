@@ -19,7 +19,11 @@ import Testing
 /// Writes an executable shim script that passes `rev-parse` invocations
 /// through to `/usr/bin/git` and exits 1 for everything else. Returns the
 /// shim's path; the caller owns (and removes) the containing directory.
-private func writeRevParseOnlyShim(in dir: String) throws -> String {
+///
+/// Internal, not private: `WorktreeWhereTests` reuses this rather than
+/// writing a second shim for the same "rev-parse succeeds, everything else
+/// fails" shape (#0287).
+func writeRevParseOnlyShim(in dir: String) throws -> String {
     let shimPath = dir + "/git-shim.sh"
     let script = """
 #!/bin/sh
