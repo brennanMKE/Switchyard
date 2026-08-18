@@ -657,7 +657,8 @@ documented. This validates the engine and settles the response contract.
       likewise.
 - [ ] Every failure mode returns a structured error carrying the exit code from §6 — not a trap, and
       not a success value with empty fields.
-- [ ] The response schemas are documented and versioned (#0026).
+- [x] The response schemas are documented and versioned (#0026, and #0194 for payload shapes —
+      guide §11 decision 21).
 - [ ] `swift test` is green, and every engine function has tests that can fail: each has a mutation
       recorded against a named test that dies under it.
 

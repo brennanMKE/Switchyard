@@ -32,8 +32,99 @@
     "success" : {
       "ok" : true,
       "result" : {
-        "optional" : true,
-        "schema" : "whereami"
+        "fields" : [
+          {
+            "description" : "Number of commits ahead of the upstream. Absent when there is no upstream to compare against.",
+            "name" : "ahead",
+            "optional" : true,
+            "type" : "int"
+          },
+          {
+            "description" : "Number of commits behind the upstream. Absent when there is no upstream to compare against.",
+            "name" : "behind",
+            "optional" : true,
+            "type" : "int"
+          },
+          {
+            "description" : "The branch name, e.g. \"main\". Absent when HEAD is detached.",
+            "name" : "branch",
+            "optional" : true,
+            "type" : "string"
+          },
+          {
+            "description" : "Number of paths with unmerged entries in the index — one per conflicted file, regardless of how many stage entries it has.",
+            "name" : "conflictCount",
+            "optional" : false,
+            "type" : "int"
+          },
+          {
+            "description" : "True when the index contains unmerged (conflicted) entries. Derived from conflictCount.",
+            "name" : "hasConflicts",
+            "optional" : false,
+            "type" : "bool"
+          },
+          {
+            "description" : "The seven-character short form of HEAD's object id, e.g. \"a1b2c3d\". Not the full SHA — see rawHead for that.",
+            "name" : "headOID",
+            "optional" : false,
+            "type" : "string"
+          },
+          {
+            "description" : "True when a cherry-pick is in progress.",
+            "name" : "isMidCherryPick",
+            "optional" : false,
+            "type" : "bool"
+          },
+          {
+            "description" : "True when a merge is in progress.",
+            "name" : "isMidMerge",
+            "optional" : false,
+            "type" : "bool"
+          },
+          {
+            "description" : "True when a rebase is in progress.",
+            "name" : "isMidRebase",
+            "optional" : false,
+            "type" : "bool"
+          },
+          {
+            "description" : "The full form of HEAD's object id, for debugging. A full SHA, or empty on a fresh repository with no commits yet.",
+            "name" : "rawHead",
+            "optional" : false,
+            "type" : "string"
+          },
+          {
+            "description" : "Number of files with staged changes.",
+            "name" : "stagedCount",
+            "optional" : false,
+            "type" : "int"
+          },
+          {
+            "description" : "Number of stash entries.",
+            "name" : "stashCount",
+            "optional" : false,
+            "type" : "int"
+          },
+          {
+            "description" : "Number of files with unstaged changes.",
+            "name" : "unstagedCount",
+            "optional" : false,
+            "type" : "int"
+          },
+          {
+            "description" : "Number of untracked files in the working tree.",
+            "name" : "untrackedCount",
+            "optional" : false,
+            "type" : "int"
+          },
+          {
+            "description" : "The upstream ref, e.g. \"origin\/main\". Absent when none is set or on a detached HEAD.",
+            "name" : "upstream",
+            "optional" : true,
+            "type" : "string"
+          }
+        ],
+        "optional" : true
       },
       "schemaVersion" : 1
     }
