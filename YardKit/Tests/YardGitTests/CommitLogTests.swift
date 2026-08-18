@@ -270,6 +270,19 @@ struct CommitLogTests {
         #expect(t == nil)
     }
 
+    // #0314 (M1 milestone review, finding 5): `Trailer.parse` splits on the
+    // FIRST colon, not the last. A trailer value containing its own colon --
+    // exactly this project's own `Claude-Session:` trailer, which carries a
+    // URL -- must keep the whole value. Mutating `firstIndex` to `lastIndex`
+    // makes the key candidate contain whitespace (the space after the URL's
+    // scheme colon), which fails the whitespace guard and drops the trailer
+    // entirely -- so this must assert the full value, not merely non-nil.
+    @Test func trailerParseKeepsValueContainingColon() throws {
+        let t = try #require(Trailer.parse("Claude-Session: https://claude.ai/code/session_013q"))
+        #expect(t.key == "Claude-Session")
+        #expect(t.value == "https://claude.ai/code/session_013q")
+    }
+
     // MARK: - CommitLogEntry helpers
 
     @Test func shortOidReturnsTwelveChars() {
@@ -468,6 +481,26 @@ struct CommitLogTests {
         let signed = try #require(trailers.first(where: { $0.key == "Signed-off-by" }))
         // A trailer value is everything after the colon, name included.
         #expect(signed.value == "Alice <alice@example.invalid>")
+    }
+
+    // #0314: the same colon-in-value shape, asserted through the real
+    // `git log` round trip rather than the parser directly, so the wiring
+    // between `run` and `Trailer.parse` is covered too. A blank line
+    // precedes the trailer line so it lands in the trailer block under
+    // #0313's last-paragraph rule.
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func trailerWithColonInValueSurvivesThroughRun(format: FixtureRepository.RefFormat) throws {
+        var repo = try FixtureRepository(refFormat: format)
+        defer { repo.destroy() }
+
+        let msg = "Record session\n\nClaude-Session: https://claude.ai/code/session_013q"
+        try repo.build([FixtureRepository.Commit("a", message: msg)])
+
+        let entries = try CommitLog.run(path: repo.url.path, rangeArguments: ["HEAD"])
+        let trailers = try #require(entries.first?.trailers)
+
+        let session = try #require(trailers.first(where: { $0.key == "Claude-Session" }))
+        #expect(session.value == "https://claude.ai/code/session_013q")
     }
 
     @Test(arguments: FixtureRepository.RefFormat.supported())
