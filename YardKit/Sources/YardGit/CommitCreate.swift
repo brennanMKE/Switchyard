@@ -213,7 +213,7 @@ public struct CommitCreate: Equatable, Sendable {
     /// precomputed `signingInEffect` instead -- exactly what a test needs to
     /// exercise the branch without waiting out any deadline.
     static func classifyTimeout(_ failure: GitProcess.Failure, signingInEffect: Bool) -> Error {
-        guard case let .timedOut(after, _) = failure, signingInEffect else { return failure }
+        guard case let .timedOut(after, _, _) = failure, signingInEffect else { return failure }
         return Failure.signingFailed(
             reason: "git commit did not finish within \(after) and was terminated -- "
                 + "likely a signing prompt with no way to answer it")

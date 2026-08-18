@@ -84,6 +84,15 @@ private func isTimedOut(_ failure: GitProcess.Failure) -> Bool {
     return false
 }
 
+/// Extracts the terminating signal `waitWithDeadline` recorded on a
+/// `.timedOut` failure -- 15 (`SIGTERM`) when `terminate()` alone ended the
+/// child within the grace period, 9 (`SIGKILL`) when the escalation had to
+/// finish the job. `nil` for any other failure shape.
+private func terminationStatus(of failure: GitProcess.Failure) -> Int32? {
+    guard case let .timedOut(_, _, terminationStatus) = failure else { return nil }
+    return terminationStatus
+}
+
 // MARK: - The bound itself, exercised directly against a fake `git`
 
 @Test func processFinishingWithinDeadlineReturnsNormally() throws {
@@ -110,6 +119,12 @@ private func isTimedOut(_ failure: GitProcess.Failure) -> Bool {
     // 9 that `ExitClass.signingFailed` also happens to use).
     #expect(isTimedOut(failure))
     #expect(failure.exitClass == .repositoryError)
+
+    // This child installs no signal handling, so `terminate()` (SIGTERM)
+    // alone ends it inside the 1s grace period -- the escalation never
+    // reaches `SIGKILL`. Asserting 15 here, rather than merely `.timedOut`,
+    // is what would catch a mutation that fired SIGKILL unconditionally.
+    #expect(terminationStatus(of: failure) == SIGTERM)
 }
 
 @Test func childIgnoringSigtermIsStillKilled() throws {
@@ -128,6 +143,14 @@ private func isTimedOut(_ failure: GitProcess.Failure) -> Bool {
     }
     let failure = try #require(thrown)
     #expect(isTimedOut(failure))
+
+    // The whole point of this test: this child traps and ignores SIGTERM,
+    // so only the SIGKILL half of the escalation ends it. Asserting the
+    // signal, not merely `.timedOut`, is what reddens when the escalation
+    // is replaced by `terminate()` alone -- with no SIGKILL, this child
+    // outlives the grace period and only its own `sleep 60` ends it, which
+    // this test's 2s deadline plus 1s grace period cannot wait out.
+    #expect(terminationStatus(of: failure) == SIGKILL)
 }
 
 /// A real `git commit --gpg-sign`, invoking a real (fake, sleeping) `gpg`,
@@ -168,7 +191,11 @@ private func isTimedOut(_ failure: GitProcess.Failure) -> Bool {
 /// timed-out `git commit`, with no subprocess and no deadline to wait out:
 /// a synthesized `.timedOut` failure, fed straight to the classifier.
 @Test func commitCreateClassifiesTimeoutAsSigningFailedOnlyWhenSigningInEffect() {
-    let failure = GitProcess.Failure.timedOut(after: .seconds(1), arguments: ["commit"])
+    // The signal value is irrelevant to this classifier -- it branches only
+    // on `signingInEffect` -- so SIGTERM stands in for "some timeout
+    // happened".
+    let failure = GitProcess.Failure.timedOut(
+        after: .seconds(1), arguments: ["commit"], terminationStatus: SIGTERM)
 
     let signingOn = CommitCreate.classifyTimeout(failure, signingInEffect: true)
     let asCommitFailure = signingOn as? CommitCreate.Failure
@@ -185,7 +212,11 @@ private func isTimedOut(_ failure: GitProcess.Failure) -> Bool {
 /// The `Fixup` mirror of the test above, for the `git rebase --autosquash`
 /// call site.
 @Test func fixupClassifiesTimeoutAsSigningFailedOnlyWhenSigningInEffect() {
-    let failure = GitProcess.Failure.timedOut(after: .seconds(1), arguments: ["rebase"])
+    // The signal value is irrelevant to this classifier -- it branches only
+    // on `signingInEffect` -- so SIGTERM stands in for "some timeout
+    // happened".
+    let failure = GitProcess.Failure.timedOut(
+        after: .seconds(1), arguments: ["rebase"], terminationStatus: SIGTERM)
 
     let signingOn = Fixup.classifyTimeout(failure, signingInEffect: true)
     let asFixupError = signingOn as? FixupError
