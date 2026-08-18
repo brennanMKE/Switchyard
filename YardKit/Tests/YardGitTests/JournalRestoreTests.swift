@@ -51,28 +51,35 @@ struct JournalRestoreTests {
                     workingDirectory: repo.url.path)
     }
 
-    /// A repository whose per-worktree chain stands on an entry, with a ref
-    /// another tool moved afterwards: c1 captured, `feature` created, c2
-    /// captured, an undo-style restore back onto c1, then `refs/heads/rogue`
-    /// created behind the journal's back.
+    /// A repository whose per-worktree chain stands on an entry, with
+    /// `refs/heads/sidecar` created and recorded by the redo target's own
+    /// snapshot: c1 captured, `feature` and `sidecar` (at "a") created, c2
+    /// (`redoState`) captured, an undo-style restore back onto c1. Left at
+    /// "a" — deliberately NOT moved here. A caller that wants the guard to
+    /// have an opinion about `sidecar` must move it to a third value
+    /// *after* whatever snapshot it is comparing against was itself
+    /// captured — for `redoTarget` (c2) that means any time after this
+    /// helper returns, but for a **foreign** entry captured later in a
+    /// linked worktree, moving it here would already be captured by that
+    /// entry's own snapshot, leaving nothing for the guard to catch
+    /// (#0248: this is exactly how #0230's original order test went dead
+    /// under #0232). Callers that also need a ref recorded by *neither*
+    /// side (`rogue`, pre-#0248's shape) add it themselves too.
     private func standingOnAnEntryWithARogueRef(
         format: FixtureRepository.RefFormat
     ) throws -> (repo: FixtureRepository, ctx: WorktreeContext,
-                 redoTarget: JournalAnchor.Entry, redoState: RefSnapshot,
-                 rogueOid: String) {
+                 redoTarget: JournalAnchor.Entry, redoState: RefSnapshot) {
         var repo = try FixtureRepository.linear(refFormat: format)
         let ctx = try context(of: repo)
         let c1 = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
         try repo.branch("feature")
+        try repo.branch("sidecar", at: "a")
         let redoState = try RefSnapshot.capture(in: ctx)
         let c2 = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
         try JournalRestore.restore(
             c1.id, operation: "undo",
             traversal: .init(restored: c1.id, resultingPosition: c1.id), in: ctx)
-        let rogueOid = try #require(repo.oids["a"])
-        try git.run(["update-ref", "refs/heads/rogue", rogueOid],
-                    workingDirectory: repo.url.path)
-        return (repo, ctx, c2, redoState, rogueOid)
+        return (repo, ctx, c2, redoState)
     }
 
     // MARK: - The round trip
@@ -238,7 +245,7 @@ struct JournalRestoreTests {
 
     @Test(arguments: FixtureRepository.RefFormat.supported())
     func anotherToolsMoveRefusesRestoreWhileTheChainStandsOnAnEntry(format: FixtureRepository.RefFormat) throws {
-        let (repo, ctx, redoTarget, redoState, rogueOid) =
+        let (repo, ctx, redoTarget, redoState) =
             try standingOnAnEntryWithARogueRef(format: format)
         defer { repo.destroy() }
         // `feature` (created inside the fixture, before its internal
@@ -247,11 +254,18 @@ struct JournalRestoreTests {
         // already existed) recorded it at the same value it still has, so
         // believed (c1, lacking `feature`) and applied (the target,
         // recording it) disagree about this name -- exactly the ordinary
-        // history this restore is walking, not foreign interference. `rogue`
-        // is different: it is absent from BOTH believed and applied, so the
-        // guard still has an opinion about it, and it is the one thing this
-        // restore never expected to see move.
+        // history this restore is walking, not foreign interference.
         try #require(redoState.refs.contains { $0.name == "refs/heads/feature" })
+        try #require(redoState.refs.contains { $0.name == "refs/heads/sidecar" && $0.oid == repo.oids["a"] })
+
+        // `sidecar` is different: `redoState`/the target recorded it at
+        // "a", and it is now moved -- AFTER the target's own capture -- to
+        // a THIRD value neither c1's belief (absent) nor the target ever
+        // recorded, so the guard still refuses (#0248: a name recorded by
+        // *neither* side, like the old `rogue` shape, no longer would).
+        let driftedOid = try #require(repo.oids["b"])
+        try git.run(["update-ref", "refs/heads/sidecar", driftedOid],
+                    workingDirectory: repo.url.path)
         let countBefore = try JournalAnchor.list(in: ctx).count
         let stateBefore = try RefSnapshot.capture(in: ctx)
 
@@ -260,7 +274,7 @@ struct JournalRestoreTests {
         }
         let error = try #require(thrown)
         #expect(error == .repositoryChanged(divergences: [
-            .init(ref: "refs/heads/rogue", expected: nil, actual: rogueOid),
+            .init(ref: "refs/heads/sidecar", expected: nil, actual: driftedOid),
         ]))
         // Nothing was written: no entry, no ref moved.
         #expect(try JournalAnchor.list(in: ctx).count == countBefore)
@@ -275,9 +289,17 @@ struct JournalRestoreTests {
     // pins below.
     @Test(arguments: FixtureRepository.RefFormat.supported())
     func bypassGuardSkipsTheCrossToolGuard(format: FixtureRepository.RefFormat) throws {
-        let (repo, ctx, redoTarget, redoState, rogueOid) =
+        let (repo, ctx, redoTarget, redoState) =
             try standingOnAnEntryWithARogueRef(format: format)
         defer { repo.destroy() }
+
+        // `rogue`: created after the target's capture, recorded by neither
+        // c1 (believed) nor c2/redoState (the target) -- the shape this
+        // test needs to pin decision 20's "leaves alone" behaviour under
+        // bypassGuard, independent of the fixture's own `sidecar` case.
+        let rogueOid = try #require(repo.oids["a"])
+        try git.run(["update-ref", "refs/heads/rogue", rogueOid],
+                    workingDirectory: repo.url.path)
 
         try JournalRestore.restore(redoTarget.id, bypassGuard: true, in: ctx)
 
@@ -322,19 +344,26 @@ struct JournalRestoreTests {
 
     /// Pins #0044 decision 3: the worktree gate (step 2) must run before the
     /// cross-tool guard (step 4). Composes `standingOnAnEntryWithARogueRef`
-    /// — the main worktree stands on a non-nil scoped cursor, with a rogue
-    /// ref planted by plumbing that the guard would catch — with a linked
-    /// worktree carrying a foreign entry, as `crossWorktreeFixture` sets up.
-    /// A foreign entry restored without `allowDifferentWorktree` must report
-    /// `differentWorktree` even when the guard's own divergence is present
-    /// and, under the gate/guard reorder this issue exists to catch, would
-    /// otherwise fire first and report `repositoryChanged` instead — an error
-    /// the caller cannot act on, naming neither worktree.
+    /// — the main worktree stands on a non-nil scoped cursor, with
+    /// `sidecar` recorded (at "a") by whatever this restore's own target
+    /// snapshot will be — with a linked worktree carrying a foreign entry.
+    /// `sidecar` is moved to a third value ONLY AFTER the foreign entry's
+    /// own checkpoint captures it, so the foreign entry's `applied`
+    /// snapshot still says "a" while the repository now says otherwise —
+    /// the guard would catch that if it ran (#0248: moving it any earlier
+    /// makes the foreign checkpoint's own capture already match, leaving
+    /// nothing to catch — exactly how #0230's original version of this
+    /// test went dead once #0232 landed). A foreign entry restored without
+    /// `allowDifferentWorktree` must report `differentWorktree` even when
+    /// the guard's own divergence is present and, under the gate/guard
+    /// reorder this issue exists to catch, would otherwise fire first and
+    /// report `repositoryChanged` instead — an error the caller cannot act
+    /// on, naming neither worktree.
     @Test(arguments: FixtureRepository.RefFormat.supported())
     func aForeignEntryStillReportsTheWorktreeGateEvenWhenTheGuardWouldFire(
         format: FixtureRepository.RefFormat
     ) throws {
-        let (repo, ctx, _, _, _) = try standingOnAnEntryWithARogueRef(format: format)
+        let (repo, ctx, _, _) = try standingOnAnEntryWithARogueRef(format: format)
         defer { repo.destroy() }
 
         let wtURL = try repo.addWorktree(named: "agent", branch: "agent-branch")
@@ -342,6 +371,14 @@ struct JournalRestoreTests {
         let name = try #require(wtCtx.worktreeName)
         let path = try #require(wtCtx.topLevel)
         let entry = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: wtCtx)
+
+        // Move `sidecar` only now, after the foreign entry's own capture:
+        // its `applied` snapshot still says "a", the repository now says
+        // "b" — a real divergence for the guard to catch if the gate ever
+        // ran after it.
+        let driftedOid = try #require(repo.oids["b"])
+        try git.run(["update-ref", "refs/heads/sidecar", driftedOid],
+                    workingDirectory: repo.url.path)
 
         let thrown = #expect(throws: JournalRestore.Error.self) {
             try JournalRestore.restore(entry.id, in: ctx)
