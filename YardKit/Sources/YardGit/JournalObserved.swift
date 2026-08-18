@@ -62,22 +62,41 @@ public enum JournalObserved {
         /// sequence, not a set.
         public let rewrites: [PostRewrite.Rewrite]?
 
+        /// Capture moment. Present on both kinds (#0235) -- a `ref_updates`
+        /// entry has the same need as a `rewrites` one. New required key,
+        /// no `schemaVersion` bump: observed entries reach no agent yet.
+        public let timestamp: Date
+        /// The worktree the foreign transaction happened in. Present on
+        /// both kinds (#0235); reuses `JournalEntryMetadata.Worktree`
+        /// rather than defining a second `{name, path}` shape. Observed
+        /// refs are shared, not per-worktree, so this is the only way a
+        /// consumer can tell which worktree a foreign rewrite happened in.
+        public let worktree: JournalEntryMetadata.Worktree
+
         public init(updates: [ReferenceTransaction.RefUpdate],
+                    timestamp: Date,
+                    worktree: JournalEntryMetadata.Worktree,
                     schemaVersion: Int = Metadata.currentSchemaVersion) {
             self.schemaVersion = schemaVersion
             self.kind = .refUpdates
             self.updates = updates
             self.source = nil
             self.rewrites = nil
+            self.timestamp = timestamp
+            self.worktree = worktree
         }
 
         public init(source: PostRewrite.Source, rewrites: [PostRewrite.Rewrite],
+                    timestamp: Date,
+                    worktree: JournalEntryMetadata.Worktree,
                     schemaVersion: Int = Metadata.currentSchemaVersion) {
             self.schemaVersion = schemaVersion
             self.kind = .rewrites
             self.updates = nil
             self.source = source.gitArgument
             self.rewrites = rewrites
+            self.timestamp = timestamp
+            self.worktree = worktree
         }
     }
 
@@ -91,9 +110,14 @@ public enum JournalObserved {
         now: Date = Date(),
         git: GitProcess = GitProcess()
     ) throws -> JournalAnchor.Entry {
+        let base = context.topLevel ?? context.gitDir
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
-        let json = try encoder.encode(Metadata(updates: updates))
+        encoder.dateEncodingStrategy = .iso8601
+        let json = try encoder.encode(Metadata(
+            updates: updates,
+            timestamp: now,
+            worktree: .init(name: context.worktreeName, path: base)))
         return try JournalAnchor.write(
             JournalAnchor.Contents(metadataJSON: json),
             id: JournalEntryID.generate(now: now, after: try list(in: context, git: git).last?.id),
@@ -166,10 +190,15 @@ public enum JournalObserved {
 
         guard !decision.isOwnInvocation else { return nil }
 
+        let base = context.topLevel ?? context.gitDir
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        encoder.dateEncodingStrategy = .iso8601
         let json = try encoder.encode(
-            Metadata(source: decision.source, rewrites: decision.rewrites))
+            Metadata(
+                source: decision.source, rewrites: decision.rewrites,
+                timestamp: now,
+                worktree: .init(name: context.worktreeName, path: base)))
         return try JournalAnchor.write(
             JournalAnchor.Contents(metadataJSON: json),
             id: JournalEntryID.generate(now: now, after: try list(in: context, git: git).last?.id),
