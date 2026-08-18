@@ -225,6 +225,17 @@ exit 0
     let pgpHeader = "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nauthor x <x@x> 0 +0000\ncommitter y <y@y> 0 +0000\ngpgsig -----BEGIN PGP SIGNATURE-----\n iQFAKEFAKEFAKE=\n =fake\n -----END PGP SIGNATURE-----"
     #expect(SignatureVerification.detectFormat(rawCommit: pgpHeader) == .openpgp)
 
+    // `git commit -S` always calls gpg with `-bsau` (detached, armored),
+    // which only ever emits `BEGIN PGP SIGNATURE` -- not measured here to
+    // emit `BEGIN PGP MESSAGE` from any real git invocation. This case is
+    // defensive: git's own gpg-interface.c carries `BEGIN PGP MESSAGE`
+    // alongside `BEGIN PGP SIGNATURE` in its `openpgp_sigs` recognition
+    // array, so `detectFormat` matches what git itself is prepared to see
+    // in a `gpgsig` header, even though its own signing path never produces
+    // that form.
+    let pgpMessageHeader = "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nauthor x <x@x> 0 +0000\ncommitter y <y@y> 0 +0000\ngpgsig -----BEGIN PGP MESSAGE-----\n iQFAKEFAKEFAKE=\n =fake\n -----END PGP MESSAGE-----"
+    #expect(SignatureVerification.detectFormat(rawCommit: pgpMessageHeader) == .openpgp)
+
     let x509Header = "tree aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\nauthor x <x@x> 0 +0000\ncommitter y <y@y> 0 +0000\ngpgsig -----BEGIN SIGNED MESSAGE-----\n MIIGaw=="
     #expect(SignatureVerification.detectFormat(rawCommit: x509Header) == .x509)
 
