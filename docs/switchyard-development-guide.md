@@ -674,6 +674,17 @@ documented. This validates the engine and settles the response contract.
       is for, and #0259's fix immediately exposed a real production bug (#0262), which is the argument
       for keeping the hunt going rather than declaring the criterion met.
 
+      **Ten passes; twenty-eight findings; all fixed. The tenth pass was CLEAN** — forty mutations
+      across thirty-nine sites, zero survivors, including eight fresh targets no prior pass had
+      recorded. **Clean-review count: 1.** One more clean pass closes M1.
+
+      What the hunt was worth, since a count of findings does not say it: `status` would have **thrown**
+      on any dirty repository if one flag were dropped (#0280), `hunks` would have reported *"nothing
+      changed"* under `color.ui = always` (#0293) and thrown on any non-ASCII filename (#0283), `wt new`
+      and `wt list` would have described the same worktree differently while silently claiming a branch
+      (#0296), and `whereami` would have counted every ignored file as untracked (#0288). None was
+      hypothetical; each was measured against the engine before it was filed.
+
 **Reachability from the CLI is M3's criterion, not M1's** — decided 2026-08-07, §11 decision 11. The
 two are separated because guide §5 has the CLI marshal over XPC and never link `YardGit`, and the XPC
 layer does not exist until M3. Requiring "runs from the built binary" in M1 asked for something M1's
