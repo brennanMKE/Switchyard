@@ -1112,6 +1112,18 @@ a feature at any milestone on the grounds that GitUp had it.
     consumes it removes it. **A stale file must degrade to today's behaviour** — no attach, nothing
     invented — rather than attaching a mapping to an unrelated entry.
 
+    **Amended 2026-08-17, after #0160's third umbrella review found the first version defective.** As
+    originally written this decision said the file names an *entry*, and #0237 implemented exactly
+    that: a single unkeyed slot, validated only against the entry still being live — which it almost
+    always is, since entries persist until pruned. Measured consequences: an abandoned operation's file
+    is consumed by a **later, unrelated** rewrite, and `Fixup`'s own failure arms run `git rebase
+    --abort` and then throw through `around`, so `switchyard` produces that state itself.
+
+    **The file must name an operation that is still in progress**, not merely an entry that still
+    exists. It is written only when the body leaves resumable git state, and it is validated against
+    the live sequencer — `SequencerSnapshot`, or the `rebase-merge` path — before it is trusted.
+    **#0241** carries the fix. The reason the file exists at all is unchanged.
+
 
 ### Still open
 
