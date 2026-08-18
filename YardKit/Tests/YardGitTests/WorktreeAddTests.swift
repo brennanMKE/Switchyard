@@ -256,6 +256,43 @@ func unknownCommittishIsAStructuredRefusal(format: FixtureRepository.RefFormat) 
     #expect(result.error == .invalidReference("deadbeef"))
 }
 
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func worktreePathIsReportedCanonicalized(format: FixtureRepository.RefFormat) throws {
+    var repo = try FixtureRepository(refFormat: format)
+    defer { repo.destroy() }
+    try repo.build([.init("base")])
+
+    // `FixtureRepository.url` is already realpath'd at construction, so a
+    // sibling path built from it (as `siblingPath` does) is already
+    // canonical and would pass even if `worktreeAdd` stopped canonicalizing
+    // its input entirely. To actually exercise that behavior, the requested
+    // path has to be built from the RAW, unresolved temp directory —
+    // `NSTemporaryDirectory()` returns `/var/folders/…`, and `/var` is a
+    // symlink to `/private/var` on macOS.
+    let rawParent = NSTemporaryDirectory()
+    let rawPath = URL(fileURLWithPath: rawParent)
+        .appendingPathComponent("yard-wt-canon-\(UUID().uuidString)").path
+
+    // Resolve the expectation independently of `WorktreeContext.canonicalize`
+    // (calling it here would pass even under the mutation that removes it):
+    // `realpath(3)`, via `FixtureRepository.realPath`, on the parent
+    // directory (which exists), with the new leaf component reattached by
+    // hand, since the leaf itself does not exist until `worktreeAdd` creates
+    // it.
+    let resolvedParent = FixtureRepository.realPath(rawParent)
+    let expected = URL(fileURLWithPath: resolvedParent)
+        .appendingPathComponent(URL(fileURLWithPath: rawPath).lastPathComponent).path
+
+    // The fixture only proves anything if the raw and canonicalized forms
+    // actually differ on this machine.
+    #expect(rawPath != expected)
+
+    let result = try worktreeAdd(
+        at: repo.url.path, path: rawPath, target: .newBranch(name: "canon-check"))
+    #expect(result.success)
+    #expect(result.worktreePath == expected)
+}
+
 // MARK: - Pure (argument vector and classifier)
 
 @Test func argumentsNeverContainForce() {
