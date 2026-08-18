@@ -275,6 +275,15 @@ paths, guard clauses that skip. The question to answer is not "does the code do 
     assignments) and the non-compiling mutation (a bare `try` inside an `if let` chain) — all three
     read exactly like a real survivor and none is one.
 
+8i. **Did you actually dispatch it?** Orchestrator failure, 2026-08-18: #0299 was set `in-progress`,
+    its worktree created and its branch pushed — and no round was ever dispatched. It sat claimed for
+    about an hour. A completion notification for a different issue arrived between creating the worktree
+    and calling the agent, and attention went there. **Nothing alarms on this**: the tracker says
+    `in-progress`, the branch exists, and only an idle worktree gives it away. The habit that catches it
+    is to treat worktree creation and dispatch as one action — never end a tool call between them — and,
+    when the queue looks quiet, to check `git worktree list` against what is actually running rather
+    than trusting the status column.
+
 9. **Is there exactly one deliverable?** Not one theme — one file, one behaviour, one thing that is
    either done or not. If the Expected behavior names more than one new production file, it is more
    than one issue.
