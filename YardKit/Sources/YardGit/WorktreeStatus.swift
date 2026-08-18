@@ -385,21 +385,6 @@ public struct WorktreeStatusParser {
         return WorktreeStatus(entries: entries)
     }
 
-    /// Compute the byte offset in `rawRecord` at which `tokens[tokenIndex]`
-    /// begins, by walking from the front summing token lengths plus the spaces
-    /// between them. Returns `rawRecord.count` if `tokenIndex` is out of range
-    /// (meaning we have no valid offset to slice on).
-    private func offsetOfToken(in rawRecord: [UInt8], atIndex tokenIndex: Int) -> Int {
-        var offset = 0
-        for i in 0..<tokenIndex where i < rawRecord.count {
-            while offset < rawRecord.count && rawRecord[offset] != 0x20 {
-                offset += 1
-            }
-            offset += 1 // skip the space
-        }
-        return min(offset, rawRecord.count)
-    }
-
 }
 
 // MARK: - §6 exit class
@@ -408,14 +393,6 @@ public struct WorktreeStatusParser {
 /// code 6 — matching `ConflictParser.Failure` on the same byte stream.
 extension WorktreeStatusParser.Failure: ExitClassCarrying {
     public var exitClass: ExitClass { .repositoryError }
-}
-
-extension Array {
-    /// Return the element at `index`, or nil if out of range. Used inside the
-    /// parser to keep conditional logic from cluttering the hot path.
-    fileprivate subscript(safe index: Int) -> Element? {
-        indices.contains(index) ? self[index] : nil
-    }
 }
 
 /// Runs `git status --porcelain=v2 -z` against a repository and parses the result.
