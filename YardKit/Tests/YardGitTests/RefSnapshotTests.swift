@@ -110,6 +110,27 @@ struct RefSnapshotTests {
         #expect(try repo.revParse("refs/rewritten/onto") == a)
     }
 
+    /// `refs/bisect/*` is per-worktree despite the `refs/` prefix (CLAUDE.md):
+    /// it is what an in-progress `git bisect` uses to remember its state.
+    /// `RefSnapshot.perWorktreeNamespaces` already carries it and #0044's own
+    /// premise lists it alongside `refs/rewritten/` and `refs/worktree/`, but
+    /// unlike those two, nothing pinned that capture and same-worktree
+    /// restore actually round-trip it — this closes that gap (#0257).
+    @Test func roundTripRestoresRefsBisect() throws {
+        var repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let a = try #require(repo.oids["a"])
+        let b = try #require(repo.oids["b"])
+        try git.run(["update-ref", "refs/bisect/bad", a], workingDirectory: repo.url.path)
+        let snap = try snapshot(of: repo)
+        #expect(snap.refs.contains { $0.name == "refs/bisect/bad" && $0.oid == a })
+
+        try git.run(["update-ref", "refs/bisect/bad", b], workingDirectory: repo.url.path)
+        try snap.restore(in: WorktreeContext.resolve(path: repo.url.path))
+
+        #expect(try repo.revParse("refs/bisect/bad") == a)
+    }
+
     /// The measured trap this design exists for: restoring while standing on
     /// a branch created after capture. `HEAD` must be retargeted in its own
     /// no-deref transaction — dereferenced, `symref-update HEAD` corrupts the
