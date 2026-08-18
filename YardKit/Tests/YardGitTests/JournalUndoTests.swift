@@ -107,20 +107,19 @@ struct JournalUndoTests {
         #expect(undone[0].restored.contains(.index))
         #expect(undone[0].restored.contains(.worktree))
 
-        // Redo is where option A's own trade-off surfaces (guide §11
-        // decision 20, which names #0232 for this exact gap): the cursor now
-        // stands on c1, whose own recorded snapshot never had `feature`, but
-        // `feature` is still live because undo left it alone. The guard
-        // cannot tell "restore chose not to touch this" from "another tool
-        // moved something behind the journal's back", so the ordinary
-        // unforced redo refuses -- "refuses the caller's traversal from step
-        // two onward", in decision 20's own words, until #0232 scopes it.
-        let thrown = #expect(throws: CrossToolGuard.Error.self) {
-            try JournalUndo.redo(in: ctx)
-        }
-        #expect(try #require(thrown) == .repositoryChanged(divergences: [
-            .init(ref: "refs/heads/feature", expected: nil, actual: featureOid),
-        ]))
+        // Redo is where option A's own trade-off used to surface (guide §11
+        // decision 20): the cursor stands on c1, whose own recorded snapshot
+        // never had `feature`, but `feature` is still live because undo left
+        // it alone. The guard cannot tell "restore chose not to touch this"
+        // from "another tool moved something behind the journal's back" by
+        // looking at c1 alone -- but the redo target's own capture (taken at
+        // undo time) DID see `feature`, at this same value, so the cross-tool
+        // guard is scoped to what believed and the target agree on (#0232)
+        // and this ordinary unforced redo now succeeds.
+        let redone = try JournalUndo.redo(in: ctx)
+        #expect(redone.count == 1)
+        #expect(try RefSnapshot.capture(in: ctx) == present)
+        #expect(try ctx.resolveRef("refs/heads/feature", inWorktree: nil) == featureOid)
     }
 
     @Test(arguments: FixtureRepository.RefFormat.supported())
@@ -132,11 +131,12 @@ struct JournalUndoTests {
         let c1 = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
         // Move `main` between checkpoints rather than create a new branch: a
         // branch created here would survive every undo/redo below untouched
-        // (guide §11 decision 20), permanently diverging the cursor's own
-        // snapshot from live reality and refusing every step from the second
-        // onward (#0232's gap) -- moving a ref the checkpoints already
-        // record stays outside that gap and keeps this test about what it
-        // names: multi-step traversal.
+        // (guide §11 decision 20) and the full-snapshot equality checks below
+        // want the repository to look exactly like each capture, which a
+        // surviving branch would break regardless of the guard (#0232's
+        // scoping stops the *refusal*, but a surviving extra ref is still an
+        // extra ref). Moving a ref the checkpoints already record keeps this
+        // test about what it names: multi-step traversal.
         let b = try #require(repo.oids["b"])
         try git.run(["update-ref", "refs/heads/main", b], workingDirectory: repo.url.path)
         let stateAtC2 = try RefSnapshot.capture(in: ctx)
@@ -189,6 +189,177 @@ struct JournalUndoTests {
         try JournalUndo.undo(in: ctx)
         try JournalUndo.undo(in: ctx)
         #expect(try RefSnapshot.capture(in: ctx) == afterBatch)
+    }
+
+    // MARK: - Two-agent traversal (#0232)
+
+    /// The measured deadlock #0232 was filed for: agent A's second undo used
+    /// to refuse, and stay refused, over an ordinary commit agent B made on
+    /// B's own branch -- naming a ref A does not control and cannot act on.
+    /// Both of A's undos must now succeed, and B's commit must survive
+    /// untouched: A's second undo walks back to a checkpoint that predates
+    /// `agent-branch` entirely, so that checkpoint's own snapshot never
+    /// mentions it, and the guard, scoped to what the cursor's belief and
+    /// this restore's target agree on, excludes it rather than refusing over
+    /// a ref it never recorded.
+    ///
+    /// `agent-branch` is deliberately a plain branch, not a worktree's
+    /// checked-out `HEAD`: `WorktreeDisturbance` (step 5, unconditional --
+    /// #0044) treats a target snapshot that never recorded a name the same
+    /// as one that deletes it, which was accurate before decision 20 but is
+    /// stale now that restore leaves an unrecorded ref alone. That staleness
+    /// is outside this issue's scope (`JournalRestore` step 4, not step 5);
+    /// exercising a real sibling checkout here would conflate the two.
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func aSecondUndoSurvivesASiblingsOrdinaryCommitBetweenSteps(
+        format: FixtureRepository.RefFormat
+    ) throws {
+        let repo = try FixtureRepository.linear(refFormat: format)
+        defer { repo.destroy() }
+        let ctx = try context(of: repo)
+
+        // c0: before `agent-branch` exists.
+        let c0 = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+
+        // Agent B's branch appears after c0 -- not checked out anywhere, so
+        // it is ordinary shared-ref state, not a worktree's `HEAD`.
+        let bOid = try #require(repo.oids["b"])
+        try git.run(["branch", "agent-branch", bOid], workingDirectory: repo.url.path)
+
+        // c1: after `agent-branch` exists -- its own capture sees it, unlike
+        // c0's.
+        let c1 = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+
+        // A's own further work: move `main` (already recorded by both
+        // checkpoints) rather than create a branch, so there is something
+        // for the first undo to revert without introducing a name neither
+        // checkpoint ever recorded (that shape is `rogue`'s, in
+        // `JournalRestoreTests`, not A's own history).
+        try git.run(["update-ref", "refs/heads/main", bOid], workingDirectory: repo.url.path)
+
+        // A's first undo: present -> c1. The cursor is nil going in, so the
+        // guard has nothing to verify yet (#0168 decision 1) -- this is why
+        // the original probe's first undo succeeded too.
+        let firstUndo = try JournalUndo.undo(in: ctx)
+        #expect(firstUndo.map(\.entry.id) == [c1.id])
+        #expect(try ctx.resolveRef("refs/heads/main", inWorktree: nil) == repo.oids["c"])
+
+        // Agent B commits ordinarily on its own branch -- the normal case,
+        // not the exception. The commit's shape does not matter, only that
+        // it moves the ref A does not control.
+        let sibling = try unreachableCommit(in: repo, marker: "sibling")
+        try git.run(["update-ref", "refs/heads/agent-branch", sibling],
+                    workingDirectory: repo.url.path)
+        let agentBranchAfter = try #require(
+            try ctx.resolveRef("refs/heads/agent-branch", inWorktree: nil))
+        try #require(agentBranchAfter == sibling && agentBranchAfter != bOid)  // vacuity guard
+
+        // A's second undo: c1 -> c0. Before #0232 this refused, naming
+        // `refs/heads/agent-branch` -- exactly the measured probe in the
+        // issue. It must now succeed.
+        let secondUndo = try JournalUndo.undo(in: ctx)
+        #expect(secondUndo.map(\.entry.id) == [c0.id])
+        #expect(try ctx.resolveRef("refs/heads/main", inWorktree: nil) == repo.oids["c"])
+
+        // B's commit was never touched: A's traversal has no authority over
+        // a ref it does not control and never recorded (decision 1).
+        #expect(try ctx.resolveRef("refs/heads/agent-branch", inWorktree: nil) == agentBranchAfter)
+        #expect(try scopedState(in: ctx).cursor == c0.id)
+    }
+
+    /// `HEAD` is checked unconditionally in `CrossToolGuard.diff`, never
+    /// subject to the name-based `scope` that narrows ordinary refs (#0232):
+    /// it is compared before the scoped loop even runs. A checkout behind
+    /// the journal's back is refused whether or not anything else in the
+    /// repository is also being widened out of scope.
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func aCheckedOutHeadBehindTheJournalsBackIsStillRefused(
+        format: FixtureRepository.RefFormat
+    ) throws {
+        var repo = try FixtureRepository.linear(refFormat: format)
+        defer { repo.destroy() }
+        let ctx = try context(of: repo)
+        try repo.branch("side")  // a checkout target, present from the start
+
+        let c1 = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+        // Move `main` so the first undo has something to revert.
+        let b = try #require(repo.oids["b"])
+        try git.run(["update-ref", "refs/heads/main", b], workingDirectory: repo.url.path)
+
+        // First undo: present -> c1. Cursor nil, guard skipped.
+        #expect(try JournalUndo.undo(in: ctx).map(\.entry.id) == [c1.id])
+
+        // Another tool checks out a different branch: HEAD moves, and no
+        // tracked ref's value changes.
+        try repo.checkout("side")
+
+        // Redo: c1 -> present. The cursor is c1 now, and HEAD diverges from
+        // what c1 recorded (symbolic `main`) -- refused, regardless of the
+        // ref-name scoping #0232 introduced.
+        let thrown = #expect(throws: CrossToolGuard.Error.self) {
+            try JournalUndo.redo(in: ctx)
+        }
+        #expect(try #require(thrown) == .repositoryChanged(divergences: [
+            .init(ref: "HEAD", expected: "ref:refs/heads/main", actual: "ref:refs/heads/side"),
+        ]))
+    }
+
+    /// The hole a name-only scope leaves open (found in review): a ref the
+    /// traversal itself is carrying from one recorded value to another --
+    /// `believed` and `applied` disagree on it by construction, the same
+    /// shape `feature`/`agent-branch` take when a restore leaves them alone
+    /// -- but here the restore target ALSO records this ref, at a value of
+    /// its own. If a foreign tool moves it to a THIRD value that matches
+    /// neither checkpoint, that is not the traversal's own history; it is
+    /// exactly what the guard exists to catch, and scoping by name alone
+    /// (round 1's `believed == applied` rule) cannot see it because the name
+    /// is excluded from consideration before any value is even compared.
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func aForeignMoveToAThirdValueRefusesEvenOnARefTheTraversalItselfIsMoving(
+        format: FixtureRepository.RefFormat
+    ) throws {
+        let repo = try FixtureRepository.linear(refFormat: format)
+        defer { repo.destroy() }
+        let ctx = try context(of: repo)
+
+        // c1: main at "c" (the initial tip) -- this becomes the cursor after
+        // the first undo, and the value the guard believes is live.
+        try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+        let b = try #require(repo.oids["b"])
+        try git.run(["update-ref", "refs/heads/main", b], workingDirectory: repo.url.path)
+
+        // c2: main at "b" -- the second undo's restore TARGET, recording a
+        // DIFFERENT value for the same ref. `believed` (c1, main=c) and
+        // `applied` (c2, main=b) disagree, by construction: this is the
+        // traversal's own history moving `main`, exactly like the tests
+        // above that move `main` instead of creating a branch.
+        let c2 = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+        let a = try #require(repo.oids["a"])
+        try git.run(["update-ref", "refs/heads/main", a], workingDirectory: repo.url.path)
+
+        // First undo: present (main=a) -> c2 (main=b). Cursor nil, guard
+        // skipped -- succeeds trivially, cursor becomes c2.
+        #expect(try JournalUndo.undo(in: ctx).map(\.entry.id) == [c2.id])
+
+        // A foreign tool moves `main` to a THIRD value -- not "c" (what c1
+        // believes), not "b" (what c2's own capture, the current live
+        // value, already is before this move), and not "a" either.
+        let foreign = try unreachableCommit(in: repo, marker: "foreign")
+        try git.run(["update-ref", "refs/heads/main", foreign], workingDirectory: repo.url.path)
+
+        // Second undo: c2 -> c1. `believed` (c2, main=b) and `applied` (c1,
+        // main=c) still disagree about `main` -- that disagreement alone
+        // must not excuse the foreign move, because `current` (the foreign
+        // commit) matches NEITHER side.
+        let thrown = #expect(throws: CrossToolGuard.Error.self) {
+            try JournalUndo.undo(in: ctx)
+        }
+        #expect(try #require(thrown) == .repositoryChanged(divergences: [
+            .init(ref: "refs/heads/main", expected: b, actual: foreign),
+        ]))
+        // Nothing was written: no entry, no ref moved.
+        #expect(try scopedState(in: ctx).cursor == c2.id)
+        #expect(try ctx.resolveRef("refs/heads/main", inWorktree: nil) == foreign)
     }
 
     // MARK: - The boundaries are ordinary
@@ -293,17 +464,17 @@ struct JournalUndoTests {
 
     @Test(arguments: FixtureRepository.RefFormat.supported())
     func traversalEntriesRecordOperationRestoredAndResultingPosition(format: FixtureRepository.RefFormat) throws {
-        let repo = try FixtureRepository.linear(refFormat: format)
+        var repo = try FixtureRepository.linear(refFormat: format)
         defer { repo.destroy() }
         let ctx = try context(of: repo)
         let c1 = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
-        // Move `main` rather than create a new branch -- the redo below is a
-        // second guarded step, and a surviving new branch would make it
-        // refuse via the cross-tool guard (guide §11 decision 20, #0232's
-        // gap) instead of exercising what this test is about: the traversal
-        // entries' own recorded metadata.
-        let a = try #require(repo.oids["a"])
-        try git.run(["update-ref", "refs/heads/main", a], workingDirectory: repo.url.path)
+        // A branch created here survives the undo below untouched (guide §11
+        // decision 20) and no longer makes the redo refuse: the redo target
+        // is the traversal entry the undo just wrote, which captured this
+        // branch at the same value it still has, so the guard's scope --
+        // where the cursor's own belief and the target agree -- excludes it
+        // rather than treating it as foreign interference (#0232).
+        try repo.branch("feature")
 
         let undone = try JournalUndo.undo(
             command: "switchyard undo",

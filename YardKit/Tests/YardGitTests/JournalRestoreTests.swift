@@ -238,16 +238,20 @@ struct JournalRestoreTests {
 
     @Test(arguments: FixtureRepository.RefFormat.supported())
     func anotherToolsMoveRefusesRestoreWhileTheChainStandsOnAnEntry(format: FixtureRepository.RefFormat) throws {
-        let (repo, ctx, redoTarget, _, rogueOid) =
+        let (repo, ctx, redoTarget, redoState, rogueOid) =
             try standingOnAnEntryWithARogueRef(format: format)
         defer { repo.destroy() }
         // `feature` (created inside the fixture, before its internal
-        // undo-style restore back to c1) is a second divergence now, not
-        // just `rogue`: that internal restore no longer deletes it as an
-        // "extra" ref (guide §11 decision 20), so it survives alongside
-        // `rogue` and the guard -- comparing the cursor's own c1 snapshot,
-        // which has neither -- names both.
-        let featureOid = try #require(try ctx.resolveRef("refs/heads/feature", inWorktree: nil))
+        // undo-style restore back to c1) is NOT a divergence here (#0232):
+        // the redo target's own capture (`redoState`, taken when `feature`
+        // already existed) recorded it at the same value it still has, so
+        // believed (c1, lacking `feature`) and applied (the target,
+        // recording it) disagree about this name -- exactly the ordinary
+        // history this restore is walking, not foreign interference. `rogue`
+        // is different: it is absent from BOTH believed and applied, so the
+        // guard still has an opinion about it, and it is the one thing this
+        // restore never expected to see move.
+        try #require(redoState.refs.contains { $0.name == "refs/heads/feature" })
         let countBefore = try JournalAnchor.list(in: ctx).count
         let stateBefore = try RefSnapshot.capture(in: ctx)
 
@@ -256,7 +260,6 @@ struct JournalRestoreTests {
         }
         let error = try #require(thrown)
         #expect(error == .repositoryChanged(divergences: [
-            .init(ref: "refs/heads/feature", expected: nil, actual: featureOid),
             .init(ref: "refs/heads/rogue", expected: nil, actual: rogueOid),
         ]))
         // Nothing was written: no entry, no ref moved.

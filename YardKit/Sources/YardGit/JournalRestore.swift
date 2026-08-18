@@ -317,7 +317,23 @@ public enum JournalRestore {
                of: nodes, in: context.worktreeName).cursor,
            entries.contains(where: { $0.id == cursor }) {
             let believed = try refsSnapshot(of: cursor, at: base, git: git)
-            let divergences = CrossToolGuard.diff(recorded: believed, current: current)
+
+            // `applied` -- not just its ref names -- is what makes this
+            // safe. A name `applied` never recorded is a name this restore
+            // will not write at all (decision 20 leaves it alone), so no
+            // live value for it is evidence of anything; a name it DOES
+            // record is refused only when the live value matches neither
+            // `believed` NOR `applied` -- matching `applied` means the write
+            // is already a no-op, matching `believed` means nothing moved
+            // since capture, and a THIRD value is the only shape a foreign
+            // tool's move can take (#0232). Scoping by name alone is not
+            // enough: a name both `believed` and `applied` record, but at
+            // different values -- an ordinary ref the traversal is itself
+            // carrying across checkpoints -- must still refuse if a foreign
+            // tool set it to something neither checkpoint recorded, and a
+            // name-only scope has no way to ask that (measured).
+            let divergences = CrossToolGuard.diff(
+                recorded: believed, applied: applied, current: current)
             guard divergences.isEmpty else {
                 throw CrossToolGuard.Error.repositoryChanged(divergences: divergences)
             }
