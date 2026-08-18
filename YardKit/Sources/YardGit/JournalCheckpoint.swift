@@ -337,12 +337,12 @@ public extension JournalCheckpoint {
             // behind, no matter what `SequencerSnapshot.capture` finds live
             // now.
             if !sequencerWasLiveBefore,
-               let sequencerNow = try SequencerSnapshot.capture(in: context, git: git) {
-                let entryIDPath = try context.path(
-                    for: sequencerNow.layout.rawValue + "/"
-                        + RepositoryLayout.sequencerEntryIDFileName,
-                    git: git)
-                try entry.id.string.write(
+               let sequencerNow = try? SequencerSnapshot.capture(in: context, git: git),
+               let entryIDPath = try? context.path(
+                   for: sequencerNow.layout.rawValue + "/"
+                       + RepositoryLayout.sequencerEntryIDFileName,
+                   git: git) {
+                try? entry.id.string.write(
                     toFile: entryIDPath, atomically: true, encoding: .utf8)
             }
             throw error
