@@ -89,6 +89,22 @@ private func nonASCIIPathRepo(_ format: FixtureRepository.RefFormat) throws -> F
     return repo
 }
 
+// MARK: - Color output (fixture-backed, #0293)
+
+/// The two-hunk fixture with `color.ui = always` configured -- the setting
+/// that forces ANSI colour escapes into git's output even when stdout is a
+/// pipe (`auto` would not: it only colours a tty, so a pipe-based fixture
+/// under `auto` would pin nothing). Measured (git 2.50.1): with this config
+/// set and no `--no-color`, `git diff` prints
+/// `\u{1B}[1mdiff --git a/f.txt b/f.txt\u{1B}[m` -- a header
+/// `HunkParser.pathFromDiffGitLine` cannot recognise, since it requires the
+/// literal, uncoloured `diff --git ` prefix.
+private func colorConfiguredRepo(_ format: FixtureRepository.RefFormat) throws -> FixtureRepository {
+    let repo = try twoHunkRepo(format)
+    try GitProcess().run(["config", "color.ui", "always"], workingDirectory: repo.url.path)
+    return repo
+}
+
 // MARK: - Listing and id stability (fixture-backed)
 
 @Test(arguments: FixtureRepository.RefFormat.supported())
@@ -645,4 +661,32 @@ func listHunksIgnoresTextconvFilter(format: FixtureRepository.RefFormat) throws 
     let body = file.hunks.flatMap(\.body)
     #expect(body.contains("-orig line 1"))
     #expect(!body.contains { $0.contains("ORIG LINE 1") })
+}
+
+// MARK: - Color output (fixture-backed, #0293)
+
+/// `listHunks` pins `--no-color` precisely because git colours the
+/// `diff --git` header when `color.ui = always` is configured --
+/// `color.ui = always` is ordinary user configuration, what people set to
+/// pipe git through `less -R`, not an exotic state. Without the flag,
+/// `HunkParser.pathFromDiffGitLine` never recognises the coloured header as
+/// the start of a file block, and `listHunks` returns `[]` -- silently,
+/// without throwing -- telling an agent nothing changed on a dirty
+/// repository.
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func listHunksIgnoresColorUiAlwaysConfig(format: FixtureRepository.RefFormat) throws {
+    let repo = try colorConfiguredRepo(format)
+    defer { repo.destroy() }
+
+    // Confirm git actually colours the header before trusting the
+    // assertion below -- a git that declines to colour a non-tty pins
+    // nothing. `always` (not `auto`) is exactly what forces colour into a
+    // pipe.
+    let plain = try GitProcess().run(["diff"], workingDirectory: repo.url.path).text
+    #expect(plain.contains("\u{1B}[1mdiff --git"))
+
+    let files = try listHunks(at: repo.url.path, area: .unstaged)
+    #expect(files.map(\.path) == ["f.txt"])
+    let file = try #require(files.first { $0.path == "f.txt" })
+    #expect(file.hunks.count == 2)
 }
