@@ -24,15 +24,38 @@ private let hermetic = ["GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "
 
 /// A distinct, otherwise-uninteresting error an `around` body can throw to
 /// simulate an unrelated switchyard operation failing for reasons that have
-/// nothing to do with any sequencer -- used by #0264's two probes.
+/// nothing to do with any sequencer -- used by the foreign-rebase probes
+/// below.
 private struct ProbeFailure: Error {}
 
-/// The entry id half of an in-flight slot's stamped contents (#0264:
-/// `<entry-id> <orig-head-oid>`), for assertions that only care about which
-/// entry the slot names, not the oid it is stamped with.
-private func slotEntryID(_ contents: String) -> String? {
-    contents.trimmingCharacters(in: .whitespacesAndNewlines)
-        .split(separator: " ").first.map(String.init)
+/// Resolves the entry-id file inside whichever sequencer directory is live
+/// right now (guide §11 decision 24, #0273) -- `RepositoryLayout
+/// .sequencerEntryIDFileName` joined onto `SequencerSnapshot.capture`'s own
+/// layout, resolved through `WorktreeContext.path(for:)`, never by
+/// concatenating onto `.git/`. `nil` when no sequencer is live.
+private func liveEntryIDPath(in context: WorktreeContext) throws -> String? {
+    guard let sequencer = try SequencerSnapshot.capture(in: context, git: git) else { return nil }
+    return try context.path(
+        for: sequencer.layout.rawValue + "/" + RepositoryLayout.sequencerEntryIDFileName, git: git)
+}
+
+/// Reads the entry id `around`'s catch wrote inside the currently live
+/// sequencer directory, trimmed -- `nil` when no sequencer is live or no
+/// file exists there yet.
+///
+/// The content never changes for as long as the operation stays open (only
+/// `around`'s catch ever writes it, once, and only git's own `--continue`
+/// or `--abort` ever removes it), so a fixture may read it at any point
+/// during that window and carry the value forward. This stands in for what
+/// a real, synchronous `post-rewrite` hook (#0217) would read before git
+/// tears the directory down once the operation concludes -- the same
+/// synchronous-capture requirement `LoggedInvocation.resumable` exists for,
+/// captured by the hook script itself rather than recomputed later.
+private func currentInFlightEntryID(in context: WorktreeContext) throws -> String? {
+    guard let path = try liveEntryIDPath(in: context),
+          let contents = try? String(contentsOfFile: path, encoding: .utf8)
+    else { return nil }
+    return contents.trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
 /// Runs `git` through a raw `Foundation.Process`, with every `SWITCHYARD_*`
@@ -65,16 +88,15 @@ private func runForeignGit(_ arguments: [String], at path: String) throws -> Int
     return process.terminationStatus
 }
 
-/// Creates a live, empty `rebase-merge` directory stamped with an
-/// `orig-head` file holding `oid`, so a fixture can plant a slot whose
-/// stamp is checkable without driving a real rebase to a stop. Returns the
-/// directory's path so the caller can `defer` its removal.
+/// Creates a live, empty `rebase-merge` directory, so a fixture can plant a
+/// `RepositoryLayout.sequencerEntryIDFileName` file inside it without
+/// driving a real rebase to a stop. Returns the directory's path so the
+/// caller can `defer` its removal.
 @discardableResult
-private func makeLiveRebaseMerge(in context: WorktreeContext, origHead oid: String) throws -> String {
+private func makeLiveRebaseMerge(in context: WorktreeContext) throws -> String {
     let rebaseMergePath = try context.path(for: "rebase-merge")
     try FileManager.default.createDirectory(
         atPath: rebaseMergePath, withIntermediateDirectories: true)
-    try oid.write(toFile: rebaseMergePath + "/orig-head", atomically: true, encoding: .utf8)
     return rebaseMergePath
 }
 
@@ -103,16 +125,10 @@ private func installLoggingPostRewriteHook(in repo: FixtureRepository, loggingTo
     // from Swift code running after that process has already exited, can
     // never observe this -- the directory is provably gone by then, no
     // matter how quickly Swift asks (measured with a direct `FileManager`
-    // probe on this exact fixture). Capturing the answer here, at the only
-    // moment it is knowable, is what `JournalCheckpoint.attachRewrite`'s
-    // `stillInProgress` parameter exists to receive.
-    // #0264: `=H=` logs the currently-live sequencer's own `orig-head`
-    // (empty when nothing is live), captured the same synchronous way `=S=`
-    // captures liveness -- inside the hook's own subprocess, while git
-    // still holds the directory open. This is what a real `post-rewrite`
-    // hook (#0217) would pass through to `JournalCheckpoint.attachRewrite`'s
-    // `liveOrigHead:` parameter, mirroring `=S=`'s existing role for
-    // `stillInProgress:`.
+    // probe on this exact fixture). `=S=` exists so a test can assert the
+    // hook really did fire while the sequencer was still open, the
+    // precondition that makes `JournalCheckpoint.attachRewrite`'s own
+    // synchronous read (guide §11 decision 24, #0273) legitimate.
     let script = """
     #!/bin/sh
     printf '=I= %s\\n' "$1" >> "\(log.path)"
@@ -120,15 +136,10 @@ private func installLoggingPostRewriteHook(in repo: FixtureRepository, loggingTo
     printf '=M= %s\\n' "${\(GitProcess.markerVariable):-}" >> "\(log.path)"
     rm=$(git rev-parse --path-format=absolute --git-path rebase-merge 2>/dev/null)
     ra=$(git rev-parse --path-format=absolute --git-path rebase-apply 2>/dev/null)
-    if [ -n "$rm" ] && [ -d "$rm" ]; then
+    if { [ -n "$rm" ] && [ -d "$rm" ]; } || { [ -n "$ra" ] && [ -d "$ra" ]; }; then
         printf '=S= 1\\n' >> "\(log.path)"
-        printf '=H= %s\\n' "$(cat "$rm/orig-head" 2>/dev/null)" >> "\(log.path)"
-    elif [ -n "$ra" ] && [ -d "$ra" ]; then
-        printf '=S= 1\\n' >> "\(log.path)"
-        printf '=H= %s\\n' "$(cat "$ra/orig-head" 2>/dev/null)" >> "\(log.path)"
     else
         printf '=S= 0\\n' >> "\(log.path)"
-        printf '=H= \\n' >> "\(log.path)"
     fi
     cat >> "\(log.path)"
     exit 0
@@ -146,21 +157,17 @@ private struct LoggedInvocation {
     let entryID: String?
     let marker: String?
     /// Whether `rebase-merge` or `rebase-apply` was present *at the instant
-    /// this invocation's hook fired* (#0253) — captured by the hook script
-    /// itself, synchronously, inside the git process that owns the
-    /// sequencer directory. Replaying this later (as every test in this file
-    /// does) cannot recompute it: by replay time the owning git process has
+    /// this invocation's hook fired* — captured by the hook script itself,
+    /// synchronously, inside the git process that owns the sequencer
+    /// directory. Replaying this later (as every test in this file does)
+    /// cannot recompute it: by replay time the owning git process has
     /// already exited and, for a rebase that finished or was aborted, the
-    /// directory is already gone. This is the answer a real `post-rewrite`
-    /// hook script (#0217) would pass to `JournalCheckpoint.attachRewrite`'s
-    /// `stillInProgress:` parameter.
+    /// directory is already gone. This is the precondition that makes a
+    /// real `post-rewrite` hook's own synchronous read of
+    /// `JournalCheckpoint.attachRewrite` legitimate (guide §11 decision 24,
+    /// #0273) -- asserted here as documentation of that precondition, not
+    /// threaded into `attachRewrite` itself, which re-derives it fresh.
     let resumable: Bool
-    /// `SequencerSnapshot`'s own `orig-head`, captured at the same
-    /// synchronous moment as `resumable` (#0264) -- `nil` when `resumable`
-    /// is false, since nothing live has an `orig-head` to report. This is
-    /// what a real `post-rewrite` hook would pass through to
-    /// `JournalCheckpoint.attachRewrite`'s `liveOrigHead:` parameter.
-    let liveOrigHead: String?
     let stdin: Data
 }
 
@@ -170,9 +177,9 @@ private struct LoggedInvocation {
 /// existed pre-rewrite) and a final `rebase` invocation whose mapping
 /// repeats that pair alongside the rest — the same shape
 /// `JournalObserved.swift`'s own doc comment describes for the foreign path.
-/// `=I=` starts a new block; `=E=`/`=M=`/`=S=`/`=H=` are that block's next
-/// four lines; everything after is that block's stdin, up to the next `=I=`
-/// or EOF.
+/// `=I=` starts a new block; `=E=`/`=M=`/`=S=` are that block's next three
+/// lines; everything after is that block's stdin, up to the next `=I=` or
+/// EOF.
 private func allInvocations(in log: URL) throws -> [LoggedInvocation] {
     let text = try String(contentsOf: log, encoding: .utf8)
     var lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
@@ -189,8 +196,7 @@ private func allInvocations(in log: URL) throws -> [LoggedInvocation] {
         let entryID = String(lines[index + 1].dropFirst(4))
         let marker = String(lines[index + 2].dropFirst(4))
         let resumable = String(lines[index + 3].dropFirst(4))
-        let liveOrigHead = String(lines[index + 4].dropFirst(4))
-        index += 5
+        index += 4
         var stdinLines: [String] = []
         while index < lines.count, !lines[index].hasPrefix("=I= ") {
             stdinLines.append(lines[index])
@@ -201,7 +207,6 @@ private func allInvocations(in log: URL) throws -> [LoggedInvocation] {
             entryID: entryID.isEmpty ? nil : entryID,
             marker: marker.isEmpty ? nil : marker,
             resumable: resumable == "1",
-            liveOrigHead: liveOrigHead.isEmpty ? nil : liveOrigHead,
             stdin: Data((stdinLines.map { $0 + "\n" }.joined()).utf8)))
     }
     return result
@@ -307,13 +312,70 @@ struct PostRewriteAttachTests {
         #expect(oldParents == newParents)
     }
 
+    // MARK: - Guide §11 decision 24 (#0273): the file's own lifetime is the
+    // staleness check
+
+    /// Decision 24's own claim, pinned directly rather than inferred through
+    /// `currentInFlightEntryID`'s indirection the way every other test in
+    /// this file exercises it: `around`'s catch writes the entry id
+    /// **inside** the live sequencer directory, at
+    /// `<layout>/RepositoryLayout.sequencerEntryIDFileName`, resolved
+    /// through `WorktreeContext.path(for:)` -- never beside it, at the old,
+    /// pre-decision-24 `RepositoryLayout.stateDirectoryName` location.
+    @Test func theInFlightEntryIDFileLivesInsideTheSequencerDirectoryNotBesideIt() throws {
+        var repo = try FixtureRepository()
+        try repo.build([
+            .init("c1", files: ["f.txt": "a\n"]),
+            .init("c2", files: ["f.txt": "b\n"]),
+            .init("c3", files: ["f.txt": "c\n"]),
+        ])
+        defer { repo.destroy() }
+        let target = try #require(repo.oids["c2"])
+        let context = try WorktreeContext.resolve(path: repo.url.path)
+
+        try repo.writeUntracked(["f.txt": "z\n"])
+        try git.run(["add", "-A"], workingDirectory: repo.url.path)
+
+        let thrown = #expect(throws: FixupError.self) {
+            _ = try Fixup.run(target: target, at: repo.url.path, extraEnvironment: hermetic)
+        }
+        guard case .blockedOnConflicts = try #require(thrown) else {
+            Issue.record("expected .blockedOnConflicts, got \(String(describing: thrown))")
+            return
+        }
+        #expect(repo.isMidRebase, "the rebase must be left resumable, not aborted")
+
+        let entry = try #require(try JournalAnchor.list(in: context).first)
+
+        // The exact resolved path decision 24 specifies: the live layout's
+        // own directory, joined with the filename, through
+        // `WorktreeContext.path(for:)`.
+        let sequencer = try #require(try SequencerSnapshot.capture(in: context, git: git))
+        let insidePath = try context.path(
+            for: sequencer.layout.rawValue + "/" + RepositoryLayout.sequencerEntryIDFileName,
+            git: git)
+        let insideContents = try #require(try? String(contentsOfFile: insidePath, encoding: .utf8))
+        #expect(insideContents.trimmingCharacters(in: .whitespacesAndNewlines) == entry.id.string,
+                "the file must land inside the live sequencer directory, at the decision-24 path")
+
+        // The mutation this test exists to catch: writing beside the
+        // sequencer -- the file's location before decision 24 -- instead of
+        // inside it.
+        let besidePath = try context.path(
+            for: RepositoryLayout.stateDirectoryName + "/" + RepositoryLayout.sequencerEntryIDFileName,
+            git: git)
+        #expect(!FileManager.default.fileExists(atPath: besidePath),
+                "the file must never be written beside the sequencer directory")
+    }
+
     /// The honest options for an own invocation with no entry id anywhere
     /// are "record nothing" and "fall back to an observed entry" (#0221's
     /// Expected behavior). This picks "record nothing": with no
-    /// `entryVariable` in the environment and no `inFlightEntryIDRelativePath`
-    /// file on disk either (#0237, guide §11 decision 19), there is no
-    /// in-flight entry to attach to, and routing it to an observed entry
-    /// would misrepresent it as foreign-sourced -- exactly the distinction
+    /// `entryVariable` in the environment and no sequencer live at all (so
+    /// no `RepositoryLayout.sequencerEntryIDFileName` file can exist
+    /// anywhere -- guide §11 decision 24, #0273), there is no in-flight
+    /// entry to attach to, and routing it to an observed entry would
+    /// misrepresent it as foreign-sourced -- exactly the distinction
     /// `JournalObserved.Metadata.kind` exists to preserve (#0220). Nothing is
     /// invented and nothing throws; the `nil` return is the documented,
     /// tested signal, not a swallowed failure.
@@ -339,27 +401,36 @@ struct PostRewriteAttachTests {
     /// A file naming a pruned or fabricated entry id must degrade to
     /// today's no-attach behaviour, not attach to whatever else this
     /// worktree happens to have recorded -- "the part most likely to be got
-    /// wrong" per #0237's own issue text. Written by hand at
-    /// `RepositoryLayout.inFlightEntryIDRelativePath`, resolved exactly the
-    /// way `JournalCheckpoint.around` resolves it, rather than through
-    /// `around` itself, so the fixture can plant an id that is guaranteed
-    /// never to have existed.
+    /// wrong" per #0237's own issue text.
+    ///
+    /// Under guide §11 decision 24 (#0273) the file only exists inside a
+    /// live sequencer directory, so the fixture must make one live
+    /// (`makeLiveRebaseMerge`, without driving a real rebase to a stop) and
+    /// write the fabricated id at
+    /// `<rebase-merge>/RepositoryLayout.sequencerEntryIDFileName` -- the
+    /// same path `JournalCheckpoint.around`'s catch resolves, by hand rather
+    /// than through `around` itself, so the fixture can plant an id that is
+    /// guaranteed never to have existed.
     @Test func aStaleFileAttachesNothingAndIsRemoved() throws {
         let repo = try FixtureRepository.linear()
         defer { repo.destroy() }
         let context = try WorktreeContext.resolve(path: repo.url.path)
 
         let fabricated = try #require(JournalEntryID(String(repeating: "0", count: JournalEntryID.length)))
-        let pendingPath = try context.path(for: RepositoryLayout.inFlightEntryIDRelativePath)
-        try FileManager.default.createDirectory(
-            atPath: URL(fileURLWithPath: pendingPath).deletingLastPathComponent().path,
-            withIntermediateDirectories: true)
+        let rebaseMergePath = try makeLiveRebaseMerge(in: context)
+        defer { try? FileManager.default.removeItem(atPath: rebaseMergePath) }
+        let pendingPath = rebaseMergePath + "/" + RepositoryLayout.sequencerEntryIDFileName
         try fabricated.string.write(toFile: pendingPath, atomically: true, encoding: .utf8)
         #expect(FileManager.default.fileExists(atPath: pendingPath))
         #expect(try JournalAnchor.list(in: context).isEmpty, "the fabricated id must name nothing real")
 
+        // `sourceArgument: "rebase"`, not `"amend"` -- an `amend` decision
+        // with a live `rebase-merge` present is `isMidRebaseAmend` (#0233)
+        // and returns early, before ever reaching the file this test means
+        // to exercise. `"rebase"` reaches the file-read path the same way
+        // the other live-sequencer fixtures below do.
         let decision = PostRewrite.decide(
-            sourceArgument: "amend",
+            sourceArgument: "rebase",
             environment: [GitProcess.markerVariable: "1"],
             readStandardInput: {
                 Data("\(String(repeating: "a", count: 40)) \(String(repeating: "b", count: 40))\n".utf8)
@@ -466,9 +537,25 @@ struct PostRewriteAttachTests {
     /// all touching `f.txt`, staged content that conflicts on replay --
     /// `FixupTests.conflictBlocksAndLeavesTheRebaseResumable`'s own fixture
     /// shape). Now the mapping must land on the entry `around` wrote before
-    /// the rebase started, found through the file at
-    /// `RepositoryLayout.inFlightEntryIDRelativePath` rather than the
-    /// environment.
+    /// the rebase started, found through the file inside the live sequencer
+    /// directory rather than the environment (guide §11 decision 24,
+    /// #0273).
+    ///
+    /// **Why this test reads the file itself instead of letting
+    /// `attachRewrite` do it.** Under decision 24 the file lives *inside*
+    /// `rebase-merge`, and git removes that whole directory the moment the
+    /// continue loop below finishes the rebase -- so by the time this test
+    /// resumes control, the file is provably gone (the same reason
+    /// `invocation.resumable` above can only be captured by the hook script
+    /// itself, synchronously, never recomputed after the fact). A real
+    /// `post-rewrite` hook (#0217) reads the file from *inside* the still-
+    /// live process, then hands the resolved id to `attachRewrite` exactly
+    /// as the environment-carried case already does; this test plays that
+    /// role by reading the file right after the conflict, while
+    /// `repo.isMidRebase` is still true, and carrying the value forward --
+    /// legitimate because the file's content never changes for as long as
+    /// the operation stays open (`currentInFlightEntryID`'s own doc
+    /// comment).
     @Test func aConflictingFixupResolvedAndContinuedAttachesToItsPreOperationEntry() throws {
         var repo = try FixtureRepository()
         try repo.build([
@@ -506,6 +593,14 @@ struct PostRewriteAttachTests {
             serialized: try JournalAnchor.metadata(for: checkpointEntry.id, in: context))
         #expect(beforeAttach.rewrite == nil)
 
+        // Captured now, while the sequencer is still genuinely live -- see
+        // this test's own doc comment for why it cannot be read after the
+        // continue loop below finishes the rebase.
+        let inFlightID = try #require(
+            try currentInFlightEntryID(in: context),
+            "the conflict must leave the in-flight file naming its own entry")
+        #expect(inFlightID == checkpointEntry.id.string)
+
         // Resolve and continue through a brand new, UNSCOPED GitProcess --
         // the exact process boundary #0237 is about. The autosquash reorders
         // the fixup right after its target, so this fixture's conflicting
@@ -541,13 +636,14 @@ struct PostRewriteAttachTests {
         #expect(invocation.source == "rebase")
         #expect(invocation.entryID == nil,
                 "the continue ran through an unscoped GitProcess and must export no entry id")
-        // #0253: this is the fact that makes the attach legitimate -- the
-        // hook script captured it synchronously, inside the same `git
-        // rebase --continue` process that still held `rebase-merge` open at
-        // that instant. Swift-level code asking the same question now,
-        // after that process has already exited and `!repo.isMidRebase`
-        // above confirmed the directory gone, cannot recover this answer --
-        // it can only be carried forward from the moment it was true.
+        // The fact that makes attaching through the file legitimate at all
+        // -- the hook script captured it synchronously, inside the same
+        // `git rebase --continue` process that still held `rebase-merge`
+        // open at that instant. Swift-level code asking the same question
+        // now, after that process has already exited and
+        // `!repo.isMidRebase` above confirmed the directory gone, cannot
+        // recover this answer -- it can only be carried forward from the
+        // moment it was true, exactly as `inFlightID` was above.
         #expect(invocation.resumable,
                 "the hook fired while the rebase it was concluding was still live")
         let decision = PostRewrite.decide(
@@ -555,9 +651,12 @@ struct PostRewriteAttachTests {
             environment: [GitProcess.markerVariable: invocation.marker ?? ""],
             readStandardInput: { invocation.stdin })
         #expect(decision.isOwnInvocation, "the marker must still be set on our own continue")
+        // `entryID:` carries the id read from the file while it was still
+        // live, exactly as a real #0217 hook glue would supply it --
+        // `attachRewrite`'s own internal file read (guide §11 decision 24)
+        // has nothing left to find once the rebase has fully concluded.
         _ = try #require(try JournalCheckpoint.attachRewrite(
-            decision, entryID: nil, stillInProgress: invocation.resumable,
-            liveOrigHead: invocation.liveOrigHead, in: context))
+            decision, entryID: try #require(JournalEntryID(inFlightID)), in: context))
 
         let after = try JournalEntryMetadata(
             serialized: try JournalAnchor.metadata(for: checkpointEntry.id, in: context))
@@ -578,24 +677,25 @@ struct PostRewriteAttachTests {
     // MARK: - #0253: the read side must require the operation still be in progress
 
     /// #0253's own probe, made a test — Finding 1 of #0160's fourth umbrella
-    /// review. A conflicting `Fixup.run(target:)` leaves the in-flight file
-    /// naming its own pre-operation entry, exactly as
+    /// review, then updated for guide §11 decision 24 (#0273). A conflicting
+    /// `Fixup.run(target:)` leaves the in-flight file naming its own
+    /// pre-operation entry, exactly as
     /// `aConflictingFixupResolvedAndContinuedAttachesToItsPreOperationEntry`
     /// above sets up. But here the caller does not resolve and continue --
     /// it runs `git rebase --abort` directly, **out of band**, the
     /// documented alternative `FixupError.blockedOnConflicts`'s doc comment
-    /// names. `Fixup` itself never runs here at all -- there is no abort arm
-    /// to clean anything up -- so before this issue the file survived the
-    /// abort, naming an entry whose operation had already ended. A later,
-    /// wholly unrelated own rewrite -- `git commit --amend`,
-    /// touching nothing the fixup touched -- would then read that stale
-    /// file back and attach its own mapping to the abandoned entry
-    /// (`JournalAnchor.list(...).contains` was the only check, and entries
-    /// persist until pruned, so it almost always passes). Now the file must
-    /// be found *not* naming a still-in-progress operation -- no sequencer
-    /// directory is live for this worktree by the time the amend's hook
-    /// fires, since the abort tore it down first -- and the amend must
-    /// attach nothing.
+    /// names.
+    ///
+    /// **Before decision 24, the file lived beside the sequencer and
+    /// survived this abort**, naming an entry whose operation had already
+    /// ended; a later, wholly unrelated own rewrite would read that stale
+    /// file back and wrongly attach to the abandoned entry. **Decision 24
+    /// removes the failure mode at its root**: the file now lives *inside*
+    /// the sequencer directory, and `git rebase --abort` deletes that whole
+    /// directory, our file included -- so there is no stale file left for a
+    /// later rewrite to consume in the first place. This test now pins that
+    /// removal directly, then confirms the unrelated rewrite attaches
+    /// nothing, which follows trivially once nothing is left to misread.
     @Test func anOutOfBandAbortLeavesAStaleFileThatALaterUnrelatedRewriteMustNotConsume() throws {
         var repo = try FixtureRepository()
         try repo.build([
@@ -625,19 +725,22 @@ struct PostRewriteAttachTests {
         #expect(entries.count == 1, "just the pre-operation checkpoint for the fixup")
         let abandoned = try #require(entries.first)
 
-        let pendingPath = try context.path(for: RepositoryLayout.inFlightEntryIDRelativePath, git: git)
         let beforeContents = try #require(
-            try? String(contentsOfFile: pendingPath, encoding: .utf8),
+            try currentInFlightEntryID(in: context),
             "the conflict must leave the in-flight file naming the fixup's own entry")
-        #expect(slotEntryID(beforeContents) == abandoned.id.string)
+        #expect(beforeContents == abandoned.id.string)
+        let pendingPath = try #require(try liveEntryIDPath(in: context))
 
-        // Out of band: the caller aborts directly, not through `Fixup` --
-        // no switchyard code runs at all for this abort, so nothing clears
-        // the file here.
+        // Out of band: the caller aborts directly, not through `Fixup`.
+        // Under decision 24 the whole `rebase-merge` directory -- our file
+        // included -- is removed by git itself, not left behind for
+        // switchyard-side code to clear.
         _ = try git.run(["rebase", "--abort"], workingDirectory: repo.url.path)
         #expect(!repo.isMidRebase, "the abort must have ended the rebase")
-        #expect(FileManager.default.fileExists(atPath: pendingPath),
-                "an out-of-band abort must leave the file behind -- nothing switchyard-side ran to clear it")
+        #expect(!FileManager.default.fileExists(atPath: pendingPath),
+                "decision 24: the abort removes the whole sequencer directory, our file included")
+        #expect(try SequencerSnapshot.capture(in: context, git: git) == nil,
+                "nothing is live once the abort has run")
 
         // A later, wholly unrelated own rewrite -- touches nothing the
         // fixup touched.
@@ -657,20 +760,10 @@ struct PostRewriteAttachTests {
             readStandardInput: { invocation.stdin })
         #expect(decision.isOwnInvocation)
 
-        // Deliberately NOT passing `stillInProgress:` -- the default nil
-        // makes `attachRewrite` re-probe the sequencer itself, which is the
-        // path a real `post-rewrite` hook (#0217) takes. Injecting the
-        // answer here would leave that re-probe unpinned: review measured
-        // that replacing it with a constant `true` kept the whole suite
-        // green. The abort has already torn the sequencer down, so the
-        // re-probe answers false and this asserts exactly what the injected
-        // value would have.
         let attached = try JournalCheckpoint.attachRewrite(
             decision, entryID: nil, in: context)
         #expect(attached == nil,
-                "a file naming an already-abandoned operation must never capture a later, unrelated rewrite")
-        #expect(!FileManager.default.fileExists(atPath: pendingPath),
-                "the stale file must be removed once it is found not to name an in-progress operation")
+                "with no sequencer live and no file to find, the unrelated rewrite must attach nothing")
 
         let after = try JournalEntryMetadata(
             serialized: try JournalAnchor.metadata(for: abandoned.id, in: context))
@@ -803,9 +896,12 @@ struct PostRewriteAttachTests {
         }
         #expect(!repo.isMidRebase, "the signing failure must abort the rebase, not leave it resumable")
 
-        let pendingPath = try context.path(for: RepositoryLayout.inFlightEntryIDRelativePath, git: git)
-        #expect(!FileManager.default.fileExists(atPath: pendingPath),
-                "an operation that aborted before throwing must leave no in-flight file")
+        // `Fixup`'s own abort ran before `around`'s catch ever saw a live
+        // sequencer to write a file into (guide §11 decision 24, #0273) --
+        // there is no worktree-wide slot left to check, only "is anything
+        // live at all".
+        #expect(try SequencerSnapshot.capture(in: context, git: git) == nil,
+                "an operation that aborted before throwing must leave no live sequencer, and so no file")
 
         let entries = try JournalAnchor.list(in: context)
         #expect(entries.count == 1, "just the pre-operation checkpoint for the abandoned fixup")
@@ -874,17 +970,16 @@ struct PostRewriteAttachTests {
         #expect(entries.count == 1)
         let fixupEntry = try #require(entries.first)
 
-        let pendingPath = try context.path(for: RepositoryLayout.inFlightEntryIDRelativePath, git: git)
         let beforeContents = try #require(
-            try? String(contentsOfFile: pendingPath, encoding: .utf8),
+            try currentInFlightEntryID(in: context),
             "the conflict must leave the in-flight file naming the fixup's own entry")
-        #expect(slotEntryID(beforeContents) == fixupEntry.id.string)
+        #expect(beforeContents == fixupEntry.id.string)
 
         // A wholly unrelated, fully successful `around` in the same
         // worktree -- must not touch the fixup's slot at all.
         _ = try JournalCheckpoint.around(operation: "unrelated", at: repo.url.path, git: git) { _ in 0 }
 
-        let afterUnrelated = try #require(try? String(contentsOfFile: pendingPath, encoding: .utf8))
+        let afterUnrelated = try currentInFlightEntryID(in: context)
         #expect(afterUnrelated == beforeContents,
                 "a successful unrelated operation must not overwrite or remove the fixup's in-flight file")
 
@@ -908,8 +1003,8 @@ struct PostRewriteAttachTests {
         #expect(invocation.source == "rebase")
         #expect(invocation.entryID == nil,
                 "the continue ran through an unscoped GitProcess and must export no entry id")
-        // #0253: captured by the hook script itself, synchronously, while
-        // the concluding `git rebase --continue` process still held
+        // Captured by the hook script itself, synchronously, while the
+        // concluding `git rebase --continue` process still held
         // `rebase-merge` open -- see the sibling assertion's comment in
         // `aConflictingFixupResolvedAndContinuedAttachesToItsPreOperationEntry`
         // for why this cannot be recomputed after the fact.
@@ -921,9 +1016,13 @@ struct PostRewriteAttachTests {
             readStandardInput: { invocation.stdin })
         #expect(decision.isOwnInvocation)
 
+        // `entryID:` carries the id captured above, from `beforeContents`,
+        // while the sequencer was still genuinely live -- the file itself
+        // is gone by now, exactly as
+        // `aConflictingFixupResolvedAndContinuedAttachesToItsPreOperationEntry`'s
+        // own doc comment explains.
         let attached = try #require(try JournalCheckpoint.attachRewrite(
-            decision, entryID: nil, stillInProgress: invocation.resumable,
-            liveOrigHead: invocation.liveOrigHead, in: context))
+            decision, entryID: try #require(JournalEntryID(beforeContents)), in: context))
         #expect(attached.id == fixupEntry.id,
                 "the mapping must land on the fixup's own entry, not the unrelated one")
 
@@ -982,11 +1081,10 @@ struct PostRewriteAttachTests {
         #expect(entries.count == 1)
         let firstEntry = try #require(entries.first)
 
-        let pendingPath = try context.path(for: RepositoryLayout.inFlightEntryIDRelativePath, git: git)
         let slotAfterFirst = try #require(
-            try? String(contentsOfFile: pendingPath, encoding: .utf8),
+            try currentInFlightEntryID(in: context),
             "the first conflict must leave the in-flight file naming its own entry")
-        #expect(slotEntryID(slotAfterFirst) == firstEntry.id.string)
+        #expect(slotAfterFirst == firstEntry.id.string)
 
         // A second `Fixup.run` against the SAME repository: `around` writes
         // its own checkpoint entry before `body` runs, then `body` throws --
@@ -1004,10 +1102,10 @@ struct PostRewriteAttachTests {
                 "the second call's own pre-operation checkpoint is still written")
         let secondEntry = try #require(entriesAfterSecond.first { $0.id != firstEntry.id })
 
-        let slotAfterSecond = try #require(try? String(contentsOfFile: pendingPath, encoding: .utf8))
-        #expect(slotEntryID(slotAfterSecond) == firstEntry.id.string,
+        let slotAfterSecond = try #require(try currentInFlightEntryID(in: context))
+        #expect(slotAfterSecond == firstEntry.id.string,
                 "first-writer-wins: the second call's throw must not clobber the first entry's slot")
-        #expect(slotEntryID(slotAfterSecond) != secondEntry.id.string)
+        #expect(slotAfterSecond != secondEntry.id.string)
 
         // Resolve and continue the one rebase that is actually in progress
         // -- the first's. Autosquash reorders the fixup right after its
@@ -1040,9 +1138,13 @@ struct PostRewriteAttachTests {
             readStandardInput: { invocation.stdin })
         #expect(decision.isOwnInvocation, "the marker must still be set on our own continue")
 
+        // `entryID:` carries `slotAfterSecond`, captured while the sequencer
+        // was still live -- see
+        // `aConflictingFixupResolvedAndContinuedAttachesToItsPreOperationEntry`'s
+        // own doc comment for why the file cannot be re-read after the
+        // continue loop above has finished the rebase.
         let attached = try #require(try JournalCheckpoint.attachRewrite(
-            decision, entryID: nil, stillInProgress: invocation.resumable,
-            liveOrigHead: invocation.liveOrigHead, in: context))
+            decision, entryID: try #require(JournalEntryID(slotAfterSecond)), in: context))
         #expect(attached.id == firstEntry.id,
                 "the mapping must land on the FIRST entry, whose slot the second call could not steal")
 
@@ -1068,24 +1170,34 @@ struct PostRewriteAttachTests {
     // MARK: - #0261: a stale in-flight slot must not divert a later,
     // unrelated operation's rewrite
 
-    /// The full reproduction #0261's probe measured, made permanent: a first
-    /// `Fixup.run` conflicts and leaves its own entry's id in the in-flight
-    /// slot; the caller aborts that rebase **directly** with `git rebase
-    /// --abort`, not through `Fixup`, so nothing switchyard-side clears the
-    /// slot and it is left naming an entry with no live operation behind it
-    /// -- "the slot names a still-live journal entry" and "the slot is held
-    /// by the operation that is live right now" are not the same claim,
-    /// because a journal entry outlives its operation. A second, wholly
-    /// unrelated `Fixup.run` then conflicts on its own and leaves its own
-    /// rebase live. Before #0261's fix, `around`'s first-writer-wins check
-    /// (#0254) could not tell the stale reference from a genuinely live one
-    /// -- `JournalAnchor.list` still contains entry A -- so the second
-    /// call's catch refused to claim the slot, and the eventual
-    /// `post-rewrite` hook attached the second operation's mapping to the
-    /// FIRST, unrelated entry: a corrupted journal, not merely a missing
-    /// one. #0261 clears a stale slot at the *start* of `around`, before the
-    /// second checkpoint is even written, so the second call claims the
-    /// (now-empty) slot for itself.
+    /// #0261's original reproduction, kept and updated for guide §11
+    /// decision 24 (#0273): a first `Fixup.run` conflicts and leaves its own
+    /// entry's id in the in-flight slot; the caller aborts that rebase
+    /// **directly** with `git rebase --abort`, not through `Fixup`. A
+    /// second, wholly unrelated `Fixup.run` then conflicts on its own and
+    /// leaves its own rebase live.
+    ///
+    /// **Before #0261's original fix, `around`'s first-writer-wins check
+    /// (#0254) could not tell a stale reference from a genuinely live one**
+    /// -- the file lived beside the sequencer, survived the abort, and
+    /// `JournalAnchor.list` still contained entry A -- so the second call's
+    /// catch refused to claim the slot, and the eventual `post-rewrite` hook
+    /// attached the second operation's mapping to the FIRST, unrelated
+    /// entry. #0261's fix was to clear a stale slot at the *start* of
+    /// `around`, before the second checkpoint was even written.
+    ///
+    /// **Decision 24 removes the failure mode at its root, the same way it
+    /// does for the sibling abort test above**: the file now lives *inside*
+    /// the sequencer directory, so the out-of-band abort in step 2 deletes
+    /// it along with the rest of `rebase-merge` -- there is no stale slot
+    /// left for `around`'s start-of-call clear to find, because nothing
+    /// survives the abort for it to clear. B's own conflict in step 4
+    /// creates a brand-new sequencer directory with no file in it yet, so
+    /// B's `around` catch writes into empty ground for the ordinary reason
+    /// (`sequencerWasLiveBefore == false`), not because of any special
+    /// clearing step. This test still pins the end-to-end outcome -- B's
+    /// mapping lands on B, never on the long-gone A -- as a regression check
+    /// that the new mechanism gets the historical #0261 scenario right too.
     @Test func anOutOfBandAbortsStaleSlotMustNotDivertALaterUnrelatedOperationsRewrite() throws {
         var repo = try FixtureRepository()
         try repo.build([
@@ -1117,22 +1229,20 @@ struct PostRewriteAttachTests {
         #expect(entries.count == 1)
         let entryA = try #require(entries.first)
 
-        let pendingPath = try context.path(for: RepositoryLayout.inFlightEntryIDRelativePath, git: git)
         let slotAfterA = try #require(
-            try? String(contentsOfFile: pendingPath, encoding: .utf8),
+            try currentInFlightEntryID(in: context),
             "the first conflict must leave the in-flight file naming its own entry")
-        #expect(slotEntryID(slotAfterA) == entryA.id.string)
+        #expect(slotAfterA == entryA.id.string)
+        let pendingPathForA = try #require(try liveEntryIDPath(in: context))
 
-        // 2. Out of band: the caller aborts directly, not through `Fixup` --
-        //    no switchyard code runs at all for this abort, so nothing
-        //    clears the slot here. It is left naming entry A, which no
-        //    longer has any live operation behind it.
+        // 2. Out of band: the caller aborts directly, not through `Fixup`.
+        //    Decision 24: the whole `rebase-merge` directory -- our file
+        //    included -- is removed by git itself, so there is no stale
+        //    reference to entry A left behind for anything to clear.
         _ = try git.run(["rebase", "--abort"], workingDirectory: repo.url.path)
         #expect(!repo.isMidRebase, "the abort must have ended the first rebase")
-        let slotAfterAbort = try #require(
-            try? String(contentsOfFile: pendingPath, encoding: .utf8),
-            "an out-of-band abort must leave the file behind -- nothing switchyard-side ran to clear it")
-        #expect(slotEntryID(slotAfterAbort) == entryA.id.string)
+        #expect(!FileManager.default.fileExists(atPath: pendingPathForA),
+                "decision 24: the abort removes the whole sequencer directory, our file included")
 
         // 3. Before operation B starts, nothing is live -- the abort tore
         //    down the only sequencer this worktree had.
@@ -1161,13 +1271,13 @@ struct PostRewriteAttachTests {
         #expect(entriesAfterB.count == 2, "B's own pre-operation checkpoint is written alongside A's")
         let entryB = try #require(entriesAfterB.first { $0.id != entryA.id })
 
-        // The fix under test: B's own `around` call cleared the stale slot
-        // at its start, before B's own checkpoint was written, so B's catch
-        // claims the (empty) slot for itself rather than finding A still
-        // "live" via #0254's first-writer-wins check.
-        let slotAfterB = try #require(try? String(contentsOfFile: pendingPath, encoding: .utf8))
-        #expect(slotEntryID(slotAfterB) == entryB.id.string,
-                "B must claim its own slot -- the stale reference to A must not have survived")
+        // B's own conflict created a brand-new sequencer directory (A's is
+        // long gone), so B's `around` catch writes into it for the ordinary
+        // reason -- nothing was live when B's own body started -- not
+        // because of any special stale-slot clearing.
+        let slotAfterB = try #require(try currentInFlightEntryID(in: context))
+        #expect(slotAfterB == entryB.id.string,
+                "B must claim its own, freshly created slot -- there is no stale reference to A left to steal")
 
         // 5. Resolve and continue -- the only rebase live is B's.
         let continueGit = GitProcess()
@@ -1195,11 +1305,15 @@ struct PostRewriteAttachTests {
             readStandardInput: { invocation.stdin })
         #expect(decision.isOwnInvocation, "the marker must still be set on our own continue")
 
+        // `entryID:` carries `slotAfterB`, captured while B's sequencer was
+        // still live -- see
+        // `aConflictingFixupResolvedAndContinuedAttachesToItsPreOperationEntry`'s
+        // own doc comment for why the file cannot be re-read after the
+        // continue loop above has finished B's rebase.
         let attached = try #require(try JournalCheckpoint.attachRewrite(
-            decision, entryID: nil, stillInProgress: invocation.resumable,
-            liveOrigHead: invocation.liveOrigHead, in: context))
+            decision, entryID: try #require(JournalEntryID(slotAfterB)), in: context))
         #expect(attached.id == entryB.id,
-                "B's mapping must land on B's OWN entry, not the stale, unrelated A")
+                "B's mapping must land on B's OWN entry, not the long-gone, unrelated A")
 
         let afterB = try JournalEntryMetadata(
             serialized: try JournalAnchor.metadata(for: entryB.id, in: context))
@@ -1241,7 +1355,6 @@ struct PostRewriteAttachTests {
         let c1 = try #require(repo.oids["c1"])
         let c2 = try #require(repo.oids["c2"])
         let context = try WorktreeContext.resolve(path: repo.url.path)
-        let pendingPath = try context.path(for: RepositoryLayout.inFlightEntryIDRelativePath)
 
         // A genuinely foreign rebase -- dropping c2 and replaying c3 onto
         // c1 conflicts, since c3's diff expects c2's content as its base.
@@ -1249,6 +1362,12 @@ struct PostRewriteAttachTests {
         #expect(status != 0, "the foreign rebase must stop on a conflict")
         #expect(repo.isMidRebase, "a live foreign rebase is the whole premise of this probe")
         #expect(try JournalAnchor.list(in: context).isEmpty, "no switchyard code has run yet")
+        // The foreign rebase's own directory is live, but nothing switchyard
+        // owns has written a `RepositoryLayout.sequencerEntryIDFileName`
+        // file into it (guide §11 decision 24, #0273) -- resolved only now,
+        // after the foreign rebase exists, since the path depends on which
+        // sequencer layout is live.
+        let pendingPath = try #require(try liveEntryIDPath(in: context))
         #expect(!FileManager.default.fileExists(atPath: pendingPath))
 
         // An unrelated switchyard operation runs while the foreign rebase is
@@ -1279,8 +1398,7 @@ struct PostRewriteAttachTests {
                 Data("\(String(repeating: "a", count: 40)) \(String(repeating: "b", count: 40))\n".utf8)
             })
         #expect(decision.isOwnInvocation)
-        let attached = try JournalCheckpoint.attachRewrite(
-            decision, entryID: nil, stillInProgress: true, in: context)
+        let attached = try JournalCheckpoint.attachRewrite(decision, entryID: nil, in: context)
         #expect(attached == nil, "nothing was ever claimed for the foreign rebase -- there is nothing to attach")
 
         let unrelatedAfter = try JournalEntryMetadata(
@@ -1289,23 +1407,30 @@ struct PostRewriteAttachTests {
                 "the unrelated entry must never receive the foreign rebase's mapping")
     }
 
-    /// #0264's Route 2 probe, made permanent. A stale slot survives an
-    /// out-of-band abort (#0261's own scenario) because nothing clears it
-    /// while a sequencer is live -- and here, before any further switchyard
-    /// operation runs, a genuinely **foreign** rebase goes live (route 1's
-    /// fix alone stops an unrelated operation from CLAIMING the slot, but
-    /// does not clear the pre-existing stale one, since `sequencerWasLiveBefore`
-    /// is true for that unrelated call too). Before this issue, the
-    /// foreign rebase's own eventual own-invocation conclusion would read
-    /// the stale slot back, find it names a still-`JournalAnchor`-live
-    /// entry, and wrongly attach the foreign rebase's mapping to that
-    /// long-abandoned entry. The fix: the slot is now stamped with the
-    /// operation it was written for, and a live operation whose own
-    /// `orig-head` does not match the stamp is stale by construction --
-    /// here, entry A's stamp holds the FIRST rebase's `orig-head` (c3, the
-    /// tip before that rebase started), while the live foreign rebase's own
-    /// `orig-head` is c4 (the tip advanced by one plain commit between the
-    /// abort and the foreign rebase starting), so the two can never match.
+    /// #0264's Route 2 probe, updated for guide §11 decision 24 (#0273) --
+    /// Finding 1 of #0160's sixth umbrella review, 2026-08-18, and the
+    /// **permanent test the issue's own probe becomes**: entry A conflicts,
+    /// an out-of-band `git rebase --abort`, then a foreign rebase **from the
+    /// same tip** -- no manufactured divergence -- attaches to neither
+    /// entry.
+    ///
+    /// **Why #0264's own fix (the `orig-head` stamp) did not hold**: `git
+    /// rebase --abort` restores `HEAD` to exactly the commit the operation
+    /// started from, so a retry from the same tip -- the ordinary thing a
+    /// caller does after an abort -- carries the identical stamp, and the
+    /// slot from the abandoned operation was trusted again. #0264's own
+    /// accepted test papered over this by manufacturing an extra commit
+    /// between the abort and the foreign rebase, purely so the two
+    /// `orig-head`s could never coincide -- which is exactly the kind of
+    /// proxy for operation identity decision 24 replaces.
+    ///
+    /// **Decision 24 needs no such trick.** The file now lives *inside* the
+    /// sequencer directory, so A's abort in step 2 deletes A's file along
+    /// with the rest of `rebase-merge` -- there is no stale reference left
+    /// to survive, coincidental tip or not. The foreign rebase in step 3
+    /// gets a brand-new directory with no file in it, so `attachRewrite` in
+    /// step 5 finds nothing regardless of which tip either rebase started
+    /// from.
     @Test func aStaleSlotPlusAForeignRebaseAttachesToNeitherEntry() throws {
         var repo = try FixtureRepository()
         try repo.build([
@@ -1317,7 +1442,6 @@ struct PostRewriteAttachTests {
         let target = try #require(repo.oids["c2"])
         let c1 = try #require(repo.oids["c1"])
         let context = try WorktreeContext.resolve(path: repo.url.path)
-        let pendingPath = try context.path(for: RepositoryLayout.inFlightEntryIDRelativePath, git: git)
 
         // 1. A conflicting `Fixup.run` (own, via switchyard) leaves slot =
         //    entry A, rebase A live.
@@ -1335,46 +1459,39 @@ struct PostRewriteAttachTests {
         let entries = try JournalAnchor.list(in: context)
         #expect(entries.count == 1)
         let entryA = try #require(entries.first)
-        let slotAfterA = try #require(try? String(contentsOfFile: pendingPath, encoding: .utf8))
-        #expect(slotEntryID(slotAfterA) == entryA.id.string,
-                "the first conflict must leave the in-flight file naming its own entry")
+        let slotAfterA = try #require(
+            try currentInFlightEntryID(in: context),
+            "the first conflict must leave the in-flight file naming its own entry")
+        #expect(slotAfterA == entryA.id.string)
+        let pendingPathForA = try #require(try liveEntryIDPath(in: context))
 
-        // 2. Out of band: the caller aborts A directly, not through Fixup --
-        //    nothing switchyard-side runs, so the slot survives, stale,
-        //    naming entry A.
+        // 2. Out of band: the caller aborts A directly, not through Fixup.
+        //    Decision 24: the whole `rebase-merge` directory -- our file
+        //    included -- is removed by git itself, whatever tip the next
+        //    rebase happens to start from.
         _ = try git.run(["rebase", "--abort"], workingDirectory: repo.url.path)
         #expect(!repo.isMidRebase, "the abort must have ended rebase A")
         #expect(try SequencerSnapshot.capture(in: context, git: git) == nil,
                 "nothing is live before the foreign rebase starts")
-        let slotAfterAbort = try #require(try? String(contentsOfFile: pendingPath, encoding: .utf8))
-        #expect(slotEntryID(slotAfterAbort) == entryA.id.string,
-                "an out-of-band abort must leave the stale file behind, naming A")
-
-        // Advance HEAD by one plain, unrelated commit so the foreign
-        // rebase's own `orig-head` cannot coincidentally match A's stamp --
-        // both rebases would otherwise start from the same tip left behind
-        // by the abort.
-        try repo.writeUntracked(["f.txt": "d\n"])
-        try git.run(["add", "-A"], workingDirectory: repo.url.path)
-        try git.run(
-            ["commit", "-m", "c4"], workingDirectory: repo.url.path,
-            extraEnvironment: hermetic.merging(["GIT_EDITOR": "true"]) { _, new in new })
-        let c3 = try #require(
-            git.run(["rev-parse", "HEAD~1"], workingDirectory: repo.url.path).lines.first)
+        #expect(!FileManager.default.fileExists(atPath: pendingPathForA),
+                "decision 24: the abort removes the whole sequencer directory, our file included")
 
         // 3. Before any further switchyard operation runs, a genuinely
         //    FOREIGN rebase -- raw Process, no SWITCHYARD_* marker -- goes
-        //    live and conflicts on its own (c4's diff replayed onto c1
-        //    conflicts, since it expects c3's content as its base).
-        let foreignStatus = try runForeignGit(["rebase", "--onto", c1, c3], at: repo.url.path)
+        //    live from the EXACT SAME tip the abort left behind. No
+        //    manufactured divergence: replaying c3 onto c1 conflicts the
+        //    same way it did for A's own rebase in step 1 (the same trigger
+        //    `aForeignRebaseAndAnUnrelatedFailingOperationAttachNothing`
+        //    above uses), regardless of which commit HEAD is sitting on
+        //    after the abort.
+        let foreignStatus = try runForeignGit(["rebase", "--onto", c1, target], at: repo.url.path)
         #expect(foreignStatus != 0, "the foreign rebase must stop on a conflict")
         #expect(repo.isMidRebase, "the foreign rebase must be genuinely live")
 
         // 4. An unrelated switchyard operation fails while the foreign
-        //    rebase is live. Route 1's fix refuses the claim
-        //    (`sequencerWasLiveBefore` is true for this call), so the stale
-        //    A reference survives untouched -- neither cleared nor
-        //    overwritten.
+        //    rebase is live. `sequencerWasLiveBefore` is true for this
+        //    call, so it must never write into the foreign rebase's
+        //    directory.
         #expect(throws: ProbeFailure.self) {
             _ = try JournalCheckpoint.around(operation: "unrelated", at: repo.url.path, git: git) { _ in
                 throw ProbeFailure()
@@ -1385,19 +1502,17 @@ struct PostRewriteAttachTests {
                 "the unrelated operation's own pre-operation checkpoint is still written")
         let unrelated = try #require(entriesAfterUnrelated.first { $0.id != entryA.id })
 
-        let slotAfterUnrelated = try #require(try? String(contentsOfFile: pendingPath, encoding: .utf8))
-        #expect(slotEntryID(slotAfterUnrelated) == entryA.id.string,
-                "the stale slot must survive untouched -- the unrelated call must not claim or clear it")
+        #expect(try currentInFlightEntryID(in: context) == nil,
+                "the foreign rebase's own directory must still hold no switchyard-entry-id file")
 
         // 5. The foreign rebase eventually concludes through switchyard (an
         //    own invocation, marker present) -- exactly the shape a real
         //    `post-rewrite` hook glue (#0217) would classify, called while
-        //    the foreign rebase is still genuinely live so the default
-        //    fresh read picks up its real `orig-head`. The fix under test:
-        //    the slot names entry A, but A's stamped `orig-head` is c3 (the
-        //    tip when rebase A started), while the live foreign rebase's own
-        //    `orig-head` is c4 (the tip after the extra commit above) -- the
-        //    two can never match, so the slot is stale by construction.
+        //    the foreign rebase is still genuinely live. The fix under
+        //    test: the foreign rebase's own directory, created fresh in
+        //    step 3, never had a file written into it -- A's died with A's
+        //    directory in step 2 -- so `attachRewrite` finds nothing to
+        //    resolve, however the two rebases' tips happen to relate.
         let decision = PostRewrite.decide(
             sourceArgument: "rebase",
             environment: [GitProcess.markerVariable: "1"],
@@ -1406,7 +1521,7 @@ struct PostRewriteAttachTests {
             })
         #expect(decision.isOwnInvocation)
         let attached = try JournalCheckpoint.attachRewrite(decision, entryID: nil, in: context)
-        #expect(attached == nil, "the mismatched stamp must attach nothing -- neither to A nor to the unrelated entry")
+        #expect(attached == nil, "neither A nor the unrelated entry may receive the foreign rebase's mapping")
 
         let afterA = try JournalEntryMetadata(
             serialized: try JournalAnchor.metadata(for: entryA.id, in: context))
@@ -1500,35 +1615,24 @@ struct PostRewriteAttachTests {
     /// The file names a real `checkpoint` entry sitting behind a genuinely
     /// live rebase (an empty `rebase-merge` directory, which is all
     /// `SequencerSnapshot.capture` checks for). That is deliberate, not
-    /// incidental: #0253 is landing at the same time and will make
-    /// `inFlightEntryID` require `SequencerSnapshot.capture(in:) != nil`
-    /// before trusting the file at all. Without a live rebase here, a
-    /// mutant that reads the file anyway would find `inFlightEntryID`
-    /// answering `nil` regardless -- for the wrong reason -- and this test
-    /// would redden today and pass again, silently, the moment #0253 lands.
+    /// incidental: `inFlightEntryID` requires `SequencerSnapshot.capture(in:)
+    /// != nil` before trusting the file at all (guide §11 decision 24,
+    /// #0273). Without a live rebase here, a mutant that reads the file
+    /// anyway would find `inFlightEntryID` answering `nil` regardless -- for
+    /// the wrong reason -- and this test would redden for the wrong cause.
     /// With a live rebase, the mutant's file read succeeds either way, so
     /// the guard is what this test is actually pinned to.
-    ///
-    /// **#0264 update:** the slot is now stamped `<entry-id> <orig-head>`,
-    /// and `inFlightEntryID` requires the stamp to match the live
-    /// operation's own `orig-head`. So this fixture's `rebase-merge`
-    /// directory carries a real `orig-head` file and the slot is stamped
-    /// with the matching oid -- otherwise the stamp mismatch alone would
-    /// make the file resolve to `nil` regardless of the mutant, and this
-    /// test would stop pinning the ownership guard it exists for.
     @Test func aForeignDecisionWithALiveFilePresentAttachesNothing() throws {
         let repo = try FixtureRepository.linear()
         defer { repo.destroy() }
         let context = try WorktreeContext.resolve(path: repo.url.path)
 
         let liveEntry = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: context)
-        let origHead = String(repeating: "c", count: 40)
-        let rebaseMergePath = try makeLiveRebaseMerge(in: context, origHead: origHead)
+        let rebaseMergePath = try makeLiveRebaseMerge(in: context)
         defer { try? FileManager.default.removeItem(atPath: rebaseMergePath) }
 
-        let pendingPath = try context.path(for: RepositoryLayout.inFlightEntryIDRelativePath)
-        try "\(liveEntry.id.string) \(origHead)".write(
-            toFile: pendingPath, atomically: true, encoding: .utf8)
+        let pendingPath = rebaseMergePath + "/" + RepositoryLayout.sequencerEntryIDFileName
+        try liveEntry.id.string.write(toFile: pendingPath, atomically: true, encoding: .utf8)
 
         let decision = PostRewrite.decide(
             sourceArgument: "rebase",
@@ -1560,20 +1664,13 @@ struct PostRewriteAttachTests {
     /// place under either precedence and this would pin nothing -- the exact
     /// vacuity #0255 exists to remove.
     ///
-    /// The file sits behind a genuinely live rebase for the same #0253
-    /// reason as the test above: under the *correct* precedence the
-    /// environment id is read eagerly and the file is never even opened
-    /// (`??`'s right side is an autoclosure), so this fixture's liveness
-    /// only matters for the mutant, which does open it -- and must find a
-    /// real, resolvable entry there both today and after #0253 lands, or
-    /// the mutant would wrongly fall through to the environment id anyway
-    /// and this test would stop catching the swap.
-    ///
-    /// **#0264 update:** same reasoning extended to the stamp -- the file's
-    /// oid must genuinely match the live rebase's `orig-head`, or a mutant
-    /// that reaches the file would find it stale for the wrong reason (the
-    /// stamp, not the precedence swap) and this test would stop catching
-    /// Finding 2.
+    /// The file sits behind a genuinely live rebase for the same reason as
+    /// the test above: under the *correct* precedence the environment id is
+    /// read eagerly and the file is never even opened (`??`'s right side is
+    /// an autoclosure), so this fixture's liveness only matters for the
+    /// mutant, which does open it -- and must find a real, resolvable entry
+    /// there, or the mutant would wrongly fall through to the environment id
+    /// anyway and this test would stop catching the swap.
     @Test func precedenceLandsOnTheEnvironmentEntryNotTheFileEntryWhenBothNameLiveEntries() throws {
         let repo = try FixtureRepository.linear()
         defer { repo.destroy() }
@@ -1584,13 +1681,11 @@ struct PostRewriteAttachTests {
         let fileEntry = try JournalCheckpoint.checkpoint(operation: "file-entry", in: context)
         #expect(environmentEntry.id != fileEntry.id, "the two entries must be genuinely different")
 
-        let origHead = String(repeating: "c", count: 40)
-        let rebaseMergePath = try makeLiveRebaseMerge(in: context, origHead: origHead)
+        let rebaseMergePath = try makeLiveRebaseMerge(in: context)
         defer { try? FileManager.default.removeItem(atPath: rebaseMergePath) }
 
-        let pendingPath = try context.path(for: RepositoryLayout.inFlightEntryIDRelativePath)
-        try "\(fileEntry.id.string) \(origHead)".write(
-            toFile: pendingPath, atomically: true, encoding: .utf8)
+        let pendingPath = rebaseMergePath + "/" + RepositoryLayout.sequencerEntryIDFileName
+        try fileEntry.id.string.write(toFile: pendingPath, atomically: true, encoding: .utf8)
 
         let decision = PostRewrite.decide(
             sourceArgument: "rebase",
@@ -1623,27 +1718,20 @@ struct PostRewriteAttachTests {
     ///
     /// As in the two tests above, the file sits behind a genuinely live
     /// `rebase-merge` directory so this attach still resolves through the
-    /// file once #0253 tightens `inFlightEntryID` to require a live
-    /// resumable operation -- without it, this test would stop exercising
-    /// the removal at all and would pass for the wrong reason.
-    ///
-    /// **#0264 update:** the fixture's `rebase-merge` directory now carries
-    /// a real `orig-head` file, and the slot is stamped with the matching
-    /// oid, so the attach still resolves through the file rather than
-    /// finding the (now required) stamp absent or mismatched.
+    /// file -- `inFlightEntryID` requires a live resumable operation (guide
+    /// §11 decision 24, #0273) -- without it, this test would stop
+    /// exercising the removal at all and would pass for the wrong reason.
     @Test func aSuccessfulAttachThroughTheFileRemovesIt() throws {
         let repo = try FixtureRepository.linear()
         defer { repo.destroy() }
         let context = try WorktreeContext.resolve(path: repo.url.path)
 
         let liveEntry = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: context)
-        let origHead = String(repeating: "c", count: 40)
-        let rebaseMergePath = try makeLiveRebaseMerge(in: context, origHead: origHead)
+        let rebaseMergePath = try makeLiveRebaseMerge(in: context)
         defer { try? FileManager.default.removeItem(atPath: rebaseMergePath) }
 
-        let pendingPath = try context.path(for: RepositoryLayout.inFlightEntryIDRelativePath)
-        try "\(liveEntry.id.string) \(origHead)".write(
-            toFile: pendingPath, atomically: true, encoding: .utf8)
+        let pendingPath = rebaseMergePath + "/" + RepositoryLayout.sequencerEntryIDFileName
+        try liveEntry.id.string.write(toFile: pendingPath, atomically: true, encoding: .utf8)
         #expect(FileManager.default.fileExists(atPath: pendingPath))
 
         let decision = PostRewrite.decide(

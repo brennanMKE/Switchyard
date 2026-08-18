@@ -255,41 +255,52 @@ public extension JournalCheckpoint {
     /// process-global: the id lives only on this one `GitProcess` value,
     /// which stops existing when `around` returns.
     ///
-    /// **The entry id also goes on disk, at
-    /// `RepositoryLayout.inFlightEntryIDRelativePath` (guide §11 decision
-    /// 19, #0237, amended by #0241).** The environment cannot survive a body
-    /// that deliberately leaves an operation in progress — `Fixup.run`
-    /// throwing `.blockedOnConflicts` leaves a rebase for the caller to
-    /// resolve and continue, and whatever runs `git rebase --continue` is a
-    /// new process with no scoped `GitProcess` to carry the id.
+    /// **The entry id also goes on disk, inside the live sequencer
+    /// directory itself — `RepositoryLayout.sequencerEntryIDFileName`
+    /// joined onto the layout `SequencerSnapshot.capture` reports (guide
+    /// §11 decision 24, #0273, superseding #0237/#0241/#0253/#0254/#0261's
+    /// beside-the-sequencer file and every staleness rule those issues
+    /// added for it).** The environment cannot survive a body that
+    /// deliberately leaves an operation in progress — `Fixup.run` throwing
+    /// `.blockedOnConflicts` leaves a rebase for the caller to resolve and
+    /// continue, and whatever runs `git rebase --continue` is a new process
+    /// with no scoped `GitProcess` to carry the id.
+    ///
+    /// **Writing inside the directory git owns means git's own lifecycle
+    /// is the file's lifecycle.** Measured, git 2.50.1: both `git rebase
+    /// --continue` and `git rebase --abort` remove the whole sequencer
+    /// directory, our file included — so the file can never survive past
+    /// the operation it names, and reading it back can never need to ask
+    /// "is this still the same operation?" the way the old, longer-lived
+    /// location did.
     ///
     /// **The file names an operation that is still in progress, not merely
-    /// an entry that still exists (#0241).** So it is written only once
-    /// `body` has already thrown *and* a resumable git operation is still
-    /// live — `SequencerSnapshot.capture` answering non-nil, the same
+    /// an entry that still exists.** It is written only once `body` has
+    /// already thrown *and* a resumable git operation is still live —
+    /// `SequencerSnapshot.capture` answering non-nil, the same
     /// `rebase-merge`/`rebase-apply` probe `Fixup`'s own conflict path
     /// answers "resumable" with. A `body` that cleans up before throwing —
     /// every `git rebase --abort` arm in `Fixup` — leaves no such state, so
     /// nothing is written for it. And nothing is ever written on a normal
     /// return: a call that never throws has nothing resumable to record, so
-    /// (#0241's second symptom) it can never clobber a slot some other,
-    /// still-in-progress call already occupies. `attachRewrite` is what
-    /// reads the file back.
+    /// it can never clobber a slot some other, still-in-progress call
+    /// already occupies. `attachRewrite` is what reads the file back.
     ///
-    /// **First-writer-wins (#0254).** The check above guards a *successful*
-    /// unrelated call — a call that never throws never reaches this write at
-    /// all. But a **second failing** call can still reach it while a first
-    /// operation's rebase is still live: its own body throws too (for
-    /// `Fixup`, `git commit --fixup=` refuses the still-unmerged index the
-    /// first conflict left behind, so no rebase of its own ever starts), and
-    /// the sequencer check above answers non-nil because the *first*
-    /// operation's rebase is what is still live — not one this body started.
-    /// Before this fix that read as "yes, write", and the second call's
-    /// entry id overwrote the first's, orphaning the first's pre-operation
-    /// `HEAD`: no stored mapping could ever reach it again. So the slot is
-    /// claimed once — if `pendingPath` already names a still-live journal
-    /// entry, this call does not overwrite it. A slot that is empty, or that
-    /// names an entry no longer live, is still written exactly as before.
+    /// **First-writer-wins.** A **second failing** call can still reach the
+    /// write while a first operation's rebase is still live: its own body
+    /// throws too (for `Fixup`, `git commit --fixup=` refuses the still-
+    /// unmerged index the first conflict left behind, so no rebase of its
+    /// own ever starts), and `SequencerSnapshot.capture` after the throw
+    /// finds the *first* operation's rebase live — not one this body
+    /// started. Writing here would overwrite the first call's entry id,
+    /// orphaning its pre-operation `HEAD`. So the write is guarded by
+    /// `sequencerWasLiveBefore`, bound once before `body` runs: a body can
+    /// only have left a resumable operation of its **own** behind if no
+    /// sequencer — this call's or a foreign one already live when it
+    /// started — existed yet at that point. A second call reaching the
+    /// catch with a sequencer already live before it started never writes,
+    /// leaving the first call's slot (and a foreign rebase's absent one)
+    /// untouched.
     static func around<T>(
         operation: String,
         at path: String,
@@ -300,28 +311,14 @@ public extension JournalCheckpoint {
         _ body: (GitProcess) throws -> T
     ) throws -> T {
         let context = try WorktreeContext.resolve(path: path, git: git)
-        // #0264: the answer to "was a sequencer already live when THIS call
-        // started" is the one question #0253/#0254/#0261 never asked -- each
-        // reasoned about the worktree ("is any rebase live", "does the slot
-        // name a live entry"), never about this call. Bound once, before
-        // `body` runs, and required again in the catch below: a body can
-        // only have left a resumable operation behind if none was live when
-        // it started. A foreign rebase already live at this point belongs to
-        // nobody switchyard knows about and must never be claimed on its
-        // behalf.
+        // The answer to "was a sequencer already live when THIS call
+        // started" is bound once, before `body` runs, and required again in
+        // the catch below: a body can only have left a resumable operation
+        // of its own behind if none was live when it started. A foreign
+        // rebase (or another switchyard operation's) already live at this
+        // point belongs to nobody this call knows about and must never be
+        // claimed -- or written into -- on its behalf.
         let sequencerWasLiveBefore = try SequencerSnapshot.capture(in: context, git: git) != nil
-        // #0261: a slot left by an operation that has since ended -- an
-        // out-of-band `git rebase --abort` is the reachable case -- names a
-        // live ENTRY long after its operation is gone, and #0254's
-        // first-writer-wins check would then refuse THIS call the slot and
-        // divert its rewrite onto the older entry (measured). Nothing is live
-        // yet at this point in the call, so an existing slot here is stale by
-        // construction.
-        if !sequencerWasLiveBefore {
-            let pendingPath = try context.path(
-                for: RepositoryLayout.inFlightEntryIDRelativePath, git: git)
-            try? fileManager.removeItem(atPath: pendingPath)
-        }
         let entry = try checkpoint(
             operation: operation, command: command, agent: agent,
             in: context, git: git)
@@ -334,40 +331,19 @@ public extension JournalCheckpoint {
             // its id persisted -- validated against the live sequencer right
             // here, not inferred from the throw alone, since `Fixup`'s own
             // `git rebase --abort` arms throw too and must leave nothing.
-            if let sequencerNow = try SequencerSnapshot.capture(in: context, git: git) {
-                // #0264: a body can only have left ITS OWN resumable
-                // operation behind if nothing was already live when this
-                // call started. `!sequencerWasLiveBefore` replaces #0254's
-                // `slotNamesALiveEntry` first-writer-wins check: every
-                // reachable case that check caught -- a second call's own
-                // body throwing while an earlier call's rebase is still
-                // live -- already has `sequencerWasLiveBefore == true` for
-                // the second call, so this condition refuses the claim
-                // before `slotNamesALiveEntry` would ever have been asked
-                // (`aSecondConflictingFixupCannotClobberTheFirstsInFlightSlot`
-                // still passes on this alone -- see this issue's Work log for
-                // confirmation it was run). No test in this suite can reach a
-                // case where `slotNamesALiveEntry` would refuse a claim this
-                // condition allows, so keeping it as a second, unpinned check
-                // would be dead protection; removed instead.
-                if !sequencerWasLiveBefore {
-                    let pendingPath = try context.path(
-                        for: RepositoryLayout.inFlightEntryIDRelativePath, git: git)
-                    try fileManager.createDirectory(
-                        atPath: URL(fileURLWithPath: pendingPath).deletingLastPathComponent().path,
-                        withIntermediateDirectories: true)
-                    // Stamped with the live operation's own `orig-head`
-                    // (measured, git 2.50.1: both `rebase-merge` and
-                    // `rebase-apply` write one) so the read side can tell
-                    // "the operation this slot was written for" from "some
-                    // other operation that happens to be live now" -- read
-                    // fresh, here, at the only moment this call can be sure
-                    // `sequencerNow` is the operation the write is about.
-                    let origHead: String? = (try? liveSequencerOrigHead(
-                        for: sequencerNow.layout, in: context, git: git)).flatMap { $0 }
-                    let stamp = "\(entry.id.string) \(origHead ?? "")"
-                    try stamp.write(toFile: pendingPath, atomically: true, encoding: .utf8)
-                }
+            // `!sequencerWasLiveBefore` is what makes the write this call's
+            // to make: a sequencer that was already live before this call
+            // started cannot be the operation this call's own body left
+            // behind, no matter what `SequencerSnapshot.capture` finds live
+            // now.
+            if !sequencerWasLiveBefore,
+               let sequencerNow = try SequencerSnapshot.capture(in: context, git: git) {
+                let entryIDPath = try context.path(
+                    for: sequencerNow.layout.rawValue + "/"
+                        + RepositoryLayout.sequencerEntryIDFileName,
+                    git: git)
+                try entry.id.string.write(
+                    toFile: entryIDPath, atomically: true, encoding: .utf8)
             }
             throw error
         }
@@ -381,57 +357,60 @@ public extension JournalCheckpoint {
     /// not this function's.
     ///
     /// **Neither an environment id nor a file means nothing is attached
-    /// (guide §11 decision 19, #0237).** Before that decision, the
-    /// environment was the only carrier and a `nil` here always meant "took
-    /// no `JournalCheckpoint.around`". Now a second source exists — the file
-    /// `around` leaves behind when its body throws mid-operation — so `nil`
-    /// means both were checked and neither named a live entry: no
-    /// `entryVariable` in the environment, and either no file, an
-    /// unparseable one, or one naming an entry that no longer exists.
-    /// Falling back to an observed entry would still misrepresent the
-    /// mapping as foreign-sourced, which is exactly the distinction
-    /// `JournalObserved.Metadata.kind` exists to preserve (#0220), and
-    /// inventing a new entry with nothing else to anchor would fabricate
-    /// state nothing captured. This is a documented, tested `nil`, not a
-    /// swallowed failure — the same shape #0220's own-invocation guard on
-    /// `JournalObserved.record` already uses for the opposite half of this
-    /// boundary.
+    /// (guide §11 decision 19, #0237, superseded for the file's location by
+    /// decision 24, #0273).** Before decision 19, the environment was the
+    /// only carrier and a `nil` here always meant "took no
+    /// `JournalCheckpoint.around`". Now a second source exists — the file
+    /// `around` leaves inside the live sequencer directory when its body
+    /// throws mid-operation — so `nil` means both were checked and neither
+    /// named a live entry: no `entryVariable` in the environment, and either
+    /// no sequencer live, no file inside it, an unparseable one, or one
+    /// naming an entry that no longer exists. Falling back to an observed
+    /// entry would still misrepresent the mapping as foreign-sourced, which
+    /// is exactly the distinction `JournalObserved.Metadata.kind` exists to
+    /// preserve (#0220), and inventing a new entry with nothing else to
+    /// anchor would fabricate state nothing captured. This is a documented,
+    /// tested `nil`, not a swallowed failure — the same shape #0220's
+    /// own-invocation guard on `JournalObserved.record` already uses for the
+    /// opposite half of this boundary.
     ///
     /// **The environment wins when both are present.** A scoped `GitProcess`
     /// means the operation is running right now; the file is the fallback
     /// for when it is not, read only when `entryID` is `nil`.
     ///
-    /// **A stale file attaches nothing, never an unrelated entry.** The id it
-    /// names must still be a live journal entry (`JournalAnchor.list`); if
-    /// not — a crash left the file behind for an entry later pruned, or the
-    /// file was fabricated — it is removed and treated as absent, degrading
-    /// to today's no-attach behaviour rather than mapping onto whatever else
-    /// this worktree happens to have recorded.
+    /// **Guide §11 decision 24 (#0273): the file's own lifetime is now the
+    /// staleness check.** It lives at
+    /// `<layout>/RepositoryLayout.sequencerEntryIDFileName`, inside whatever
+    /// sequencer directory `SequencerSnapshot.capture` finds live *right
+    /// now* — never a fixed, worktree-wide path. Measured, git 2.50.1: `git
+    /// rebase --continue` and `git rebase --abort` both remove the whole
+    /// sequencer directory, our file included, so a file this call can find
+    /// can only belong to whatever operation is live at the moment of the
+    /// read. There is no operation-identity question left to ask — no
+    /// `stillInProgress` flag, no `orig-head` stamp to compare — because a
+    /// file naming a finished or abandoned operation cannot exist: finishing
+    /// or abandoning it is exactly what removed the directory that held it.
+    /// The one check that remains is `JournalAnchor.list`: the id a live
+    /// file names must still be a live journal entry, in case it was pruned
+    /// out from under a still-open operation.
+    ///
+    /// **This is correct only because a real `post-rewrite` hook (#0217)
+    /// calls `attachRewrite` synchronously, as a child of the git process
+    /// that is still holding the sequencer directory open** — measured,
+    /// git 2.50.1: the hook fires and only *after it returns* does git
+    /// remove `rebase-merge`/`rebase-apply`. A caller that asks after that
+    /// git process has already exited can never observe the file, no matter
+    /// when it asks — the directory is provably gone by then. This is the
+    /// same synchronous-capture requirement `writeEntry`'s own
+    /// `sequencer: SequencerSnapshot? = nil` parameter exists for: let
+    /// whoever is positioned to observe the truth supply it, rather than
+    /// re-derive a value that may no longer be derivable.
     ///
     /// **Mid-rebase dedup (#0233).** `JournalObserved.isMidRebaseAmend` is
     /// checked first, before the own/foreign split, so a mid-rebase `amend`
     /// invocation attaches nothing here for the same reason it records
     /// nothing on the foreign path: the rebase's own final `rebase`-sourced
     /// invocation repeats the pair and is the authoritative one.
-    ///
-    /// **`stillInProgress` (#0253) lets a caller who already observed the
-    /// sequencer supply that answer instead of forcing a re-probe here.**
-    /// `nil` (the default) re-checks fresh via `SequencerSnapshot.capture`,
-    /// exactly `inFlightEntryID`'s own doc comment describes. That default
-    /// is right for a caller with no better information, but it is *stale
-    /// by construction* for the one caller that matters most: a real
-    /// `post-rewrite` hook script (#0217) runs as a child of the git process
-    /// that is *still holding the sequencer directory open* — measured,
-    /// git 2.50.1: the hook fires and only *after it returns* does git
-    /// remove `rebase-merge`. A hook that checks synchronously, inline, sees
-    /// the operation genuinely still in progress; a caller that checks after
-    /// that git process has already exited never can, no matter when it
-    /// asks — the directory is provably gone by then (measured with a
-    /// direct `FileManager` probe on this exact fixture). `writeEntry`'s own
-    /// `sequencer: SequencerSnapshot? = nil` parameter is the same shape for
-    /// the same reason: let whoever is positioned to observe the truth
-    /// supply it, rather than re-derive a value that may no longer be
-    /// derivable.
     ///
     /// Throws only on a genuine persistence failure once there is an id to
     /// attach to. The totality invariant (#0043, #0191) — a failed attach
@@ -441,8 +420,6 @@ public extension JournalCheckpoint {
     static func attachRewrite(
         _ decision: PostRewrite.Decision,
         entryID: JournalEntryID?,
-        stillInProgress: Bool? = nil,
-        liveOrigHead: String? = nil,
         in context: WorktreeContext,
         git: GitProcess = GitProcess(),
         fileManager: FileManager = .default
@@ -454,25 +431,14 @@ public extension JournalCheckpoint {
 
         guard decision.isOwnInvocation else { return nil }
 
-        let pendingPath = try context.path(
-            for: RepositoryLayout.inFlightEntryIDRelativePath, git: git)
-        // `stillInProgress` and `liveOrigHead` both default to a fresh read,
-        // exactly `inFlightEntryID`'s own doc comment already describes for
-        // `stillInProgress` alone -- right for a caller with no better
-        // information, but *stale by construction* for a real
-        // `post-rewrite` hook (#0217), which must supply both, captured
-        // synchronously while it still holds the sequencer directory open
-        // (#0253's own reasoning, extended by #0264 to the stamp).
-        let currentSequencer = try SequencerSnapshot.capture(in: context, git: git)
-        let resolvedStillInProgress = stillInProgress ?? (currentSequencer != nil)
-        let resolvedLiveOrigHead = try liveOrigHead ?? currentSequencer.flatMap {
-            try liveSequencerOrigHead(for: $0.layout, in: context, git: git)
-        }
-        guard let resolvedID = try entryID ?? inFlightEntryID(
-            at: pendingPath, stillInProgress: resolvedStillInProgress,
-            liveOrigHead: resolvedLiveOrigHead,
-            in: context, git: git, fileManager: fileManager)
-        else { return nil }
+        // The file is read only when the environment carried no id -- `??`
+        // never even resolves the live sequencer otherwise. `fromFile` also
+        // carries the path the id came from, so it can be cleared below
+        // without touching a sequencer this call resolved nothing from.
+        let fromFile = entryID == nil
+            ? try inFlightEntryID(in: context, git: git, fileManager: fileManager)
+            : nil
+        guard let resolvedID = entryID ?? fromFile?.id else { return nil }
 
         let existing = try JournalEntryMetadata(
             serialized: try JournalAnchor.metadata(for: resolvedID, in: context, git: git))
@@ -481,99 +447,67 @@ public extension JournalCheckpoint {
         let updated = existing.attachingRewrite(mapping)
         let attached = try JournalAnchor.updateMetadata(
             try updated.serialized(), for: resolvedID, in: context, git: git)
-        // The operation is over at this point: remove whatever the file
-        // held, if anything -- a no-op when the id came from the
-        // environment and `around` already cleaned it up.
-        try? fileManager.removeItem(atPath: pendingPath)
+        // The operation is over at this point: remove the file the id was
+        // resolved from, if it was the file -- a no-op when the id came
+        // from the environment instead, since a different, still-open
+        // operation's own file (guide §11 decision 24) is never this call's
+        // to clear.
+        if let path = fromFile?.path {
+            try? fileManager.removeItem(atPath: path)
+        }
         return attached
     }
 
-    /// Reads the entry id `around` leaves at `pendingPath` when its body
-    /// throws mid-operation, validating it names both a live journal entry
-    /// *and* a still-in-progress git operation before trusting it. A stale
-    /// or unparseable file is removed and treated as absent -- the part of
-    /// #0237 "most likely to be got wrong": a crash between `around`
-    /// writing the file and the operation finishing must degrade to
-    /// no-attach, never attach to an unrelated, possibly months-old entry.
+    /// Reads the entry id `around` left inside the *currently live*
+    /// sequencer directory, if any — `RepositoryLayout
+    /// .sequencerEntryIDFileName` joined onto the layout
+    /// `SequencerSnapshot.capture` reports right now, resolved through
+    /// `WorktreeContext.path(for:)`, never by concatenating onto `.git/`.
+    /// Returns both the id and the path it came from, so `attachRewrite` can
+    /// clear exactly that file once the attach it enabled has succeeded.
     ///
-    /// **Guide §11 decision 19, as amended (#0253).** The original check
-    /// here validated only that the id still named a live journal entry --
-    /// almost always true, since entries persist until pruned. That let an
-    /// operation abandoned *outside* `switchyard` -- an out-of-band `git
-    /// rebase --abort` the caller runs directly, the documented alternative
-    /// to continuing -- leave the file in place with nothing left to clear
-    /// it (`Fixup`'s own abort arms never run for this path at all: nobody
-    /// called `Fixup`). A later, wholly unrelated own rewrite would then
-    /// read the stale file back and attach to the abandoned operation's
-    /// entry. So the file is now trusted only when
-    /// `stillInProgress` is true -- resolved by `attachRewrite` from either
-    /// a caller-supplied answer or a fresh `SequencerSnapshot.capture(in:)`,
-    /// the same rebase-merge/rebase-apply probe `around`'s own catch clause
-    /// already runs when it decides whether to write the file in the first
-    /// place. Not in progress means either the operation finished (and
-    /// whoever finished it should have consumed and removed the file
-    /// already) or it was abandoned out of band -- both degrade the same
-    /// way, to no-attach, which is the safe direction on both sides of that
-    /// distinction.
+    /// **No staleness branch beyond "does a live sequencer have this file,
+    /// and does it name a live entry" (guide §11 decision 24, #0273).** The
+    /// file cannot outlive the operation it was written for — git removes
+    /// the whole directory on both `--continue` and `--abort` — so nothing
+    /// here needs to ask whether the operation is *still* the one that wrote
+    /// it: no sequencer live, or no file inside the one that is, both
+    /// degrade the same way as an unparseable one or an id that no longer
+    /// names a live journal entry (a crash between `around` writing the file
+    /// and the operation finishing, or a prune that ran while the operation
+    /// was still open) — no-attach, never an unrelated entry.
     private static func inFlightEntryID(
-        at pendingPath: String,
-        stillInProgress: Bool,
-        liveOrigHead: String?,
         in context: WorktreeContext,
         git: GitProcess,
         fileManager: FileManager
-    ) throws -> JournalEntryID? {
-        guard fileManager.fileExists(atPath: pendingPath),
-              let contents = try? String(contentsOfFile: pendingPath, encoding: .utf8)
+    ) throws -> (id: JournalEntryID, path: String)? {
+        guard let sequencer = try SequencerSnapshot.capture(in: context, git: git) else {
+            return nil
+        }
+        let path = try context.path(
+            for: sequencer.layout.rawValue + "/" + RepositoryLayout.sequencerEntryIDFileName,
+            git: git)
+        guard fileManager.fileExists(atPath: path),
+              let contents = try? String(contentsOfFile: path, encoding: .utf8)
         else { return nil }
 
-        // #0264: the slot's contents are `<entry-id> <orig-head-oid>`,
-        // written by `around`'s catch. A slot with no stamp -- written
-        // before this change, or otherwise malformed -- cannot be checked
-        // against the live operation and is treated as stale: the safe
-        // direction, costing one missed attach, once.
-        let fields = contents
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .split(separator: " ", omittingEmptySubsequences: true)
-        guard fields.count == 2, let id = JournalEntryID(String(fields[0])) else {
-            try? fileManager.removeItem(atPath: pendingPath)
+        // An unparseable file cannot name anything -- clean it up rather
+        // than leaving known-bad data for the next invocation to re-parse.
+        guard let id = JournalEntryID(contents.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+            try? fileManager.removeItem(atPath: path)
             return nil
         }
-        let stampedOrigHead = String(fields[1])
 
+        // The file's own lifetime already rules out "names an operation
+        // that has finished or been abandoned" (guide §11 decision 24). The
+        // one case left is a prune that ran while the operation was still
+        // open: the id no longer names a live journal entry, so clean the
+        // file up the same way and degrade to no-attach.
         let stillLive = try JournalAnchor.list(in: context, git: git).contains { $0.id == id }
-        // The slot must name a still-live journal entry, an operation that
-        // is genuinely still in progress (#0253), AND -- #0264 -- the
-        // currently live operation's own `orig-head` must be the one this
-        // slot was stamped for. A slot surviving from a different, unrelated
-        // live operation (route 2: an out-of-band abort followed by a
-        // foreign rebase) is stale by construction even though "some
-        // sequencer is live" alone would say otherwise.
-        guard stillLive, stillInProgress,
-              let liveOrigHead, liveOrigHead == stampedOrigHead
-        else {
-            try? fileManager.removeItem(atPath: pendingPath)
+        guard stillLive else {
+            try? fileManager.removeItem(atPath: path)
             return nil
         }
-        return id
-    }
-
-    /// The pre-rebase oid a live sequencer directory recorded in its own
-    /// `orig-head` file -- measured, git 2.50.1: both `rebase-merge` and
-    /// `rebase-apply` write one, the same oid recorded in both layouts for
-    /// one stopped rebase (this issue's own Work log). Resolved through
-    /// `WorktreeContext.path(for:)` -- `worktrees/<name>/rebase-merge/
-    /// orig-head` -- never by concatenating onto `.git/`. `nil` when the
-    /// file is missing or empty, which the stamp comparison in
-    /// `inFlightEntryID` treats as a non-match, not a crash.
-    private static func liveSequencerOrigHead(
-        for layout: SequencerSnapshot.Layout,
-        in context: WorktreeContext,
-        git: GitProcess
-    ) throws -> String? {
-        let path = try context.path(for: layout.rawValue + "/orig-head", git: git)
-        guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
-        let oid = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return oid.isEmpty ? nil : oid
+        return (id, path)
     }
 }
