@@ -65,18 +65,36 @@ struct WorktreeRemoveTests {
         #expect(!exists(at: worktreeURL), "worktree directory should be gone after clean removal")
     }
 
-    /// An unclean worktree (with a modified tracked file) is refused without
-    /// --force. The error names the dirty path, and the directory still exists
-    /// afterwards.
+    /// An unclean worktree (one modified tracked file, one untracked file) is
+    /// refused without --force. The error names both dirty paths by content,
+    /// not merely by count — a constant-returning mutation of
+    /// `extractDirtyPaths` would slip past a single-file fixture, so this one
+    /// carries two distinguishable paths (#0282's lesson). The directory still
+    /// exists afterwards.
     @Test("refuses to remove a dirty worktree without force", arguments: FixtureRepository.RefFormat.supported())
     func refusesDirtyWorktreeWithoutForce(format: FixtureRepository.RefFormat) throws {
         var fixture = try FixtureRepository(refFormat: format)
 
-        let worktreeURL: URL = try fixture.addWorktree(named: "dirty-wt", branch: "main")
+        // A real commit so the worktree checks out a tracked file we can then
+        // modify. Without a prior commit `main` is unborn and the worktree
+        // starts empty, leaving nothing to modify -- only the untracked case.
+        try fixture.build([
+            FixtureRepository.Commit("initial", files: ["tracked.txt": "original content\n"])
+        ])
 
-        // Write an untracked file in the worktree to make it dirty.
-        let dirtFile = worktreeURL.appendingPathComponent("dirty.txt")
-        try "this is dirty content".write(to: dirtFile, atomically: true, encoding: .utf8)
+        // `main` already names a real branch once the fixture has a commit, so
+        // the worktree's new branch must have a different name -- `-b main`
+        // would fail with "a branch named 'main' already exists".
+        let worktreeURL: URL = try fixture.addWorktree(named: "dirty-wt", branch: "dirty-wt-branch")
+
+        // Modify the tracked file so it is dirty in the worktree side of the
+        // index, and add a second, untracked file -- two distinguishable
+        // dirty paths, not one.
+        let trackedFile = worktreeURL.appendingPathComponent("tracked.txt")
+        try "modified content".write(to: trackedFile, atomically: true, encoding: .utf8)
+
+        let untrackedFile = worktreeURL.appendingPathComponent("dirty.txt")
+        try "this is dirty content".write(to: untrackedFile, atomically: true, encoding: .utf8)
 
         let git = GitProcess()
         let repoPath = try repoPath(for: fixture, git: git)
@@ -93,6 +111,10 @@ struct WorktreeRemoveTests {
         #expect(!result.success)
         if case let .unclean(paths) = result.error {
             #expect(!paths.isEmpty, "error should name dirty paths")
+            #expect(paths.contains("tracked.txt"), "error should name the modified tracked file")
+            #expect(paths.contains("dirty.txt"), "error should name the untracked file")
+            #expect(paths.count == 2, "exactly the two dirty paths should be named, no more")
+            #expect(!paths.contains(""), "no path entry should be empty")
         } else {
             Issue.record("expected .unclean error, got \(String(describing: result.error))")
         }
