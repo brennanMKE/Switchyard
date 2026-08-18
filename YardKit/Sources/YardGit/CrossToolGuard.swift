@@ -121,11 +121,15 @@ public enum CrossToolGuard {
     /// snapshot the restore is about to apply, `current` is the repository
     /// now.
     ///
-    /// For a name `applied` does not record while `recorded` does, this
-    /// restore issues no `update` command for it at all — decision 20 means
-    /// an unrecorded ref is left exactly as it is — so no live value can be
-    /// evidence of anything this restore is about to disturb, and the name
-    /// is skipped outright (#0232).
+    /// For any name `applied` does not record, this restore issues no
+    /// `update` command for it at all — decision 20 means an unrecorded ref
+    /// is left exactly as it is — so no live value can be evidence of
+    /// anything this restore is about to disturb, and the name is skipped
+    /// outright regardless of what `recorded` says (#0232 fixed this for a
+    /// name `recorded` also lacks; #0248 fixed the remaining case, a name
+    /// recorded by *neither* side, which fell through to the divergence
+    /// branch below and refused restores over pure creations like a
+    /// sibling's `git worktree add -b`).
     ///
     /// For every other name, a divergence is reported only when `current`
     /// matches **neither** `recorded` **nor** `applied`. Matching `applied`
@@ -162,7 +166,7 @@ public enum CrossToolGuard {
             let believed = believedByName[name]
             let target = appliedByName[name]
             let now = currentByName[name]
-            if target == nil, believed != nil { continue }
+            if target == nil { continue }
             guard now != believed, now != target else { continue }
             divergences.append(Divergence(ref: name, expected: believed, actual: now))
         }
