@@ -1202,6 +1202,46 @@ a feature at any milestone on the grounds that GitUp had it.
 
     **#0256 widens this**: a sibling stopped mid-rebase is one more holder. It applies uniformly.
 
+24. **The in-flight entry id lives *inside* the sequencer directory, not beside it.** Decided
+    2026-08-18, after #0160's sixth umbrella review found the **fifth** wrong-entry attach against the
+    same root cause.
+
+    The record of "which journal entry is this interrupted operation's" was kept in
+    `$GIT_DIR/switchyard/in-flight-entry-id`, a file switchyard owns and must therefore decide when to
+    delete. Four rounds tried four different rules for that — is any sequencer live (#0253), does the
+    slot name a live entry (#0254), was one live when this call started (#0261), does the operation's
+    `orig-head` match (#0264) — and **every one was a proxy for operation identity that turned out not
+    to be unique.** `orig-head` is the last proxy git already writes, and it is provably non-unique:
+    `git rebase --abort` restores `HEAD` to exactly that commit, so a retry from the same tip carries
+    the identical stamp. #0264's own test only passes because it manufactures an extra commit to force
+    the two apart, and its comment says so.
+
+    **So stop guessing the lifetime and take git's.** The entry id is written to
+    `rebase-merge/switchyard-entry-id` (or `rebase-apply/…`), resolved through
+    `WorktreeContext.path(for:)`. **git deletes that directory on both finish and abort — measured,
+    git 2.50.1, including with our file present** — so the record cannot outlive the operation it
+    describes, and no staleness rule is needed at all. Also measured: an unknown file in that
+    directory does not disturb `git rebase --continue`, which completes normally.
+
+    **What this spends, stated plainly:** switchyard writes a file into a directory git owns. That is
+    a coupling to git's on-disk layout of exactly the kind `CLAUDE.md` warns about — with the
+    difference that it is a *write* of a file git ignores, resolved through `rev-parse --git-path`
+    rather than by concatenation, and its failure mode is a missed attach rather than a corrupted
+    repository. The alternative considered and rejected was dropping the mechanism entirely until
+    #0217's hook glue can carry the id in its environment; that is cleaner but gives up
+    already-working behaviour for a milestone.
+
+    **One qualification, found by #0160's seventh review and worth stating rather than discovering
+    twice:** the claim "the record cannot outlive its operation" is true of *git's* teardown, not of
+    switchyard's own. The file now sits inside the region `SequencerSnapshot` captures —
+    `buildTree` hashes every file in the directory — so a checkpoint taken while an operation is
+    interrupted captures the entry-id file too, and `restore` re-materializes it. **That does not
+    produce a wrong entry**: the file and the sequencer are captured and restored as one tree, so they
+    stay consistent with each other, and `stillLive` catches the case where the entry it names has since
+    been pruned. It is the one route by which the file can reappear, and it is the reason `stillLive`
+    was kept rather than deleted with the rest of the staleness machinery.
+
+
 
 ### Still open
 
@@ -1255,32 +1295,3 @@ Paths below are relative to the **repository root**, not to this file.
 - `../../RemoteControl/docs/cli-embedding-and-install.md` — embedding and installing the CLI binary
 - `../GitUp` — concepts only, per [Section 2](#2-licensing-constraint-read-this-first)
 - libgit2 commit API: https://libgit2.org/docs/reference/main/commit/index.html
-
-24. **The in-flight entry id lives *inside* the sequencer directory, not beside it.** Decided
-    2026-08-18, after #0160's sixth umbrella review found the **fifth** wrong-entry attach against the
-    same root cause.
-
-    The record of "which journal entry is this interrupted operation's" was kept in
-    `$GIT_DIR/switchyard/in-flight-entry-id`, a file switchyard owns and must therefore decide when to
-    delete. Four rounds tried four different rules for that — is any sequencer live (#0253), does the
-    slot name a live entry (#0254), was one live when this call started (#0261), does the operation's
-    `orig-head` match (#0264) — and **every one was a proxy for operation identity that turned out not
-    to be unique.** `orig-head` is the last proxy git already writes, and it is provably non-unique:
-    `git rebase --abort` restores `HEAD` to exactly that commit, so a retry from the same tip carries
-    the identical stamp. #0264's own test only passes because it manufactures an extra commit to force
-    the two apart, and its comment says so.
-
-    **So stop guessing the lifetime and take git's.** The entry id is written to
-    `rebase-merge/switchyard-entry-id` (or `rebase-apply/…`), resolved through
-    `WorktreeContext.path(for:)`. **git deletes that directory on both finish and abort — measured,
-    git 2.50.1, including with our file present** — so the record cannot outlive the operation it
-    describes, and no staleness rule is needed at all. Also measured: an unknown file in that
-    directory does not disturb `git rebase --continue`, which completes normally.
-
-    **What this spends, stated plainly:** switchyard writes a file into a directory git owns. That is
-    a coupling to git's on-disk layout of exactly the kind `CLAUDE.md` warns about — with the
-    difference that it is a *write* of a file git ignores, resolved through `rev-parse --git-path`
-    rather than by concatenation, and its failure mode is a missed attach rather than a corrupted
-    repository. The alternative considered and rejected was dropping the mechanism entirely until
-    #0217's hook glue can carry the id in its environment; that is cleaner but gives up
-    already-working behaviour for a milestone.
