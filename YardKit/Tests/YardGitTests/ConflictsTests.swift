@@ -41,10 +41,12 @@ struct ConflictsTests {
         try repo.build([.init("theirs", parents: ["base"], files: ["d.txt": "theirs d\n"])])
 
         let git = GitProcess()
-        try repo.checkoutDetached(repo.oids["base"]!)
+        let baseOID = try #require(repo.oids["base"])
+        try repo.checkoutDetached(baseOID)
         try git.run(["rm", "-q", "d.txt"], workingDirectory: repo.url.path)
         try git.run(["commit", "-qm", "ours deletes d"], workingDirectory: repo.url.path)
-        _ = try git.capture(["merge", "--no-commit", repo.oids["theirs"]!],
+        let theirsOID = try #require(repo.oids["theirs"])
+        _ = try git.capture(["merge", "--no-commit", theirsOID],
                             workingDirectory: repo.url.path)
 
         let files = try conflictedFiles(at: repo.url.path)
@@ -70,8 +72,10 @@ struct ConflictsTests {
         try repo.build([.init("theirs", parents: ["base"], files: ["new.txt": "theirs new\n"])])
 
         let git = GitProcess()
-        try repo.checkoutDetached(repo.oids["ours"]!)
-        _ = try git.capture(["merge", "--no-commit", repo.oids["theirs"]!],
+        let oursOID = try #require(repo.oids["ours"])
+        try repo.checkoutDetached(oursOID)
+        let theirsOID = try #require(repo.oids["theirs"])
+        _ = try git.capture(["merge", "--no-commit", theirsOID],
                             workingDirectory: repo.url.path)
 
         let files = try conflictedFiles(at: repo.url.path)
@@ -100,12 +104,14 @@ struct ConflictsTests {
         ])])
 
         let git = GitProcess()
-        try repo.checkoutDetached(repo.oids["base"]!)
+        let baseOID = try #require(repo.oids["base"])
+        try repo.checkoutDetached(baseOID)
         try repo.writeUntracked(["f.txt": "ours f\n", "g.txt": "ours g\n"])
         try git.run(["rm", "-q", "d.txt"], workingDirectory: repo.url.path)
         try git.run(["add", "-A"], workingDirectory: repo.url.path)
         try git.run(["commit", "-qm", "ours"], workingDirectory: repo.url.path)
-        _ = try git.capture(["merge", "--no-commit", repo.oids["theirs"]!],
+        let theirsOID = try #require(repo.oids["theirs"])
+        _ = try git.capture(["merge", "--no-commit", theirsOID],
                             workingDirectory: repo.url.path)
 
         let files = try conflictedFiles(at: repo.url.path)
@@ -130,13 +136,15 @@ struct ConflictsTests {
         try repo.build([.init("theirs", parents: ["base"], files: ["run.sh": "theirs\n"])])
 
         let git = GitProcess()
-        try repo.checkoutDetached(repo.oids["base"]!)
+        let baseOID = try #require(repo.oids["base"])
+        try repo.checkoutDetached(baseOID)
         let scriptURL = repo.url.appendingPathComponent("run.sh")
         try "ours\n".write(to: scriptURL, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
         try git.run(["add", "-A"], workingDirectory: repo.url.path)
         try git.run(["commit", "-qm", "ours makes run.sh executable"], workingDirectory: repo.url.path)
-        _ = try git.capture(["merge", "--no-commit", repo.oids["theirs"]!],
+        let theirsOID = try #require(repo.oids["theirs"])
+        _ = try git.capture(["merge", "--no-commit", theirsOID],
                             workingDirectory: repo.url.path)
 
         // Ground truth from git itself, not the parser under test (#0281):
@@ -168,7 +176,8 @@ struct ConflictsTests {
         try repo.build([.init("base", files: ["link.txt": "target-a\n"])])
 
         let git = GitProcess()
-        try repo.checkoutDetached(repo.oids["base"]!)
+        let baseOID = try #require(repo.oids["base"])
+        try repo.checkoutDetached(baseOID)
         let linkURL = repo.url.appendingPathComponent("link.txt")
         try FileManager.default.removeItem(at: linkURL)
         try FileManager.default.createSymbolicLink(atPath: linkURL.path, withDestinationPath: "b")
@@ -176,7 +185,7 @@ struct ConflictsTests {
         try git.run(["commit", "-qm", "ours symlinks link.txt to b"], workingDirectory: repo.url.path)
         let oursOID = try repo.revParse("HEAD")
 
-        try repo.checkoutDetached(repo.oids["base"]!)
+        try repo.checkoutDetached(baseOID)
         try FileManager.default.removeItem(at: linkURL)
         try FileManager.default.createSymbolicLink(atPath: linkURL.path, withDestinationPath: "a")
         try git.run(["add", "-A"], workingDirectory: repo.url.path)
@@ -215,8 +224,10 @@ struct ConflictsTests {
         try repo.build([.init("theirs", parents: ["base"], files: ["f.txt": "theirs\n"])])
 
         let git = GitProcess()
-        try repo.checkoutDetached(repo.oids["ours"]!)
-        _ = try git.capture(["rebase", repo.oids["theirs"]!], workingDirectory: repo.url.path)
+        let oursOID = try #require(repo.oids["ours"])
+        try repo.checkoutDetached(oursOID)
+        let theirsOID = try #require(repo.oids["theirs"])
+        _ = try git.capture(["rebase", theirsOID], workingDirectory: repo.url.path)
 
         let files = try conflictedFiles(at: repo.url.path)
         #expect(files.map(\.path) == ["f.txt"])
@@ -242,8 +253,10 @@ struct ConflictsTests {
         try repo.build([.init("theirs", parents: ["base"], files: ["f.txt": "theirs\n"])])
 
         let git = GitProcess()
-        try repo.checkoutDetached(repo.oids["ours"]!)
-        _ = try git.capture(["cherry-pick", repo.oids["theirs"]!], workingDirectory: repo.url.path)
+        let oursOID = try #require(repo.oids["ours"])
+        try repo.checkoutDetached(oursOID)
+        let theirsOID = try #require(repo.oids["theirs"])
+        _ = try git.capture(["cherry-pick", theirsOID], workingDirectory: repo.url.path)
 
         let files = try conflictedFiles(at: repo.url.path)
         #expect(files.map(\.path) == ["f.txt"])
