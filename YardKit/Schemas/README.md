@@ -30,24 +30,31 @@ carries the same `schemaVersion`, and an agent checks it once per response. Vers
 - The closed set of `error.code` strings, and that each pairs with the process exit status the
   same way `EnvelopeErrorCode.exitCode` does.
 - Each command's result payload **is named** by its `schemaName`, and that name is stable.
+- Each field of a documented payload — its wire key, JSON scalar type, whether it is optional (see
+  below), and, for a closed string enum, its case list — is published in that command's schema
+  file, under `envelope.success.result.fields`.
 
-**What the generated files do *not* yet contain, corrected 2026-08-17:** the payload *shapes*
-themselves. Every generated success shape is `"result": {"optional": true, "schema": "<schemaName>"}`
-— a self-reference naming no field, type or enum — because `CommandSpec` has no field that could hold
-one. This section previously read *"each command's result payload shape, named by its `schemaName`"*,
-which promised coverage no artifact provides. The payload bytes **are** pinned, exhaustively, by the
-seventeen `YardWireTests` files; what is missing is a published artifact an agent can read.
+**History, corrected 2026-08-17 and again by #0194:** until #0194, every generated success shape was
+`"result": {"optional": true, "schema": "<schemaName>"}` — a self-reference naming no field, type or
+enum — because `CommandSpec` had no field that could hold one. #0194 (guide §11 decision 21) added
+`CommandSpec.payload`, and `SchemaEmitter` now renders a real field list when a command supplies one.
+A command that has not supplied a shape yet — or one with genuinely no payload, like `noop` — still
+gets the historical self-reference; see `CommandSpec`'s doc comment in `Sources/YardKit/CommandSpec.swift`
+for exactly when each form applies.
 
-Whether that is closed by teaching the emitter payload shapes, or by narrowing the promise and
-assigning payloads to a named M3 criterion, is **#0194** and is not yet decided.
+The payload bytes are pinned twice over: the `YardWireTests` byte literals pin the exact JSON, and
+(for `whereami`, the first command to carry a shape) `WhereAmIWireTests.schemaFieldNamesMatchTheEncodedKeysExactly`
+binds the schema file's declared field names back to the type's actual encoded keys, so the two
+cannot drift silently.
 
 ## What is a breaking change
 
 Breaking — requires bumping the version:
 
-- Removing or renaming any key an agent can currently read, in the envelope or in a payload. **The
-  payload half of this rule is real but unenforced by any generated artifact today** — see the
-  correction above; it is enforced by the `YardWireTests` byte literals instead.
+- Removing or renaming any key an agent can currently read, in the envelope or in a payload. For a
+  command with a published payload shape (`whereami`, so far), this is enforced by the checked-in
+  schema file plus the `YardWireTests` binding above; a command that has not been given a shape yet
+  still relies on its `YardWireTests` byte literals alone.
 - Changing a key's JSON type, or changing what an existing enum string means.
 - Removing an `error.code` string, or changing the exit code it pairs with.
 - Making a previously always-present key optional.
