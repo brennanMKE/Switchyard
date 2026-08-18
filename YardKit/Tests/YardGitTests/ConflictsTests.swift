@@ -116,6 +116,95 @@ struct ConflictsTests {
         #expect(stageLines.count == 8)
     }
 
+    // Finding 6, M1 milestone review sixth pass (#0281): every `mode`
+    // assertion elsewhere in this file is the string "100644", so a
+    // hardcoded `mode: "100644"` in `ConflictParser` would go unnoticed.
+    // These two conflict a non-regular-file mode against `base` so the
+    // reported stage mode has to come from git's own output to pass.
+    @Test("executableModeConflictReportsActualStageModes", arguments: FixtureRepository.RefFormat.supported())
+    func executableModeConflictReportsActualStageModes(format: FixtureRepository.RefFormat) throws {
+        var repo = try FixtureRepository(refFormat: format)
+        defer { repo.destroy() }
+
+        try repo.build([.init("base", files: ["run.sh": "original\n"])])
+        try repo.build([.init("theirs", parents: ["base"], files: ["run.sh": "theirs\n"])])
+
+        let git = GitProcess()
+        try repo.checkoutDetached(repo.oids["base"]!)
+        let scriptURL = repo.url.appendingPathComponent("run.sh")
+        try "ours\n".write(to: scriptURL, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
+        try git.run(["add", "-A"], workingDirectory: repo.url.path)
+        try git.run(["commit", "-qm", "ours makes run.sh executable"], workingDirectory: repo.url.path)
+        _ = try git.capture(["merge", "--no-commit", repo.oids["theirs"]!],
+                            workingDirectory: repo.url.path)
+
+        // Ground truth from git itself, not the parser under test (#0281):
+        // confirms the fixture actually produced a 100755 "ours" stage
+        // before trusting any assertion made through `conflictedFiles`.
+        let stageLines = try git.run(["ls-files", "-u"], workingDirectory: repo.url.path).lines
+        #expect(!stageLines.isEmpty)
+        let oursStageLine = try #require(stageLines.first(where: { $0.hasSuffix("2\trun.sh") }))
+        #expect(oursStageLine.hasPrefix("100755 "))
+
+        let files = try conflictedFiles(at: repo.url.path)
+        let entry = try #require(files.first(where: { $0.path == "run.sh" }))
+        #expect(entry.kind == .bothModified)
+
+        let base = try #require(entry.base)
+        let ours = try #require(entry.ours)
+        let theirs = try #require(entry.theirs)
+
+        #expect(base.mode == "100644")
+        #expect(ours.mode == "100755")
+        #expect(theirs.mode == "100644")
+    }
+
+    @Test("symlinkModeConflictReportsSymlinkMode", arguments: FixtureRepository.RefFormat.supported())
+    func symlinkModeConflictReportsSymlinkMode(format: FixtureRepository.RefFormat) throws {
+        var repo = try FixtureRepository(refFormat: format)
+        defer { repo.destroy() }
+
+        try repo.build([.init("base", files: ["link.txt": "target-a\n"])])
+
+        let git = GitProcess()
+        try repo.checkoutDetached(repo.oids["base"]!)
+        let linkURL = repo.url.appendingPathComponent("link.txt")
+        try FileManager.default.removeItem(at: linkURL)
+        try FileManager.default.createSymbolicLink(atPath: linkURL.path, withDestinationPath: "b")
+        try git.run(["add", "-A"], workingDirectory: repo.url.path)
+        try git.run(["commit", "-qm", "ours symlinks link.txt to b"], workingDirectory: repo.url.path)
+        let oursOID = try repo.revParse("HEAD")
+
+        try repo.checkoutDetached(repo.oids["base"]!)
+        try FileManager.default.removeItem(at: linkURL)
+        try FileManager.default.createSymbolicLink(atPath: linkURL.path, withDestinationPath: "a")
+        try git.run(["add", "-A"], workingDirectory: repo.url.path)
+        try git.run(["commit", "-qm", "theirs symlinks link.txt to a"], workingDirectory: repo.url.path)
+        let theirsOID = try repo.revParse("HEAD")
+
+        try repo.checkoutDetached(oursOID)
+        _ = try git.capture(["merge", "--no-commit", theirsOID], workingDirectory: repo.url.path)
+
+        // Ground truth from git itself (#0281), as above.
+        let stageLines = try git.run(["ls-files", "-u"], workingDirectory: repo.url.path).lines
+        #expect(!stageLines.isEmpty)
+        let oursStageLine = try #require(stageLines.first(where: { $0.hasSuffix("2\tlink.txt") }))
+        #expect(oursStageLine.hasPrefix("120000 "))
+
+        let files = try conflictedFiles(at: repo.url.path)
+        let entry = try #require(files.first(where: { $0.path == "link.txt" }))
+        #expect(entry.kind == .bothModified)
+
+        let base = try #require(entry.base)
+        let ours = try #require(entry.ours)
+        let theirs = try #require(entry.theirs)
+
+        #expect(base.mode == "100644")
+        #expect(ours.mode == "120000")
+        #expect(theirs.mode == "120000")
+    }
+
     @Test("rebaseConflictIsReportedWithSidesSwapped", arguments: FixtureRepository.RefFormat.supported())
     func rebaseConflictIsReportedWithSidesSwapped(format: FixtureRepository.RefFormat) throws {
         var repo = try FixtureRepository(refFormat: format)
