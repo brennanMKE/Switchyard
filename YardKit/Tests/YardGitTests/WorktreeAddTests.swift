@@ -335,6 +335,53 @@ func worktreePathIsReportedCanonicalized(format: FixtureRepository.RefFormat) th
     #expect(result.worktreePath == expected)
 }
 
+/// #0321 (M1 milestone review, finding 4): `worktreeAdd` canonicalizes the
+/// requested path **before** `git worktree add` runs, while the leaf and its
+/// parent are both still missing. Every other fixture in this file creates a
+/// worktree under an already-existing parent, so a mutation that reverses a
+/// multi-component missing tail (`WorktreeContext.swift:166`) goes uncaught
+/// everywhere else: `git worktree add` still creates the real directory at
+/// the correctly-ordered path, but the engine would report a `worktreePath`
+/// that names a different, non-existent location. This is the end-to-end
+/// half — it is what makes the defect user-visible (`wt new` reporting
+/// `ok: true` with a path nothing was created at) rather than a helper
+/// detail.
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func worktreeAddIntoATwoDeepMissingParentReportsWhereItActuallyCreatedTheWorktree(
+    format: FixtureRepository.RefFormat
+) throws {
+    var repo = try FixtureRepository(refFormat: format)
+    defer { repo.destroy() }
+    try repo.build([.init("base")])
+
+    // Two new path components, neither existing before `worktreeAdd` runs:
+    // a missing middle directory and the worktree leaf under it.
+    let middle = repo.url.deletingLastPathComponent()
+        .appendingPathComponent("yard-wt-deep-\(UUID().uuidString.prefix(6))")
+    let path = middle.appendingPathComponent("leaf")
+    #expect(!FileManager.default.fileExists(atPath: middle.path))
+    defer { try? FileManager.default.removeItem(at: middle) }
+
+    let result = try worktreeAdd(
+        at: repo.url.path, path: path.path, target: .newBranch(name: "deep-new"))
+    #expect(result.success)
+    #expect(result.error == nil)
+
+    // The oracle: re-canonicalize the same requested path now that
+    // `worktreeAdd` has created it. At this point every component exists,
+    // so this call takes `canonicalize`'s `realpath(3)` fast path, not the
+    // missing-tail walk under test, and is unaffected by the mutation.
+    let expected = WorktreeContext.canonicalize(path.path)
+
+    // The user-visible defect: under the mutation, `result.worktreePath`
+    // names a reversed, never-created location.
+    #expect(result.worktreePath == expected)
+    var isDirectory: ObjCBool = false
+    let exists = FileManager.default.fileExists(atPath: result.worktreePath, isDirectory: &isDirectory)
+    #expect(exists, "the reported worktreePath must be where the worktree was actually created")
+    #expect(isDirectory.boolValue)
+}
+
 // MARK: - Pure (argument vector and classifier)
 
 @Test func argumentsNeverContainForce() {

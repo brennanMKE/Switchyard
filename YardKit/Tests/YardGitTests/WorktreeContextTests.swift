@@ -212,6 +212,33 @@ struct WorktreeContextTests {
         #expect(ctx.topLevel != nil)
     }
 
+    // MARK: - canonicalize's missing-tail walk (#0321)
+
+    /// Every other fixture in this file creates a missing tail exactly **one**
+    /// component deep, where a reversed and an unreversed walk produce the
+    /// same answer. This one is two deep, so only a correctly-ordered
+    /// `tail.reversed()` recovers `aaa/bbb`; the un-reversed walk (the
+    /// `tail.reversed()` -> `tail` mutation at `WorktreeContext.swift:166`)
+    /// answers `bbb/aaa` instead.
+    @Test func canonicalizeReversesATwoComponentMissingTailBackToItsOriginalOrder() throws {
+        let root = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("yard-wt-canon2-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        // Neither `aaa` nor `aaa/bbb` exists — a two-component missing tail
+        // on top of a root that does.
+        let missing = root.appendingPathComponent("aaa").appendingPathComponent("bbb")
+        #expect(!FileManager.default.fileExists(atPath: missing.deletingLastPathComponent().path))
+
+        let resolvedRoot = FixtureRepository.realPath(root.path)
+        let expected = resolvedRoot + "/aaa/bbb"
+
+        let result = WorktreeContext.canonicalize(missing.path)
+        #expect(result == expected,
+                "a two-component missing tail must round-trip in its original order")
+    }
+
     // MARK: - Newline safety (#0285)
 
     /// The case #0284's round deliberately deferred: resolving *from inside*
