@@ -229,6 +229,16 @@ paths, guard clauses that skip. The question to answer is not "does the code do 
     the production path and assert what it produced, moving the body into a reachable place if that is
     what it takes.
 
+    **Third instance, 2026-08-17, in a subtler form** — #0253 caught in review, not in a failed round.
+    Production gained an *injectable* seam (`attachRewrite(stillInProgress:)`, `nil` meaning "re-probe
+    the sequencer yourself"), and every test passed the value explicitly, including the one test whose
+    fixture would have produced the same answer from the re-probe. Replacing the re-probe with a
+    constant `true` left the whole suite green. The seam was correct and necessary — a real
+    `post-rewrite` hook is the only caller that can observe a live rebase — but **injecting a value in
+    a test that did not need to injected it is the same defect as reimplementing production in a fake**:
+    the default path ships untested. The rule to carry: *when a parameter has a default that computes
+    something, at least one test must take the default.*
+
 9. **Is there exactly one deliverable?** Not one theme — one file, one behaviour, one thing that is
    either done or not. If the Expected behavior names more than one new production file, it is more
    than one issue.
