@@ -257,6 +257,32 @@ So: run the verification command as your last action, always. If it fails and yo
 report that it fails and what the failure says. Never end a round without knowing the state of the
 suite.
 
+## Rule 3c — Run `swift test` in the FOREGROUND. Never background it.
+
+**Four rounds have now been lost to this.** A round backgrounds the suite — with `&`, with a
+background-run flag, or by arming a watcher on an output file — and then stops to wait for it. **A turn
+ends when a response contains no tool calls, so waiting *is* stopping.** The suite finishes, and nobody
+is there to read it.
+
+It also destroys the one signal you have: a backgrounded suite that is slow and a backgrounded suite
+that is hung look identical. In the foreground they do not — one returns and one hits your timeout.
+
+So: **one blocking command, with a generous timeout.** This package runs seventy-odd suites in
+parallel, most of them blocked in `git` subprocesses, so a full run takes 45–130 seconds depending on
+what else the machine is doing. Set the timeout to 900000 ms and simply wait. That is not a long time
+to a process; it only feels long.
+
+The one legitimate case for `&` is running **two** suites concurrently, and even then the whole thing
+stays inside a single foreground command:
+
+```sh
+( cd ../other-worktree/YardKit && swift test > A.log 2>&1 ) &
+swift test > B.log 2>&1
+wait
+```
+
+The command blocks until both finish. That is still foreground.
+
 ## Rule 8 — Tests use swift-testing, not XCTest.
 
 Every test file in this package uses `import Testing`, `@Test`, and `#expect`. Match it.
