@@ -223,21 +223,40 @@ public struct GitProcess: Sendable {
             inPipe.fileHandleForWriting.closeFile()
         }
 
-        // Drain stdout on a background queue rather than reading it
-        // synchronously here. A child blocked on its own prompt (pinentry,
-        // an ssh-agent dialog) writes nothing and closes nothing, so a
-        // synchronous `readDataToEndOfFile()` would block forever and the
-        // bounded wait below would never get a chance to act. stderr is
-        // already going to a file, so there is no second pipe to manage.
-        let drain = StdoutDrain(pipe: outPipe)
-        drain.start()
-
+        let outData: Data
         if let timeout {
+            // A bounded wait needs stdout drained concurrently, not after:
+            // a child blocked on its own prompt (pinentry, an ssh-agent
+            // dialog) writes nothing and closes nothing, so a synchronous
+            // `readDataToEndOfFile()` below would block forever and
+            // `waitWithDeadline` would never get a chance to act. This
+            // branch is reached only by the two signing-adjacent call
+            // sites `GitProcess.signingTimeout` documents (#0163), so the
+            // extra thread and semaphore per call are affordable here —
+            // unlike the `else` branch, which every other `GitProcess`
+            // call in the package still takes, unconditionally, on every
+            // invocation.
+            let drain = StdoutDrain(pipe: outPipe)
+            drain.start()
             try Self.waitWithDeadline(process, timeout: timeout, arguments: arguments)
+            outData = drain.finish()
         } else {
+            // Drain stdout to completion, then wait. stderr is already going
+            // to a file, so there is no second pipe to deadlock against and
+            // no thread to block.
+            //
+            // Draining two pipes needs either concurrent reads or a run
+            // loop, and blocking on a DispatchGroup (or a semaphore, as the
+            // timeout branch above does) starves Swift concurrency's
+            // cooperative thread pool -- measured #0163 round 1: making
+            // every call take that path, not just the timeout one, took the
+            // full suite from 38s to over 12 minutes. A file has no buffer
+            // limit, so one pipe plus one file removes the problem rather
+            // than managing it, and this is the unconditional path every
+            // non-timeout call takes -- which is nearly all of them.
+            outData = outPipe.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
         }
-        let outData = drain.finish()
         let errData = (try? Data(contentsOf: errURL)) ?? Data()
 
         return Output(
@@ -345,10 +364,23 @@ private final class StdoutDrain: @unchecked Sendable {
         self.handle = pipe.fileHandleForReading
     }
 
+    /// A dedicated `Thread`, deliberately not `DispatchQueue.global()`.
+    /// `capture` runs inside one of ~1000 parallel swift-testing tests, any
+    /// of which may itself be executing ON a GCD global-queue worker thread.
+    /// Submitting the read to that same queue and then blocking on it in
+    /// `finish()` is the textbook GCD deadlock: a pool thread waiting on
+    /// another task queued on its own, now-exhausted, pool. Measured #0163
+    /// round 2: with the drain on `DispatchQueue.global()`, the full suite
+    /// did not finish in over ten minutes at ~0% CPU (genuinely stalled, not
+    /// merely slow) even though every individual test file was fast in
+    /// isolation -- exactly the shape of pool exhaustion, which only
+    /// appears once enough concurrent callers are competing for the same
+    /// bounded pool. A `Thread` is not drawn from any shared pool, so it
+    /// cannot be blocked behind other work queued on one.
     func start() {
-        DispatchQueue.global(qos: .utility).async {
-            self.result = self.handle.readDataToEndOfFile()
-            self.semaphore.signal()
+        Thread.detachNewThread { [self] in
+            result = handle.readDataToEndOfFile()
+            semaphore.signal()
         }
     }
 

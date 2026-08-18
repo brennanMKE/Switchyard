@@ -91,38 +91,38 @@ public struct CommitCreate: Equatable, Sendable {
         let args = ["commit", "-m", message]
             + trailers.flatMap { ["--trailer", $0.description] }
             + arguments(for: signing)
+        // Bounded only when a signature will actually be attempted (#0163).
+        // `signingInEffect` is one cheap, synchronous, un-timed `git config`
+        // read for `.config` (nil for `.sign`/`.noSign`, which decide
+        // without a git call at all) -- paid on every commit so the
+        // expensive path below (a background thread and a semaphore around
+        // the wait, see `GitProcess.capture`) stays confined to commits that
+        // can actually hang, rather than the common case, which is every
+        // other commit in the package. Measured: applying `capture`'s
+        // `timeout:` unconditionally here took the full suite from 38s to
+        // over 12 minutes, because `.config` is this function's default and
+        // most callers never override it.
+        let inEffect = try signingInEffect(
+            signing,
+            in: workingDirectory,
+            git: git,
+            extraEnvironment: extraEnvironment
+        )
         let output: GitProcess.Output
         do {
             output = try git.capture(
                 args,
                 workingDirectory: workingDirectory,
                 extraEnvironment: extraEnvironment,
-                timeout: GitProcess.signingTimeout
+                timeout: inEffect ? GitProcess.signingTimeout : nil
             )
         } catch let failure as GitProcess.Failure {
             if case .timedOut = failure {
-                let inEffect = try signingInEffect(
-                    signing,
-                    in: workingDirectory,
-                    git: git,
-                    extraEnvironment: extraEnvironment
-                )
-                if inEffect {
-                    throw Failure.signingFailed(
-                        reason: "git commit did not finish within \(GitProcess.signingTimeout) "
-                            + "and was terminated -- likely a signing prompt with no way to answer it"
-                    )
-                }
+                throw classifyTimeout(failure, signingInEffect: inEffect)
             }
             throw failure
         }
         guard output.exitCode == 0 else {
-            let inEffect = try signingInEffect(
-                signing,
-                in: workingDirectory,
-                git: git,
-                extraEnvironment: extraEnvironment
-            )
             if let failure = classify(stderr: output.standardError, signingInEffect: inEffect) {
                 throw failure
             }
@@ -196,6 +196,27 @@ public struct CommitCreate: Equatable, Sendable {
         guard signingInEffect else { return nil }
         guard signingFailureMarkers.contains(where: { stderr.contains($0) }) else { return nil }
         return .signingFailed(reason: stderr.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    /// Classifies a `GitProcess.Failure.timedOut` from the `git commit`
+    /// invocation (#0163). Signing in effect -> `.signingFailed`, since a
+    /// signing helper's own UI is the one thing `GitProcess`'s prompt-
+    /// suppressing environment cannot govern; signing not in effect ->
+    /// `failure` is rethrown unchanged, so it keeps carrying
+    /// `ExitClass.repositoryError` through `GitProcess.Failure`'s own
+    /// conformance rather than being misreported as a signing problem it
+    /// was never trying to solve.
+    ///
+    /// Pure and subprocess-free on purpose: every other classifier in this
+    /// type reads a git invocation's real stderr, but a timeout produces
+    /// none, so this one takes the already-thrown `Failure` and a
+    /// precomputed `signingInEffect` instead -- exactly what a test needs to
+    /// exercise the branch without waiting out any deadline.
+    static func classifyTimeout(_ failure: GitProcess.Failure, signingInEffect: Bool) -> Error {
+        guard case let .timedOut(after, _) = failure, signingInEffect else { return failure }
+        return Failure.signingFailed(
+            reason: "git commit did not finish within \(after) and was terminated -- "
+                + "likely a signing prompt with no way to answer it")
     }
 }
 

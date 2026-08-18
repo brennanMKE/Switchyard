@@ -6,27 +6,25 @@
 // a fake, never at a real `gpg`. No keychain, ~/.gnupg, or ~/.ssh entry is
 // touched.
 //
+// Every test here uses an explicit, short (1-2s) deadline against a fake
+// child that sleeps 60s -- never the production `GitProcess.signingTimeout`
+// (30s), which only `CommitCreate`/`Fixup` use internally and which no test
+// here waits out (round 1 did, at 30s+ per test, and made the full suite
+// take twelve minutes instead of the ~38s baseline). `CommitCreate.
+// classifyTimeout` and `Fixup.classifyTimeout` are pure, subprocess-free
+// functions for exactly this reason: the branch that picks `.signingFailed`
+// vs. the original `.timedOut` is tested directly, with no deadline to wait
+// out at all.
+//
 // Rule 7c applies with force here: no test in this file asserts elapsed
-// time. Every deadline used is a fixed value the production code was told
-// to use, and every fake child's sleep (60s) is far longer than any
-// deadline plus the 1s termination grace period, so the ordering between
-// "deadline expired" and "child would have exited anyway" is never in
-// question.
+// time. Every deadline used is a fixed value the test itself chose, and
+// every fake child's sleep (60s) is far longer than any deadline plus the
+// 1s termination grace period, so the ordering between "deadline expired"
+// and "child would have exited anyway" is never in question.
 
 import Foundation
 import Testing
 @testable import YardGit
-
-private let hermetic = ["GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null"]
-
-private func set(_ key: String, _ value: String, in repo: FixtureRepository) throws {
-    try GitProcess().run(["config", key, value], workingDirectory: repo.url.path)
-}
-
-private func stageChange(in repo: FixtureRepository) throws {
-    try repo.writeUntracked(["staged.txt": "staged content\n"])
-    try GitProcess().run(["add", "staged.txt"], workingDirectory: repo.url.path)
-}
 
 /// Writes an executable script to `path` -- the fake-gpg technique from
 /// #0037/CommitCreateGPGTests.swift, generalized to stand in for `git`
@@ -63,29 +61,21 @@ sleep 60
 """
 
 /// Writes `script` into the fixture worktree, marks it executable, and
-/// points `gpg.program` at it -- identical to CommitCreateGPGTests.swift's
-/// `installFakeGpg`, duplicated here so this file has no cross-file private
-/// dependency.
+/// points `gpg.program` at it -- the same shape as CommitCreateGPGTests.
+/// swift's `installFakeGpg`, duplicated here so this file has no cross-file
+/// private dependency.
 private func installFakeGpg(_ script: String, in repo: FixtureRepository) throws {
     try repo.writeUntracked(["fake-gpg.sh": script])
     let path = repo.url.appendingPathComponent("fake-gpg.sh").path
     try FileManager.default.setAttributes(
         [.posixPermissions: 0o755], ofItemAtPath: path)
-    try set("gpg.program", path, in: repo)
+    try GitProcess().run(
+        ["config", "gpg.program", path], workingDirectory: repo.url.path)
 }
 
-/// Resolves the repo's effective hooks directory the way the engine does
-/// (`WorktreeContext.path(for:)`, never string concatenation onto `.git/`).
-private func hooksDirectory(_ repo: FixtureRepository) throws -> String {
-    try WorktreeContext.resolve(path: repo.url.path).path(for: "hooks")
-}
-
-private func writeHook(_ name: String, in directory: String, content: String) throws {
-    let fm = FileManager.default
-    try fm.createDirectory(atPath: directory, withIntermediateDirectories: true)
-    let url = URL(fileURLWithPath: directory).appendingPathComponent(name)
-    try Data(content.utf8).write(to: url)
-    try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+private func stageChange(in repo: FixtureRepository) throws {
+    try repo.writeUntracked(["staged.txt": "staged content\n"])
+    try GitProcess().run(["add", "staged.txt"], workingDirectory: repo.url.path)
 }
 
 /// True when `failure` is `.timedOut`, however its associated values differ.
@@ -140,50 +130,71 @@ private func isTimedOut(_ failure: GitProcess.Failure) -> Bool {
     #expect(isTimedOut(failure))
 }
 
-// MARK: - Classification at the signing-adjacent call sites
-
-@Test func hungSigningHelperClassifiesAsSigningFailed() throws {
+/// A real `git commit --gpg-sign`, invoking a real (fake, sleeping) `gpg`,
+/// bounded by an explicit short deadline passed directly to `GitProcess.
+/// capture` -- not `CommitCreate.run`, so this measures the mechanism
+/// against the real git-plus-gpg process tree without waiting out the 30s
+/// production constant. `CommitCreate`'s own classification of this shape
+/// is covered, deadline-free, by the pure-function tests below.
+@Test func realGitCommitInvokingAHungGpgIsReportedAsTimedOut() throws {
     var repo = try FixtureRepository()
     defer { repo.destroy() }
     try repo.build([.init("a")])
-    try set("gpg.format", "openpgp", in: repo)
+    try GitProcess().run(
+        ["config", "gpg.format", "openpgp"], workingDirectory: repo.url.path)
     try installFakeGpg(sleepingScript, in: repo)
     try stageChange(in: repo)
     let base = try repo.revParse("HEAD")
 
-    let thrown = #expect(throws: CommitCreate.Failure.self) {
-        _ = try CommitCreate.run(
-            message: "signed", signing: .sign, in: repo.url.path, extraEnvironment: hermetic)
-    }
-    let failure = try #require(thrown)
-    #expect(failure.exitClass == .signingFailed)
-
-    // No commit was written -- the timeout killed `git commit` before it
-    // could write the object, exactly as a real signing refusal does.
-    #expect(try repo.revParse("HEAD") == base)
-}
-
-@Test func hungHookWithSigningOffClassifiesAsRepositoryError() throws {
-    var repo = try FixtureRepository()
-    defer { repo.destroy() }
-    try repo.build([.init("a")])
-    // No gpg involved at all: `.noSign` passes `--no-gpg-sign`, so nothing
-    // could ever invoke a signing helper here. The hang is a pre-commit
-    // hook, which `git commit` still waits on regardless of signing -- the
-    // timeout is signing-adjacent by call site, not by cause, and a timeout
-    // with signing not in effect must not be misclassified as `.signing
-    // Failed` just because it happened on this code path.
-    try writeHook("pre-commit", in: try hooksDirectory(repo), content: sleepingScript)
-    try stageChange(in: repo)
-    let base = try repo.revParse("HEAD")
-
     let thrown = #expect(throws: GitProcess.Failure.self) {
-        _ = try CommitCreate.run(
-            message: "should time out", signing: .noSign, in: repo.url.path,
-            extraEnvironment: hermetic)
+        _ = try GitProcess().capture(
+            ["commit", "-m", "signed", "--gpg-sign"],
+            workingDirectory: repo.url.path,
+            extraEnvironment: ["GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "/dev/null"],
+            timeout: .seconds(2)
+        )
     }
     let failure = try #require(thrown)
     #expect(isTimedOut(failure))
-    #expect(failure.exitClass == .repositoryError)
+
+    // No commit was written -- the kill happened before git could write
+    // the object, exactly as a real signing refusal does.
     #expect(try repo.revParse("HEAD") == base)
+}
+
+// MARK: - Classification, pure and subprocess-free
+
+/// Exercises the exact branch `CommitCreate.run`'s do/catch takes on a
+/// timed-out `git commit`, with no subprocess and no deadline to wait out:
+/// a synthesized `.timedOut` failure, fed straight to the classifier.
+@Test func commitCreateClassifiesTimeoutAsSigningFailedOnlyWhenSigningInEffect() {
+    let failure = GitProcess.Failure.timedOut(after: .seconds(1), arguments: ["commit"])
+
+    let signingOn = CommitCreate.classifyTimeout(failure, signingInEffect: true)
+    let asCommitFailure = signingOn as? CommitCreate.Failure
+    #expect(asCommitFailure != nil)
+    #expect(asCommitFailure?.exitClass == .signingFailed)
+
+    let signingOff = CommitCreate.classifyTimeout(failure, signingInEffect: false)
+    let asGitFailure = signingOff as? GitProcess.Failure
+    #expect(asGitFailure != nil)
+    #expect(asGitFailure.map(isTimedOut) == true)
+    #expect(asGitFailure?.exitClass == .repositoryError)
+}
+
+/// The `Fixup` mirror of the test above, for the `git rebase --autosquash`
+/// call site.
+@Test func fixupClassifiesTimeoutAsSigningFailedOnlyWhenSigningInEffect() {
+    let failure = GitProcess.Failure.timedOut(after: .seconds(1), arguments: ["rebase"])
+
+    let signingOn = Fixup.classifyTimeout(failure, signingInEffect: true)
+    let asFixupError = signingOn as? FixupError
+    #expect(asFixupError != nil)
+    #expect(asFixupError?.exitClass == .signingFailed)
+
+    let signingOff = Fixup.classifyTimeout(failure, signingInEffect: false)
+    let asGitFailure = signingOff as? GitProcess.Failure
+    #expect(asGitFailure != nil)
+    #expect(asGitFailure.map(isTimedOut) == true)
+    #expect(asGitFailure?.exitClass == .repositoryError)
 }
