@@ -856,6 +856,136 @@ struct PostRewriteAttachTests {
         #expect(unrelatedMetadata.rewrite == nil, "the unrelated entry must stay untouched")
     }
 
+    /// #0254's own probe, made a test — Finding 2 of #0160's fourth umbrella
+    /// review, 2026-08-17. A conflicting `Fixup.run(target:)` leaves the
+    /// in-flight file naming its own entry, exactly as
+    /// `aConflictingFixupResolvedAndContinuedAttachesToItsPreOperationEntry`
+    /// above sets up. Here the SECOND caller is not an unrelated successful
+    /// operation (as
+    /// `anUnrelatedSuccessfulOperationBetweenAConflictAndItsContinueDoesNotClobberTheSlot`
+    /// covers) but a second `Fixup.run(target:)` against the same
+    /// still-conflicted repository: measured, `git commit --fixup=` refuses
+    /// with "Committing is not possible because you have unmerged files"
+    /// (exit 128) before any rebase of its own ever starts, so its own
+    /// `around` call throws while the FIRST call's rebase is what the
+    /// sequencer check finds still live. Before this issue that read as
+    /// "yes, write", and the second call's entry id clobbered the first's
+    /// slot -- the uncovered quadrant the sibling test above cannot reach,
+    /// since most operations that run mid-rebase fail rather than succeed.
+    @Test func aSecondConflictingFixupCannotClobberTheFirstsInFlightSlot() throws {
+        var repo = try FixtureRepository()
+        try repo.build([
+            .init("c1", files: ["f.txt": "a\n"]),
+            .init("c2", files: ["f.txt": "b\n"]),
+            .init("c3", files: ["f.txt": "c\n"]),
+        ])
+        defer { repo.destroy() }
+        let target = try #require(repo.oids["c2"])
+        let context = try WorktreeContext.resolve(path: repo.url.path)
+        let log = repo.url.appendingPathComponent("post-rewrite.log")
+        try installLoggingPostRewriteHook(in: repo, loggingTo: log)
+
+        let headBefore = try #require(
+            git.run(["rev-parse", "HEAD"], workingDirectory: repo.url.path).lines.first)
+
+        try repo.writeUntracked(["f.txt": "z\n"])
+        try git.run(["add", "-A"], workingDirectory: repo.url.path)
+
+        let firstThrown = #expect(throws: FixupError.self) {
+            _ = try Fixup.run(target: target, at: repo.url.path, extraEnvironment: hermetic)
+        }
+        guard case .blockedOnConflicts = try #require(firstThrown) else {
+            Issue.record("expected .blockedOnConflicts, got \(String(describing: firstThrown))")
+            return
+        }
+        #expect(repo.isMidRebase, "the first rebase must be left resumable, not aborted")
+
+        let entries = try JournalAnchor.list(in: context)
+        #expect(entries.count == 1)
+        let firstEntry = try #require(entries.first)
+
+        let pendingPath = try context.path(for: RepositoryLayout.inFlightEntryIDRelativePath, git: git)
+        let slotAfterFirst = try #require(
+            try? String(contentsOfFile: pendingPath, encoding: .utf8),
+            "the first conflict must leave the in-flight file naming its own entry")
+        #expect(slotAfterFirst.trimmingCharacters(in: .whitespacesAndNewlines) == firstEntry.id.string)
+
+        // A second `Fixup.run` against the SAME repository: `around` writes
+        // its own checkpoint entry before `body` runs, then `body` throws --
+        // `git commit --fixup=` refuses the still-unmerged index left by the
+        // first conflict, so no second rebase ever starts. `around`'s catch
+        // still finds a live sequencer (the FIRST rebase), and must not
+        // claim the slot with this second entry's id.
+        #expect(throws: GitProcess.Failure.self) {
+            _ = try Fixup.run(target: target, at: repo.url.path, extraEnvironment: hermetic)
+        }
+        #expect(repo.isMidRebase, "still only the first rebase -- the second never started one")
+
+        let entriesAfterSecond = try JournalAnchor.list(in: context)
+        #expect(entriesAfterSecond.count == 2,
+                "the second call's own pre-operation checkpoint is still written")
+        let secondEntry = try #require(entriesAfterSecond.first { $0.id != firstEntry.id })
+
+        let slotAfterSecond = try #require(try? String(contentsOfFile: pendingPath, encoding: .utf8))
+        #expect(slotAfterSecond.trimmingCharacters(in: .whitespacesAndNewlines) == firstEntry.id.string,
+                "first-writer-wins: the second call's throw must not clobber the first entry's slot")
+        #expect(slotAfterSecond.trimmingCharacters(in: .whitespacesAndNewlines) != secondEntry.id.string)
+
+        // Resolve and continue the one rebase that is actually in progress
+        // -- the first's. Autosquash reorders the fixup right after its
+        // target, so this fixture's conflicting content conflicts twice on
+        // replay, exactly as
+        // `aConflictingFixupResolvedAndContinuedAttachesToItsPreOperationEntry`
+        // above loops for.
+        let continueGit = GitProcess()
+        let continueEnvironment = hermetic.merging(["GIT_EDITOR": "true"]) { _, new in new }
+        for _ in 0..<5 where repo.isMidRebase {
+            if repo.hasConflicts {
+                try repo.writeUntracked(["f.txt": "resolved\n"])
+                try git.run(["add", "-A"], workingDirectory: repo.url.path)
+            }
+            _ = try continueGit.capture(
+                ["rebase", "--continue"], workingDirectory: repo.url.path,
+                extraEnvironment: continueEnvironment)
+        }
+        #expect(!repo.isMidRebase, "the continue loop must have finished the rebase")
+
+        let invocation = try finalInvocation(in: log)
+        #expect(invocation.source == "rebase")
+        #expect(invocation.entryID == nil,
+                "the continue ran through an unscoped GitProcess and must export no entry id")
+        #expect(invocation.resumable,
+                "the hook fired while the rebase it was concluding was still live")
+        let decision = PostRewrite.decide(
+            sourceArgument: invocation.source,
+            environment: [GitProcess.markerVariable: invocation.marker ?? ""],
+            readStandardInput: { invocation.stdin })
+        #expect(decision.isOwnInvocation, "the marker must still be set on our own continue")
+
+        let attached = try #require(try JournalCheckpoint.attachRewrite(
+            decision, entryID: nil, stillInProgress: invocation.resumable, in: context))
+        #expect(attached.id == firstEntry.id,
+                "the mapping must land on the FIRST entry, whose slot the second call could not steal")
+
+        let afterFirst = try JournalEntryMetadata(
+            serialized: try JournalAnchor.metadata(for: firstEntry.id, in: context))
+        let mapping = try #require(
+            afterFirst.rewrite, "the mapping must be findable, attached to the first entry")
+        let head = try #require(
+            git.run(["rev-parse", "HEAD"], workingDirectory: repo.url.path).lines.first)
+        let fromHeadBefore = try #require(
+            mapping.rewrites.first(where: { $0.oldOid == headBefore }),
+            "the first entry's pre-operation HEAD must be reachable through the stored mapping")
+        #expect(fromHeadBefore.newOid == head)
+
+        let afterSecond = try JournalEntryMetadata(
+            serialized: try JournalAnchor.metadata(for: secondEntry.id, in: context))
+        #expect(afterSecond.rewrite == nil, "the second entry must stay untouched -- it never had a slot")
+
+        #expect(try JournalObserved.list(in: context).isEmpty,
+                "the mapping belongs on the journal entry that captured pre-operation state, not as an observed one")
+    }
+
     // MARK: - The compare-and-swap guard
 
     /// `updateRefCommand`'s literal output, old oid included. `update-ref
