@@ -491,10 +491,15 @@ public extension JournalCheckpoint {
               let contents = try? String(contentsOfFile: path, encoding: .utf8)
         else { return nil }
 
-        // An unparseable file cannot name anything -- clean it up rather
-        // than leaving known-bad data for the next invocation to re-parse.
+        // An unparseable file cannot name anything, so this degrades to
+        // no-attach without cleaning it up (#0292). Cleanup is unreachable
+        // in practice: the file's only writer is `around`'s catch, which
+        // always writes a `JournalEntryID.string` -- valid by construction,
+        // since `generate`/`incremented` only ever draw from the id
+        // alphabet -- and decision 24 already bounds the file's lifetime to
+        // the sequencer directory that holds it, so a stale file written by
+        // anything else cannot survive to be read here.
         guard let id = JournalEntryID(contents.trimmingCharacters(in: .whitespacesAndNewlines)) else {
-            try? fileManager.removeItem(atPath: path)
             return nil
         }
 
