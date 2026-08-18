@@ -2,9 +2,11 @@
 // every one of its type's stored members (#0316).
 //
 // #0312's finding is the reason this file exists: `WorktreeEntry.==`
-// (WorktreeList.swift) omits `prunableReason` today, and no mutation was
-// needed to expose it — the suite was green around the omission because
-// nothing compared the operator's body against the type's own member list.
+// (WorktreeList.swift) omitted `prunableReason`, and no mutation was needed
+// to expose it — the suite was green around the omission because nothing
+// compared the operator's body against the type's own member list. #0312
+// fixed the operator; this guard is what keeps that class of omission from
+// recurring, here or on any future hand-written `==`.
 // This guard makes that comparison mechanical: a source scan finds every
 // hand-written `==`, extracts the members it actually compares, extracts the
 // type's own stored members from its declaration, and fails when the first
@@ -175,22 +177,18 @@ struct EqualityCoverageTests {
     /// issue says why it cannot be, matching the convention
     /// `ExitClassCoverageTests`/`DescriptionCoverageTests` already use.
     ///
-    /// `WorktreeEntry` is #0316's proof that this guard catches something
-    /// real: its `==` (`WorktreeList.swift`) omits `prunableReason` today.
-    /// #0312 is the issue that fixes the operator itself — this guard's job
-    /// is to make the omission loud, not to fix it. Remove this entry the
-    /// moment #0312 lands: `everyAllowListedTypeStillOmitsAStoredMember`
-    /// below fails the instant the entry stops being necessary, so leaving
-    /// it in place is not a silent no-op once #0312 ships.
+    /// `WorktreeEntry` no longer needs an entry: #0312 added
+    /// `prunableReason` to its `==`, so it now compares every stored member
+    /// and passes `everyHandWrittenEqualityCoversItsStoredMembers` on its
+    /// own — the exemption that used to live here has nothing left to
+    /// excuse (`everyAllowListedTypeStillOmitsAStoredMember` would have
+    /// failed the moment the fix landed if the entry had stayed).
     ///
     /// Empty is the goal state, not an error — the day this list has no
     /// entries is the day every hand-written `==` in the engine covers its
-    /// own type completely. None of the three tests below require it to be
-    /// non-empty.
-    private let allowList: [String: String] = [
-        "WorktreeEntry": "#0312 — static func == omits prunableReason; " +
-            "fixed there, not by this guard.",
-    ]
+    /// own type completely. That day is today. None of the three tests
+    /// below require it to be non-empty.
+    private let allowList: [String: String] = [:]
 
     /// #0316's headline: every hand-written `==` compares every one of its
     /// type's stored members, or has an allow-list entry that says why not.
