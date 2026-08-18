@@ -3,7 +3,7 @@
 import Foundation
 
 /// Names every sibling worktree whose checked-out branch a ref-snapshot
-/// restore would move, delete, or re-create.
+/// restore would move or re-create.
 ///
 /// `refs/heads/*` is shared across worktrees, and a sibling's working copy
 /// and index are built against the commit its branch points at. Git's own
@@ -35,8 +35,12 @@ public enum WorktreeDisturbance {
     ///
     /// `current` is the branch's oid now (nil when the branch does not
     /// currently exist — a dangling checkout); `target` is what restore
-    /// would write (nil when restore deletes the branch). They differ by
-    /// construction.
+    /// would write it to. `target` is never nil here: a branch the snapshot
+    /// never recorded is left untouched by restore (guide §11 decision 20)
+    /// and so is never a disturbance, whatever its current state — only a
+    /// name the snapshot actually carries can move or be re-created. `target`
+    /// stays `String?` because it rides the wire (#0130) and dropping the
+    /// optional would be a breaking change for no behavioral gain.
     public struct Disturbance: Sendable, Equatable {
         /// Canonicalized path of the sibling worktree, as porcelain reports
         /// it — the same identity git's own refusal messages use.
@@ -116,8 +120,13 @@ public enum WorktreeDisturbance {
             let path = WorktreeContext.canonicalize(rawPath)
             guard path != callerPath else { continue }
             let ref = "refs/heads/" + branch
+            // A name the snapshot never recorded is left untouched by
+            // restore (guide §11 decision 20 — restore no longer deletes
+            // unrecorded refs), so it cannot be disturbed no matter what its
+            // current value is. Only a ref the snapshot actually carries can
+            // move or be re-created under a sibling's checkout.
+            guard let targetOid = recordedByName[ref] else { continue }
             let currentOid = currentByName[ref]
-            let targetOid = recordedByName[ref]
             guard currentOid != targetOid else { continue }
             result.append(Disturbance(
                 worktreePath: path, branch: ref,
