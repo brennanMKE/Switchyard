@@ -660,7 +660,9 @@ documented. This validates the engine and settles the response contract.
 - [x] The response schemas are documented and versioned (#0026, and #0194 for payload shapes —
       guide §11 decision 21).
 - [ ] `swift test` is green, and every engine function has tests that can fail: each has a mutation
-      recorded against a named test that dies under it.
+      recorded against a named test that dies under it. **The 2026-08-17 review found this unmet for
+      `gitStatus` alone** — thirteen of fourteen mutations killed a named test, both on `gitStatus`
+      survived. Filed as **#0245**; M1's clean-review count restarts when it resolves.
 
 **Reachability from the CLI is M3's criterion, not M1's** — decided 2026-08-07, §11 decision 11. The
 two are separated because guide §5 has the CLI marshal over XPC and never link `YardGit`, and the XPC
