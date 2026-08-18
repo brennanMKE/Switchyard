@@ -360,7 +360,8 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-08-18 | #0284 | Implementation round 1, Sonnet subagent (S, measured) | 217,452 | $1.04 |
 | 2026-08-18 | #0160 | **Umbrella review, seventh pass — clean** (O, measured) | 159,061 | $2.54 |
 | 2026-08-18 | #0276 | Implementation round 1, Sonnet subagent (S, measured) | 75,798 | $0.36 |
-| | | **Total measured** | **34,098,249** | **$352.95** |
+| 2026-08-18 | #0285 | Implementation round 1, Sonnet subagent (S, measured) | 122,713 | $0.59 |
+| | | **Total measured** | **34,220,962** | **$353.54** |
 
 ## What this total does and does not cover
 
