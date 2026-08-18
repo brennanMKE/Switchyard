@@ -179,10 +179,14 @@ struct EqualityCoverageTests {
     /// real: its `==` (`WorktreeList.swift`) omits `prunableReason` today.
     /// #0312 is the issue that fixes the operator itself — this guard's job
     /// is to make the omission loud, not to fix it. Remove this entry the
-    /// moment #0312 lands; `allowListEntriesRequireAnIssueCitation` and
-    /// `everyHandWrittenEqualityCoversItsStoredMembers` both stay meaningful
-    /// either way — the second one starts enforcing full coverage on
-    /// `WorktreeEntry` the moment the entry is gone.
+    /// moment #0312 lands: `everyAllowListedTypeStillOmitsAStoredMember`
+    /// below fails the instant the entry stops being necessary, so leaving
+    /// it in place is not a silent no-op once #0312 ships.
+    ///
+    /// Empty is the goal state, not an error — the day this list has no
+    /// entries is the day every hand-written `==` in the engine covers its
+    /// own type completely. None of the three tests below require it to be
+    /// non-empty.
     private let allowList: [String: String] = [
         "WorktreeEntry": "#0312 — static func == omits prunableReason; " +
             "fixed there, not by this guard.",
@@ -222,14 +226,17 @@ struct EqualityCoverageTests {
         }
     }
 
-    /// The allow-list is honest in both directions: every entry cites an
+    /// The allow-list is honest in one direction: every entry cites an
     /// issue, and every entry still names a conformer the scan actually
     /// finds — a type renamed, removed, or no longer hand-written (i.e. now
     /// synthesized) drops out of the scan, and a stale entry here would
-    /// silently exempt nothing.
+    /// silently exempt nothing. Deliberately does NOT require `allowList`
+    /// to be non-empty: an empty list is the success state (see the doc
+    /// comment on `allowList`), and a test that fails on that state is one
+    /// whoever hits it will delete rather than honor. Whether an entry is
+    /// still *earning* its place — as opposed to merely still existing — is
+    /// `everyAllowListedTypeStillOmitsAStoredMember`'s job, not this one's.
     @Test func allowListEntriesRequireAnIssueCitationAndARealConformer() throws {
-        try #require(!allowList.isEmpty, "allow-list is empty — see WorktreeEntry note if this needs updating")
-
         for (name, reason) in allowList {
             #expect(reason.contains("#"), "\(name) allow-list entry must cite an issue: \(reason)")
         }
@@ -244,5 +251,41 @@ struct EqualityCoverageTests {
             removed, no longer hand-written, or the scanner broke): \
             \(stale.sorted().joined(separator: ", "))
             """)
+    }
+
+    /// Makes the allow-list self-expiring. Round 1 shipped an exemption
+    /// mechanism that only checked an entry still *points at* a real `==`
+    /// (`allowListEntriesRequireAnIssueCitationAndARealConformer` above) —
+    /// which stays green even after the underlying omission is fixed,
+    /// because a completed `==` is still a hand-written `==` the scan
+    /// finds. Verified directly: adding `prunableReason` to
+    /// `WorktreeEntry.==` and rerunning left the suite green, which is the
+    /// defect this test closes. Every allow-listed type must still fail the
+    /// coverage check `everyHandWrittenEqualityCoversItsStoredMembers`
+    /// would otherwise apply to it — the moment it stops failing, its
+    /// exemption has nothing left to excuse.
+    @Test func everyAllowListedTypeStillOmitsAStoredMember() throws {
+        guard !allowList.isEmpty else { return }   // nothing to check — see the doc comment on `allowList`
+
+        let conformers = try EqualityScan.scan(under: engineRoot)
+        let byName = Dictionary(uniqueKeysWithValues: conformers.map { ($0.typeName, $0) })
+
+        for name in allowList.keys {
+            let conformer = try #require(
+                byName[name],
+                """
+                \(name) is allow-listed but the scan found no == for it at all \
+                — see allowListEntriesRequireAnIssueCitationAndARealConformer
+                """)
+            let missing = Set(conformer.storedMembers).subtracting(conformer.comparedMembers)
+            #expect(
+                !missing.isEmpty,
+                """
+                \(name)'s == now compares every stored member — its allow-list \
+                entry in EqualityCoverageTests.swift is stale and should be \
+                removed, which lets everyHandWrittenEqualityCoversItsStoredMembers \
+                start enforcing full coverage on it automatically.
+                """)
+        }
     }
 }
