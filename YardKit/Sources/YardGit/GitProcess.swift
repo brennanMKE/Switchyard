@@ -40,7 +40,15 @@ public struct GitProcess: Sendable {
         /// `ExitClass.signingFailed`'s raw value. Callers that care why the
         /// timeout mattered classify it themselves; this case only reports
         /// that it happened.
-        case timedOut(after: Duration, arguments: [String])
+        ///
+        /// `terminationStatus` is the child's `Process.terminationStatus`
+        /// after `waitWithDeadline`'s escalation finished -- 15 (`SIGTERM`)
+        /// when `terminate()` alone ended it within the grace period, 9
+        /// (`SIGKILL`) when it did not and the escalation had to finish the
+        /// job. Measured 2026-08-17, #0239: this is what distinguishes "the
+        /// ordinary case" from "the child trapped SIGTERM and needed the
+        /// escalation this type exists for" without reading a clock.
+        case timedOut(after: Duration, arguments: [String], terminationStatus: Int32)
 
         public var description: String {
             switch self {
@@ -50,9 +58,12 @@ public struct GitProcess: Sendable {
                     + (detail.isEmpty ? "" : ": \(detail)")
             case let .launchFailed(message):
                 return "could not launch git: \(message)"
-            case let .timedOut(after, arguments):
+            case let .timedOut(after, arguments, terminationStatus):
+                let cause = terminationStatus == SIGKILL
+                    ? "ignored SIGTERM and had to be killed (SIGKILL)"
+                    : "was terminated (signal \(terminationStatus))"
                 return "git \(arguments.joined(separator: " ")) did not finish within \(after) "
-                    + "and was terminated"
+                    + "and \(cause)"
             }
         }
     }
@@ -298,7 +309,8 @@ public struct GitProcess: Sendable {
             kill(process.processIdentifier, SIGKILL)
         }
         process.waitUntilExit()
-        throw Failure.timedOut(after: timeout, arguments: arguments)
+        throw Failure.timedOut(
+            after: timeout, arguments: arguments, terminationStatus: process.terminationStatus)
     }
 
     /// The environment every invocation runs under.

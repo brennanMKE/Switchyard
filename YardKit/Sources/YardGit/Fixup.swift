@@ -277,7 +277,7 @@ public struct Fixup: Equatable, Sendable {
     /// -- the caller aborts the rebase itself before calling this, since
     /// that is a side effect, not a classification.
     static func classifyTimeout(_ failure: GitProcess.Failure, signingInEffect: Bool) -> Error {
-        guard case let .timedOut(after, _) = failure, signingInEffect else { return failure }
+        guard case let .timedOut(after, _, _) = failure, signingInEffect else { return failure }
         return FixupError.signingFailed(
             reason: "git rebase --autosquash did not finish within \(after) and was terminated -- "
                 + "likely a signing prompt with no way to answer it")
