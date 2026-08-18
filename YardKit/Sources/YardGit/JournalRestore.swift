@@ -318,28 +318,22 @@ public enum JournalRestore {
            entries.contains(where: { $0.id == cursor }) {
             let believed = try refsSnapshot(of: cursor, at: base, git: git)
 
-            // Scope: every ref name where `believed` (what the journal
-            // currently thinks is true) and `applied` (what this restore is
-            // about to write) AGREE -- including agreeing that neither has
-            // ever recorded it. A name where they disagree is exactly the
-            // ref this restore's own history is changing (an ordinary
-            // undo/redo across checkpoints that recorded different values,
-            // or a ref neither end ever captured), so a live mismatch there
-            // is not foreign interference to refuse -- it is the traversal
-            // itself, and refusing it would make every such step impossible
-            // (#0232). Scoping to `applied`'s own names alone is not enough:
-            // a redo target that captured "present" also captured every ref
-            // decision 20 chose to leave alone, so it would still be
-            // in scope and the guard would still refuse (measured).
-            let believedByName = Dictionary(uniqueKeysWithValues: believed.refs.map { ($0.name, $0.oid) })
-            let appliedByName = Dictionary(uniqueKeysWithValues: applied.refs.map { ($0.name, $0.oid) })
-            let scope = Set(believedByName.keys)
-                .union(appliedByName.keys)
-                .union(current.refs.map(\.name))
-                .filter { believedByName[$0] == appliedByName[$0] }
-
+            // `applied` -- not just its ref names -- is what makes this
+            // safe. A name `applied` never recorded is a name this restore
+            // will not write at all (decision 20 leaves it alone), so no
+            // live value for it is evidence of anything; a name it DOES
+            // record is refused only when the live value matches neither
+            // `believed` NOR `applied` -- matching `applied` means the write
+            // is already a no-op, matching `believed` means nothing moved
+            // since capture, and a THIRD value is the only shape a foreign
+            // tool's move can take (#0232). Scoping by name alone is not
+            // enough: a name both `believed` and `applied` record, but at
+            // different values -- an ordinary ref the traversal is itself
+            // carrying across checkpoints -- must still refuse if a foreign
+            // tool set it to something neither checkpoint recorded, and a
+            // name-only scope has no way to ask that (measured).
             let divergences = CrossToolGuard.diff(
-                recorded: believed, current: current, scope: scope)
+                recorded: believed, applied: applied, current: current)
             guard divergences.isEmpty else {
                 throw CrossToolGuard.Error.repositoryChanged(divergences: divergences)
             }

@@ -13,22 +13,21 @@ import Foundation
 /// cannot name the ref, the recorded value, and the current one is a dead end
 /// for whoever hits it.
 ///
-/// **What is compared:** the recorded `RefSnapshot` — the exact value restore
-/// would write back — against a fresh capture taken under the same listing
-/// rules. Restore (#0027) writes back only the refs its snapshot recorded and
-/// never deletes a ref created since (guide §11 decision 20), so "the set
-/// restore would touch" is exactly that snapshot's ref names, plus `HEAD`.
-/// The unscoped `diff` overload below checks the union of both sides' names
-/// instead, for a caller with no narrower notion of "what will be written."
-/// A caller that does know — `JournalRestore` does, from the snapshot it is
-/// about to apply — passes `scope`, so a ref outside it is not evidence the
-/// caller's world moved, only that some *other* ref exists that this restore
-/// will never touch (#0232). Guarding a wider set than the caller passes as
-/// `scope` would let restore clobber unguarded state, which is the failure
-/// this type exists to prevent. Pseudo-refs (`ORIG_HEAD`, `MERGE_HEAD`,
-/// `AUTO_MERGE`) are outside `for-each-ref` and outside the snapshot, so they
-/// are outside the guard; the index and worktree are the other primitives'
-/// business (#0151, #0152).
+/// **What is compared:** the recorded `RefSnapshot` — what the journal
+/// believes is currently true — against a fresh capture, but a name is only
+/// worth refusing over if it also matters to what this particular restore is
+/// about to write. Restore (#0027) writes back only the refs its snapshot
+/// recorded and never deletes a ref created since (guide §11 decision 20),
+/// so a name the restore's own target snapshot never recorded is a name this
+/// restore cannot disturb, whatever else moved it (#0232). The unscoped
+/// `diff` overload below has no such target and checks the union of both
+/// sides' names instead, for a caller with no narrower notion of "what will
+/// be written." A caller that does know — `JournalRestore` does, from the
+/// snapshot it is about to apply — passes it as `applied`, so a ref that
+/// restore will never touch is not evidence the caller's world moved.
+/// Pseudo-refs (`ORIG_HEAD`, `MERGE_HEAD`, `AUTO_MERGE`) are outside
+/// `for-each-ref` and outside the snapshot, so they are outside the guard;
+/// the index and worktree are the other primitives' business (#0151, #0152).
 ///
 /// **The value vocabulary matches the `reference-transaction` hook (#0042):**
 /// a symbolic `HEAD` reports as `ref:<target>`, everything else as an object
@@ -50,16 +49,20 @@ import Foundation
 /// no `force:` parameter here — a bypass the engine offers is a bypass an agent
 /// will find.
 ///
-/// **What is compared, and by whom.** This type is *reference-agnostic*: `diff`
-/// takes whatever snapshot the caller believes and reports divergence from the
-/// present. Choosing the reference is the composing flow's job, and
-/// `JournalRestore` supplies the **scoped chain cursor's** snapshot — the state
-/// the repository is believed to be in — never the target entry's. Comparing
-/// against the target would refuse every legitimate restore, since the diff
-/// between a checkpoint and the present is exactly the history the caller asked
-/// to revert (#0168 decision 1; #0034 decision 4 corrected 2026-08-17).
-/// `requireUnchanged` below has no production call site and exists for a caller
-/// that does hold a specific reference snapshot.
+/// **What is compared, and by whom.** This type is *reference-agnostic*:
+/// `diff` takes whatever snapshot the caller believes, whatever snapshot it
+/// is about to apply, and reports divergence from the present. Choosing both
+/// is the composing flow's job. `JournalRestore` supplies the **scoped chain
+/// cursor's** snapshot as `recorded` — the state the repository is believed
+/// to be in — and the target entry's snapshot as `applied`. Refusing whenever
+/// `current` disagrees with `recorded` alone would refuse every legitimate
+/// restore, since the diff between a checkpoint and the present is exactly
+/// the history the caller asked to revert; refusing only when `current`
+/// matches *neither* `recorded` *nor* `applied` (#0232) keeps that history
+/// walkable while still catching a third value neither side expected
+/// (#0168 decision 1; #0034 decision 4 corrected 2026-08-17). `requireUnchanged`
+/// below has no production call site and exists for a caller that does hold
+/// a specific reference snapshot.
 public enum CrossToolGuard {
 
     /// One ref whose current value is not what the journal recorded.
@@ -103,23 +106,43 @@ public enum CrossToolGuard {
     /// divergent ref name in sorted order, so the report is deterministic and
     /// two agents comparing reports see the same bytes.
     ///
-    /// Unscoped: every name either side recorded is checked. This is what a
-    /// caller uses when it has no narrower notion of "what will be written" —
-    /// `divergences(from:in:git:)` and `requireUnchanged` below both compare
-    /// the whole repository. `JournalRestore` uses the scoped overload
-    /// instead (#0232).
+    /// Unscoped: `applied` is `recorded` itself, so the per-name rule below
+    /// reduces to a plain `recorded` vs. `current` comparison for every name
+    /// either side has. This is what a caller uses when it has no narrower
+    /// notion of what a restore will write — `divergences(from:in:git:)` and
+    /// `requireUnchanged` below both compare the whole repository.
+    /// `JournalRestore` uses the three-snapshot overload instead (#0232).
     public static func diff(recorded: RefSnapshot, current: RefSnapshot) -> [Divergence] {
-        let allNames = Set(recorded.refs.map(\.name)).union(current.refs.map(\.name))
-        return diff(recorded: recorded, current: current, scope: allNames)
+        diff(recorded: recorded, applied: recorded, current: current)
     }
 
-    /// Divergences limited to `scope`, the ref names the caller is about to
-    /// write. A ref outside it cannot be disturbed by this restore, so a
-    /// change to one is not evidence that the caller's world moved under it
-    /// (#0232). `HEAD` is always checked: restore always writes it, and it
-    /// has no place in `scope`'s vocabulary of ref *names*.
+    /// Divergences that matter given what this restore will actually write.
+    /// `recorded` is the cursor's believed snapshot, `applied` is the
+    /// snapshot the restore is about to apply, `current` is the repository
+    /// now.
+    ///
+    /// For a name `applied` does not record while `recorded` does, this
+    /// restore issues no `update` command for it at all — decision 20 means
+    /// an unrecorded ref is left exactly as it is — so no live value can be
+    /// evidence of anything this restore is about to disturb, and the name
+    /// is skipped outright (#0232).
+    ///
+    /// For every other name, a divergence is reported only when `current`
+    /// matches **neither** `recorded` **nor** `applied`. Matching `applied`
+    /// means the restore's write is already a no-op for this ref — nothing
+    /// changes, nothing is lost. Matching `recorded` means nothing has moved
+    /// since the journal last verified it — including the ordinary case
+    /// where `recorded` and `applied` simply agree. Matching **neither** is
+    /// the only shape another tool's unexpected move can take, whether or
+    /// not this same ref is also one the traversal itself is carrying from
+    /// one recorded value to another.
+    ///
+    /// `HEAD` is always compared against `recorded` alone, never against
+    /// `applied`: it is unconditional, outside this per-name rule entirely,
+    /// because a restore always writes it and there is no "left alone" case
+    /// for it to fall into.
     public static func diff(
-        recorded: RefSnapshot, current: RefSnapshot, scope: Set<String>
+        recorded: RefSnapshot, applied: RefSnapshot, current: RefSnapshot
     ) -> [Divergence] {
         var divergences: [Divergence] = []
         if recorded.head != current.head {
@@ -129,14 +152,19 @@ public enum CrossToolGuard {
                 actual: value(of: current.head)
             ))
         }
-        let recordedByName = Dictionary(uniqueKeysWithValues: recorded.refs.map { ($0.name, $0.oid) })
+        let believedByName = Dictionary(uniqueKeysWithValues: recorded.refs.map { ($0.name, $0.oid) })
+        let appliedByName = Dictionary(uniqueKeysWithValues: applied.refs.map { ($0.name, $0.oid) })
         let currentByName = Dictionary(uniqueKeysWithValues: current.refs.map { ($0.name, $0.oid) })
-        for name in Set(recordedByName.keys).union(currentByName.keys).intersection(scope).sorted() {
-            let expected = recordedByName[name]
-            let actual = currentByName[name]
-            if expected != actual {
-                divergences.append(Divergence(ref: name, expected: expected, actual: actual))
-            }
+        let names = Set(believedByName.keys)
+            .union(appliedByName.keys)
+            .union(currentByName.keys)
+        for name in names.sorted() {
+            let believed = believedByName[name]
+            let target = appliedByName[name]
+            let now = currentByName[name]
+            if target == nil, believed != nil { continue }
+            guard now != believed, now != target else { continue }
+            divergences.append(Divergence(ref: name, expected: believed, actual: now))
         }
         return divergences
     }

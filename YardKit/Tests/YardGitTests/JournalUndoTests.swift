@@ -304,6 +304,64 @@ struct JournalUndoTests {
         ]))
     }
 
+    /// The hole a name-only scope leaves open (found in review): a ref the
+    /// traversal itself is carrying from one recorded value to another --
+    /// `believed` and `applied` disagree on it by construction, the same
+    /// shape `feature`/`agent-branch` take when a restore leaves them alone
+    /// -- but here the restore target ALSO records this ref, at a value of
+    /// its own. If a foreign tool moves it to a THIRD value that matches
+    /// neither checkpoint, that is not the traversal's own history; it is
+    /// exactly what the guard exists to catch, and scoping by name alone
+    /// (round 1's `believed == applied` rule) cannot see it because the name
+    /// is excluded from consideration before any value is even compared.
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func aForeignMoveToAThirdValueRefusesEvenOnARefTheTraversalItselfIsMoving(
+        format: FixtureRepository.RefFormat
+    ) throws {
+        let repo = try FixtureRepository.linear(refFormat: format)
+        defer { repo.destroy() }
+        let ctx = try context(of: repo)
+
+        // c1: main at "c" (the initial tip) -- this becomes the cursor after
+        // the first undo, and the value the guard believes is live.
+        try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+        let b = try #require(repo.oids["b"])
+        try git.run(["update-ref", "refs/heads/main", b], workingDirectory: repo.url.path)
+
+        // c2: main at "b" -- the second undo's restore TARGET, recording a
+        // DIFFERENT value for the same ref. `believed` (c1, main=c) and
+        // `applied` (c2, main=b) disagree, by construction: this is the
+        // traversal's own history moving `main`, exactly like the tests
+        // above that move `main` instead of creating a branch.
+        let c2 = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+        let a = try #require(repo.oids["a"])
+        try git.run(["update-ref", "refs/heads/main", a], workingDirectory: repo.url.path)
+
+        // First undo: present (main=a) -> c2 (main=b). Cursor nil, guard
+        // skipped -- succeeds trivially, cursor becomes c2.
+        #expect(try JournalUndo.undo(in: ctx).map(\.entry.id) == [c2.id])
+
+        // A foreign tool moves `main` to a THIRD value -- not "c" (what c1
+        // believes), not "b" (what c2's own capture, the current live
+        // value, already is before this move), and not "a" either.
+        let foreign = try unreachableCommit(in: repo, marker: "foreign")
+        try git.run(["update-ref", "refs/heads/main", foreign], workingDirectory: repo.url.path)
+
+        // Second undo: c2 -> c1. `believed` (c2, main=b) and `applied` (c1,
+        // main=c) still disagree about `main` -- that disagreement alone
+        // must not excuse the foreign move, because `current` (the foreign
+        // commit) matches NEITHER side.
+        let thrown = #expect(throws: CrossToolGuard.Error.self) {
+            try JournalUndo.undo(in: ctx)
+        }
+        #expect(try #require(thrown) == .repositoryChanged(divergences: [
+            .init(ref: "refs/heads/main", expected: b, actual: foreign),
+        ]))
+        // Nothing was written: no entry, no ref moved.
+        #expect(try scopedState(in: ctx).cursor == c2.id)
+        #expect(try ctx.resolveRef("refs/heads/main", inWorktree: nil) == foreign)
+    }
+
     // MARK: - The boundaries are ordinary
 
     @Test(arguments: FixtureRepository.RefFormat.supported())
