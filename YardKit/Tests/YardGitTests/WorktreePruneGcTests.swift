@@ -290,8 +290,59 @@ struct WorktreePruneGcTests {
         // The abandoned session that survives should point at the agentdeleted worktree.
         let abandonedEntry = try #require(abandoned.first, "the abandoned entry must exist")
         #expect(normalize(abandonedEntry.path) == normalize(agentdeletedPath.path), "the abandoned entry must be the agent-deleted worktree")
-        #expect(abandonedEntry.lockReason != nil, "abandoned session must have a recorded lock reason")
+        #expect(abandonedEntry.lockReason == "switchyard-agent:session=gone", "abandoned session's lockReason must equal the exact reason the fixture wrote, not merely be non-nil")
         #expect(abandonedEntry.removable == false, "abandoned sessions are never removable")
+    }
+
+    // MARK: - #0282 — lockReason carries the session id verbatim, per abandoned worktree
+
+    /// M1 milestone review, sixth pass, 2026-08-18, finding 7: `Report.lockReason` is the
+    /// actionable part of an abandoned-session report — it carries the session id a human or
+    /// agent uses to decide whether the session is really gone — and no prior test compared it
+    /// against the reason the fixture wrote. `WorktreePrune.swift:136` was measured to redden
+    /// under a mutation that substitutes one constant lock reason for every abandoned worktree
+    /// (`lockReason: "switchyard-agent:MUTATED"` in place of `entry.lockReason`); a single
+    /// abandoned worktree cannot distinguish that mutation from the correct value if the two
+    /// happen to differ in only one place, so this test builds two abandoned worktrees with
+    /// distinct session ids in one report and asserts each entry's `lockReason` equals its own
+    /// fixture-written reason exactly.
+    @Test func abandonedSessionLockReasonMatchesFixtureExactlyForEachOfTwoDistinctSessions() throws {
+        var repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+
+        let uuid = UUID().uuidString.prefix(8)
+        let firstReason = "switchyard-agent:session=alpha-\(uuid)"
+        let secondReason = "switchyard-agent:session=bravo-\(uuid)"
+
+        let firstPath = try repo.addWorktree(named: "abandoned1", branch: "abandoned1-\(uuid)")
+        let secondPath = try repo.addWorktree(named: "abandoned2", branch: "abandoned2-\(uuid)")
+
+        try repo.lockWorktree(firstPath, reason: firstReason)
+        try repo.lockWorktree(secondPath, reason: secondReason)
+
+        try FileManager.default.removeItem(at: firstPath)
+        try FileManager.default.removeItem(at: secondPath)
+
+        let reports = try WorktreePrune.gc(repositoryPath: repo.url.path).reports
+        let abandoned = reports.filter { $0.type == .abandonedSession }
+
+        #expect(abandoned.count == 2, "both agent-locked, directory-deleted worktrees must be reported as abandoned sessions")
+
+        let firstEntry = try #require(
+            abandoned.first { normalize($0.path) == normalize(firstPath.path) },
+            "the first abandoned worktree must be in the report")
+        let secondEntry = try #require(
+            abandoned.first { normalize($0.path) == normalize(secondPath.path) },
+            "the second abandoned worktree must be in the report")
+
+        // Each entry's lockReason must equal ITS OWN fixture-written reason, not the other
+        // entry's, and not a shared constant. A mutation returning one constant for every
+        // worktree (e.g. "switchyard-agent:MUTATED") makes both of these fail; a mutation that
+        // merely returns the *other* entry's reason also fails, since the two are asserted
+        // against distinct expected values below.
+        #expect(firstEntry.lockReason == firstReason, "the first abandoned entry must carry its own session id verbatim")
+        #expect(secondEntry.lockReason == secondReason, "the second abandoned entry must carry its own session id verbatim")
+        #expect(firstEntry.lockReason != secondEntry.lockReason, "the two abandoned entries must not share a lock reason")
     }
 
     // MARK: - gc wiring: prune flag controls second element of the tuple
