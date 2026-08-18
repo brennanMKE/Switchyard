@@ -268,34 +268,33 @@ struct WhereAmITests {
     /// of them) left the full suite green. This builds a fixture with four
     /// distinct, non-zero counts.
     ///
-    /// The counts are 1 stash, 2 untracked, 3 staged, 4 unstaged -- not the
-    /// 3-unstaged/4-staged split one might reach for first. Measured directly
-    /// with `git diff-index`, `--cached HEAD` (`stagedCount`'s probe) and
-    /// plain `HEAD` (`unstagedCount`'s probe, `WhereAmI.swift:252-258`) do not
-    /// partition the working tree into disjoint staged/unstaged sets: a path
-    /// staged via `git add`, with its working-tree copy then rewritten back
-    /// to byte-identical HEAD content (confirmed with `git hash-object`
-    /// matching `git rev-parse HEAD:<path>`), still shows `M` under plain
-    /// `HEAD`. `diff-index` without `--cached` reports every path whose index
-    /// differs from `HEAD` *plus* any path whose working tree differs from
-    /// the index -- it does not report only the latter. So every staged path
-    /// always lands in `unstagedCount`'s probe too, and `unstagedCount` can
-    /// never be smaller than `stagedCount` for a real repository. This
-    /// fixture respects that: 3 files are staged only, and those same 3 plus
-    /// 1 more file modified in the working tree only make up the 4 that
-    /// `unstagedCount` reports.
+    /// **Revised for #0262.** `unstagedCount`'s probe changed from
+    /// `git diff-index HEAD` (HEAD vs. working tree, so a file staged and
+    /// then left alone was double-counted as "unstaged" too) to
+    /// `git diff --name-only` (index vs. working tree, the correct meaning).
+    /// Under the old probe, every staged path always also landed in
+    /// `unstagedCount`, so this fixture's original 3-staged/4-unstaged pair
+    /// only existed *because of* that defect (see #0262's issue text for the
+    /// old measurements). Under the new probe the staged-only paths are
+    /// invisible to `unstagedCount`, so the fixture now uses 3 staged-only
+    /// files and 4 *disjoint* unstaged-only files to keep all four counts
+    /// distinct — `unstagedCount` no longer needs to include the staged
+    /// paths, and asserting it here confirms it does not.
     @Test func asymmetricWorkingTreeCountsReportDistinctValues() throws {
         var repo = try FixtureRepository(refFormat: .files)
         defer { repo.destroy() }
 
-        // Base commit: three files that become staged-only changes, one that
-        // becomes an unstaged-only change, and one used solely to produce
+        // Base commit: three files that become staged-only changes, four
+        // that become unstaged-only changes, and one used solely to produce
         // the stash entry.
         try repo.build([FixtureRepository.Commit("base", files: [
             "s1.txt": "s1\n",
             "s2.txt": "s2\n",
             "s3.txt": "s3\n",
-            "x1.txt": "x1\n",
+            "u1.txt": "u1\n",
+            "u2.txt": "u2\n",
+            "u3.txt": "u3\n",
+            "u4.txt": "u4\n",
             "stashfile.txt": "stashfile\n",
         ])])
 
@@ -309,7 +308,8 @@ struct WhereAmITests {
                     workingDirectory: repo.url.path)
 
         // 3 staged: modify and `git add` three distinct files, with no
-        // further edit afterward.
+        // further edit afterward -- so their working tree matches the index
+        // and the new `unstagedCount` probe must not see them.
         for name in ["s1", "s2", "s3"] {
             try "\(name)\nstaged-change\n".write(
                 to: repo.url.appendingPathComponent("\(name).txt"),
@@ -317,11 +317,12 @@ struct WhereAmITests {
             try git.run(["add", "\(name).txt"], workingDirectory: repo.url.path)
         }
 
-        // +1 unstaged-only file, never staged, on top of the 3 staged paths
-        // above -- bringing unstagedCount to 4.
-        try "x1\nunstaged-change\n".write(
-            to: repo.url.appendingPathComponent("x1.txt"),
-            atomically: true, encoding: .utf8)
+        // 4 unstaged-only files, never staged, disjoint from the staged set.
+        for name in ["u1", "u2", "u3", "u4"] {
+            try "\(name)\nunstaged-change\n".write(
+                to: repo.url.appendingPathComponent("\(name).txt"),
+                atomically: true, encoding: .utf8)
+        }
 
         // 2 untracked.
         try repo.writeUntracked([
@@ -337,17 +338,103 @@ struct WhereAmITests {
 
         let status = try git.capture(["status", "--porcelain"], workingDirectory: repo.url.path)
         let statusLines = status.text.split(separator: "\n", omittingEmptySubsequences: true)
-        #expect(statusLines.count == 6, "3 staged + 1 unstaged-only + 2 untracked")
+        #expect(statusLines.count == 9, "3 staged + 4 unstaged-only + 2 untracked")
 
         let r = try whereAmI(path: repo.url.path, git: git)
         #expect(r.stashCount == 1, "one stash entry")
         #expect(r.untrackedCount == 2, "two untracked files")
         #expect(r.stagedCount == 3, "three files staged only")
-        #expect(r.unstagedCount == 4, "the three staged paths plus the one unstaged-only path")
+        #expect(r.unstagedCount == 4,
+                "the four unstaged-only files -- the three staged-only paths must not be counted")
         #expect(
             Set([r.stashCount, r.untrackedCount, r.stagedCount, r.unstagedCount]).count == 4,
             "all four counts are pairwise distinct -- a mutation transposing any two must fail"
         )
+    }
+
+    // MARK: - Issue 0262 Required Test — staged file, clean working tree
+
+    /// The state the old `diff-index HEAD` probe could never report: a file
+    /// staged via `git add` with the working tree otherwise matching the
+    /// index. Measured, git 2.50.1: `git diff --name-only` (the new probe)
+    /// is empty here while `git diff-index --name-status HEAD` (the old one)
+    /// still reports the file as `M`. This is the whole criterion for #0262.
+    @Test func stagedFileWithCleanWorkingTreeReportsZeroUnstaged() throws {
+        var repo = try FixtureRepository(refFormat: .files)
+        defer { repo.destroy() }
+
+        try repo.build([FixtureRepository.Commit("base", files: [
+            "f.txt": "f\n",
+        ])])
+
+        try "f\nstaged-change\n".write(
+            to: repo.url.appendingPathComponent("f.txt"),
+            atomically: true, encoding: .utf8)
+        try git.run(["add", "f.txt"], workingDirectory: repo.url.path)
+
+        // Confirm the fixture state directly before trusting whereAmI's
+        // report of it: the true unstaged probe is empty, and status shows
+        // the change staged only ("M ", not " M" or "MM").
+        let trueUnstaged = try git.capture(["diff", "--name-only"], workingDirectory: repo.url.path)
+        #expect(trueUnstaged.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                "git diff --name-only reports nothing -- the working tree matches the index")
+
+        let status = try git.capture(["status", "--porcelain"], workingDirectory: repo.url.path)
+        #expect(status.text.trimmingCharacters(in: .whitespacesAndNewlines) == "M  f.txt",
+                "staged only, not also modified in the working tree")
+
+        let r = try whereAmI(path: repo.url.path, git: git)
+        #expect(r.unstagedCount == 0, "the staged file must not be counted as unstaged")
+        #expect(r.stagedCount == 1, "the file is staged")
+    }
+
+    /// `unstagedCount`'s probe, plain `git diff --name-only -z`, lists a
+    /// conflicted path *twice* -- once against each side of the conflict.
+    /// Measured directly below: the raw probe returns `f.txt` twice while
+    /// `conflictCount`'s `--diff-filter=U` returns it once. `unstagedCount`
+    /// deduplicates through a `Set` before counting so the doubled entry does
+    /// not inflate it; this test pins that so the dedup cannot silently
+    /// regress. `plain.txt` is an ordinary unstaged file, unrelated to the
+    /// conflict, so the assertion distinguishes "deduplicated to one" from
+    /// "only happened to see one path" -- if the dedup were dropped,
+    /// `unstagedCount` would read 3 (f.txt twice + plain.txt), not 2.
+    @Test func conflictedPathIsNotDoubleCountedInUnstaged() throws {
+        var repo = try FixtureRepository(refFormat: .files)
+        defer { repo.destroy() }
+
+        try repo.build([FixtureRepository.Commit("base", files: [
+            "f.txt": "original\n",
+            "plain.txt": "plain\n",
+        ])])
+        try repo.build([FixtureRepository.Commit("ours", parents: ["base"], files: [
+            "f.txt": "ours\n",
+        ])])
+        try repo.build([FixtureRepository.Commit("theirs", parents: ["base"], files: [
+            "f.txt": "theirs\n",
+        ])])
+        try repo.checkoutDetached(repo.oids["ours"]!)
+        _ = try? git.run(["merge", "--no-commit", repo.oids["theirs"]!],
+                         workingDirectory: repo.url.path)
+
+        // +1 ordinary unstaged path, never part of the conflict.
+        try "plain\nunstaged-change\n".write(
+            to: repo.url.appendingPathComponent("plain.txt"),
+            atomically: true, encoding: .utf8)
+
+        // Confirm the fixture actually reached the state this test depends
+        // on: the raw probe really does list the conflicted path twice, and
+        // the conflict machinery reports exactly one conflicted path.
+        let rawProbe = try git.capture(["diff", "--name-only", "-z"], workingDirectory: repo.url.path)
+        let rawFields = rawProbe.text.split(separator: "\0", omittingEmptySubsequences: true)
+        #expect(rawFields.filter { $0 == "f.txt" }.count == 2,
+                "git diff --name-only -z lists the conflicted path twice -- the defect this test guards")
+        #expect(rawFields.contains("plain.txt"),
+                "the ordinary unstaged file is also present in the raw probe")
+
+        let r = try whereAmI(path: repo.url.path, git: git)
+        #expect(r.conflictCount == 1, "one conflicted path")
+        #expect(r.unstagedCount == 2,
+                "the conflicted path counted once, plus the one ordinary unstaged path -- would read 3 if the doubled conflict entry were not deduplicated")
     }
 
 }
