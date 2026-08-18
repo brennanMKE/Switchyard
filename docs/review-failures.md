@@ -247,6 +247,15 @@ paths, guard clauses that skip. The question to answer is not "does the code do 
     function the evidence exercises is deliberately out of scope, say so and say why; silence reads as
     coverage.
 
+8f. **Could a pin this change relies on have gone stale — without its test or its behaviour being
+    edited?** New shape, found twice on 2026-08-18 by #0160's sixth umbrella review. A guard can stop
+    being pinned because a *neighbouring* change made a different guard fail first, so the mutation that
+    used to kill a test now gets caught earlier and the test passes for the wrong reason. Nobody touched
+    the test. Nobody touched the behaviour. The coverage is simply gone. One of the two had been
+    recorded as **live by the previous review pass, five hours earlier**. So when a change adds a guard
+    *upstream* of an existing one, re-run the existing one's mutation rather than trusting the last
+    review that saw it.
+
 9. **Is there exactly one deliverable?** Not one theme — one file, one behaviour, one thing that is
    either done or not. If the Expected behavior names more than one new production file, it is more
    than one issue.
