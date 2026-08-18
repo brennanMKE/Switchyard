@@ -64,4 +64,72 @@ struct GitStatusTests {
         #expect(entry.worktree == .untracked)
         #expect(entry.staged == .unmodified)
     }
+
+    @Test("gitStatus reports staged and unstaged states for tracked modifications")
+    func reportsStagedAndUnstagedTrackedModifications() throws {
+        let repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let git = GitProcess()
+
+        // Both files must be TRACKED before an edit reads as a modification --
+        // an uncommitted new file is `?`, not `M`. Commit both first.
+        try repo.writeUntracked([
+            "staged.txt": "original staged\n",
+            "unstaged.txt": "original unstaged\n",
+        ])
+        try git.run(["add", "staged.txt", "unstaged.txt"], workingDirectory: repo.url.path)
+        try git.run(["commit", "-q", "-m", "track staged.txt and unstaged.txt"],
+                    workingDirectory: repo.url.path)
+
+        // staged.txt: modify AND stage the modification -- the `M.` case,
+        // reported through `staged`.
+        try "staged change\n".write(
+            to: repo.url.appendingPathComponent("staged.txt"), atomically: true, encoding: .utf8)
+        try git.run(["add", "staged.txt"], workingDirectory: repo.url.path)
+
+        // unstaged.txt: modify WITHOUT staging -- the `.M` case, reported
+        // through `worktree`.
+        try "unstaged change\n".write(
+            to: repo.url.appendingPathComponent("unstaged.txt"), atomically: true, encoding: .utf8)
+
+        let status = try gitStatus(at: repo.url.path)
+
+        // Exact entry set, not merely "some entries exist" -- the linear
+        // fixture's tree is otherwise clean.
+        #expect(Set(status.entries.map(\.path)) == ["staged.txt", "unstaged.txt"])
+
+        let staged = try #require(status.entries.first(where: { $0.path == "staged.txt" }))
+        #expect(staged.staged == .modified, "a staged modification must report staged as modified")
+        #expect(staged.worktree == .unmodified, "a staged-only modification leaves the worktree side clean")
+
+        let unstaged = try #require(status.entries.first(where: { $0.path == "unstaged.txt" }))
+        #expect(unstaged.staged == .unmodified, "an unstaged modification must not report staged as modified")
+        #expect(unstaged.worktree == .modified, "an unstaged modification must report worktree as modified")
+    }
+
+    @Test("gitStatus reports the original path of a staged rename")
+    func reportsOriginalPathOfStagedRename() throws {
+        let repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let git = GitProcess()
+
+        try repo.writeUntracked(["original.txt": "content\n"])
+        try git.run(["add", "original.txt"], workingDirectory: repo.url.path)
+        try git.run(["commit", "-q", "-m", "track original.txt"], workingDirectory: repo.url.path)
+
+        // `git mv` renames on disk and stages the rename in one step -- git
+        // detects it as a `2 R.` record with no explicit `-M` needed, since
+        // the content is unchanged (measured: `status.renames` defaults on).
+        try git.run(["mv", "original.txt", "renamed.txt"], workingDirectory: repo.url.path)
+
+        let status = try gitStatus(at: repo.url.path)
+
+        #expect(status.entries.map(\.path) == ["renamed.txt"])
+
+        let renamed = try #require(status.entries.first)
+        #expect(renamed.originalPath == "original.txt")
+        #expect(renamed.originalPathBytes == Array("original.txt".utf8))
+        #expect(renamed.staged == .modified, "a rename is reported on the staged side")
+        #expect(renamed.worktree == .unmodified)
+    }
 }
