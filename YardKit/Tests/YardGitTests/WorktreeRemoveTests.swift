@@ -162,6 +162,59 @@ struct WorktreeRemoveTests {
                 "the removed worktree should no longer be listed at all")
     }
 
+    /// A worktree locked with a **non-agent** reason — the kind a human would write,
+    /// with no occurrence of the word "agent" — must be left alone.
+    /// `worktreeRemove` documents (WorktreeRemove.swift:117-120) that it releases
+    /// only agent-session locks and "leave[s] other locks alone — a human lock is
+    /// not the same as an agent session." Every other locked-worktree test in this
+    /// file locks with an agent reason, so nothing else exercises that half of the
+    /// condition. This test reddens under the mutation that replaces
+    /// `reason.contains("agent")` with a tautology, while the agent-lock tests
+    /// above stay green.
+    @Test("leaves a human lock in place and refuses removal", arguments: FixtureRepository.RefFormat.supported())
+    func leavesHumanLockAlone(format: FixtureRepository.RefFormat) throws {
+        var fixture = try FixtureRepository(refFormat: format)
+
+        let worktreeURL: URL = try fixture.addWorktree(named: "human-locked-wt", branch: "main")
+        try fixture.lockWorktree(worktreeURL, reason: "reviewed by Brennan, keep until sign-off")
+
+        let git = GitProcess()
+        let repoPath = try repoPath(for: fixture, git: git)
+
+        #expect(exists(at: worktreeURL))
+
+        let result: WorktreeRemoveResult = try worktreeRemove(
+            at: repoPath,
+            worktreeURL.path,
+            git: git
+        )
+
+        #expect(!result.success, "a human-locked worktree must not be removed")
+        #expect(!result.lockedRelease, "a non-agent lock must not be released")
+        #expect(exists(at: worktreeURL), "worktree directory should still exist after refusal")
+
+        // Measured directly: `git worktree remove` on a locked worktree exits 128
+        // with "fatal: cannot remove a locked working tree, lock reason: <reason>
+        // \nuse 'remove -f -f' to override or unlock first" -- a different message
+        // than the dirty-worktree case, and one that does not end in "use --force
+        // to delete it", so `extractDirtyPaths` finds no path list to parse and the
+        // refusal surfaces as `.unclean` with an empty path array rather than
+        // `.unknownFailure`.
+        if case let .unclean(paths) = result.error {
+            #expect(paths.isEmpty, "git's locked-worktree message carries no dirty-path list to parse")
+        } else {
+            Issue.record("expected .unclean(paths: []) for a refused locked removal, got \(String(describing: result.error))")
+        }
+
+        // The worktree entry is still listed, and still shows the lock in place.
+        let entries = try worktreeList(path: repoPath, git: git)
+        guard let entry = entries.first(where: { ($0.path ?? "").hasSuffix(worktreeURL.lastPathComponent) }) else {
+            Issue.record("worktree entry should still be listed after a refused removal")
+            return
+        }
+        #expect(entry.locked, "the human lock should still be present")
+    }
+
     /// When releasing an agent lock fails for real, the caller sees git's own
     /// stderr in `.lockFailed`'s `detail` — not Foundation's generic
     /// `localizedDescription` fallback (#0195). We force a genuine failure by
