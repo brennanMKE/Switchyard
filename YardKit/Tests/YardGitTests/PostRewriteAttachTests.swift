@@ -1933,4 +1933,117 @@ struct PostRewriteAttachTests {
         #expect(error is GitProcess.Failure,
                 "the body's own error must survive a failed entry-id write, not a file-system error")
     }
+
+    /// #0286 round 2: the same principle extends to the two throwing calls
+    /// immediately above the write -- `SequencerSnapshot.capture` and
+    /// `context.path`, both plumbing through `git`. Either failing would
+    /// replace the body's error exactly as the write did, so both are now
+    /// guarded (`try?`) in the `if let` chain that decides whether to write
+    /// at all.
+    ///
+    /// Made to fail deterministically without touching production code, and
+    /// without the `chmod` trick above: `context.path`'s only failure mode
+    /// is `git rev-parse --git-path` itself failing, so this fixture routes
+    /// `around` through a `git` shim that forwards every invocation to real
+    /// `/usr/bin/git` -- including the real conflicting `--apply` rebase the
+    /// body runs, and including `SequencerSnapshot.capture`'s own
+    /// `--git-path` calls for `rebase-merge`/`rebase-apply`/`AUTO_MERGE` --
+    /// except the one whose `--git-path` argument names
+    /// `RepositoryLayout.sequencerEntryIDFileName`, which it fails outright.
+    /// That is exactly, and only, the call `around`'s catch makes to resolve
+    /// where the entry id would be written.
+    @Test func aFailedGitPathResolutionDoesNotReplaceTheBodysError() throws {
+        var repo = try FixtureRepository(refFormat: .files)
+        defer { repo.destroy() }
+
+        // c1, on main: f = "a"
+        try "a\n".write(to: repo.url.appendingPathComponent("f"),
+                        atomically: true, encoding: .utf8)
+        try git.run(["add", "-A"], workingDirectory: repo.url.path)
+        try git.run(["commit", "-qm", "c1"], workingDirectory: repo.url.path,
+                    extraEnvironment: hermetic)
+
+        // A side branch off c1.
+        try git.run(["checkout", "-qb", "side"], workingDirectory: repo.url.path,
+                    extraEnvironment: hermetic)
+
+        // c2, back on main: f = "b" -- main moves past c1 on the same line.
+        try git.run(["checkout", "-q", "main"], workingDirectory: repo.url.path,
+                    extraEnvironment: hermetic)
+        try "b\n".write(to: repo.url.appendingPathComponent("f"),
+                        atomically: true, encoding: .utf8)
+        try git.run(["commit", "-qam", "c2"], workingDirectory: repo.url.path,
+                    extraEnvironment: hermetic)
+
+        // c3, on side: f = "c" -- a conflicting edit to the same line.
+        try git.run(["checkout", "-q", "side"], workingDirectory: repo.url.path,
+                    extraEnvironment: hermetic)
+        try "c\n".write(to: repo.url.appendingPathComponent("f"),
+                        atomically: true, encoding: .utf8)
+        try git.run(["commit", "-qam", "c3"], workingDirectory: repo.url.path,
+                    extraEnvironment: hermetic)
+
+        // A shim that is real git for everything except the one `--git-path`
+        // name this issue is about -- forwarding, not stubbing, so the
+        // fixture's own conflicting rebase and `SequencerSnapshot.capture`'s
+        // other lookups behave exactly as they do against real git.
+        let shimDir = NSTemporaryDirectory() + "yard-shim-\(UUID().uuidString)"
+        try FileManager.default.createDirectory(
+            atPath: shimDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: shimDir) }
+        let shimPath = shimDir + "/git-shim.sh"
+        let script = """
+        #!/bin/sh
+        case "$*" in
+          *--git-path*\(RepositoryLayout.sequencerEntryIDFileName)*) exit 1 ;;
+          *) exec /usr/bin/git "$@" ;;
+        esac
+        """
+        try script.write(toFile: shimPath, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: shimPath)
+        let flakyGit = GitProcess(executablePath: shimPath)
+
+        var caught: Error?
+        do {
+            _ = try JournalCheckpoint.around(
+                operation: "apply-backend-path-failure", at: repo.url.path, git: flakyGit
+            ) { scoped in
+                try scoped.run(["rebase", "--apply", "main"], workingDirectory: repo.url.path,
+                               extraEnvironment: hermetic)
+            }
+            Issue.record("expected around to rethrow the body's error")
+        } catch {
+            caught = error
+        }
+
+        // Both the body's own conflict and the shim's induced failure throw
+        // `GitProcess.Failure`, so the type alone cannot tell them apart --
+        // `arguments` can: only the body's real `rebase --apply` command
+        // names `"rebase"` as an element, and only the shim-failed
+        // resolution names `"--git-path"`.
+        let error = try #require(caught, "around must rethrow something")
+        guard case let .exited(_, _, arguments) = try #require(error as? GitProcess.Failure) else {
+            Issue.record("expected a GitProcess.Failure(.exited), got \(error)")
+            return
+        }
+        #expect(arguments.contains("rebase"),
+                "the body's own conflicting rebase must be what around rethrows")
+        #expect(!arguments.contains("--git-path"),
+                "the git-path resolution's own failure must not have replaced the body's error")
+
+        // The shim's fail branch was genuinely exercised, not merely
+        // present: the sequencer is still findable through real git (the
+        // shim only fails the one name this issue is about), and no
+        // entry-id file exists at the path `around` never resolved.
+        let context = try WorktreeContext.resolve(path: repo.url.path)
+        defer { _ = try? SequencerSnapshot.clear(in: context, git: git) }
+        let sequencer = try #require(try SequencerSnapshot.capture(in: context, git: git))
+        #expect(sequencer.layout == .rebaseApply)
+        let entryIDPath = try context.path(
+            for: sequencer.layout.rawValue + "/" + RepositoryLayout.sequencerEntryIDFileName,
+            git: git)
+        #expect(!FileManager.default.fileExists(atPath: entryIDPath),
+                "no file can exist at a path around never successfully resolved")
+    }
 }
