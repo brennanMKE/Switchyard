@@ -342,7 +342,7 @@ public extension JournalCheckpoint {
                     for: sequencerNow.layout.rawValue + "/"
                         + RepositoryLayout.sequencerEntryIDFileName,
                     git: git)
-                try entry.id.string.write(
+                try? entry.id.string.write(
                     toFile: entryIDPath, atomically: true, encoding: .utf8)
             }
             throw error

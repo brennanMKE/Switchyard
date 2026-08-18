@@ -1843,4 +1843,94 @@ struct PostRewriteAttachTests {
         #expect(!FileManager.default.fileExists(atPath: pendingPath),
                 "the in-flight file must be removed once its attach succeeds")
     }
+
+    // MARK: - #0286: a failed entry-id write must not replace the body's error
+
+    /// `around`'s catch writes the in-flight entry id with `try?` — a failed
+    /// write degrades to no-attach, the same safe degradation every other
+    /// path in this mechanism takes, and the body's own error is rethrown
+    /// intact. Before this issue the `try` was unguarded, so a permission
+    /// failure on that write replaced whatever the body threw --
+    /// `FixupError.blockedOnConflicts`, which tells the caller the rebase is
+    /// resumable and how, discarded in favour of a file-system error the
+    /// caller can do nothing with.
+    ///
+    /// Made to fail deterministically without touching production code: the
+    /// body runs a real conflicting `--apply` rebase (mirroring
+    /// `aConflictingApplyBackendRebaseWritesAndReadsTheEntryIDFromRebaseApply`
+    /// above, which confirms `rebase-apply/` is genuinely live once this
+    /// call throws), and once that call has failed -- so `rebase-apply/`
+    /// already exists on disk -- strips the directory's write bit before
+    /// rethrowing. `around`'s catch still finds the sequencer live (reading
+    /// it needs no write permission) and still attempts the entry-id write,
+    /// which now fails with a permission error instead of succeeding. The
+    /// permissions are restored before the fixture is torn down.
+    @Test func aFailedEntryIDWriteDoesNotReplaceTheBodysError() throws {
+        var repo = try FixtureRepository(refFormat: .files)
+        defer { repo.destroy() }
+
+        // c1, on main: f = "a"
+        try "a\n".write(to: repo.url.appendingPathComponent("f"),
+                        atomically: true, encoding: .utf8)
+        try git.run(["add", "-A"], workingDirectory: repo.url.path)
+        try git.run(["commit", "-qm", "c1"], workingDirectory: repo.url.path,
+                    extraEnvironment: hermetic)
+
+        // A side branch off c1.
+        try git.run(["checkout", "-qb", "side"], workingDirectory: repo.url.path,
+                    extraEnvironment: hermetic)
+
+        // c2, back on main: f = "b" -- main moves past c1 on the same line.
+        try git.run(["checkout", "-q", "main"], workingDirectory: repo.url.path,
+                    extraEnvironment: hermetic)
+        try "b\n".write(to: repo.url.appendingPathComponent("f"),
+                        atomically: true, encoding: .utf8)
+        try git.run(["commit", "-qam", "c2"], workingDirectory: repo.url.path,
+                    extraEnvironment: hermetic)
+
+        // c3, on side: f = "c" -- a conflicting edit to the same line.
+        try git.run(["checkout", "-q", "side"], workingDirectory: repo.url.path,
+                    extraEnvironment: hermetic)
+        try "c\n".write(to: repo.url.appendingPathComponent("f"),
+                        atomically: true, encoding: .utf8)
+        try git.run(["commit", "-qam", "c3"], workingDirectory: repo.url.path,
+                    extraEnvironment: hermetic)
+
+        let context = try WorktreeContext.resolve(path: repo.url.path)
+        let applyDir = try context.path(for: "rebase-apply")
+        defer {
+            // Restore the write bit so `repo.destroy()` can remove the tree.
+            _ = try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o755], ofItemAtPath: applyDir)
+        }
+
+        var caught: Error?
+        do {
+            _ = try JournalCheckpoint.around(
+                operation: "apply-backend-write-failure", at: repo.url.path
+            ) { scoped in
+                do {
+                    try scoped.run(["rebase", "--apply", "main"], workingDirectory: repo.url.path,
+                                   extraEnvironment: hermetic)
+                } catch {
+                    // `--apply` has already replayed `c3` onto main's `c2`,
+                    // conflicted, and left `rebase-apply/` on disk -- strip
+                    // its write bit before rethrowing, so `around`'s catch
+                    // can still find the sequencer live but cannot write
+                    // into it.
+                    #expect(FileManager.default.fileExists(atPath: applyDir))
+                    try FileManager.default.setAttributes(
+                        [.posixPermissions: 0o500], ofItemAtPath: applyDir)
+                    throw error
+                }
+            }
+            Issue.record("expected around to rethrow the body's error")
+        } catch {
+            caught = error
+        }
+
+        let error = try #require(caught, "around must rethrow something")
+        #expect(error is GitProcess.Failure,
+                "the body's own error must survive a failed entry-id write, not a file-system error")
+    }
 }
