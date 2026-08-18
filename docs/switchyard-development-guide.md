@@ -662,7 +662,12 @@ documented. This validates the engine and settles the response contract.
 - [ ] `swift test` is green, and every engine function has tests that can fail: each has a mutation
       recorded against a named test that dies under it. **The 2026-08-17 review found this unmet for
       `gitStatus` alone** — thirteen of fourteen mutations killed a named test, both on `gitStatus`
-      survived. Filed as **#0245**; M1's clean-review count restarts when it resolves.
+      survived. Filed as **#0245**; M1's clean-review count restarts when it resolves. **Passes 2, 3
+      and 4 each found the same shape again in a different function** — #0247 (`whereAmI`'s upstream
+      block), #0259 (its four count fields), and then #0265, #0266, #0267 together. *A field only ever
+      asserted at its zero value, in a fixture that cannot produce anything else* is what this criterion
+      is for, and #0259's fix immediately exposed a real production bug (#0262), which is the argument
+      for keeping the hunt going rather than declaring the criterion met.
 
 **Reachability from the CLI is M3's criterion, not M1's** — decided 2026-08-07, §11 decision 11. The
 two are separated because guide §5 has the CLI marshal over XPC and never link `YardGit`, and the XPC
