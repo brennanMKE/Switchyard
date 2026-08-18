@@ -352,6 +352,26 @@ struct CommitLogTests {
         #expect(trailers.count == 2)
     }
 
+    // The milestone-review measured defect (#0313): a colon-shaped prose
+    // paragraph *before* the real trailer block used to make the old
+    // first-blank-line lookahead latch onto it as "the" separator, so
+    // `Trailer.parse` rejected "Because the API: it changed." (its key
+    // contains whitespace) and broke before ever reaching the real trailer
+    // block below it. Git's rule is that the trailer block is the body's
+    // LAST paragraph -- this must find `Agent-Name` regardless of the prose
+    // paragraph above it.
+    @Test func trailersParsingFindsRealTrailerBlockAfterColonShapedProse() {
+        let body = """
+            Fix the thing
+
+            Because the API: it changed.
+
+            Agent-Name: tool
+        """
+        let trailers = CommitLog.parseTrailerBlock(from: body)
+        #expect(trailers == [Trailer(key: "Agent-Name", value: "tool")])
+    }
+
     // MARK: - CommitLog.run — end-to-end with multi-line, merge, non-ASCII, trailers
 
     @Test(arguments: FixtureRepository.RefFormat.supported())
@@ -652,6 +672,45 @@ struct CommitLogTests {
         try repo.build([
             FixtureRepository.Commit("a", message: noProvenance),
             FixtureRepository.Commit("b", message: realProvenance)
+        ])
+
+        let filtered = try CommitLog.run(path: repo.url.path, rangeArguments: ["HEAD"],
+                                          options: .agentOnly)
+
+        #expect(filtered.count == 1)
+        #expect(filtered.first?.oid == repo.oids["b"])
+        #expect(!filtered.contains(where: { $0.oid == repo.oids["a"] }))
+    }
+
+    // MARK: - Trailer block is the last paragraph, not the first colon-shaped one (#0313)
+
+    // The `agentOnly` consequence of the milestone-review defect: a commit
+    // whose body contains a colon-shaped prose paragraph *before* its real
+    // trailer block must still be returned by an `agentOnly` query -- the old
+    // first-blank-line lookahead latched onto the prose paragraph, `trailers`
+    // came back empty, and the commit was silently dropped despite carrying
+    // real provenance. This is the mirror image of
+    // `agentOnlyExcludesCommitWhereAgentShapedLineIsBodyProseNotATrailer`
+    // above (#0305): that one pins prose-before-trailers must NOT count as a
+    // trailer; this one pins a real trailer block AFTER prose must still be
+    // found.
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func agentOnlyIncludesCommitWhereRealTrailerBlockFollowsColonShapedProse(format: FixtureRepository.RefFormat) throws {
+        var repo = try FixtureRepository(refFormat: format)
+        defer { repo.destroy() }
+
+        let provenance = """
+        Fix the thing
+
+        Because the API: it changed.
+
+        Agent-Name: tool
+        """
+        let noProvenance = "Unrelated commit\n\nJust a normal change."
+
+        try repo.build([
+            FixtureRepository.Commit("a", message: noProvenance),
+            FixtureRepository.Commit("b", message: provenance)
         ])
 
         let filtered = try CommitLog.run(path: repo.url.path, rangeArguments: ["HEAD"],
