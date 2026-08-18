@@ -300,6 +300,18 @@ public extension JournalCheckpoint {
         _ body: (GitProcess) throws -> T
     ) throws -> T {
         let context = try WorktreeContext.resolve(path: path, git: git)
+        // #0261: a slot left by an operation that has since ended -- an
+        // out-of-band `git rebase --abort` is the reachable case -- names a
+        // live ENTRY long after its operation is gone, and #0254's
+        // first-writer-wins check would then refuse THIS call the slot and
+        // divert its rewrite onto the older entry (measured). Nothing is live
+        // yet at this point in the call, so an existing slot here is stale by
+        // construction.
+        if try SequencerSnapshot.capture(in: context, git: git) == nil {
+            let pendingPath = try context.path(
+                for: RepositoryLayout.inFlightEntryIDRelativePath, git: git)
+            try? fileManager.removeItem(atPath: pendingPath)
+        }
         let entry = try checkpoint(
             operation: operation, command: command, agent: agent,
             in: context, git: git)
