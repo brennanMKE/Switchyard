@@ -219,6 +219,14 @@ paths, guard clauses that skip. The question to answer is not "does the code do 
     exercises a fake of it proves the fake. #0218 round 1 landed exactly that, and the mutation that
     exposed it was made on the shipped file rather than on the test's helper.
 
+0d. **Does any test reconstruct something production owns — a fake that reimplements a method, or an
+    encoder configured to match one?** If so, the mutation that matters is on the **production** copy,
+    and it will usually come back green. Two instances on 2026-08-17: #0218's `FakeAppService.perform`
+    mirrored the app's method, and #0235's wire tests built their own `JSONEncoder` matching `record`'s.
+    Both pinned something real and neither pinned the criterion. The fix is the same both times — call
+    the production path and assert what it produced, moving the body into a reachable place if that is
+    what it takes.
+
 9. **Is there exactly one deliverable?** Not one theme — one file, one behaviour, one thing that is
    either done or not. If the Expected behavior names more than one new production file, it is more
    than one issue.
