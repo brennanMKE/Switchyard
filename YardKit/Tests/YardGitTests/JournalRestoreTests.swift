@@ -837,6 +837,104 @@ struct JournalRestoreTests {
         #expect(try RefSnapshot.capture(in: ctx) == stateBefore)
     }
 
+    // MARK: - Step 6 is scoped to what actually gets applied (#0260)
+
+    /// #0251 narrowed step 6's object-existence check from the recorded
+    /// snapshot to the snapshot actually applied (`toApply`, after step 5
+    /// drops a live sibling's held branch into `leftAlone`) — but nothing
+    /// pinned it (#0260).
+    ///
+    /// **Why this cannot reuse the annotated-tag route.** The obvious way to
+    /// reach "recorded but gone" is the one the type comment already
+    /// documents and `aReclaimedTagObjectRefusesRestoreBeforeAnythingMutates`
+    /// already pins: an annotated tag *object*, whose peeled commit
+    /// `JournalCheckpoint`'s keep-alive parents preserve but whose tag object
+    /// itself they do not (#0167 decision 4). Pointing `refs/heads/agent-
+    /// branch` at that tag object directly, via `update-ref`, was tried and
+    /// measured to fail: `fatal: update_ref failed for ref 'refs/heads/
+    /// agent-branch': trying to write non-commit object <oid> to branch
+    /// 'refs/heads/agent-branch'` — git 2.50.1 refuses a non-commit value on
+    /// any `refs/heads/*` ref outright, so a branch can never end up
+    /// recording a tag object's oid. And a **commit** a branch legitimately
+    /// records can never go missing on its own: `keepAliveParents` peels
+    /// every captured ref (already a commit, for a branch) into a parent of
+    /// the very entry recording it, so as long as that entry stays
+    /// restorable, its own recorded commit stays reachable through it —
+    /// structurally, not incidentally. No `git gc`, however aggressive, can
+    /// reclaim an object that is a parent of a commit a surviving ref still
+    /// points to.
+    ///
+    /// **What this constructs instead.** A commit reachable from nothing
+    /// (`unreachableCommit`, same helper the tag test uses) is recorded as
+    /// `agent-branch`'s oid, checkpointed normally, then the branch is moved
+    /// off it with plumbing. The commit is left dangling only as a keep-alive
+    /// *parent* of the entry's own commit — real, but never walked by
+    /// anything this test or the engine runs — so directly removing its
+    /// loose object file (never packed: `gc.auto=0` per `FixtureRepository`,
+    /// and nothing between its creation and this deletion could have
+    /// repacked it) genuinely deletes it from the object database, exactly
+    /// as `git cat-file -e` below confirms before restore runs. The path is
+    /// resolved via `git rev-parse --git-path`, never by concatenating onto
+    /// `.git/` — the same rule production code follows, so this still works
+    /// on `reftable`, where object storage is unaffected by the ref-format
+    /// choice. A live sibling still holds `agent-branch`, so step 5 drops it
+    /// into `leftAlone` before step 6 ever inspects its recorded, now-gone
+    /// oid — restore must succeed and never throw `Error.unrestorableObjects`.
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func aLiveSiblingsRecordedButDeletedObjectDoesNotBlockRestore(
+        format: FixtureRepository.RefFormat
+    ) throws {
+        var repo = try FixtureRepository.linear(refFormat: format)
+        defer { repo.destroy() }
+        try repo.addWorktree(named: "agent", branch: "agent-branch")
+        let ctx = try context(of: repo)
+
+        // A commit reachable from nothing else, so nothing but
+        // `agent-branch` names it once it is assigned below.
+        let victim = try unreachableCommit(in: repo, marker: "sibling \(format.rawValue)")
+        // `git branch -f` refuses on a branch a linked worktree has checked
+        // out; `update-ref` has no such restriction (same reasoning as
+        // `FixtureRepository.branch`). `victim` is a real commit, so unlike
+        // the tag-object attempt above, git accepts this write.
+        try git.run(["update-ref", "refs/heads/agent-branch", victim],
+                    workingDirectory: repo.url.path)
+
+        // The checkpoint records `agent-branch` at `victim`.
+        let entry = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+
+        // Move the sibling's branch off `victim` with plumbing (#0044) — the
+        // same move the sibling-disturbance tests make — so no *ref* names
+        // it any more. (It survives only as a keep-alive parent of `entry`'s
+        // own commit until the next step removes it directly.)
+        let movedTo = try #require(repo.oids["a"])
+        try git.run(["update-ref", "refs/heads/agent-branch", movedTo],
+                    workingDirectory: repo.url.path)
+
+        // Delete `victim`'s loose object file directly — the one operation
+        // that can remove it while `entry` still carries it as a keep-alive
+        // parent, since no porcelain command reclaims a reachable object.
+        // Path resolved through `git rev-parse --git-path`, never by
+        // concatenating onto `.git/` (CLAUDE.md), so this works identically
+        // under `reftable`.
+        let objectPath = try #require(try git.run(
+            ["rev-parse", "--path-format=absolute", "--git-path",
+             "objects/\(victim.prefix(2))/\(victim.dropFirst(2))"],
+            workingDirectory: repo.url.path).lines.first)
+        try #require(FileManager.default.fileExists(atPath: objectPath))
+        try FileManager.default.removeItem(atPath: objectPath)
+
+        // Measured, before restore runs: the recorded oid is genuinely gone.
+        let probe = try git.capture(["cat-file", "-e", victim], workingDirectory: repo.url.path)
+        try #require(probe.exitCode != 0)
+
+        let report = try JournalRestore.restore(entry.id, in: ctx)
+
+        #expect(report.leftAlone == ["refs/heads/agent-branch"])
+        // Left exactly where the sibling's own move put it, not the
+        // checkpoint's (now-unrestorable) recorded value.
+        #expect(try ctx.resolveRef("refs/heads/agent-branch", inWorktree: nil) == movedTo)
+    }
+
     // MARK: - The pruned-cursor degradation
 
     /// #0179 — the cursor points at an entry that pruning has since deleted.
