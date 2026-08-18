@@ -73,4 +73,72 @@ struct WhereAmIWireTests {
         let result = try #require(object["result"] as? [String: Any])
         #expect(result["branch"] as? String == "main")
     }
+
+    // MARK: - Binding the schema to the type (#0194)
+
+    /// `YardKit/Schemas/whereami.json`, resolved from this file's compile-time
+    /// path: `Tests/YardWireTests/WhereAmIWireTests.swift` → up three → package
+    /// root → `Schemas/whereami.json`.
+    private static let whereamiSchemaURL = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()   // YardWireTests
+        .deletingLastPathComponent()   // Tests
+        .deletingLastPathComponent()   // YardKit (package root)
+        .appendingPathComponent("Schemas", isDirectory: true)
+        .appendingPathComponent("whereami.json")
+
+    /// Extracts the payload field names the generated schema declares, from
+    /// `envelope.success.result.fields[].name`.
+    private static func schemaPayloadFieldNames() throws -> Set<String> {
+        let data = try Data(contentsOf: whereamiSchemaURL)
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let envelope = try #require(object["envelope"] as? [String: Any])
+        let success = try #require(envelope["success"] as? [String: Any])
+        let result = try #require(success["result"] as? [String: Any])
+        let fields = try #require(result["fields"] as? [[String: Any]],
+                                   "whereami.json's result must declare a real field list, not the self-reference")
+        let names = fields.compactMap { $0["name"] as? String }
+        #expect(names.count == fields.count, "every declared field must have a string name")
+        return Set(names)
+    }
+
+    /// The binding that makes the schema true rather than decorative
+    /// (#0194): the field names `whereami.json` declares must be **exactly**
+    /// the keys a fully-populated `WhereAmI` actually encodes — no more, no
+    /// fewer. A hand-written schema and a hand-written wire literal can each
+    /// drift from the type independently; this test reads the generated file
+    /// off disk, so it catches drift in either direction.
+    ///
+    /// Mutation A — add a field to `CommandRegistry.whereamiSpec`'s payload
+    /// that `WhereAmI` does not encode (e.g. a fictitious `"bogus"` field),
+    /// regenerate the schema, and this test reddens: the schema's field-name
+    /// set gains `"bogus"`, which the encoded JSON never has.
+    ///
+    /// Mutation B — remove one real field from `whereamiSpec`'s payload (e.g.
+    /// drop `"rawHead"`), regenerate the schema, and this test reddens the
+    /// other way: the encoded JSON still has `"rawHead"`, which the schema's
+    /// field-name set no longer does.
+    @Test func schemaFieldNamesMatchTheEncodedKeysExactly() throws {
+        let value = WhereAmI(
+            branch: "main", upstream: "origin/main", ahead: 2, behind: 1,
+            isMidRebase: false, isMidMerge: true, isMidCherryPick: false,
+            stashCount: 3, untrackedCount: 4, unstagedCount: 5, stagedCount: 6,
+            hasConflicts: true, conflictCount: 7,
+            headOID: "a1b2c3d",
+            rawHead: "a1b2c3d4e5f6a7b8c9d0a1b2c3d4e5f6a7b8c9d0")
+        let encodedKeys = try topLevelKeys(ofJSON: wireJSON(value))
+        #expect(!encodedKeys.isEmpty, "a fully-populated value must encode at least one key")
+
+        let schemaFieldNames = try Self.schemaPayloadFieldNames()
+        #expect(!schemaFieldNames.isEmpty, "whereami.json must declare at least one payload field")
+
+        #expect(schemaFieldNames == encodedKeys,
+                "schema declares \(schemaFieldNames.sorted()); the type encodes \(encodedKeys.sorted())")
+    }
+}
+
+/// Top-level key set of a JSON object given as text.
+private func topLevelKeys(ofJSON text: String) throws -> Set<String> {
+    let object = try JSONSerialization.jsonObject(with: Data(text.utf8))
+    let dictionary = try #require(object as? [String: Any], "expected a JSON object")
+    return Set(dictionary.keys)
 }
