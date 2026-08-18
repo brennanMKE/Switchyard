@@ -107,7 +107,12 @@ struct WorktreeDisturbanceTests {
         #expect(error.exitClass == .repositoryError)
     }
 
-    @Test func aSnapshotPredatingTheWorktreeReportsTheDeletion() throws {
+    // A snapshot taken before the sibling's branch existed never recorded
+    // it. Before guide §11 decision 20, restore deleted every ref absent
+    // from the snapshot, so this was reported as a disturbance (the
+    // deletion); after decision 20, restore leaves an unrecorded ref alone,
+    // so a live sibling standing on it is not disturbed at all (#0244).
+    @Test func aSnapshotPredatingTheWorktreeNeverDisturbsItsLiveCheckout() throws {
         var repo = try FixtureRepository.linear()
         defer { repo.destroy() }
         let recorded = try capture(at: repo.url.path)
@@ -115,13 +120,15 @@ struct WorktreeDisturbanceTests {
         defer { try? FileManager.default.removeItem(at: wt) }
         let c = try #require(repo.oids["c"])
 
-        // Restore would DELETE refs/heads/agent-branch (#0027's union
-        // restore) — under the sibling's checkout.
-        let report = try disturbances(restoring: recorded, at: repo.url.path)
-        #expect(report == [WorktreeDisturbance.Disturbance(
-            worktreePath: wt.path, branch: "refs/heads/agent-branch",
-            current: c, target: nil, prunable: false)])
-        #expect(report[0].target == nil)
+        // The snapshot never mentions refs/heads/agent-branch, so restoring
+        // it cannot move or delete that branch (decision 20) — the sibling's
+        // checkout is not a disturbance.
+        #expect(try disturbances(restoring: recorded, at: repo.url.path).isEmpty)
+
+        // Restoring for real leaves the branch exactly where it was.
+        try recorded.restore(in: WorktreeContext.resolve(path: repo.url.path))
+        #expect(try line(of: ["rev-parse", "refs/heads/agent-branch"],
+                         at: repo.url.path) == c)
     }
 
     // MARK: - What is deliberately not a disturbance
@@ -218,6 +225,31 @@ struct WorktreeDisturbanceTests {
             .init(worktreePath: "/w/zebra", branch: "refs/heads/z-branch",
                   current: nil, target: y, prunable: false),
         ])
+    }
+
+    // A ref present on the current side but absent from `recorded` entirely
+    // (not merely differing in oid) is never a disturbance: restore only
+    // ever writes refs it recorded (decision 20), so it cannot touch this
+    // one however live the sibling's checkout is. This exercises the pure
+    // function directly, distinct from the empty-repository probe above.
+    @Test func aBranchTheSnapshotNeverMentionsIsNeverADisturbance() throws {
+        let x = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        func entry(_ path: String, branch: String) -> WorktreeEntry {
+            WorktreeEntry(path: path, head: x, branch: branch,
+                          locked: false, lockReason: nil, bare: false,
+                          detached: false, prunable: false,
+                          prunableReason: nil, isMainWorktree: false)
+        }
+        let recorded = RefSnapshot(
+            head: .symbolic(target: "refs/heads/main"), refs: [])
+        let current = RefSnapshot(
+            head: .symbolic(target: "refs/heads/main"),
+            refs: [.init(name: "refs/heads/agent-branch", oid: x)])
+        let report = WorktreeDisturbance.disturbances(
+            restoring: recorded, current: current,
+            worktrees: [entry("/w/sibling", branch: "agent-branch")],
+            callerPath: "/w/caller")
+        #expect(report.isEmpty)
     }
 
     // MARK: - detachingHeldHead: detach on collision (#0211, guide §11 decision 16)
