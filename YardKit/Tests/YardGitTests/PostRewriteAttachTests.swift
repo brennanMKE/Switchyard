@@ -24,21 +24,44 @@ private let hermetic = ["GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_SYSTEM": "
 
 /// Installs a `post-rewrite` hook that logs, for one invocation: the hook's
 /// argument, `GitProcess.entryVariable`'s value (empty line when unset),
-/// `GitProcess.markerVariable`'s value (empty line when unset), then stdin
-/// verbatim. The hooks directory is resolved through
-/// `WorktreeContext.path(for:)` — `git rev-parse --git-path hooks` — never
-/// by string concatenation onto `.git/`.
+/// `GitProcess.markerVariable`'s value (empty line when unset), whether a
+/// resumable rebase is present *at the instant the hook fires* (#0253; see
+/// `LoggedInvocation.resumable`), then stdin verbatim. The hooks directory is
+/// resolved through `WorktreeContext.path(for:)` — `git rev-parse
+/// --git-path hooks` — never by string concatenation onto `.git/`.
 private func installLoggingPostRewriteHook(in repo: FixtureRepository, loggingTo log: URL) throws {
     let context = try WorktreeContext.resolve(path: repo.url.path)
     let hooksDir = try context.path(for: "hooks")
     try FileManager.default.createDirectory(
         atPath: hooksDir, withIntermediateDirectories: true)
     let hookPath = hooksDir + "/post-rewrite"
+    // The sequencer check mirrors `SequencerSnapshot.capture`'s own two
+    // layouts (rebase-merge, rebase-apply), resolved through `git rev-parse
+    // --git-path` exactly as the Swift side resolves it -- never string
+    // concatenation onto `.git/`. This runs *inside* the hook's own
+    // subprocess, which git spawns and waits on before it tears down the
+    // sequencer directory (measured, git 2.50.1: `rebase-merge` is still
+    // present when the hook fires, for both the mid-rebase `amend` and the
+    // final `rebase` invocation; it is gone only after the hook returns and
+    // the owning `git rebase --continue` process exits). A check made later,
+    // from Swift code running after that process has already exited, can
+    // never observe this -- the directory is provably gone by then, no
+    // matter how quickly Swift asks (measured with a direct `FileManager`
+    // probe on this exact fixture). Capturing the answer here, at the only
+    // moment it is knowable, is what `JournalCheckpoint.attachRewrite`'s
+    // `stillInProgress` parameter exists to receive.
     let script = """
     #!/bin/sh
     printf '=I= %s\\n' "$1" >> "\(log.path)"
     printf '=E= %s\\n' "${\(GitProcess.entryVariable):-}" >> "\(log.path)"
     printf '=M= %s\\n' "${\(GitProcess.markerVariable):-}" >> "\(log.path)"
+    rm=$(git rev-parse --path-format=absolute --git-path rebase-merge 2>/dev/null)
+    ra=$(git rev-parse --path-format=absolute --git-path rebase-apply 2>/dev/null)
+    if { [ -n "$rm" ] && [ -d "$rm" ]; } || { [ -n "$ra" ] && [ -d "$ra" ]; }; then
+        printf '=S= 1\\n' >> "\(log.path)"
+    else
+        printf '=S= 0\\n' >> "\(log.path)"
+    fi
     cat >> "\(log.path)"
     exit 0
     """
@@ -54,6 +77,16 @@ private struct LoggedInvocation {
     /// `JournalCheckpoint.around`.
     let entryID: String?
     let marker: String?
+    /// Whether `rebase-merge` or `rebase-apply` was present *at the instant
+    /// this invocation's hook fired* (#0253) — captured by the hook script
+    /// itself, synchronously, inside the git process that owns the
+    /// sequencer directory. Replaying this later (as every test in this file
+    /// does) cannot recompute it: by replay time the owning git process has
+    /// already exited and, for a rebase that finished or was aborted, the
+    /// directory is already gone. This is the answer a real `post-rewrite`
+    /// hook script (#0217) would pass to `JournalCheckpoint.attachRewrite`'s
+    /// `stillInProgress:` parameter.
+    let resumable: Bool
     let stdin: Data
 }
 
@@ -63,8 +96,9 @@ private struct LoggedInvocation {
 /// existed pre-rewrite) and a final `rebase` invocation whose mapping
 /// repeats that pair alongside the rest — the same shape
 /// `JournalObserved.swift`'s own doc comment describes for the foreign path.
-/// `=I=` starts a new block; `=E=`/`=M=` are that block's next two lines;
-/// everything after is that block's stdin, up to the next `=I=` or EOF.
+/// `=I=` starts a new block; `=E=`/`=M=`/`=S=` are that block's next three
+/// lines; everything after is that block's stdin, up to the next `=I=` or
+/// EOF.
 private func allInvocations(in log: URL) throws -> [LoggedInvocation] {
     let text = try String(contentsOf: log, encoding: .utf8)
     var lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
@@ -80,7 +114,8 @@ private func allInvocations(in log: URL) throws -> [LoggedInvocation] {
         let source = String(lines[index].dropFirst(4))
         let entryID = String(lines[index + 1].dropFirst(4))
         let marker = String(lines[index + 2].dropFirst(4))
-        index += 3
+        let resumable = String(lines[index + 3].dropFirst(4))
+        index += 4
         var stdinLines: [String] = []
         while index < lines.count, !lines[index].hasPrefix("=I= ") {
             stdinLines.append(lines[index])
@@ -90,6 +125,7 @@ private func allInvocations(in log: URL) throws -> [LoggedInvocation] {
             source: source,
             entryID: entryID.isEmpty ? nil : entryID,
             marker: marker.isEmpty ? nil : marker,
+            resumable: resumable == "1",
             stdin: Data((stdinLines.map { $0 + "\n" }.joined()).utf8)))
     }
     return result
@@ -429,12 +465,22 @@ struct PostRewriteAttachTests {
         #expect(invocation.source == "rebase")
         #expect(invocation.entryID == nil,
                 "the continue ran through an unscoped GitProcess and must export no entry id")
+        // #0253: this is the fact that makes the attach legitimate -- the
+        // hook script captured it synchronously, inside the same `git
+        // rebase --continue` process that still held `rebase-merge` open at
+        // that instant. Swift-level code asking the same question now,
+        // after that process has already exited and `!repo.isMidRebase`
+        // above confirmed the directory gone, cannot recover this answer --
+        // it can only be carried forward from the moment it was true.
+        #expect(invocation.resumable,
+                "the hook fired while the rebase it was concluding was still live")
         let decision = PostRewrite.decide(
             sourceArgument: invocation.source,
             environment: [GitProcess.markerVariable: invocation.marker ?? ""],
             readStandardInput: { invocation.stdin })
         #expect(decision.isOwnInvocation, "the marker must still be set on our own continue")
-        _ = try #require(try JournalCheckpoint.attachRewrite(decision, entryID: nil, in: context))
+        _ = try #require(try JournalCheckpoint.attachRewrite(
+            decision, entryID: nil, stillInProgress: invocation.resumable, in: context))
 
         let after = try JournalEntryMetadata(
             serialized: try JournalAnchor.metadata(for: checkpointEntry.id, in: context))
@@ -450,6 +496,101 @@ struct PostRewriteAttachTests {
 
         #expect(try JournalObserved.list(in: context).isEmpty,
                 "the mapping belongs on the journal entry that captured pre-operation state, not as an observed one")
+    }
+
+    // MARK: - #0253: the read side must require the operation still be in progress
+
+    /// #0253's own probe, made a test — Finding 1 of #0160's fourth umbrella
+    /// review. A conflicting `Fixup.run(target:)` leaves the in-flight file
+    /// naming its own pre-operation entry, exactly as
+    /// `aConflictingFixupResolvedAndContinuedAttachesToItsPreOperationEntry`
+    /// above sets up. But here the caller does not resolve and continue --
+    /// it runs `git rebase --abort` directly, **out of band**, the
+    /// documented alternative `FixupError.blockedOnConflicts`'s doc comment
+    /// names. `Fixup` itself never runs here at all -- there is no abort arm
+    /// to clean anything up -- so before this issue the file survived the
+    /// abort, naming an entry whose operation had already ended. A later,
+    /// wholly unrelated own rewrite -- `git commit --amend`,
+    /// touching nothing the fixup touched -- would then read that stale
+    /// file back and attach its own mapping to the abandoned entry
+    /// (`JournalAnchor.list(...).contains` was the only check, and entries
+    /// persist until pruned, so it almost always passes). Now the file must
+    /// be found *not* naming a still-in-progress operation -- no sequencer
+    /// directory is live for this worktree by the time the amend's hook
+    /// fires, since the abort tore it down first -- and the amend must
+    /// attach nothing.
+    @Test func anOutOfBandAbortLeavesAStaleFileThatALaterUnrelatedRewriteMustNotConsume() throws {
+        var repo = try FixtureRepository()
+        try repo.build([
+            .init("c1", files: ["f.txt": "a\n"]),
+            .init("c2", files: ["f.txt": "b\n"]),
+            .init("c3", files: ["f.txt": "c\n"]),
+        ])
+        defer { repo.destroy() }
+        let target = try #require(repo.oids["c2"])
+        let context = try WorktreeContext.resolve(path: repo.url.path)
+        let log = repo.url.appendingPathComponent("post-rewrite.log")
+        try installLoggingPostRewriteHook(in: repo, loggingTo: log)
+
+        try repo.writeUntracked(["f.txt": "z\n"])
+        try git.run(["add", "-A"], workingDirectory: repo.url.path)
+
+        let thrown = #expect(throws: FixupError.self) {
+            _ = try Fixup.run(target: target, at: repo.url.path, extraEnvironment: hermetic)
+        }
+        guard case .blockedOnConflicts = try #require(thrown) else {
+            Issue.record("expected .blockedOnConflicts, got \(String(describing: thrown))")
+            return
+        }
+        #expect(repo.isMidRebase, "the rebase must be left resumable, not aborted")
+
+        let entries = try JournalAnchor.list(in: context)
+        #expect(entries.count == 1, "just the pre-operation checkpoint for the fixup")
+        let abandoned = try #require(entries.first)
+
+        let pendingPath = try context.path(for: RepositoryLayout.inFlightEntryIDRelativePath, git: git)
+        let beforeContents = try #require(
+            try? String(contentsOfFile: pendingPath, encoding: .utf8),
+            "the conflict must leave the in-flight file naming the fixup's own entry")
+        #expect(beforeContents.trimmingCharacters(in: .whitespacesAndNewlines) == abandoned.id.string)
+
+        // Out of band: the caller aborts directly, not through `Fixup` --
+        // no switchyard code runs at all for this abort, so nothing clears
+        // the file here.
+        _ = try git.run(["rebase", "--abort"], workingDirectory: repo.url.path)
+        #expect(!repo.isMidRebase, "the abort must have ended the rebase")
+        #expect(FileManager.default.fileExists(atPath: pendingPath),
+                "an out-of-band abort must leave the file behind -- nothing switchyard-side ran to clear it")
+
+        // A later, wholly unrelated own rewrite -- touches nothing the
+        // fixup touched.
+        try git.run(
+            ["commit", "--amend", "--no-edit"], workingDirectory: repo.url.path,
+            extraEnvironment: hermetic.merging(["GIT_EDITOR": "true"]) { _, new in new })
+
+        let invocation = try finalInvocation(in: log)
+        #expect(invocation.source == "amend")
+        #expect(invocation.entryID == nil, "the amend ran through an unscoped GitProcess")
+        #expect(!invocation.resumable,
+                "the abort tore down the sequencer before this hook ever fired")
+        let markerValue = try #require(invocation.marker)
+        let decision = PostRewrite.decide(
+            sourceArgument: invocation.source,
+            environment: [GitProcess.markerVariable: markerValue],
+            readStandardInput: { invocation.stdin })
+        #expect(decision.isOwnInvocation)
+
+        let attached = try JournalCheckpoint.attachRewrite(
+            decision, entryID: nil, stillInProgress: invocation.resumable, in: context)
+        #expect(attached == nil,
+                "a file naming an already-abandoned operation must never capture a later, unrelated rewrite")
+        #expect(!FileManager.default.fileExists(atPath: pendingPath),
+                "the stale file must be removed once it is found not to name an in-progress operation")
+
+        let after = try JournalEntryMetadata(
+            serialized: try JournalAnchor.metadata(for: abandoned.id, in: context))
+        #expect(after.rewrite == nil, "the abandoned fixup's own entry must stay untouched")
+        #expect(try JournalObserved.list(in: context).isEmpty)
     }
 
     /// #0234's own test: `Fixup.run(source:target:)` (#0214's existing-commit
@@ -682,13 +823,21 @@ struct PostRewriteAttachTests {
         #expect(invocation.source == "rebase")
         #expect(invocation.entryID == nil,
                 "the continue ran through an unscoped GitProcess and must export no entry id")
+        // #0253: captured by the hook script itself, synchronously, while
+        // the concluding `git rebase --continue` process still held
+        // `rebase-merge` open -- see the sibling assertion's comment in
+        // `aConflictingFixupResolvedAndContinuedAttachesToItsPreOperationEntry`
+        // for why this cannot be recomputed after the fact.
+        #expect(invocation.resumable,
+                "the hook fired while the rebase it was concluding was still live")
         let decision = PostRewrite.decide(
             sourceArgument: invocation.source,
             environment: [GitProcess.markerVariable: invocation.marker ?? ""],
             readStandardInput: { invocation.stdin })
         #expect(decision.isOwnInvocation)
 
-        let attached = try #require(try JournalCheckpoint.attachRewrite(decision, entryID: nil, in: context))
+        let attached = try #require(try JournalCheckpoint.attachRewrite(
+            decision, entryID: nil, stillInProgress: invocation.resumable, in: context))
         #expect(attached.id == fixupEntry.id,
                 "the mapping must land on the fixup's own entry, not the unrelated one")
 

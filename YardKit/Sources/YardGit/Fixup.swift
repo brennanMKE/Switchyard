@@ -178,10 +178,15 @@ public struct Fixup: Equatable, Sendable {
                 // The rebase can never be resumed from mid-hang, so it is
                 // aborted unconditionally, exactly as `classifiedRebaseFailure`'s
                 // non-conflict paths do -- there is no index state here that a
-                // caller could usefully continue.
+                // caller could usefully continue. Nothing to clean up on the
+                // in-flight file (#0253): `around`'s catch, which is the only
+                // writer, has not run yet at this point -- it only writes
+                // after `body` throws, and only when the sequencer is still
+                // live then. The abort just above already ends this rebase,
+                // so `around` finds no live sequencer and writes nothing for
+                // this operation to begin with.
                 _ = try? git.run(
                     ["rebase", "--abort"], workingDirectory: path, extraEnvironment: extraEnvironment)
-                clearInFlightFile(at: path, git: git)
                 throw classifyTimeout(failure, signingInEffect: inEffect)
             }
             throw failure
@@ -239,6 +244,21 @@ public struct Fixup: Equatable, Sendable {
     ///      rebase first (it can never sign, so it is not resumable), then
     ///      `.signingFailed`.
     ///    - neither → abort the rebase, then a plain `GitProcess.Failure`.
+    ///
+    /// Neither abort arm below cleans up the in-flight entry-id file
+    /// (#0253, removed here as dead code): `JournalCheckpoint.around`'s
+    /// catch clause is the file's only writer, and it runs *after* this
+    /// function returns its `Error` up through `body`'s throw -- at which
+    /// point it checks the sequencer itself before deciding to write
+    /// anything. Since the `git rebase --abort` just below already ends
+    /// this rebase, `around` finds no live sequencer and writes nothing for
+    /// this operation, so there was never a file here to clear. A
+    /// same-worktree file left behind by an *earlier*, different
+    /// interrupted operation is caught later, at read time, by
+    /// `JournalCheckpoint.attachRewrite`'s `stillInProgress` requirement
+    /// (guide §11 decision 19, as amended) — not by a proactive clear on
+    /// this operation's own abort. Measured: deleting both call sites this
+    /// function used to have leaves the full suite green.
     private static func classifiedRebaseFailure(
         output: GitProcess.Output,
         arguments: [String],
@@ -258,7 +278,6 @@ public struct Fixup: Equatable, Sendable {
             stderr: output.standardError, signingInEffect: inEffect) {
             _ = try? git.run(
                 ["rebase", "--abort"], workingDirectory: path, extraEnvironment: extraEnvironment)
-            clearInFlightFile(at: path, git: git)
             switch failure {
             case let .signingFailed(reason):
                 return FixupError.signingFailed(reason: reason)
@@ -267,23 +286,8 @@ public struct Fixup: Equatable, Sendable {
 
         _ = try? git.run(
             ["rebase", "--abort"], workingDirectory: path, extraEnvironment: extraEnvironment)
-        clearInFlightFile(at: path, git: git)
         return GitProcess.Failure.exited(
             code: output.exitCode, stderr: output.standardError, arguments: arguments)
-    }
-
-    /// Removes the in-flight entry-id file after an abort, if any is
-    /// present — a second, independent guard alongside `JournalCheckpoint.
-    /// around`'s own live-sequencer check (#0241), so an operation that just
-    /// aborted its own rebase never leaves the slot occupied, whatever wrote
-    /// it. Best-effort: a repository that never had the file, or whose
-    /// worktree cannot be re-resolved here, leaves nothing to clean up.
-    private static func clearInFlightFile(at path: String, git: GitProcess) {
-        guard let context = try? WorktreeContext.resolve(path: path, git: git),
-              let pendingPath = try? context.path(
-                for: RepositoryLayout.inFlightEntryIDRelativePath, git: git)
-        else { return }
-        try? FileManager.default.removeItem(atPath: pendingPath)
     }
 
     /// Classifies a `GitProcess.Failure.timedOut` from the `git rebase
