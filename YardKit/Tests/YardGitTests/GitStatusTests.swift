@@ -186,6 +186,51 @@ struct GitStatusTests {
         let source = try #require(status.entries.first(where: { $0.path == "original.txt" }))
         #expect(source.staged == .modified, "the copy's modified source is reported separately")
     }
+
+    @Test("gitStatus reports an untracked file under status.showUntrackedFiles=no, agreeing with whereAmI")
+    func reportsUntrackedFileUnderShowUntrackedFilesNo() throws {
+        // #0318: `gitStatus` lost every untracked file under
+        // `status.showUntrackedFiles = no` because nothing pinned the
+        // config, while `whereAmI`'s `untrackedCount` (`ls-files -o
+        // --exclude-standard`, plumbing, config-blind) kept counting it --
+        // the same contradiction #0296 was filed for between `wt new` and
+        // `wt list`. This test asserts both that the file reappears and that
+        // the two engine functions now agree about the same worktree.
+        let repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let git = GitProcess()
+
+        try git.run(
+            ["config", "status.showUntrackedFiles", "no"], workingDirectory: repo.url.path)
+        try repo.writeUntracked(["newfile.txt": "content\n"])
+
+        // Verify the config actually bites before trusting anything
+        // downstream: plain `git status --porcelain=v2` (no -c pin) under
+        // this config must omit the untracked file entirely -- the measured
+        // baseline the issue records.
+        let plain = try git.run(["status", "--porcelain=v2"], workingDirectory: repo.url.path)
+        #expect(
+            plain.text.isEmpty,
+            "fixture did not provoke the config: status.showUntrackedFiles=no left plain porcelain non-empty: \(plain.text)")
+
+        // The behaviour under test: gitStatus pins the config itself and
+        // must still report the file.
+        let status = try gitStatus(at: repo.url.path)
+        #expect(status.entries.map(\.path) == ["newfile.txt"])
+
+        let untracked = try #require(status.entries.first)
+        #expect(untracked.worktree == .untracked)
+        #expect(untracked.staged == .unmodified)
+
+        // The user-visible harm: assert the two engine functions agree,
+        // not just that gitStatus recovered. A single-function assertion
+        // would miss the contradiction #0318 found.
+        let where_ = try whereAmI(path: repo.url.path)
+        #expect(where_.untrackedCount == 1)
+        #expect(
+            where_.untrackedCount == status.entries.count,
+            "whereAmI and gitStatus disagree about the same worktree under status.showUntrackedFiles=no: untrackedCount=\(where_.untrackedCount), gitStatus entries=\(status.entries.count)")
+    }
 }
 
 private extension String {

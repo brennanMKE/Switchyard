@@ -403,7 +403,23 @@ public func gitStatus(
     includeIgnored: Bool = false,
     git: GitProcess = GitProcess()
 ) throws -> WorktreeStatus {
-    var args: [String] = ["status", "--porcelain=v2", "-z"]
+    // `-c status.showUntrackedFiles=normal`: `--porcelain=v2` exists to be a
+    // stable machine format, and every other format-stability lever here is
+    // pinned explicitly (`--no-color`, `--no-ext-diff`, `-c
+    // core.quotepath=false`, …). This one was the exception (#0318):
+    // measured, git 2.50.1 — under `status.showUntrackedFiles = no`, plain
+    // `git status --porcelain=v2` omits every untracked file, so `gitStatus`
+    // silently dropped them under ordinary user configuration while
+    // `whereAmI`'s `untrackedCount` (`ls-files -o --exclude-standard`,
+    // plumbing, config-blind) kept counting them — the two engine functions
+    // disagreeing about the same worktree, same shape as #0296.
+    //
+    // `color.ui`, `core.quotepath` (under `-z`), and `status.relativePaths`
+    // were measured to leave this output byte-identical, so they are not
+    // pinned here (unlike #0319's `wt rm`, where `--force` bypasses git's
+    // dirty check entirely rather than relaxing it, a `-c` there would look
+    // meaningful and do nothing).
+    var args: [String] = ["-c", "status.showUntrackedFiles=normal", "status", "--porcelain=v2", "-z"]
     if includeIgnored { args.append("--ignored") }
 
     let output = try git.run(
