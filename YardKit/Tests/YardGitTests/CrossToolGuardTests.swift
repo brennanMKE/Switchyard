@@ -139,22 +139,28 @@ struct CrossToolGuardTests {
             ref: "refs/heads/side", expected: b, actual: nil))
     }
 
-    @Test func branchCreatedByAnotherToolReportsAbsentExpected() throws {
+    /// Renamed from `branchCreatedByAnotherToolReportsAbsentExpected`
+    /// (#0248): its old comment said restore would DELETE this ref, which
+    /// guide §11 decision 20 already made false -- restore deletes only
+    /// refs its own snapshot recorded, so an unscoped caller with no target
+    /// of its own (`applied` defaults to `recorded` in the two-snapshot
+    /// `diff` overload this test exercises through `divergences(from:in:)`)
+    /// has nothing this ref could be evidence of disturbing either. The
+    /// unscoped guard is test-only plumbing today (`requireUnchanged` and
+    /// `divergences(from:in:)` have no production call site), but its
+    /// behaviour must still follow the same rule the three-snapshot
+    /// overload does: a name `applied`/`target` never recorded is a name
+    /// this guard cannot have an opinion about, whatever else moved it.
+    @Test func branchCreatedByAnotherToolIsNotReported() throws {
         var repo = try FixtureRepository.linear()
         defer { repo.destroy() }
         let recorded = try capture(at: repo.url.path)
         let a = try #require(repo.oids["a"])
 
-        // Restore would DELETE this ref (#0027 plans deletions from the same
-        // listing) — work the journal never knew about. The whole guard
-        // exists so that clobber is refused with a name attached.
         try git.run(["update-ref", "refs/heads/intruder", a],
                     workingDirectory: repo.url.path)
 
-        let report = try divergences(from: recorded, at: repo.url.path)
-        try #require(report.count == 1)
-        #expect(report[0] == CrossToolGuard.Divergence(
-            ref: "refs/heads/intruder", expected: nil, actual: a))
+        #expect(try divergences(from: recorded, at: repo.url.path).isEmpty)
     }
 
     // MARK: - Worktrees: shared refs guarded, HEAD per-worktree

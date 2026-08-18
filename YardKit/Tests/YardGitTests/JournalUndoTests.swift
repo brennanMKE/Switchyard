@@ -267,6 +267,66 @@ struct JournalUndoTests {
         #expect(try scopedState(in: ctx).cursor == c0.id)
     }
 
+    /// #0248's own probe: the creation counterpart to
+    /// `aSecondUndoSurvivesASiblingsOrdinaryCommitBetweenSteps` above. Agent
+    /// B's shared refs are pure creations here -- a linked worktree's own
+    /// branch (`git worktree add -b`) and an ordinary branch (`git
+    /// branch`) -- rather than a move of something either checkpoint
+    /// recorded. Before #0248, `CrossToolGuard.swift:165` skipped a name
+    /// only when the target snapshot lacked it AND the belief recorded it,
+    /// so a name recorded by NEITHER side fell through to the divergence
+    /// branch and A's second undo refused, naming both of B's creations --
+    /// verbatim the measured probe in the issue. Both of A's undos must now
+    /// succeed, and B's creations must survive untouched.
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func aSecondUndoSurvivesASiblingsPureCreationsBetweenSteps(
+        format: FixtureRepository.RefFormat
+    ) throws {
+        var repo = try FixtureRepository.linear(refFormat: format)
+        defer { repo.destroy() }
+        let ctx = try context(of: repo)
+
+        // c0: before agent B creates anything.
+        let c0 = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+
+        // Move `main` between checkpoints (already recorded by both), so
+        // the first undo has something of A's own to revert without
+        // introducing a name neither checkpoint ever recorded.
+        let bOid = try #require(repo.oids["b"])
+        try git.run(["update-ref", "refs/heads/main", bOid], workingDirectory: repo.url.path)
+        let c1 = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+
+        // A's own further work: move `main` again.
+        let aOid = try #require(repo.oids["a"])
+        try git.run(["update-ref", "refs/heads/main", aOid], workingDirectory: repo.url.path)
+
+        // A's first undo: present (main=a) -> c1 (main=b). Cursor nil going
+        // in, guard skipped.
+        let firstUndo = try JournalUndo.undo(in: ctx)
+        #expect(firstUndo.map(\.entry.id) == [c1.id])
+        #expect(try ctx.resolveRef("refs/heads/main", inWorktree: nil) == bOid)
+
+        // Agent B: pure creations, nothing of A's touched -- the exact
+        // probe #0248 measured. A linked worktree with a new branch, plus
+        // an ordinary branch, neither of which c0 or c1 recorded, since
+        // both postdate every checkpoint.
+        try repo.addWorktree(named: "agent", branch: "agent-branch")
+        try repo.branch("b-wip")
+
+        // A's second undo: c1 (main=b) -> c0 (main=c). Before #0248 this
+        // refused, naming both `refs/heads/agent-branch` and
+        // `refs/heads/b-wip`. It must now succeed.
+        let secondUndo = try JournalUndo.undo(in: ctx)
+        #expect(secondUndo.map(\.entry.id) == [c0.id])
+        #expect(try ctx.resolveRef("refs/heads/main", inWorktree: nil) == repo.oids["c"])
+
+        // B's creations were never touched: A's traversal has no authority
+        // over refs it does not control and never recorded (decision 1).
+        #expect(try ctx.resolveRef("refs/heads/agent-branch", inWorktree: nil) != nil)
+        #expect(try ctx.resolveRef("refs/heads/b-wip", inWorktree: nil) != nil)
+        #expect(try scopedState(in: ctx).cursor == c0.id)
+    }
+
     /// `HEAD` is checked unconditionally in `CrossToolGuard.diff`, never
     /// subject to the name-based `scope` that narrows ordinary refs (#0232):
     /// it is compared before the scoped loop even runs. A checkout behind
