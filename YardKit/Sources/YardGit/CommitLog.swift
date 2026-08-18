@@ -257,40 +257,41 @@ public enum CommitLog {
         return entries
     }
 
-    /// Pulls out the trailer block from a body -- everything after the first
-    /// blank line (if any) that looks like `Key: Value`.
+    /// Pulls out the trailer block from a body. Git's rule (`git help
+    /// interpret-trailers`) is that the trailer block is the commit's
+    /// **last** paragraph -- the run of non-blank lines ending the body,
+    /// preceded by one or more blank lines -- not merely the first paragraph
+    /// that happens to look trailer-shaped (#0313: a colon-shaped prose
+    /// paragraph earlier in the body must not be mistaken for the block and
+    /// must not hide a real trailer block that follows it).
     static func parseTrailerBlock(from commitBody: String) -> [Trailer] {
         let lines = commitBody.split(separator: "\n", omittingEmptySubsequences: false)
 
-        // Find the first blank-line separator between body and trailers.
-        // Guarded on count instead of building the range by subtraction --
-        // `lines` is never empty from `split(omittingEmptySubsequences: false)`
-        // today, but a range built as `0 ..< lines.count - 1` traps the moment
-        // it is (#0196). Fewer than two lines means no separator can exist.
-        var separatorIndex: Int? = nil
-        if lines.count >= 2 {
-            for i in 0 ..< lines.count - 1 {
-                let line = lines[i].trimmingCharacters(in: .whitespaces)
-                if line.isEmpty {
-                    // Look ahead -- is the next non-blank line a trailer?
-                    for j in (i + 1) ..< lines.count {
-                        let next = lines[j].trimmingCharacters(in: .whitespaces)
-                        if next.isEmpty { continue }
-                        // A trailer starts at word boundary, no leading whitespace.
-                        if next.first?.isWhitespace == false && next.firstIndex(of: ":") != nil {
-                            separatorIndex = i
-                        }
-                        break
-                    }
-                    if separatorIndex != nil { break }
-                }
-            }
+        func isBlank(_ line: Substring) -> Bool {
+            line.trimmingCharacters(in: .whitespaces).isEmpty
         }
 
-        let startIdx = max(separatorIndex.map { $0 + 1 } ?? lines.count, 0)
+        // `%B` commonly ends with its own trailing newline, which
+        // `split(omittingEmptySubsequences: false)` turns into a trailing
+        // empty element that belongs to no paragraph. Trim it before looking
+        // for the last paragraph.
+        var end = lines.count
+        while end > 0, isBlank(lines[end - 1]) { end -= 1 }
+        guard end > 0 else { return [] }
+
+        // Walk backward from the end of the (trimmed) body to the start of
+        // its last paragraph -- the run of non-blank lines up to `end`.
+        var startIdx = end
+        while startIdx > 0, !isBlank(lines[startIdx - 1]) { startIdx -= 1 }
+
+        // Git's rule requires the group to be "preceded by one or more empty
+        // lines". `startIdx == 0` means the whole body is one paragraph with
+        // no blank line anywhere before it -- not a trailer block.
+        guard startIdx > 0 else { return [] }
+
         var trailers: [Trailer] = []
 
-        for i in startIdx ..< lines.count {
+        for i in startIdx ..< end {
             let trimmed = String(lines[i]).trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { continue }
 
