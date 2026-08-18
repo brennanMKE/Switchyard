@@ -89,6 +89,27 @@ struct RefSnapshotTests {
             .resolveRef("refs/heads/extra", inWorktree: nil) == a)
     }
 
+    /// `refs/rewritten/*` is per-worktree despite the `refs/` prefix
+    /// (CLAUDE.md): it is what an interrupted rebase uses to remember its
+    /// mapping. Guide §11 decision 6 (#0044) claims capture already carries
+    /// it and same-worktree restore already round-trips it because
+    /// `for-each-ref` enumerates it under a plain name in the owning
+    /// worktree — this pins that claim (#0249).
+    @Test func roundTripRestoresRefsRewritten() throws {
+        var repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let a = try #require(repo.oids["a"])
+        let b = try #require(repo.oids["b"])
+        try git.run(["update-ref", "refs/rewritten/onto", a], workingDirectory: repo.url.path)
+        let snap = try snapshot(of: repo)
+        #expect(snap.refs.contains { $0.name == "refs/rewritten/onto" && $0.oid == a })
+
+        try git.run(["update-ref", "refs/rewritten/onto", b], workingDirectory: repo.url.path)
+        try snap.restore(in: WorktreeContext.resolve(path: repo.url.path))
+
+        #expect(try repo.revParse("refs/rewritten/onto") == a)
+    }
+
     /// The measured trap this design exists for: restoring while standing on
     /// a branch created after capture. `HEAD` must be retargeted in its own
     /// no-deref transaction — dereferenced, `symref-update HEAD` corrupts the
