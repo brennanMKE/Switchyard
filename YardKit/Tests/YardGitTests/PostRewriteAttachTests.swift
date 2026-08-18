@@ -920,6 +920,22 @@ struct PostRewriteAttachTests {
     /// leave the entry's pre-checkpoint `HEAD` reachable through the stored
     /// mapping — the assertion this issue exists for, not merely that the
     /// mapping is non-empty.
+    ///
+    /// **#0317: this loop replays all three invocations, unfiltered** —
+    /// unlike a live `JournalCheckpoint.attachRewrite`, which asks
+    /// `isMidRebaseAmend` a question only answerable *while the rebase's own
+    /// sequencer directory is still open*, and so filters the mid-rebase
+    /// `amend` out in production. By the time this loop runs the whole
+    /// operation has already finished and that directory is gone, so the
+    /// live check no longer sees what it would have seen synchronously —
+    /// measured: `attachRewrite` composes all three here, and one harmless
+    /// artifact of that is `target`'s pair getting recorded twice, once
+    /// repeated verbatim by the final `rebase` invocation and once left
+    /// over from the mid-rebase `amend` this loop never actually filtered.
+    /// The invariant below is stated as "no `oldOid` maps to two
+    /// *different* `newOid`s" rather than flat uniqueness of `oldOid`,
+    /// which that harmless, identical-valued duplicate would otherwise
+    /// trip for no real reason.
     @Test func attachingAnExistingCommitFixupMappingKeepsThePreCheckpointHeadReachable() throws {
         var repo = try FixtureRepository()
         try repo.build([.init("c1"), .init("c2"), .init("c3")])
@@ -965,10 +981,48 @@ struct PostRewriteAttachTests {
         #expect(mapping.source == "rebase",
                 "the final, authoritative invocation is the rebase; its source must survive composing")
 
-        // The assertion that matters: the entry's pre-checkpoint HEAD must
-        // be reachable through the stored mapping, chained to the operation's
-        // actual result — not merely present somewhere, and not lost behind
-        // the intermediate commit the mid-rebase amend named.
+        // #0317: pin `composing(with:)`'s `chainedFrom` invariant directly,
+        // rather than trusting that a broken bookkeeping happens to surface
+        // only as a missing `headBefore` pair below. Two properties, not one
+        // literal pin — the fixture's oids are not stable across runs, and a
+        // literal pin would need updating every time they change:
+        //
+        // 1. No `oldOid` resolves to two *different* `newOid`s. A regressed
+        //    `chainedFrom` (this issue's own mutation:
+        //    `chainedFrom.insert(index)` -> `insert(-1)`) stops marking a
+        //    chained `self` pair as consumed, so it is re-emitted alongside
+        //    the pair that correctly chained through it -- exactly the
+        //    `headBefore -> mid` / `headBefore -> head` split the issue
+        //    describes. (Grouped into a set per `oldOid`, rather than a flat
+        //    uniqueness check on `oldOid` itself, because this loop's own
+        //    replay of all three invocations, unfiltered, already and
+        //    harmlessly repeats `target`'s pair with an *identical* `newOid`
+        //    both times -- see the doc comment above.)
+        // 2. Every stored `newOid` is reachable from the post-rewrite
+        //    `HEAD` -- the property that actually matters to a reader of
+        //    the mapping: a pair pointing at a commit no ref reaches is
+        //    exactly the wrongness #0233 and #0234 exist to eliminate.
+        var newOidsByOldOid: [String: Set<String>] = [:]
+        for rewrite in mapping.rewrites {
+            newOidsByOldOid[rewrite.oldOid, default: []].insert(rewrite.newOid)
+        }
+        for (oldOid, newOids) in newOidsByOldOid {
+            #expect(newOids.count == 1,
+                    "\(oldOid) must resolve to exactly one newOid, not \(newOids)")
+        }
+        for rewrite in mapping.rewrites {
+            let ancestor = try git.capture(
+                ["merge-base", "--is-ancestor", rewrite.newOid, "HEAD"],
+                workingDirectory: repo.url.path)
+            #expect(ancestor.exitCode == 0,
+                    "\(rewrite.oldOid) -> \(rewrite.newOid): newOid must be reachable in the post-rewrite history")
+        }
+
+        // The assertion the doc comment above already promised: the entry's
+        // pre-checkpoint HEAD must be reachable through the stored mapping,
+        // chained to the operation's actual result -- not merely present
+        // somewhere, and not lost behind the intermediate commit the
+        // mid-rebase amend named.
         let fromHeadBefore = try #require(
             mapping.rewrites.first(where: { $0.oldOid == headBefore }),
             "headBefore must be reachable through the stored mapping")

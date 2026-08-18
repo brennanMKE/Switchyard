@@ -175,7 +175,23 @@ public struct JournalEntryMetadata: Sendable, Equatable, Codable {
         /// carried through unchanged, in `next`'s order — order git
         /// guarantees (`Rewrite`'s doc comment). A pair from `self` that
         /// `next` never mentions is real information the later invocation
-        /// did not repeat and is appended after, rather than dropped.
+        /// did not repeat and is appended after, rather than dropped. A
+        /// pair from `self` that `next` *does* chain through — `headBefore →
+        /// mid` in the example above, once `mid → head` has consumed it —
+        /// is the opposite case: it must **not** also be appended, or the
+        /// composed mapping ends up claiming `headBefore` maps to two
+        /// different commits, one of them the intermediate `mid` that
+        /// nothing in the resulting history reaches. `chainedFrom` is the
+        /// only statement of that rule; dropping the index it records (in
+        /// place of the pair, which composing never touches) silently
+        /// re-emits every chained pair alongside its replacement (#0317).
+        /// In the real, two-invocation sequence this method actually runs
+        /// against — #0233 already filters the rebase's own mid-rebase
+        /// `amend` before `attachingRewrite` is ever called — every `self`
+        /// pair is always chained through by `next`, so `unconsumed` is
+        /// always empty; it exists for a hypothetical wider divergence
+        /// between what `self` and `next` each rewrote, not one this method
+        /// has ever been observed to hit.
         ///
         /// `source` becomes `next.source`: the newest invocation is
         /// authoritative, the same rule `JournalObserved` already applies to
