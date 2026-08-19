@@ -1267,6 +1267,24 @@ a feature at any milestone on the grounds that GitUp had it.
     been pruned. It is the one route by which the file can reappear, and it is the reason `stillLive`
     was kept rather than deleted with the rest of the staleness machinery.
 
+25. **`gitStatus` keeps `-c status.renames=true` and does not add copy detection.** Decided
+    2026-08-18 — reading 1, keep `status.renames=true`. **#0334.**
+
+    **Decided by me, not by Brennan, because he asked to wrap M1 ASAP and this was the only thing in
+    it blocked on a person.** It is one line and reversible; if he wants copies, #0334 reopens.
+
+    **Why reading 1.** It is git's own default, so it changes nothing for anyone today; it keeps the
+    payload config-blind, which is what #0329 was for; and copy detection is the expensive `-C` pass
+    git leaves off by default, so pinning `copies` would slow every `status` call on a large
+    repository to surface something almost nothing consumes. Reading 3 — a `detectCopies:` parameter
+    — stays available the moment a caller actually wants it, and costs nothing to add later.
+
+    **What this issue still owes**, and it is small: `WorktreeStatusEntry.State.copied`'s doc comment
+    must say that **no production path can currently emit it**, that `gitStatus` pins
+    `status.renames=true`, and that `EnumVocabularyCoverageTests`' hand-built `C.` record is what
+    keeps its parsing tested. Without that note the next reader goes looking for the code path that
+    produces it.
+
 
 
 ### Still open

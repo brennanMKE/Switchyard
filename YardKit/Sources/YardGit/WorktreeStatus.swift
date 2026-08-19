@@ -66,6 +66,16 @@ public struct WorktreeStatusEntry {
             case "A", "+": self = .added
             case "D", "-": self = .deleted
             case "M": self = .modified
+            // "C" (copy) maps here alongside "R" (rename), the same as every
+            // other rename/copy status character. There is no separate
+            // `.copied` case: `gitStatus` pins `-c status.renames=true`
+            // (above), and a command-line `-c` always beats a
+            // repository-level `status.renames=copies`, so no production
+            // path can emit a `C` record through `gitStatus` for any
+            // repository, however the user configures it (#0329, #0334).
+            // `EnumVocabularyCoverageTests`' hand-built `C.` record (#0316)
+            // is what keeps this mapping tested even though it is otherwise
+            // unreachable.
             case "R", "C": self = .modified
             case "T": self = .typechange
             case "U": self = .unmerged
@@ -432,6 +442,11 @@ public func gitStatus(
     // today's behaviour exactly and changes only what happens under a
     // non-default user config — the same reasoning as
     // `status.showUntrackedFiles` above.
+    //
+    // Decided (#0334): kept `true` rather than `copies`, so a command-line
+    // `-c` here always beats a repository-level `status.renames=copies` and
+    // `gitStatus` can no longer report a copy (`C`) record for any
+    // repository, however the user configures it.
     var args: [String] = [
         "-c", "status.showUntrackedFiles=normal",
         "-c", "status.renames=true",
