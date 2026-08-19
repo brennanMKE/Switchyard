@@ -102,6 +102,19 @@ private func invocations(in log: URL) -> [(source: String, stdin: Data)] {
     #expect(empty.malformedLineCount == 0)
 }
 
+@Test func parseDropsLineWithInternalDoubleSpaceAsMalformed() {
+    // #0331: an *internal* double space, `old␣␣new`, is the fixture that
+    // distinguishes `omittingEmptySubsequences: false` from `true` — the
+    // existing malformed fixture above uses a *leading* space, which both
+    // settings reject and so pins neither. Under `false` (the current,
+    // correct behaviour) this splits to ["old", "", "new"]: three fields,
+    // and fields[1] is empty, so the line is rejected as malformed.
+    let input = Data("\(oidA)  \(oidB)\n".utf8)
+    let result = PostRewrite.parse(input)
+    #expect(result.rewrites.isEmpty)
+    #expect(result.malformedLineCount == 1)
+}
+
 // MARK: - The many-to-one view
 
 @Test func replacementsGroupManyToOnePreservingOrder() {
