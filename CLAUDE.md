@@ -93,8 +93,10 @@ context resumes without needing the previous conversation.
 
 Brennan sets goals as **"complete every issue in milestone MN"**, and that goal — not a single issue
 — is what a session iterates against. There is no separate goal-tracking mechanism and none is
-wanted: **the tracker is the goal's state.** `./scripts/list-recent-issues-by-milestone.sh` prints
-open / in-progress / resolved per milestone, which is the whole progress report.
+wanted: **the tracker is the goal's state.** `./scripts/list-issues-by-milestone` prints each
+milestone with its completion percentage and its open / in-progress counts, which is the whole
+progress report. **A milestone at 100% is not closed** — guide §9 also wants two consecutive clean
+review passes, and no count can see that, so the script says so in its footer.
 
 Working a milestone goal means, on repeat until the milestone's open count is zero: pick the next
 open issue in that milestone, plan it to the standard below, preflight it, dispatch one round,

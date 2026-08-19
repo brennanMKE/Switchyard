@@ -1,0 +1,389 @@
+#!/usr/bin/env python3
+"""List the issue tracker grouped by milestone, with completion percentages.
+
+CLAUDE.md makes this the whole progress report for a milestone goal: "the
+tracker is the goal's state". So the question it answers is *how far through
+the milestone am I*, not *what did I touch lately* — which is why every
+heading carries a percentage and a bar, and why the milestone sections come
+before the individual issues.
+
+    scripts/list-issues-by-milestone                 # everything, grouped
+    scripts/list-issues-by-milestone --open          # hide finished issues
+    scripts/list-issues-by-milestone -m M2           # just M2
+    scripts/list-issues-by-milestone --no-color      # plain columns for grep/awk
+
+Milestone labels come from `docs/switchyard-development-guide.md` §9 when it is
+findable, so `M1` prints as "M1 — the read engine and worktrees". The guide is
+the one place those names are maintained; duplicating them here would go stale
+the first time a milestone is renamed.
+
+Completion is measured in issues, not acceptance criteria: an issue counts as
+done when its status is `resolved` or `closed`. `wontfix` is excluded from the
+denominator entirely — it is never going to be done, so leaving it in would cap
+a milestone below 100% forever. In-progress issues additionally show their
+acceptance-criteria tally, the only sub-issue signal the tracker records.
+
+**A milestone at 100% is not a closed milestone.** Guide §9 requires two
+consecutive clean review passes on top, and no count in this output can see
+that — #0115 is the standing example, where forty-two M1 issues resolved while
+the milestone's actual criterion went unmet. The footer says so rather than
+letting 100% read as done.
+
+The issues folder is found the same way the shell version found it: ./issues if
+present, otherwise the first immediate subdirectory holding an Issues.md or
+project.json marker, repeated up the parent directories, stopping at the
+enclosing git repo root.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import shutil
+import sys
+import time
+from pathlib import Path
+
+DONE = {"resolved", "closed", "done", "fixed", "complete", "completed"}
+IN_PROGRESS = {"in-progress", "in progress", "wip"}
+OPENISH = {"open", "new", "todo", "reopened"}
+WONTFIX = {"wontfix", "won't fix", "duplicate", "invalid"}
+
+TITLE_RE = re.compile(r"^#\s*(\d+)\s*[—-]\s*(.+?)\s*$")
+ROW_RE = re.compile(r"^\|\s*\*\*(?P<key>[^*]+)\*\*\s*\|\s*(?P<val>.*?)\s*\|\s*$")
+AC_RE = re.compile(r"^- \[(?P<mark>[ xX])\]")
+MILESTONE_RE = re.compile(r"^M(?P<num>\d+)$")
+GUIDE_MILESTONE_RE = re.compile(r"^\*\*(?P<key>M\d+)\s*—\s*(?P<label>[^.*]+)")
+
+UNMILESTONED = "—"
+
+FRESH_SECS = 172_800   # 2 days
+WEEK_SECS = 604_800    # 7 days
+
+
+class Palette:
+    """ANSI codes, or empty strings when color is off."""
+
+    NAMES = dict(
+        reset="0", dim="2", bold="1", red="31", green="32",
+        yellow="33", blue="34", magenta="35", cyan="36", gray="90",
+    )
+
+    def __init__(self, enabled: bool):
+        self.enabled = enabled
+        for name, code in self.NAMES.items():
+            setattr(self, name, f"\033[{code}m" if enabled else "")
+
+
+class Issue:
+    __slots__ = ("num", "title", "status", "milestone", "ac_done", "ac_total", "mtime")
+
+    def __init__(self, path: Path):
+        self.num = path.stem
+        self.title = "(no title)"
+        self.status = "?"
+        self.milestone = UNMILESTONED
+        self.ac_done = 0
+        self.ac_total = 0
+        self.mtime = path.stat().st_mtime
+
+        for i, line in enumerate(path.read_text(encoding="utf-8").splitlines()):
+            if i == 0:
+                m = TITLE_RE.match(line)
+                if m:
+                    self.num, self.title = m.group(1), m.group(2)
+                continue
+            m = ROW_RE.match(line)
+            if m:
+                key, val = m.group("key").strip().lower(), m.group("val").strip()
+                if key == "status":
+                    self.status = val or "?"
+                elif key == "milestone" and val:
+                    self.milestone = val
+                continue
+            m = AC_RE.match(line)
+            if m:
+                self.ac_total += 1
+                if m.group("mark") in "xX":
+                    self.ac_done += 1
+
+    @property
+    def key(self) -> str:
+        return self.status.strip().lower()
+
+    @property
+    def is_done(self) -> bool:
+        return self.key in DONE
+
+    @property
+    def is_in_progress(self) -> bool:
+        return self.key in IN_PROGRESS
+
+    @property
+    def is_wontfix(self) -> bool:
+        return self.key in WONTFIX
+
+    @property
+    def counts(self) -> bool:
+        """Whether this issue belongs in a completion denominator."""
+        return not self.is_wontfix
+
+    @property
+    def age_secs(self) -> float:
+        return time.time() - self.mtime
+
+    def glyph(self) -> str:
+        if self.is_done:
+            return "✓"
+        if self.is_in_progress:
+            return "◐"
+        if self.key in OPENISH:
+            return "○"
+        if self.is_wontfix:
+            return "⊘"
+        return "•"
+
+    def color(self, p: Palette) -> str:
+        if self.is_done:
+            return p.green
+        if self.is_in_progress:
+            return p.cyan
+        if self.key in OPENISH:
+            return p.yellow
+        if self.is_wontfix:
+            return p.gray
+        return p.magenta
+
+
+def human_age(secs: float) -> str:
+    secs = int(secs)
+    for limit, div, suffix in (
+        (60, 1, "s"), (3600, 60, "m"), (86_400, 3600, "h"),
+        (604_800, 86_400, "d"), (2_592_000, 604_800, "w"),
+        (31_536_000, 2_592_000, "mo"),
+    ):
+        if secs < limit:
+            return f"{secs // div}{suffix}"
+    return f"{secs // 31_536_000}y"
+
+
+def is_issues_dir(d: Path) -> bool:
+    return any((d / n).is_file() for n in ("project.json", "Issues.md", "Issue.md"))
+
+
+def find_issues_in(base: Path) -> Path | None:
+    if (base / "issues").is_dir() and is_issues_dir(base / "issues"):
+        return base / "issues"
+    try:
+        candidates = [d for d in sorted(base.iterdir()) if d.is_dir() and is_issues_dir(d)]
+    except OSError:
+        return None
+    for c in candidates:
+        if "issue" in c.name.lower():
+            return c
+    return candidates[0] if candidates else None
+
+
+def resolve_issues_dir(arg: str | None) -> Path:
+    if arg:
+        p = Path(arg)
+        return p if p.is_absolute() else Path.cwd() / p
+    d = Path.cwd()
+    home = Path.home()
+    while d != d.parent and d != home:
+        found = find_issues_in(d)
+        if found:
+            return found
+        if (d / ".git").exists():   # repo root is the boundary
+            break
+        d = d.parent
+    return Path.cwd() / "issues"
+
+
+def project_name(issues_dir: Path) -> str:
+    """The tracker's canonical name from project.json, else the repo folder."""
+    try:
+        return json.loads((issues_dir / "project.json").read_text())["name"]
+    except (OSError, ValueError, KeyError):
+        return issues_dir.parent.name
+
+
+def milestone_labels(issues_dir: Path) -> dict[str, str]:
+    """`{"M1": "the read engine and worktrees", ...}` from guide §9.
+
+    Best-effort: a missing or restructured guide costs the labels, not the
+    report, so every failure returns an empty map rather than raising.
+    """
+    guide = issues_dir.parent / "docs" / "switchyard-development-guide.md"
+    try:
+        text = guide.read_text(encoding="utf-8")
+    except OSError:
+        return {}
+    labels: dict[str, str] = {}
+    for line in text.splitlines():
+        m = GUIDE_MILESTONE_RE.match(line)
+        if m:
+            labels.setdefault(m.group("key"), m.group("label").strip().rstrip("."))
+    return labels
+
+
+def milestone_sort_key(name: str) -> tuple[int, int, str]:
+    """M-numbers ascending, then any other label, then the unmilestoned bucket."""
+    if name == UNMILESTONED:
+        return (2, 0, "")
+    m = MILESTONE_RE.match(name)
+    if m:
+        return (0, int(m.group("num")), "")
+    return (1, 0, name)
+
+
+def bar(done: int, total: int, width: int = 12) -> str:
+    if total <= 0:
+        return "░" * width
+    filled = round(width * done / total)
+    return "█" * filled + "░" * (width - filled)
+
+
+def pct(done: int, total: int) -> int:
+    return round(100 * done / total) if total else 0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(
+        prog="list-issues-by-milestone",
+        description="List issues grouped by milestone, with completion percentages.",
+    )
+    ap.add_argument("dir", nargs="?", help="issues directory (default: auto-detect)")
+    ap.add_argument("--open", action="store_true", dest="only_open",
+                    help="hide finished issues; percentages still reflect everything")
+    ap.add_argument("-m", "--milestone", metavar="M", help="show only this milestone (e.g. M2)")
+    ap.add_argument("-n", "--limit", type=int, default=0, metavar="N",
+                    help="show at most N issues per milestone (default: no limit)")
+    ap.add_argument("-a", "--all", action="store_true", dest="show_all",
+                    help="include resolved issues untouched for over a week")
+    ap.add_argument("--color", action="store_const", const="always", dest="color_mode")
+    ap.add_argument("--no-color", action="store_const", const="never", dest="color_mode")
+    args = ap.parse_args()
+
+    issues_dir = resolve_issues_dir(args.dir)
+    if not issues_dir.is_dir():
+        print(f"error: {issues_dir} not found", file=sys.stderr)
+        return 1
+
+    files = sorted(issues_dir.glob("[0-9][0-9][0-9][0-9].md"))
+    if not files:
+        print(f"no issue files in {issues_dir}", file=sys.stderr)
+        return 0
+
+    issues = [Issue(f) for f in files]
+
+    mode = args.color_mode or "auto"
+    use_color = mode == "always" or (
+        mode == "auto" and sys.stdout.isatty() and not os.environ.get("NO_COLOR")
+    )
+    p = Palette(use_color)
+
+    groups: dict[str, list[Issue]] = {}
+    for it in issues:
+        groups.setdefault(it.milestone, []).append(it)
+    ordered = sorted(groups, key=milestone_sort_key)
+
+    if args.milestone:
+        want = args.milestone.strip()
+        ordered = [k for k in ordered if k.lower() == want.lower()]
+        if not ordered:
+            print(f"no issues in milestone {want}", file=sys.stderr)
+            return 1
+
+    # Stale finished issues are hidden from the *listing* only. They stay in
+    # every count above: a milestone's percentage must not move because an
+    # issue got old.
+    def listed(members: list[Issue]) -> list[Issue]:
+        out = []
+        for it in members:
+            finished = it.is_done or it.is_wontfix
+            if args.only_open and finished:
+                continue
+            if not args.show_all and finished and it.age_secs > WEEK_SECS:
+                continue
+            out.append(it)
+        return out
+
+    if not use_color:
+        for k in ordered:
+            for it in sorted(listed(groups[k]), key=lambda i: i.num):
+                print(f"{it.num}  {it.status:<12}  {k:<4}  {it.title}")
+        return 0
+
+    labels = milestone_labels(issues_dir)
+    counted = [i for i in issues if i.counts]
+    total_done = sum(1 for i in counted if i.is_done)
+    total_in_progress = sum(1 for i in counted if i.is_in_progress)
+    wontfix = sum(1 for i in issues if i.is_wontfix)
+    width = shutil.get_terminal_size((100, 24)).columns
+
+    head = (f"{project_name(issues_dir)} · {total_done}/{len(counted)} issues · "
+            f"{pct(total_done, len(counted))}%")
+    print(f"\n{p.bold}{head}{p.reset}  {p.green}{bar(total_done, len(counted), 24)}{p.reset}")
+    tail = []
+    if total_in_progress:
+        tail.append(f"{total_in_progress} in progress")
+    if wontfix:
+        tail.append(f"{wontfix} won't-fix excluded from the total")
+    if tail:
+        print(f"{p.dim}{' · '.join(tail)}{p.reset}")
+
+    hidden = 0
+    for k in ordered:
+        members = sorted(groups[k], key=lambda i: i.num)
+        cm = [i for i in members if i.counts]
+        done = sum(1 for i in cm if i.is_done)
+        in_prog = sum(1 for i in cm if i.is_in_progress)
+        openish = len(cm) - done - in_prog
+        label = labels.get(k)
+        title = f"{k} — {label}" if label else (k if k != UNMILESTONED else "Unmilestoned")
+        pc = pct(done, len(cm))
+        pcolor = p.green if pc == 100 else (p.cyan if pc else p.dim)
+
+        print(f"\n{p.bold}{p.blue}{title}{p.reset}  "
+              f"{p.dim}{done}/{len(cm)}{p.reset}  "
+              f"{pcolor}{pc:>3}%{p.reset} {pcolor}{bar(done, len(cm))}{p.reset}  "
+              f"{p.yellow}{openish} open{p.reset}"
+              f"{f'{p.dim} · {p.reset}{p.cyan}{in_prog} in progress{p.reset}' if in_prog else ''}")
+
+        shown = 0
+        for it in listed(members):
+            if args.limit and shown >= args.limit:
+                break
+            tcolor = p.dim if (it.is_done or it.is_wontfix) else p.reset
+            status = f"{it.glyph()} {it.status}"
+            extra = ""
+            if it.is_in_progress and it.ac_total:
+                extra = f"  {p.dim}{it.ac_done}/{it.ac_total} AC{p.reset}"
+            age = human_age(it.age_secs)
+            acolor = (p.green + p.bold) if it.age_secs <= FRESH_SECS else (
+                p.yellow if it.age_secs <= WEEK_SECS else p.dim)
+            # Budget: 2 indent + 4 num + 2 + 13 status + 2 + 4 age + 2, plus any AC note.
+            avail = max(20, width - 29 - (len(f"  {it.ac_done}/{it.ac_total} AC") if extra else 0))
+            t = it.title if len(it.title) <= avail else it.title[: avail - 1] + "…"
+            print(f"  {p.gray}{it.num}{p.reset}  "
+                  f"{it.color(p)}{status:<13}{p.reset}  "
+                  f"{acolor}{age:>4}{p.reset}  "
+                  f"{tcolor}{t}{p.reset}{extra}")
+            shown += 1
+        hidden += len(members) - len(listed(members))
+
+    footer = []
+    if hidden:
+        footer.append(f"{hidden} finished issue{'s' if hidden != 1 else ''} "
+                      f"untouched for over a week hidden (-a to show)")
+    footer.append("100% is not a closed milestone — guide §9 also requires "
+                  "two consecutive clean review passes")
+    print(f"\n{p.dim}{' · '.join(footer)}{p.reset}\n")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
