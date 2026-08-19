@@ -92,17 +92,21 @@ private func hostileConfigImmunityFixture() throws -> FixtureRepository {
     return repo
 }
 
-// MARK: - The seven functions, captured as one snapshot
+// MARK: - The eight functions, captured as one snapshot
 
-/// One call to each of the seven criterion-1 engine functions (`listHunks`
+/// One call to each of the eight criterion-1 engine functions (`listHunks`
 /// counted twice, `.staged` and `.unstaged`, per the issue's explicit
-/// requirement), each result encoded through `configImmunityEncoder()`.
+/// requirement -- nine captures total), each result encoded through
+/// `configImmunityEncoder()`. `commitDiff` (#0341) is the eighth: it shares
+/// `listHunks`' pinned flags via one constant, so this sweep now covers both
+/// call sites that vector could diverge behind.
 private struct ConfigImmunitySnapshot {
     let whereAmI: Data
     let graphRows: Data
     let gitStatus: Data
     let listHunksStaged: Data
     let listHunksUnstaged: Data
+    let commitDiffSecond: Data
     let conflictedFiles: Data
     let commitLogRun: Data
     let signatureVerificationRun: Data
@@ -116,6 +120,7 @@ private struct ConfigImmunitySnapshot {
             ("gitStatus", before.gitStatus, after.gitStatus),
             ("listHunks(.staged)", before.listHunksStaged, after.listHunksStaged),
             ("listHunks(.unstaged)", before.listHunksUnstaged, after.listHunksUnstaged),
+            ("commitDiff(second)", before.commitDiffSecond, after.commitDiffSecond),
             ("conflictedFiles", before.conflictedFiles, after.conflictedFiles),
             ("CommitLog.run", before.commitLogRun, after.commitLogRun),
             ("SignatureVerification.run", before.signatureVerificationRun, after.signatureVerificationRun),
@@ -123,14 +128,17 @@ private struct ConfigImmunitySnapshot {
     }
 }
 
-/// Runs all seven (eight, counting both `listHunks` areas) criterion-1
+/// Runs all eight (nine counting both `listHunks` areas) criterion-1
 /// engine functions against the repository at `path` and encodes each
 /// result. Every field is captured with the fixture's own `HEAD` --
 /// `whereAmI` is included even though it has no known config lever yet,
 /// because the property under test is about the whole criterion-1 surface,
-/// not only the functions a prior gap was found in.
+/// not only the functions a prior gap was found in. `revision` is the
+/// fixture's `second` commit -- an ordinary, one-parent commit with real
+/// content, so `commitDiff` has something to diff.
 private func captureConfigImmunitySnapshot(
     at path: String,
+    revision: String,
     encoder: JSONEncoder
 ) throws -> ConfigImmunitySnapshot {
     ConfigImmunitySnapshot(
@@ -139,6 +147,7 @@ private func captureConfigImmunitySnapshot(
         gitStatus: try encoder.encode(gitStatus(at: path)),
         listHunksStaged: try encoder.encode(listHunks(at: path, area: .staged)),
         listHunksUnstaged: try encoder.encode(listHunks(at: path, area: .unstaged)),
+        commitDiffSecond: try encoder.encode(commitDiff(at: path, revision: revision)),
         conflictedFiles: try encoder.encode(conflictedFiles(at: path)),
         commitLogRun: try encoder.encode(CommitLog.run(path: path, rangeArguments: [])),
         signatureVerificationRun: try encoder.encode(
@@ -219,8 +228,8 @@ private let configImmunityAllowList: [String: String] = [:]
 struct ConfigImmunityTests {
 
     /// For every `(key, value)` pair in `configImmunityTable`, against one
-    /// shared hostile fixture: capture all eight criterion-1 calls, set the
-    /// config, capture all eight again, and `#expect` the encoded bytes are
+    /// shared hostile fixture: capture all nine criterion-1 calls, set the
+    /// config, capture all nine again, and `#expect` the encoded bytes are
     /// unchanged -- reporting which function and which config on failure.
     ///
     /// Deliberately one `@Test`, not `@Test(arguments:)`: the fixture's git
@@ -236,17 +245,18 @@ struct ConfigImmunityTests {
         let repo = try hostileConfigImmunityFixture()
         defer { repo.destroy() }
         let path = repo.url.path
+        let revision = try #require(repo.oids["second"])
         let git = GitProcess()
         let encoder = configImmunityEncoder()
 
         var rowsChecked = 0
         for config in configImmunityTable {
-            let before = try captureConfigImmunitySnapshot(at: path, encoder: encoder)
+            let before = try captureConfigImmunitySnapshot(at: path, revision: revision, encoder: encoder)
 
             try git.run(["config", config.key, config.value], workingDirectory: path)
             let after: ConfigImmunitySnapshot
             do {
-                after = try captureConfigImmunitySnapshot(at: path, encoder: encoder)
+                after = try captureConfigImmunitySnapshot(at: path, revision: revision, encoder: encoder)
             } catch {
                 _ = try? git.run(["config", "--unset", config.key], workingDirectory: path)
                 throw error
