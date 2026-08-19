@@ -13,6 +13,39 @@ Two design documents, both current, both in `docs/`:
 
 `issues/` holds the task breakdown. This file is the working agreement: rules, commands, and traps.
 
+## Priority, set 2026-08-18: the app MVP comes before everything else
+
+**Brennan's instruction, in his words:** *"We can set aside some issues which are not essential to an
+MVP showing the core UI for the app… We should have started with the app first then added the CLI for
+remote control. The problem with not seeing a demo is we cannot see if we are going in the wrong
+direction."*
+
+He is right about the sequencing, and the record supports him: 331 issues and 1148 tests in, the app
+showed `Text("Hello, world!")` until #0337, and **the first thing anyone could run was a development
+harness added on 2026-08-18**. Guide §11 decision 11 moved CLI reachability to M3 on sound
+architectural grounds and left no other way to see the engine work; #0115 had already recorded that
+same failure once. Milestone order kept being followed past the point where it was serving anyone.
+
+**So the order changes until there is a demo:**
+
+1. **The app MVP is the only priority.** A window, a repository, real read data on screen.
+2. **Unimplemented git actions are allowed, and show an alert saying so.** A stubbed action with an
+   honest alert is MVP progress; a fully-correct action nobody can see is not.
+3. **The M1 and M2 milestone reviews are paused, not cancelled.** Criterion 5's "two consecutive clean
+   passes" is a quality ritual with no termination pressure, and it is exactly what would keep M1 open
+   while the app sits unbuilt. Resume after the MVP demo.
+4. **No new engine hardening.** The config-immunity hunt is capped (#0330 makes it a test). Do not open
+   another class of engine defect until the UI exists to exercise it.
+5. **A round that produces something visible outranks a round that produces a test.** When both are
+   available, dispatch the visible one.
+
+**What is not waste, so it does not get re-litigated:** the UI's data layer is `whereAmI`, `gitStatus`,
+`graphRows`, `CommitLog`, `listHunks`, `conflictedFiles` and the `wt` group — all built, all tested,
+all directly consumed by the views, since `YardUI` depends on `YardGit` and the app owns the engine.
+The journal is undo/redo, a product feature. **What was over-invested is the depth**: fourteen M1
+review passes and seven config-immunity issues before one pixel existed. That is a sequencing error,
+not a code error, and this section is the correction.
+
 ## Autonomy: keep working through the queue
 
 **The default is to keep going.** Work through open issues in order without reporting back after
