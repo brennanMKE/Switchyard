@@ -874,6 +874,59 @@ struct CommitLogTests {
         #expect(oid == realOid)
     }
 
+    // MARK: - i18n.logOutputEncoding must not mojibake log output (#0326)
+    //
+    // `i18n.logOutputEncoding = ISO-8859-1` re-encodes `%B`/`%an` out of UTF-8,
+    // and `GitProcess.Output.text` (`String(decoding:as: UTF8.self)`) decodes
+    // stdout lossily rather than failing, so an unpinned `git log` silently
+    // hands back U+FFFD replacement characters in place of the real bytes.
+    // `--encoding=UTF-8` pins the output regardless of that config. This must
+    // assert on bytes, not merely on string inequality: U+FFFD compares
+    // unequal to the original but *looks* like an ordinary string diff, which
+    // makes a byte assertion the only unambiguous report.
+    @Test func runPreservesNonASCIISubjectAndAuthorUnderISO88591LogOutputEncoding() throws {
+        let repo = try FixtureRepository(refFormat: .files)
+        defer { repo.destroy() }
+
+        let subject = "sujet café élève"
+        let authorName = "Café Élodie"
+        // `--author` on the command line, not `GIT_AUTHOR_NAME` via
+        // `extraEnvironment`: Foundation's `Process.environment` on Darwin
+        // silently normalizes non-ASCII values to NFD (measured -- precomposed
+        // "é" (0xC3 0xA9) arrives at the child process decomposed to "e" +
+        // U+0301), which is a Foundation quirk unrelated to this issue and
+        // would make the byte assertion below fail for the wrong reason.
+        // Process arguments are not affected, so `--author` round-trips the
+        // exact bytes.
+        try git.run(
+            ["commit", "-q", "--allow-empty",
+             "--author=\(authorName) <cafe@example.invalid>", "-m", subject],
+            workingDirectory: repo.url.path
+        )
+
+        try git.run(
+            ["config", "i18n.logOutputEncoding", "ISO-8859-1"], workingDirectory: repo.url.path)
+
+        // Verify the config actually bites before trusting anything downstream
+        // (the #0320/#0325 pattern): plain `git log --format=%s`, with no
+        // `--encoding` override, must come back through `GitProcess` with
+        // U+FFFD replacement characters in place of the accented bytes under
+        // this config -- the measured baseline the issue records. If this
+        // assertion cannot fail, it is not testing anything.
+        let plain = try git.run(["log", "-1", "--format=%s"], workingDirectory: repo.url.path)
+        #expect(
+            plain.text.contains("\u{FFFD}"),
+            "fixture did not provoke the config: i18n.logOutputEncoding=ISO-8859-1 produced no replacement characters in plain --format=%s output: \(plain.text)")
+
+        let entries = try CommitLog.run(path: repo.url.path, rangeArguments: ["-1", "HEAD"])
+        try #require(entries.count == 1)
+
+        // Assert on the UTF-8 bytes, not the string: this is what makes a
+        // U+FFFD regression unambiguous rather than merely "some string diff".
+        #expect(Data(entries[0].subject.utf8) == Data(subject.utf8))
+        #expect(Data(entries[0].author.utf8) == Data(authorName.utf8))
+    }
+
     // MARK: - hasProvenance shortcut
 
     @Test func hasProvenanceReturnsFalseWhenEmptyTrailers() {
