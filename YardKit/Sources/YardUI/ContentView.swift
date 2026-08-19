@@ -44,6 +44,12 @@ public struct ContentView: View {
     /// commits legitimately stays empty.
     @State private var history: [CommitLogEntry] = []
 
+    /// #0052's lane-assigned commit graph, loaded alongside `history` from a
+    /// separate engine call and joined to it by `oid` in
+    /// `CommitHistoryView`. Empty until the first successful load, same as
+    /// `history` above.
+    @State private var graphRows: [GraphRow] = []
+
     /// The History pane's selection, keyed on `oid`. #0082's Detail pane
     /// observes it to show the selected commit.
     @State private var selectedCommit: String?
@@ -141,13 +147,9 @@ public struct ContentView: View {
         }
     }
 
-    /// #0340's commit list. The round that built this shell left a
-    /// placeholder here because #0340 was dispatched concurrently and owned
-    /// `CommitHistoryView.swift`; it landed first, so the wiring is done
-    /// here at review rather than deferred to a third issue. #0052 replaces
-    /// the flat list with lane rendering.
+    /// #0340's commit list with #0052's lane gutter beside it.
     private var historyPane: some View {
-        CommitHistoryView(entries: history, selection: $selectedCommit)
+        CommitHistoryView(entries: history, graphRows: graphRows, selection: $selectedCommit)
     }
 
     /// #0082: shows the selected commit when `selectedCommit` names one
@@ -231,6 +233,7 @@ public struct ContentView: View {
         errorMessage = nil
         summary = nil
         history = []
+        graphRows = []
         sidebar = nil
         selectedCommit = nil
         do {
@@ -238,8 +241,11 @@ public struct ContentView: View {
             // Separate from the summary load on purpose: a repository whose
             // log cannot be read (an unborn branch has no HEAD) must still
             // show its header and status rather than falling into the error
-            // state wholesale. Same reasoning for the sidebar load below.
+            // state wholesale. Same reasoning for the graph and sidebar
+            // loads below -- three independent engine calls, so one failing
+            // does not blank the others.
             history = (try? await loadCommitHistory(at: repositoryPath)) ?? []
+            graphRows = (try? await loadCommitGraph(at: repositoryPath)) ?? []
             sidebar = try? await loadRepositorySidebar(at: repositoryPath)
         } catch {
             errorMessage = String(describing: error)
