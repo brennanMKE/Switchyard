@@ -192,7 +192,14 @@ public enum CommitLog {
             "--decorate-refs=refs/stash",
             "--decorate-refs=refs/tags/*",
         ]
-        args = ["log"] + decorateRefs + ["--format=\(fmt)"]
+        // `log.showSignature = true` prepends a human-readable verification
+        // line ("Good \"git\" signature for ...") ahead of the requested
+        // `--format` output, even with a custom `--format` -- measured
+        // 2026-08-18 against a real SSH-signed commit. Without
+        // `--no-show-signature`, `oid` below becomes that prose sentence
+        // instead of the 40-hex commit id, which is a wire payload field an
+        // agent feeds straight back to git (#0325).
+        args = ["log"] + decorateRefs + ["--no-show-signature", "--format=\(fmt)"]
 
         if rangeArguments.isEmpty {
             args.append("HEAD")
