@@ -52,6 +52,17 @@ let package = Package(
             dependencies: ["YardKit"],
             path: "Sources/switchyard"
         ),
+        // Development-only harness: links YardCommands (and therefore
+        // YardGit) in-process so the engine can be run from the command line
+        // before the app exists to talk to over XPC. `switchyard` above
+        // stays XPC-only on purpose (guide §11 decision 11) -- this target
+        // is the "other way to run it" #0337 adds alongside it, not a
+        // replacement.
+        .executableTarget(
+            name: "yard-engine",
+            dependencies: ["YardCommands", "YardKit"],
+            path: "Sources/yard-engine"
+        ),
         .testTarget(
             name: "YardGitTests",
             dependencies: ["YardGit"],
@@ -64,7 +75,11 @@ let package = Package(
         ),
         .testTarget(
             name: "YardCommandsTests",
-            dependencies: ["YardCommands"],
+            // YardKit too: #0337's composition test calls runYard directly
+            // to assert the yard-engine fallback (runEngineCommand ??
+            // runYard) without needing the executable target itself, which
+            // SwiftPM does not allow a test target to depend on.
+            dependencies: ["YardCommands", "YardKit"],
             path: "Tests/YardCommandsTests"
         ),
         .testTarget(
