@@ -768,6 +768,36 @@ struct CommitLogTests {
         #expect(decorated[0].refs.contains("main") || decorated[0].refs.contains("HEAD"))
     }
 
+    // #0320: `refs` (`%D`) obeys `log.excludeDecoration`, so a repo configured
+    // with `log.excludeDecoration = refs/tags/*` silently dropped tags from
+    // this field. `CommitLog.run` now passes `--decorate-refs=HEAD
+    // --decorate-refs=refs/*`, which the man page documents as overriding a
+    // `log.excludeDecoration` match.
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func runIncludesTagInRefsUnderLogExcludeDecoration(format: FixtureRepository.RefFormat) throws {
+        var repo = try FixtureRepository(refFormat: format)
+        defer { repo.destroy() }
+        try repo.build([FixtureRepository.Commit("a")])
+        try git.run(["tag", "v1"], workingDirectory: repo.url.path)
+
+        try git.run(
+            ["config", "log.excludeDecoration", "refs/tags/*"], workingDirectory: repo.url.path)
+
+        // Verify the config actually bites before trusting anything downstream:
+        // plain `git log --format=%D` (no override) under this config must omit
+        // the tag entirely -- the measured baseline the issue records.
+        let plain = try git.run(["log", "--format=%D", "-1"], workingDirectory: repo.url.path)
+        #expect(
+            !plain.text.contains("tag: v1"),
+            "fixture did not provoke the config: log.excludeDecoration=refs/tags/* left tag: v1 in plain %D output: \(plain.text)")
+
+        let entries = try CommitLog.run(path: repo.url.path, rangeArguments: ["HEAD"])
+        try #require(entries.count >= 1, "not enough entries to index")
+        #expect(
+            entries[0].refs.contains("tag: v1"),
+            "refs should still carry the tag despite log.excludeDecoration; got \(entries[0].refs)")
+    }
+
     // MARK: - hasProvenance shortcut
 
     @Test func hasProvenanceReturnsFalseWhenEmptyTrailers() {
