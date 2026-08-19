@@ -166,6 +166,69 @@ exit 0
     #expect(result.format == .openpgp)
 }
 
+/// #0324: `log.showSignature=true` prepends a prose verification line ahead
+/// of `--format`'s output even though `--format` is explicit, which used to
+/// swallow `SignatureVerification.run`'s `\u{01}`-delimited fields and report
+/// a validly signed commit as `.cannotCheck`. Uses a real SSH-signed commit —
+/// `installFakeGpg` cannot produce a signature git calls *good* — per the
+/// recipe measured in the issue notes (git 2.50.1). The key is a throwaway
+/// keypair generated fresh into the fixture's own directory, registered
+/// nowhere; its fingerprint differs every run, so nothing here asserts on it.
+@Test func showSignatureConfigDoesNotBreakVerification() throws {
+    var repo = try FixtureRepository()
+    defer { repo.destroy() }
+    try repo.build([FixtureRepository.Commit("a")])
+
+    let keyPath = repo.url.appendingPathComponent("k").path
+    try GitProcess(executablePath: "/usr/bin/ssh-keygen").run(
+        ["-q", "-t", "ed25519", "-N", "", "-C", "t@t", "-f", keyPath],
+        standardInput: Data()
+    )
+    let publicKey = try String(contentsOf: URL(fileURLWithPath: "\(keyPath).pub"), encoding: .utf8)
+    try repo.writeUntracked(["allowed": "t@t \(publicKey)"])
+    for (key, value) in [
+        "gpg.format": "ssh",
+        "user.signingkey": "\(keyPath).pub",
+        "gpg.ssh.allowedSignersFile": repo.url.appendingPathComponent("allowed").path,
+    ] {
+        try GitProcess().run(["config", key, value], workingDirectory: repo.url.path)
+    }
+    try GitProcess().run(
+        ["commit", "-q", "-S", "--allow-empty", "-m", "signed subject"],
+        workingDirectory: repo.url.path
+    )
+    let signedSha = try repo.revParse("HEAD")
+
+    // Verify the config bites first: plain `git log --format=%G?` under it
+    // must emit the prose line, not the raw flag. Anchored on the literal
+    // git wording rather than on non-emptiness, so a config that silently
+    // failed to apply (a vacuous probe) cannot pass this.
+    let flagUnderConfig = try GitProcess().run(
+        ["-c", "log.showSignature=true", "log", "-1", "--format=%G?", "HEAD"],
+        workingDirectory: repo.url.path
+    )
+    let firstLine = flagUnderConfig.lines.first ?? ""
+    #expect(firstLine.hasPrefix("Good \"git\" signature for t@t"))
+    #expect(firstLine != "G")
+
+    // The commit really is signed and verifiable with the config off --
+    // establishes the baseline `run` must still report once the config is on.
+    let withoutConfig = try SignatureVerification.run(
+        revision: signedSha, in: repo.url.path, extraEnvironment: hermetic)
+    #expect(withoutConfig.state == .good)
+
+    // The fix: `run` passes `--no-show-signature`, so `log.showSignature`
+    // (set here as repository-local config, which `hermetic` does not null)
+    // must not change what `run` reports.
+    try GitProcess().run(
+        ["config", "log.showSignature", "true"], workingDirectory: repo.url.path)
+    let underConfig = try SignatureVerification.run(
+        revision: signedSha, in: repo.url.path, extraEnvironment: hermetic)
+    #expect(underConfig.state == .good)
+    #expect(underConfig.format == .ssh)
+    #expect(underConfig.signer == "t@t")
+}
+
 @Test func unknownRevisionThrows() throws {
     let repo = try FixtureRepository()
     defer { repo.destroy() }
