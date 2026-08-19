@@ -61,3 +61,27 @@ public func loadRepositorySummary(at path: String) async throws -> RepositorySum
 public func loadCommitHistory(at path: String) async throws -> [CommitLogEntry] {
     try CommitLog.run(path: path, rangeArguments: ["-100", "HEAD"])
 }
+
+/// Loads the diff `revision` introduced, for the Detail pane's commit view
+/// (#0082).
+///
+/// `YardUI` sets `.defaultIsolation(MainActor.self)` (`Package.swift`), so
+/// this needs `@concurrent` for the same reason `loadRepositorySummary` and
+/// `loadCommitHistory` above do: `commitDiff` shells out to `git`
+/// synchronously (`GitProcess.run`), and running that on the main actor
+/// blocks the window. `@concurrent` forces this function onto the concurrent
+/// executor regardless of the caller's isolation; callers `await` it from
+/// the main actor and get control back there once it returns.
+///
+/// `FileDiff` and `Hunk` are declared in `YardGit`, which does not set
+/// `YardUI`'s default isolation, so they are already `nonisolated`
+/// `Sendable` value types and need no wrapper type here — unlike
+/// `RepositorySummary` above, which is declared in this target.
+///
+/// Empty for a merge commit (`commitDiff`'s own documented behaviour,
+/// measured #0341) — callers branch on `CommitLogEntry.parents.count > 1`
+/// to show an explicit note instead of treating that as "nothing changed".
+@concurrent
+public func loadCommitDiff(at path: String, revision: String) async throws -> [FileDiff] {
+    try commitDiff(at: path, revision: revision)
+}

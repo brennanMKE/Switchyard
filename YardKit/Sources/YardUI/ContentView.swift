@@ -16,9 +16,10 @@
 // that would fight the "just three columns" shape #0080's planning settled
 // on.
 //
-// The History and Detail panes are placeholders for #0340 and #0082/#0052,
-// which are separate, concurrently-dispatched issues -- this file does not
-// import or reference `CommitHistoryView` or touch `RepositoryLoader.swift`.
+// #0082: the Detail pane now shows the commit selected in the History pane
+// -- `CommitDetailView`, fed by `loadCommitDiff` (`RepositoryLoader.swift`).
+// With nothing selected it keeps showing the #0339 status list unchanged;
+// the commit view is an addition, not a replacement.
 
 import AppKit
 import SwiftUI
@@ -43,9 +44,18 @@ public struct ContentView: View {
     /// commits legitimately stays empty.
     @State private var history: [CommitLogEntry] = []
 
-    /// The History pane's selection, keyed on `oid`. Nothing observes it yet
-    /// — #0082's detail pane is what it exists for.
+    /// The History pane's selection, keyed on `oid`. #0082's Detail pane
+    /// observes it to show the selected commit.
     @State private var selectedCommit: String?
+
+    /// `loadCommitDiff`'s result for `selectedCommit`, loaded by the
+    /// `.task(id: selectedCommit)` below. `nil` while loading or when
+    /// nothing is selected; `[]` for a genuinely empty diff once loaded.
+    @State private var selectedCommitDiff: [FileDiff]?
+
+    /// Set when `loadCommitDiff` throws — shown in the Detail pane instead
+    /// of a blank diff.
+    @State private var selectedCommitDiffError: String?
 
     /// A `public struct`'s memberwise initialiser is **internal**. Without this,
     /// `ContentView()` is unreachable from the app target — the same defect
@@ -89,6 +99,9 @@ public struct ContentView: View {
         .task(id: repositoryPath) {
             await reload()
         }
+        .task(id: selectedCommit) {
+            await reloadSelectedCommitDiff()
+        }
     }
 
     private func repositoryView(summary: RepositorySummary) -> some View {
@@ -125,12 +138,18 @@ public struct ContentView: View {
         CommitHistoryView(entries: history, selection: $selectedCommit)
     }
 
-    /// The existing status list, unchanged from #0339 (#0082 replaces it).
-    /// Hosted here for now so nothing regresses while the Sidebar and History
-    /// panes are placeholders.
+    /// #0082: shows the selected commit when `selectedCommit` names one
+    /// found in `history`. With nothing selected -- the #0339 behaviour --
+    /// it keeps showing today's working-tree status list unchanged.
     private func detailPane(summary: RepositorySummary) -> some View {
         Group {
-            if summary.status.entries.isEmpty {
+            if let selectedCommit, let entry = history.first(where: { $0.oid == selectedCommit }) {
+                CommitDetailView(
+                    entry: entry,
+                    files: selectedCommitDiff,
+                    diffError: selectedCommitDiffError
+                )
+            } else if summary.status.entries.isEmpty {
                 Text("Working tree clean")
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -210,6 +229,21 @@ public struct ContentView: View {
             history = (try? await loadCommitHistory(at: repositoryPath)) ?? []
         } catch {
             errorMessage = String(describing: error)
+        }
+    }
+
+    /// Loads the diff for `selectedCommit`, keyed by `.task(id:)` so a new
+    /// selection cancels an in-flight load for the previous one. Nothing to
+    /// load with no repository open or no commit selected -- that is the
+    /// #0339 status-list branch in `detailPane`, not an error.
+    private func reloadSelectedCommitDiff() async {
+        selectedCommitDiffError = nil
+        selectedCommitDiff = nil
+        guard let repositoryPath, let selectedCommit else { return }
+        do {
+            selectedCommitDiff = try await loadCommitDiff(at: repositoryPath, revision: selectedCommit)
+        } catch {
+            selectedCommitDiffError = String(describing: error)
         }
     }
 }
