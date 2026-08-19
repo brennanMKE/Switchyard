@@ -426,7 +426,9 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-08-18 | #0324 | Round 1 (S, measured) | 94,828 | $0.28 |
 | 2026-08-18 | #0325 | Round 1 (S, measured) | 99,243 | $0.30 |
 | 2026-08-18 | #0333 | Round 1 (S, measured) | 66,753 | $0.20 |
-| | | **Total measured** | **42,105,441** | **$418.72** |
+| 2026-08-18 | #0326 | Round 1 (S, measured) | 108,093 | $0.32 |
+| 2026-08-18 | #0331 | Round 1 (S, measured) | 65,454 | $0.20 |
+| | | **Total measured** | **42,278,988** | **$419.24** |
 
 ## What this total does and does not cover
 

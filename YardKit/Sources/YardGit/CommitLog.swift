@@ -199,7 +199,15 @@ public enum CommitLog {
         // `--no-show-signature`, `oid` below becomes that prose sentence
         // instead of the 40-hex commit id, which is a wire payload field an
         // agent feeds straight back to git (#0325).
-        args = ["log"] + decorateRefs + ["--no-show-signature", "--format=\(fmt)"]
+        //
+        // `i18n.logOutputEncoding` re-encodes `%B`/`%an` out of UTF-8 (default
+        // ISO-8859-1 when set), and `GitProcess.Output.text` decodes stdout as
+        // UTF-8 lossily rather than failing -- measured 2026-08-18: a non-ASCII
+        // subject under that config comes back with U+FFFD replacement
+        // characters instead of its real bytes. A `schemaVersion: 1` envelope
+        // is UTF-8 by definition, so `--encoding=UTF-8` pins git's output to
+        // UTF-8 regardless of `i18n.logOutputEncoding` (#0326).
+        args = ["log"] + decorateRefs + ["--no-show-signature", "--encoding=UTF-8", "--format=\(fmt)"]
 
         if rangeArguments.isEmpty {
             args.append("HEAD")
