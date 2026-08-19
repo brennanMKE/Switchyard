@@ -137,7 +137,21 @@ public struct GitProcess: Sendable {
     ///   - arguments: arguments after the executable, without a leading "git".
     ///   - workingDirectory: passed via `-C`, so the process CWD is untouched.
     ///   - standardInput: written to stdin, then closed.
-    ///   - extraEnvironment: merged over the base environment.
+    ///   - extraEnvironment: merged over the base environment. **`Process` on
+    ///     Darwin normalizes non-ASCII environment *values* from NFC to NFD
+    ///     as they cross the exec boundary** -- measured independently
+    ///     (#0335) with a precomposed `"Café Élodie"`: the UTF-8 bytes set
+    ///     here, `67 97 102 195 169 32 195 137 108 111 100 105 101` (13
+    ///     bytes), are read back by the child as `67 97 102 101 204 129 32
+    ///     69 204 129 108 111 100 105 101` (15 bytes) -- `é` (`195 169`)
+    ///     arrives decomposed as `e` + U+0301 (`101 204 129`), and likewise
+    ///     for `É`. **Process *arguments* are not affected** -- the same
+    ///     string passed as an argument round-trips exactly, which is the
+    ///     workaround: prefer an argument (`--author=`, for instance) over
+    ///     an environment value for any non-ASCII string. `GitProcess` does
+    ///     not normalize values on the way in or out; see
+    ///     `GitProcessTests.extraEnvironmentNonASCIIValueArrivesNFDNormalized`,
+    ///     which pins this as current behaviour rather than a fix.
     ///   - timeout: when non-`nil`, the child is terminated (and reported as
     ///     `Failure.timedOut`) if it has not exited by this deadline. `nil`
     ///     (the default) is today's behavior: `waitUntilExit()` with no
@@ -174,11 +188,15 @@ public struct GitProcess: Sendable {
     /// `diff --quiet` and `merge-base --is-ancestor`, for instance — so callers
     /// that expect that use this and inspect `exitCode` themselves.
     ///
-    /// - Parameter timeout: see `run(_:workingDirectory:standardInput:
-    ///   extraEnvironment:timeout:)`. When the deadline expires this throws
-    ///   `Failure.timedOut` rather than returning an `Output` -- unlike a
-    ///   plain non-zero exit, a timeout is never information a caller reads
-    ///   from `exitCode`.
+    /// - Parameters:
+    ///   - extraEnvironment: see `run(_:workingDirectory:standardInput:
+    ///     extraEnvironment:timeout:)` -- the same NFD-normalization trap
+    ///     applies here, since `run` calls this to do the actual work.
+    ///   - timeout: see `run(_:workingDirectory:standardInput:
+    ///     extraEnvironment:timeout:)`. When the deadline expires this throws
+    ///     `Failure.timedOut` rather than returning an `Output` -- unlike a
+    ///     plain non-zero exit, a timeout is never information a caller reads
+    ///     from `exitCode`.
     public func capture(
         _ arguments: [String],
         workingDirectory: String? = nil,
