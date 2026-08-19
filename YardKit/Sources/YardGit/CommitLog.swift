@@ -161,7 +161,38 @@ public enum CommitLog {
         // Build the format string by appending range arguments after an
         // explicit HEAD (when nothing is given), so the output is predictable.
         let fmt = String(formatString.dropFirst("--format=".count))
-        args = ["log", "--format=\(fmt)"]
+        //
+        // `%D` (the `refs` field below) obeys `log.excludeDecoration`, so a repo
+        // with e.g. `log.excludeDecoration = refs/tags/*` silently drops tags
+        // from `CommitLogEntry.refs` (#0320). `-c log.excludeDecoration=` was
+        // assumed to neutralise this but does not: measured on git 2.50.1, an
+        // empty-value override does not clear the exclude list, it *adds* an
+        // empty pattern to it, which drops every decoration -- `HEAD -> main`
+        // reduces to bare `HEAD`, worse than doing nothing.
+        //
+        // The form that actually works is an explicit `--decorate-refs`
+        // pattern, which the man page documents as overriding a
+        // `log.excludeDecoration` match. It must list git's own default
+        // candidate set (`HEAD`, `refs/heads/`, `refs/remotes/`, `refs/stash`,
+        // `refs/tags/`) one prefix at a time rather than the blanket
+        // `refs/*` first tried: passing *any* `--decorate-refs` switches git
+        // from "default candidate set" mode to "explicit accept-list over all
+        // refs" mode -- measured directly, `refs/*` alone reproduced the
+        // default output for `main`/`tag: v1` but also decorated Switchyard's
+        // own journal anchor refs (`ServiceNames.journalRefPrefix`), which
+        // `commitLogDecorationsNeverCarryJournalRefs`
+        // (LaneAssignmentTests.swift) pins must never surface. The five
+        // explicit prefixes below reproduce the default candidate set
+        // byte-for-byte (measured, both with and without
+        // `log.excludeDecoration` set) without widening it.
+        let decorateRefs = [
+            "--decorate-refs=HEAD",
+            "--decorate-refs=refs/heads/*",
+            "--decorate-refs=refs/remotes/*",
+            "--decorate-refs=refs/stash",
+            "--decorate-refs=refs/tags/*",
+        ]
+        args = ["log"] + decorateRefs + ["--format=\(fmt)"]
 
         if rangeArguments.isEmpty {
             args.append("HEAD")
