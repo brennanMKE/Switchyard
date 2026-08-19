@@ -674,9 +674,19 @@ documented. This validates the engine and settles the response contract.
       is for, and #0259's fix immediately exposed a real production bug (#0262), which is the argument
       for keeping the hunt going rather than declaring the criterion met.
 
-      **Ten passes; twenty-eight findings; all fixed. The tenth pass was CLEAN** — forty mutations
-      across thirty-nine sites, zero survivors, including eight fresh targets no prior pass had
-      recorded. **Clean-review count: 1.** One more clean pass closes M1.
+      **Fourteen passes. The tenth was clean; passes 11-14 were not, so the clean-review count is
+      back to 0** — and the four passes after the clean one are the argument for not having stopped
+      there. Between them they produced #0312, #0316, #0318, #0319, #0321, #0323-#0326, and then
+      #0328-#0330 while the last pass's findings were being written up. Two were **data-loss or
+      correctness bugs, not test gaps**: `wt rm` destroying untracked files without `--force` under
+      `status.showUntrackedFiles=no` (#0319), and `hunks` emitting a patch `git apply` refuses under
+      `diff.suppressBlankEmpty` (#0323).
+
+      **The passes changed method, and that is what made them productive.** Pass 14 was asked to audit
+      pass 13's enumeration rather than repeat it, and falsified its central claim — see §11's
+      *Still open*, which records both the correction and the reason a class-2 enumeration bounded by
+      our own source can never close. **#0330 is the fix**: it makes the property a test, so the
+      criterion stops depending on a reviewer's memory.
 
       What the hunt was worth, since a count of findings does not say it: `status` would have **thrown**
       on any dirty repository if one flag were dropped (#0280), `hunks` would have reported *"nothing
