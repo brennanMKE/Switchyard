@@ -286,8 +286,11 @@ struct CommitLogTests {
     // MARK: - CommitLogEntry helpers
 
     @Test func shortOidReturnsTwelveChars() {
-        let long = String(repeating: "a", count: 40)
-        #expect(CommitLogEntry.shortOid(long).count == 12)
+        // Non-uniform halves so prefix and suffix differ -- a uniform string
+        // (e.g. all "a") would pass this assertion under either truncation
+        // direction and fail to catch the mutation.
+        let long = String(repeating: "a", count: 20) + String(repeating: "b", count: 20)
+        #expect(CommitLogEntry.shortOid(long) == String(long.prefix(12)))
     }
 
     @Test func shortOidReturnsUnknownForEmptyString() {
@@ -305,9 +308,11 @@ struct CommitLogTests {
     }
 
     @Test func shortOidPropertyReturnsTruncatedOid() {
-        let long = String(repeating: "b", count: 40)
+        // Non-uniform halves so prefix and suffix differ; see
+        // shortOidReturnsTwelveChars for why a uniform string can't do this.
+        let long = String(repeating: "c", count: 20) + String(repeating: "d", count: 20)
         let entry = CommitLogEntry(oid: long, parents: [], author: "Alice", refs: "", signatureStatus: .noSig, message: "hi", trailers: [])
-        #expect(entry.shortOid.count == 12)
+        #expect(entry.shortOid == String(long.prefix(12)))
     }
 
     // MARK: - Subject from message
