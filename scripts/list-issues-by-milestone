@@ -78,7 +78,8 @@ class Palette:
 
 
 class Issue:
-    __slots__ = ("num", "title", "status", "milestone", "ac_done", "ac_total", "mtime")
+    __slots__ = ("num", "title", "status", "milestone", "ac_done", "ac_total", "mtime",
+                 "duplicate_metadata")
 
     def __init__(self, path: Path):
         self.num = path.stem
@@ -88,6 +89,7 @@ class Issue:
         self.ac_done = 0
         self.ac_total = 0
         self.mtime = path.stat().st_mtime
+        self.duplicate_metadata = False
 
         for i, line in enumerate(path.read_text(encoding="utf-8").splitlines()):
             if i == 0:
@@ -98,10 +100,19 @@ class Issue:
             m = ROW_RE.match(line)
             if m:
                 key, val = m.group("key").strip().lower(), m.group("val").strip()
-                if key == "status":
+                # First row wins. #0156 and #0157 each carried TWO metadata
+                # blocks on 2026-08-18 -- the first saying resolved/M1, the
+                # second open/M2 -- and this loop's last-write-wins behaviour
+                # silently reported the wrong one, so two finished issues read
+                # as open for days. The duplicates are fixed; taking the first
+                # row makes a future duplicate a stale reading rather than an
+                # arbitrary one, and `--lint` below reports it outright.
+                if key == "status" and self.status == "?":
                     self.status = val or "?"
-                elif key == "milestone" and val:
+                elif key == "milestone" and val and self.milestone == UNMILESTONED:
                     self.milestone = val
+                elif key in ("status", "milestone"):
+                    self.duplicate_metadata = True
                 continue
             m = AC_RE.match(line)
             if m:
@@ -263,6 +274,8 @@ def main() -> int:
                     help="show at most N issues per milestone (default: no limit)")
     ap.add_argument("-a", "--all", action="store_true", dest="show_all",
                     help="include resolved issues untouched for over a week")
+    ap.add_argument("--lint", action="store_true",
+                    help="report issues with duplicated Status/Milestone rows and exit")
     ap.add_argument("--color", action="store_const", const="always", dest="color_mode")
     ap.add_argument("--no-color", action="store_const", const="never", dest="color_mode")
     args = ap.parse_args()
@@ -278,6 +291,14 @@ def main() -> int:
         return 0
 
     issues = [Issue(f) for f in files]
+
+    if args.lint:
+        bad = [i for i in issues if i.duplicate_metadata]
+        for i in bad:
+            print(f"{i.num}: duplicated Status/Milestone rows -- "
+                  f"reading status={i.status} milestone={i.milestone}")
+        print(f"{len(bad)} issue(s) with duplicated metadata")
+        return 1 if bad else 0
 
     mode = args.color_mode or "auto"
     use_color = mode == "always" or (
