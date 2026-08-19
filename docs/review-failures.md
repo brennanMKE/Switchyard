@@ -319,6 +319,14 @@ paths, guard clauses that skip. The question to answer is not "does the code do 
     review and re-anchored on a named position. **A guard clause that cannot fail is worse than no
     guard**, because it reads as evidence in the work log.
 
+8o. **Does the issue put `CGFloat` into a test file, and has it said to import Foundation?**
+    `AGENTS.md` Rule 8c has the measurement: without a direct `import Foundation`, `#expect` reports
+    two bit-identical `CGFloat` values as unequal — `(computedWidth → 480.0) == (computedSum → 480.0)`
+    — because SE-0444 member import visibility hides `CGFloat`'s `Equatable` conformance from the
+    macro. Verified independently at review by deleting the import and re-running. Any issue whose
+    tests compare view-layer geometry needs the import named in its Expected behavior, or the round
+    pays for the discovery again.
+
 8n. **Does the named test file exercise the layer the new test needs?**
     Check 12 asks whether the path can hold a unit test — a claim about the build system. This is the
     layer question underneath it, and a path can pass 12 and still be wrong. #0329 named

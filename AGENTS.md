@@ -569,6 +569,23 @@ Production defaults stay small. A CLI is one process making one call, and five s
 Two tests broke this rule on 2026-08-17 and cost a round; five more with a five-second XPC deadline
 turned `main` red an hour later.
 
+## Rule 8c — `import Foundation` in any test file that touches `CGFloat`, even if nothing names Foundation.
+
+**Measured 2026-08-18, and the failure looks like a compiler bug rather than a missing import.** A test
+file that uses `CGFloat` and imports only its own module gets this from `#expect`:
+
+```
+Expectation failed: (computedWidth → 480.0) == (computedSum → 480.0)
+```
+
+**Two bit-identical values, reported unequal.** Adding `import Foundation` fixes it. The cause is
+SE-0444 member import visibility: without a direct import, `#expect`'s macro cannot see `CGFloat`'s
+`Equatable` conformance, and it degrades instead of failing to compile.
+
+So: **if a test file mentions `CGFloat` — including indirectly, by comparing a view-layer constant —
+`import Foundation` explicitly.** Do not spend the round bisecting your own arithmetic; #0080's round
+lost time to exactly that before finding it.
+
 ## Rule 10 — `swift build` does not compile the tests. Only `swift test` does.
 
 `swift build` builds the library and executable targets. It does **not** build test targets. A test
