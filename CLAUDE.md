@@ -694,23 +694,31 @@ invocation, and every path lookup goes through it. It exists from M1 for this re
 
 ## Current state
 
-**Updated 2026-08-17.** This section was two milestones out of date — it still said the repository was
-a stock SwiftUI template with nothing built, which a fresh context would read as fact.
+**Updated 2026-08-18, end of session.** Suite baseline **1169 tests in 81 suites**
+(`docs/test-baseline.txt` is the number to trust, not prose here).
 
-- **M0 is done.** `docs/engine-findings.md` answers all four spike questions with measured evidence
-  and the spike code is deleted. Its exit criteria in guide §9 are checked off.
-- **`YardKit/` is real**: `YardGit` (46 source files — the engine), `YardKit`, `YardUI`, and the
-  `switchyard` executable, plus five test targets. `docs/test-baseline.txt` carries the current suite
-  count, and it is the number to trust rather than any figure written into prose here.
-- **M1 — the read engine and worktrees — is at its milestone review**, not at its start. The engine
-  behind `whereami`, `graph`, `status`, `hunks`, `conflicts`, `log` and `verify` and the whole `wt`
-  group exists with tests.
-- **M2 — journal, hooks, safe mutation — is the milestone in progress.** The journal, its anchor
-  store, undo/redo, the chain, and hook install all exist; see the M2 checklist in guide §9 for what
-  is not done.
-- **The app target is still a stock SwiftUI template.** Nothing in the XPC layer, the broker, or the
-  UI is built; that is M3 onward. An engine with no caller is exactly the gap guide §11 decision 11
-  moved to M3.
+- **M0, M1 and M2 have zero open issues.** M1's criterion-5 hunt ran fourteen review passes; #0160's
+  umbrella closed on its fifteenth, at clean-review count 2. **Neither milestone has had its guide §9
+  *milestone* review**, which is a separate ritual from per-issue review and is paused — see the
+  priority section at the top of this file.
+- **M3 is the milestone in progress**, and the app is real. `open Switchyard.xcodeproj` and Run gives a
+  window that opens a repository through `NSOpenPanel` and shows: a `whereAmI` header; a sidebar of
+  branches, remotes, tags, worktrees and a stash count; a commit history with a **lane gutter** drawn
+  from `graphRows`; and a detail pane with the selected commit's metadata, trailers and diff.
+- **`yard-engine` is a development harness** (#0337) that links `YardCommands` in-process so engine
+  commands can be run from a terminal: `swift run yard-engine whereami`. **`switchyard` is still
+  `YardKit`-only and XPC-bound** by design — that layer does not exist yet, and neither does the
+  command registry for anything but `whereami` (#0225-#0228, #0115).
+- **`YardUI` is seven files**, all landed 2026-08-18: `ContentView`, `RepositoryLoader` (five
+  `@concurrent` loaders), `RepositoryHeaderView`, `StatusRow`, `CommitHistoryView`, `CommitDetailView`,
+  `FileDiffView`, `RepositorySidebarView`, plus `LaneGeometry`/`LaneGutterView` and `PaneLayout`.
+- **The app target is no longer a stock template**: `SwitchyardApp`, `AppDelegate`, `AppXPCServer` and
+  `AgentRegistrar`. It renders `ContentView()` from the package.
+
+**Two things a fresh context should not have to rediscover.** `YardUI` depends on `YardGit`, so **the
+app reaches its own engine directly — XPC is for the CLI, not for the UI**; that fact is what made the
+demo reachable at all. And `YardUI` sets `.defaultIsolation(MainActor.self)`, so every engine call from
+a view goes through a `@concurrent` loader and every plain value type it returns needs `nonisolated`.
 
 **On 2026-08-16 `main` was reset** to recover from work done outside the workflow; see
 `docs/workflow-reset-2026-08-16.md` for what moved to which branch and what has to be re-done.

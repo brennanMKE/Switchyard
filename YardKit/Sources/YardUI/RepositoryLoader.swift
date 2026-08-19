@@ -62,6 +62,33 @@ public func loadCommitHistory(at path: String) async throws -> [CommitLogEntry] 
     try CommitLog.run(path: path, rangeArguments: ["-100", "HEAD"])
 }
 
+/// Loads the lane-assigned commit graph for the History pane's lane gutter
+/// (#0052).
+///
+/// Bounded to `limit: 100` -- the same bound `loadCommitHistory` above
+/// applies via `["-100", "HEAD"]` -- so the two collections cover the same
+/// commits. `CommitHistoryView` joins them by `oid`; a commit with no
+/// matching `GraphRow` renders without a gutter rather than crashing or
+/// shifting the row, since the two calls are independent reads and are not
+/// guaranteed to agree to the commit.
+///
+/// `YardUI` sets `.defaultIsolation(MainActor.self)` (`Package.swift`), so
+/// this needs `@concurrent` for the same reason `loadRepositorySummary`,
+/// `loadCommitHistory` and `loadCommitDiff` above do: `graphRows` shells out
+/// to `git` synchronously (`GitProcess.run`), and running that on the main
+/// actor blocks the window. `@concurrent` forces this function onto the
+/// concurrent executor regardless of the caller's isolation; callers `await`
+/// it from the main actor and get control back there once it returns.
+///
+/// `GraphRow` is declared in `YardGit`, which does not set `YardUI`'s
+/// default isolation, so it is already a `nonisolated` `Sendable` value type
+/// and needs no wrapper type here -- same reasoning as `loadCommitDiff`
+/// above for `FileDiff`/`Hunk`.
+@concurrent
+public func loadCommitGraph(at path: String) async throws -> [GraphRow] {
+    try graphRows(at: path, limit: 100)
+}
+
 /// Loads the diff `revision` introduced, for the Detail pane's commit view
 /// (#0082).
 ///
