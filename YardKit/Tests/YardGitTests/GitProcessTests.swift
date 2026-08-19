@@ -164,6 +164,55 @@ struct GitProcessTests {
         #expect(format.lines[0] == "reftable")
     }
 
+    // MARK: - extraEnvironment NFD normalization (#0335)
+
+    /// Pins `Process`'s NFD normalization of non-ASCII environment *values*
+    /// as **current behaviour**, not a bug to be fixed here -- see the doc
+    /// comment on `run`'s `extraEnvironment` parameter. Uses `/usr/bin/
+    /// printenv` rather than `git` because it echoes the raw value back
+    /// with nothing else in the way. If a future Foundation stops
+    /// normalizing, this test fails and whoever sees it can delete the
+    /// warning alongside it -- it must NOT be "fixed" by asserting the
+    /// value round-trips.
+    @Test func extraEnvironmentNonASCIIValueArrivesNFDNormalized() throws {
+        // Precomposed "Café Élodie": UTF-8 bytes measured with a standalone
+        // `swift` script (#0335), 13 bytes.
+        let precomposed = "Caf\u{00E9} \u{00C9}lodie"
+        let precomposedBytes: [UInt8] = [
+            67, 97, 102, 195, 169, 32, 195, 137, 108, 111, 100, 105, 101,
+        ]
+        #expect(Array(precomposed.utf8) == precomposedBytes)
+
+        let printenv = GitProcess(executablePath: "/usr/bin/printenv")
+        let out = try printenv.run(
+            ["SWITCHYARD_0335_TEST_VALUE"],
+            extraEnvironment: ["SWITCHYARD_0335_TEST_VALUE": precomposed]
+        )
+
+        // `printenv` appends a trailing newline; drop it before comparing so
+        // the assertion is only about the value itself. Comparing raw bytes
+        // -- not a re-decoded `String` -- means nothing but the exec
+        // boundary can be responsible for a difference.
+        var receivedBytes = Array(out.standardOutput)
+        if receivedBytes.last == 0x0A { receivedBytes.removeLast() }
+
+        // The NFD form measured independently (#0335): "é" (195 169)
+        // decomposes to "e" + U+0301 (101 204 129), and likewise for "É"
+        // (195 137 -> 69 204 129). Thirteen bytes in, fifteen out.
+        let expectedNFDBytes: [UInt8] = [
+            67, 97, 102, 101, 204, 129, 32, 69, 204, 129, 108, 111, 100, 105, 101,
+        ]
+        #expect(
+            receivedBytes == expectedNFDBytes,
+            """
+            expected the NFD form Process is currently known to normalize \
+            non-ASCII environment values to; got \(receivedBytes) -- if this \
+            fails, Foundation stopped normalizing and the warning on \
+            extraEnvironment can be deleted
+            """
+        )
+    }
+
     // MARK: - The boundary stays visible
 
     /// No other type in `YardGit` may construct a `Process`. If the boundary
