@@ -358,20 +358,32 @@ public struct HunkParser {
     }
 }
 
-/// Lists the hunks of every changed file in the repository at `path`, for
-/// one diff area. Empty when that diff is empty.
-///
-/// The flags pin git's output against user config: `--no-color`,
-/// `--no-ext-diff` and `--no-textconv` (drivers would replace or fabricate
-/// patch text), `--no-renames` (a rename would put two different paths on
-/// the `diff --git` line), `--default-prefix` (overrides `diff.noprefix`
-/// and `diff.mnemonicprefix`), `--full-index` (overrides `core.abbrev`,
-/// which otherwise changes the length of the `headerText` `index` line --
-/// measured, git 2.50.1: `core.abbrev=4` prints `index e45c..6319` while
-/// `--full-index` always prints the full 40-hex blob ids, and `headerText`
-/// is both a `schemaVersion: 1` wire field and the byte `Staging.swift`
-/// hands to `git apply`, so it cannot vary with a user's config),
-/// `--unified=3` (overrides `diff.context`), `--inter-hunk-context=0`
+/// The `-c` config overrides pinned in every diff-producing command in this
+/// file (`listHunks`, `commitDiff`): `core.quotepath=false` so non-ASCII
+/// paths print raw, and `diff.suppressBlankEmpty=false` (there is no
+/// command-line flag for this one -- with it set to `true`, git drops the
+/// leading space git otherwise prints on a blank context line, and
+/// `HunkBuilder.body.didSet` decrements its remaining-line budget from that
+/// space, so a blank context line under the config would consume no budget,
+/// `wantsMoreBody` would keep reporting true, and the next hunk's `@@`
+/// header would be swallowed as body text (#0323)). Passed before the
+/// subcommand (`diff` or `diff-tree`), as `git -c k=v -c k=v <subcommand>`.
+private let pinnedDiffConfigOverrides = ["-c", "core.quotepath=false",
+                                          "-c", "diff.suppressBlankEmpty=false"]
+
+/// The flags pinned in every diff-producing command in this file
+/// (`listHunks`, `commitDiff`), for seven separately measured reasons
+/// (#0267, #0283, #0293, #0294, #0323, #0328, #0336), against user config:
+/// `--no-color`, `--no-ext-diff` and `--no-textconv` (drivers would replace
+/// or fabricate patch text), `--no-renames` (a rename would put two
+/// different paths on the `diff --git` line), `--default-prefix` (overrides
+/// `diff.noprefix` and `diff.mnemonicprefix`), `--full-index` (overrides
+/// `core.abbrev`, which otherwise changes the length of the `headerText`
+/// `index` line -- measured, git 2.50.1: `core.abbrev=4` prints `index
+/// e45c..6319` while `--full-index` always prints the full 40-hex blob ids,
+/// and `headerText` is both a `schemaVersion: 1` wire field and the byte
+/// `Staging.swift` hands to `git apply`, so it cannot vary with a user's
+/// config), `--unified=3` (overrides `diff.context`), `--inter-hunk-context=0`
 /// (overrides `diff.interHunkContext`, git's own default when it is unset --
 /// measured, git 2.50.1, on a 20-line file with an insertion after line 3
 /// and an edit at line 17: at the default, `git diff` prints two hunks,
@@ -380,26 +392,84 @@ public struct HunkParser {
 /// `@@ -1,20 +1,21 @@`; `--inter-hunk-context=0` restores the two-hunk
 /// output. `--unified=3` bounds the context *within* a hunk;
 /// `--inter-hunk-context` bounds the gap at which two hunks *merge* -- the
-/// same defect as `diff.context` above, one flag over (#0336),
-/// `core.quotepath=false` so non-ASCII paths print raw, and
-/// `diff.suppressBlankEmpty=false` (there is no command-line flag for this
-/// one). With it set to `true`, git drops the leading space git otherwise
-/// prints on a blank context line --
-/// `HunkBuilder.body.didSet` decrements its remaining-line budget from that
-/// space, so a blank context line under the config would consume no
-/// budget, `wantsMoreBody` would keep reporting true, and the next hunk's
-/// `@@` header would be swallowed as body text (#0323).
+/// same defect as `diff.context` above, one flag over (#0336). Appended
+/// after the subcommand and its own arguments, e.g. `diff --cached` or
+/// `diff-tree --root -p --no-commit-id <rev>`, both of which accept these as
+/// ordinary diff-machinery flags.
+///
+/// **One shared copy for #0330's config-immunity sweep to guard**: two
+/// separately-maintained lists would diverge, and the sweep only checks
+/// what it is pointed at (#0341).
+private let pinnedDiffFlags = ["--no-color", "--no-ext-diff", "--no-textconv", "--no-renames",
+                                "--default-prefix", "--full-index", "--unified=3",
+                                "--inter-hunk-context=0"]
+
+/// Lists the hunks of every changed file in the repository at `path`, for
+/// one diff area. Empty when that diff is empty.
+///
+/// See `pinnedDiffConfigOverrides` and `pinnedDiffFlags` for why each flag
+/// here is pinned.
 public func listHunks(
     at path: String,
     area: DiffArea,
     git: GitProcess = GitProcess()
 ) throws -> [FileDiff] {
-    var arguments = ["-c", "core.quotepath=false",
-                      "-c", "diff.suppressBlankEmpty=false", "diff"]
+    var arguments = pinnedDiffConfigOverrides + ["diff"]
     if area == .staged { arguments.append("--cached") }
-    arguments += ["--no-color", "--no-ext-diff", "--no-textconv", "--no-renames",
-                  "--default-prefix", "--full-index", "--unified=3",
-                  "--inter-hunk-context=0"]
+    arguments += pinnedDiffFlags
+    let output = try git.run(arguments, workingDirectory: path)
+    return try HunkParser().parse(output.text)
+}
+
+/// The diff a single commit introduced -- what `#0082`'s detail pane shows
+/// for a selected commit. Empty when the commit introduced no changes
+/// (e.g. an `--allow-empty` commit).
+///
+/// `git diff <rev>^!` is the obvious spelling and is wrong: on a **root**
+/// commit it has no parent, so `<rev>^` does not resolve and `git diff`
+/// prints nothing at all, exit 0 -- indistinguishable from a genuinely empty
+/// commit. Measured, git 2.50.1, fresh repository with one commit:
+/// `git diff …flags… 'HEAD^!'` prints nothing, exit 0.
+///
+/// `git diff-tree --root -p --no-commit-id` handles all three shapes this
+/// function needs to tell apart:
+///
+/// - **Root commit**: `--root` makes `diff-tree` diff it against the empty
+///   tree instead of refusing for lack of a parent -- measured, same
+///   fixture: the file appears with `--- /dev/null`, i.e. `oldMode == nil`.
+/// - **Ordinary commit**: an unremarkable one-parent diff.
+/// - **Merge commit**: measured, git 2.50.1, a two-parent merge built from
+///   `FixtureRepository.merged` (branch off `a`, merged back into `b`,
+///   itself adding `merge.txt`) -- `git diff-tree --root -p --no-commit-id
+///   <merge-oid>` prints **nothing**, exit 0. This is `diff-tree`'s
+///   documented behavior for a merge commit with neither `-m` nor `-c`/`--cc`
+///   given: it does not pick a parent to diff against on its own, so an
+///   empty diff is what this function reports for any merge commit,
+///   including one that changed files relative to both parents.
+///
+/// `--no-commit-id` removes the bare 40-hex oid line `diff-tree` otherwise
+/// prints first. Measured (mutation, #0341): dropping the flag does **not**
+/// currently redden any test here -- `HunkParser.parse`'s preamble handling
+/// (`guard file != nil else { continue }`) already discards every line
+/// before the first `diff --git`, so the stray oid line is silently
+/// swallowed as preamble rather than mis-parsed. Pinned anyway: it is the
+/// exact command this function's doc comment measured, it keeps this
+/// output identical line-for-line to a plain `git diff`'s, and it removes a
+/// dependence on that guard's incidental coverage of a line it was not
+/// written to handle.
+///
+/// See `pinnedDiffConfigOverrides` and `pinnedDiffFlags` for why each flag
+/// here is pinned -- the same vector `listHunks` carries, so the two cannot
+/// diverge.
+public func commitDiff(
+    at path: String,
+    revision: String,
+    git: GitProcess = GitProcess()
+) throws -> [FileDiff] {
+    var arguments = pinnedDiffConfigOverrides
+    arguments += ["diff-tree", "--root", "-p", "--no-commit-id"]
+    arguments += pinnedDiffFlags
+    arguments.append(revision)
     let output = try git.run(arguments, workingDirectory: path)
     return try HunkParser().parse(output.text)
 }

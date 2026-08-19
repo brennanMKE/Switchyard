@@ -951,3 +951,79 @@ func listHunksIgnoresDiffInterHunkContextConfig(format: FixtureRepository.RefFor
     #expect(second.body.contains("-line 17"))
     #expect(second.body.contains("+line 17 CHANGED"))
 }
+
+// MARK: - commitDiff (#0341)
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func commitDiffOfAnOrdinaryCommitReturnsItsChange(format: FixtureRepository.RefFormat) throws {
+    var repo = try FixtureRepository(refFormat: format)
+    defer { repo.destroy() }
+    try repo.build([.init("base", files: ["f.txt": base20()])])
+    try repo.build([.init("second", parents: ["base"], files: ["f.txt": edited20()])])
+    let second = try #require(repo.oids["second"])
+
+    let files = try commitDiff(at: repo.url.path, revision: second)
+    #expect(files.map(\.path) == ["f.txt"])
+    let file = try #require(files.first)
+    #expect(file.hunks.count == 2)
+
+    let first = try #require(file.hunks.first)
+    #expect(first.header == "@@ -1,6 +1,7 @@")
+    #expect(first.body.contains("+inserted after 03"))
+
+    let last = try #require(file.hunks.last)
+    #expect(last.header == "@@ -14,7 +15,7 @@ line 13")
+    #expect(last.body.contains("-line 17"))
+    #expect(last.body.contains("+line 17 CHANGED"))
+}
+
+/// The case `git diff <rev>^!` gets wrong (issue's "measured command"):
+/// a root commit has no parent, so `^!` resolves to nothing and `git diff`
+/// prints an empty diff for a commit that plainly added a file.
+/// `--root` is what makes `diff-tree` diff against the empty tree instead,
+/// so the added file shows up with `/dev/null` as its old side.
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func commitDiffOfARootCommitShowsTheFileAsAdded(format: FixtureRepository.RefFormat) throws {
+    var repo = try FixtureRepository(refFormat: format)
+    defer { repo.destroy() }
+    try repo.build([.init("root", files: ["a.txt": "x\n"])])
+    let root = try #require(repo.oids["root"])
+
+    let files = try commitDiff(at: repo.url.path, revision: root)
+    #expect(files.map(\.path) == ["a.txt"])
+    let file = try #require(files.first)
+    #expect(file.oldMode == nil && file.newMode == "100644")
+    #expect(file.headerText.contains("--- /dev/null"))
+    let hunk = try #require(file.hunks.first)
+    #expect(hunk.oldStart == 0 && hunk.oldCount == 0)
+    #expect(hunk.body == ["+x"])
+}
+
+/// Measured, git 2.50.1: `git diff-tree --root -p --no-commit-id` on a
+/// two-parent merge commit -- built here from `FixtureRepository.merged`,
+/// whose `merge` commit both combines two branches' independent additions
+/// and adds `merge.txt` of its own -- prints nothing, exit 0. `diff-tree`
+/// does not pick a parent to diff against without `-m` or `-c`/`--cc`, so
+/// `commitDiff` reports an empty result for any merge commit, whatever it
+/// changed. Documented on `commitDiff` itself; asserted here so a future
+/// git that changes this default is caught.
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func commitDiffOfAMergeCommitIsEmpty(format: FixtureRepository.RefFormat) throws {
+    let repo = try FixtureRepository.merged(refFormat: format)
+    defer { repo.destroy() }
+    let merge = try #require(repo.oids["merge"])
+
+    let files = try commitDiff(at: repo.url.path, revision: merge)
+    #expect(files.isEmpty)
+}
+
+@Test func commitDiffOfUnknownRevisionThrowsRepositoryError() throws {
+    let repo = try FixtureRepository()
+    defer { repo.destroy() }
+
+    let thrown = #expect(throws: GitProcess.Failure.self) {
+        _ = try commitDiff(at: repo.url.path, revision: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
+    }
+    let failure = try #require(thrown)
+    #expect(failure.exitClass == .repositoryError)
+}
