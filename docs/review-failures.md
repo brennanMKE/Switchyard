@@ -319,6 +319,16 @@ paths, guard clauses that skip. The question to answer is not "does the code do 
     review and re-anchored on a named position. **A guard clause that cannot fail is worse than no
     guard**, because it reads as evidence in the work log.
 
+8n. **Does the named test file exercise the layer the new test needs?**
+    Check 12 asks whether the path can hold a unit test — a claim about the build system. This is the
+    layer question underneath it, and a path can pass 12 and still be wrong. #0329 named
+    `WorktreeStatusTests.swift`, which only drives `WorktreeStatusParser` against **hand-built bytes**
+    and never calls `gitStatus(at:)`; the new test needed a real repository, and every other
+    "gitStatus pins a config lever" test (#0245, #0310, #0318) lives in `GitStatusTests.swift`. The
+    round noticed and moved it, which is the good outcome — but a round that had obeyed the issue
+    would have built a fixture in a file with no fixtures in it. **Grep the named file for the
+    function under test before naming it.**
+
 9. **Is there exactly one deliverable?** Not one theme — one file, one behaviour, one thing that is
    either done or not. If the Expected behavior names more than one new production file, it is more
    than one issue.

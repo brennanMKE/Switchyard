@@ -418,8 +418,25 @@ public func gitStatus(
     // were measured to leave this output byte-identical, so they are not
     // pinned here (unlike #0319's `wt rm`, where `--force` bypasses git's
     // dirty check entirely rather than relaxing it, a `-c` there would look
-    // meaningful and do nothing).
-    var args: [String] = ["-c", "status.showUntrackedFiles=normal", "status", "--porcelain=v2", "-z"]
+    // meaningful and do nothing). That enumeration was measured on a fixture
+    // with no rename in it, which is exactly why `status.renames` was not on
+    // it — it is fixture-bounded, not exhaustive.
+    //
+    // `-c status.renames=true`: measured, git 2.50.1 (#0329) — under a user's
+    // `status.renames=false` or `diff.renames=false` (`status.renames` falls
+    // back to `diff.renames`), a staged `git mv old.txt new.txt` changes
+    // shape entirely: one `2 R.` entry with `originalPath` becomes two
+    // separate entries, `1 A.` and `1 D.`, with no rename correlation at all.
+    // `true` is git's own default (`status.renames` falls back to
+    // `diff.renames`, which defaults to true), so pinning it preserves
+    // today's behaviour exactly and changes only what happens under a
+    // non-default user config — the same reasoning as
+    // `status.showUntrackedFiles` above.
+    var args: [String] = [
+        "-c", "status.showUntrackedFiles=normal",
+        "-c", "status.renames=true",
+        "status", "--porcelain=v2", "-z",
+    ]
     if includeIgnored { args.append("--ignored") }
 
     let output = try git.run(

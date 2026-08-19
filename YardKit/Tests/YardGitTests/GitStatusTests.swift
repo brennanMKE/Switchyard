@@ -165,22 +165,33 @@ struct GitStatusTests {
             to: repo.url.appendingPathComponent("original.txt"))
         try git.run(["add", "original.txt", "copied.txt"], workingDirectory: repo.url.path)
 
-        // Verify git actually emitted a `C` record before trusting anything
-        // downstream -- a copy git reports as `A` pins nothing.
+        // Verify the repository config actually provokes a `C` record from
+        // plain git before trusting anything downstream -- a copy git
+        // reports as `A` pins nothing. This is the *unpinned* invocation, so
+        // it still sees the repository's own `status.renames=copies`.
         let porcelain = try git.run(["status", "--porcelain=v2"], workingDirectory: repo.url.path)
         #expect(
             porcelain.text.contains("C. N..."),
             "fixture did not provoke a copy record: \(porcelain.text)")
 
-        // The behaviour under test: `gitStatus` must return the entry, not throw.
+        // The behaviour under test: `gitStatus` must return the entry, not
+        // throw. Since #0329, `gitStatus` unconditionally pins `-c
+        // status.renames=true`, and a command-line `-c` always overrides a
+        // repository-level `status.renames=copies` -- measured 2026-08-18,
+        // git 2.50.1. So `gitStatus`'s own invocation no longer sees the
+        // `copies` config this fixture sets, and the copy is reported as a
+        // plain, uncorrelated add rather than a `C` record. Copy-record
+        // *parsing* itself is unaffected and stays covered by
+        // `EnumVocabularyCoverageTests`'s hand-built `C.` record (#0316);
+        // this test's remaining job is only proving `gitStatus` does not
+        // throw on this repository.
         let status = try gitStatus(at: repo.url.path)
 
         #expect(Set(status.entries.map(\.path)) == ["original.txt", "copied.txt"])
 
         let copy = try #require(status.entries.first(where: { $0.path == "copied.txt" }))
-        #expect(copy.originalPath == "original.txt")
-        #expect(copy.originalPathBytes == Array("original.txt".utf8))
-        #expect(copy.staged == .modified, "a copy is reported on the staged side")
+        #expect(copy.originalPath == nil, "the pinned status.renames=true no longer correlates the copy")
+        #expect(copy.staged == .added, "with copy detection unreachable, the new file reports as a plain add")
         #expect(copy.worktree == .unmodified)
 
         let source = try #require(status.entries.first(where: { $0.path == "original.txt" }))
@@ -230,6 +241,49 @@ struct GitStatusTests {
         #expect(
             where_.untrackedCount == status.entries.count,
             "whereAmI and gitStatus disagree about the same worktree under status.showUntrackedFiles=no: untrackedCount=\(where_.untrackedCount), gitStatus entries=\(status.entries.count)")
+    }
+
+    @Test("gitStatus reports one rename record, not an add/delete pair, under status.renames=false")
+    func reportsOneRenameRecordUnderStatusRenamesFalse() throws {
+        // #0329: `gitStatus`'s payload changed shape under a user's
+        // `status.renames=false` or `diff.renames=false` (`status.renames`
+        // falls back to `diff.renames`) -- one `2 R.` entry with
+        // `originalPath` became two separate entries, `1 A.` and `1 D.`, with
+        // no rename correlation at all. Both keys are set so it is clear
+        // neither one alone is doing the work.
+        let repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let git = GitProcess()
+
+        try git.run(["config", "status.renames", "false"], workingDirectory: repo.url.path)
+        try git.run(["config", "diff.renames", "false"], workingDirectory: repo.url.path)
+
+        try repo.writeUntracked(["old.txt": "content\n"])
+        try git.run(["add", "old.txt"], workingDirectory: repo.url.path)
+        try git.run(["commit", "-q", "-m", "track old.txt"], workingDirectory: repo.url.path)
+
+        try git.run(["mv", "old.txt", "new.txt"], workingDirectory: repo.url.path)
+
+        // Verify the config actually bites before trusting anything
+        // downstream: plain `git status --porcelain=v2` (no -c pin) under
+        // this config must report the rename as two disjoint records, not
+        // one -- the measured baseline the issue records.
+        let plain = try git.run(["status", "--porcelain=v2"], workingDirectory: repo.url.path)
+        let plainLines = plain.text.split(separator: "\n").filter { !$0.isEmpty }
+        #expect(
+            plainLines.count == 2,
+            "fixture did not provoke the config: status.renames=false left plain porcelain with \(plainLines.count) line(s), not 2: \(plain.text)")
+
+        // The behaviour under test: gitStatus pins the config itself and
+        // must still report a single rename entry.
+        let status = try gitStatus(at: repo.url.path)
+
+        #expect(status.entries.count == 1, "the config-blind gitStatus must still report one rename entry")
+        let renamed = try #require(status.entries.first)
+        #expect(renamed.path == "new.txt")
+        #expect(renamed.originalPath == "old.txt")
+        #expect(renamed.staged == .modified, "a rename is reported on the staged side")
+        #expect(renamed.worktree == .unmodified)
     }
 }
 
