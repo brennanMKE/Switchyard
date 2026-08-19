@@ -302,7 +302,15 @@ struct PostRewriteAttachTests {
         let after = try JournalEntryMetadata(
             serialized: try JournalAnchor.metadata(for: checkpointEntry.id, in: context))
         let mapping = try #require(after.rewrite)
-        #expect(mapping.source == "rebase")
+        // #0322: asserted against the decision this test itself derived from
+        // the real hook invocation, not a literal -- a production hardcode
+        // of `.rebase.gitArgument` at `JournalCheckpoint.swift:448` would
+        // still read "rebase" here (the only own invocation attached in
+        // this test genuinely is a rebase), so this line alone cannot
+        // distinguish deriving from hardcoding. See the mid-loop check in
+        // `attachingAnExistingCommitFixupMappingKeepsThePreCheckpointHeadReachable`
+        // below for the assertion that can.
+        #expect(mapping.source == decision.source.gitArgument)
         #expect(mapping.rewrites == decision.rewrites)
 
         // Every other field comes back unchanged -- pinned against
@@ -962,8 +970,11 @@ struct PostRewriteAttachTests {
                 "a standalone amend, a mid-rebase amend, then the authoritative final rebase")
 
         // Attach every invocation in order, exactly as the real hook would
-        // fire them across the lifetime of one operation.
-        for invocation in logged {
+        // fire them across the lifetime of one operation. `finalDecision` is
+        // hoisted out of the loop so the assertion below can compare against
+        // the *last* invocation's decision rather than a literal.
+        var finalDecision: PostRewrite.Decision?
+        for (index, invocation) in logged.enumerated() {
             let decision = PostRewrite.decide(
                 sourceArgument: invocation.source,
                 environment: [GitProcess.markerVariable: invocation.marker ?? ""],
@@ -972,14 +983,46 @@ struct PostRewriteAttachTests {
             let entryID = try #require(JournalEntryID(entryIDString))
             #expect(entryID == checkpointEntry.id)
             _ = try JournalCheckpoint.attachRewrite(decision, entryID: entryID, in: context)
+            finalDecision = decision
+
+            // #0322: right after the *first* invocation (the standalone
+            // `amend` `Fixup.run`'s existing-commit mode fires before the
+            // rebase ever starts, per the doc comment above) nothing has
+            // composed over it yet, so the stored source is whatever this
+            // one decision alone carried -- genuinely "amend" here, not
+            // "rebase". A production hardcode of `.rebase.gitArgument`
+            // (`JournalCheckpoint.swift:448`) would store "rebase" at this
+            // point regardless, even though no rebase has run yet; that
+            // mismatch is what makes the hardcode mutation visible, which
+            // the *final* assertion below cannot do on its own (the last
+            // invocation genuinely is a rebase, so a hardcoded "rebase"
+            // and a correctly-derived one are indistinguishable there).
+            if index == 0 {
+                #expect(decision.source.gitArgument == "amend",
+                        "the fixture's first invocation must be the standalone amend, or the check below proves nothing")
+                let midway = try JournalEntryMetadata(
+                    serialized: try JournalAnchor.metadata(for: checkpointEntry.id, in: context))
+                let midwayMapping = try #require(midway.rewrite)
+                #expect(midwayMapping.source == decision.source.gitArgument)
+            }
         }
 
         let after = try JournalEntryMetadata(
             serialized: try JournalAnchor.metadata(for: checkpointEntry.id, in: context))
         let mapping = try #require(after.rewrite)
         #expect(!mapping.rewrites.isEmpty)
-        #expect(mapping.source == "rebase",
-                "the final, authoritative invocation is the rebase; its source must survive composing")
+        // The final, authoritative invocation is the rebase, and composing
+        // always takes `next.source` (`JournalEntryMetadata.swift`'s
+        // `composing(with:)`) -- so the stored value here is whatever the
+        // *last* invocation's decision carried, asserted against that
+        // decision rather than the literal it happens to coincide with.
+        // This assertion alone still cannot distinguish that from a
+        // hardcoded "rebase", since the last invocation genuinely is one;
+        // the mid-loop check above at `index == 0` is what catches that
+        // mutation, by pinning an intermediate state that is genuinely
+        // "amend".
+        let lastDecision = try #require(finalDecision)
+        #expect(mapping.source == lastDecision.source.gitArgument)
 
         // #0317: pin `composing(with:)`'s `chainedFrom` invariant directly,
         // rather than trusting that a broken bookkeeping happens to surface
