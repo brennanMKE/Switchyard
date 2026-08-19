@@ -365,15 +365,20 @@ public struct HunkParser {
 /// `--no-ext-diff` and `--no-textconv` (drivers would replace or fabricate
 /// patch text), `--no-renames` (a rename would put two different paths on
 /// the `diff --git` line), `--default-prefix` (overrides `diff.noprefix`
-/// and `diff.mnemonicprefix`), `--unified=3` (overrides `diff.context`),
-/// `core.quotepath=false` so non-ASCII paths print raw, and
-/// `diff.suppressBlankEmpty=false` (there is no command-line flag for this
-/// one). With it set to `true`, git drops the leading space git otherwise
-/// prints on a blank context line -- `HunkBuilder.body.didSet` decrements
-/// its remaining-line budget from that space, so a blank context line under
-/// the config would consume no budget, `wantsMoreBody` would keep reporting
-/// true, and the next hunk's `@@` header would be swallowed as body text
-/// (#0323).
+/// and `diff.mnemonicprefix`), `--full-index` (overrides `core.abbrev`,
+/// which otherwise changes the length of the `headerText` `index` line --
+/// measured, git 2.50.1: `core.abbrev=4` prints `index e45c..6319` while
+/// `--full-index` always prints the full 40-hex blob ids, and `headerText`
+/// is both a `schemaVersion: 1` wire field and the byte `Staging.swift`
+/// hands to `git apply`, so it cannot vary with a user's config),
+/// `--unified=3` (overrides `diff.context`), `core.quotepath=false` so
+/// non-ASCII paths print raw, and `diff.suppressBlankEmpty=false` (there is
+/// no command-line flag for this one). With it set to `true`, git drops the
+/// leading space git otherwise prints on a blank context line --
+/// `HunkBuilder.body.didSet` decrements its remaining-line budget from that
+/// space, so a blank context line under the config would consume no
+/// budget, `wantsMoreBody` would keep reporting true, and the next hunk's
+/// `@@` header would be swallowed as body text (#0323).
 public func listHunks(
     at path: String,
     area: DiffArea,
@@ -383,7 +388,7 @@ public func listHunks(
                       "-c", "diff.suppressBlankEmpty=false", "diff"]
     if area == .staged { arguments.append("--cached") }
     arguments += ["--no-color", "--no-ext-diff", "--no-textconv", "--no-renames",
-                  "--default-prefix", "--unified=3"]
+                  "--default-prefix", "--full-index", "--unified=3"]
     let output = try git.run(arguments, workingDirectory: path)
     return try HunkParser().parse(output.text)
 }

@@ -118,6 +118,21 @@ private func diffContextConfiguredRepo(_ format: FixtureRepository.RefFormat) th
     return repo
 }
 
+// MARK: - core.abbrev override (fixture-backed, #0328)
+
+/// The two-hunk fixture with `core.abbrev` configured to 4 -- short enough
+/// that the `index` line's hex runs are visibly shortened rather than
+/// merely non-default. Measured (git 2.50.1), same fixture and same
+/// unstaged edit throughout: `core.abbrev` unset prints
+/// `index e45c9c2..6319a87 100644`; `core.abbrev=4` prints
+/// `index e45c..6319 100644`; `--full-index` prints the full 40-hex line
+/// regardless of `core.abbrev`.
+private func abbrevConfiguredRepo(_ format: FixtureRepository.RefFormat) throws -> FixtureRepository {
+    let repo = try twoHunkRepo(format)
+    try GitProcess().run(["config", "core.abbrev", "4"], workingDirectory: repo.url.path)
+    return repo
+}
+
 // MARK: - Listing and id stability (fixture-backed)
 
 @Test(arguments: FixtureRepository.RefFormat.supported())
@@ -743,6 +758,47 @@ func listHunksIgnoresDiffContextConfig(format: FixtureRepository.RefFormat) thro
     #expect(second.oldStart == 14 && second.newStart == 15)
     #expect(second.body.contains("-line 17"))
     #expect(second.body.contains("+line 17 CHANGED"))
+}
+
+/// `listHunks` pins `--full-index` precisely because `core.abbrev` is
+/// ordinary user configuration that otherwise shortens the blob ids on the
+/// `index` line -- `headerText` is a `schemaVersion: 1` wire field and the
+/// exact byte `Staging.swift` hands to `git apply`, so its length cannot
+/// depend on a user's config (#0328).
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func listHunksIgnoresCoreAbbrevConfig(format: FixtureRepository.RefFormat) throws {
+    let repo = try abbrevConfiguredRepo(format)
+    defer { repo.destroy() }
+
+    // Confirm core.abbrev actually takes effect before trusting the
+    // assertion below -- a value git ignores pins nothing. Without
+    // --full-index, plain `git diff`'s index line abbreviates both blob ids
+    // to 4 hex characters each under core.abbrev=4.
+    let plain = try GitProcess().run(["diff"], workingDirectory: repo.url.path).text
+    let plainIndexLine = try #require(
+        plain.split(separator: "\n").first { $0.hasPrefix("index ") })
+    let plainHashes = plainIndexLine.dropFirst("index ".count)
+        .prefix { $0 != " " }
+    let plainHexRuns = plainHashes.split(separator: ".")
+    #expect(plainHexRuns.count == 2)
+    for run in plainHexRuns {
+        #expect(run.count == 4)
+    }
+
+    // With --full-index in listHunks' argument vector, the same config
+    // produces the full 40-hex line regardless -- assert the hex run's
+    // length, not merely that it differs from the abbreviated one above.
+    let files = try listHunks(at: repo.url.path, area: .unstaged)
+    let file = try #require(files.first { $0.path == "f.txt" })
+    let indexLine = try #require(
+        file.headerText.split(separator: "\n").first { $0.hasPrefix("index ") })
+    let hashes = indexLine.dropFirst("index ".count).prefix { $0 != " " }
+    let hexRuns = hashes.split(separator: ".")
+    #expect(hexRuns.count == 2)
+    for run in hexRuns {
+        #expect(run.count == 40)
+        #expect(run.allSatisfy { $0.isHexDigit })
+    }
 }
 
 // MARK: - diff.suppressBlankEmpty override (fixture-backed, #0323)
