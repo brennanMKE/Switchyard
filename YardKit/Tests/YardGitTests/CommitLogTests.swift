@@ -803,6 +803,85 @@ struct CommitLogTests {
             "refs should still carry the tag despite log.excludeDecoration; got \(entries[0].refs)")
     }
 
+    // MARK: - log.showSignature must not leak prose into `oid` (#0325)
+
+    /// Generates a throwaway ed25519 keypair with `/usr/bin/ssh-keygen`, a
+    /// standard macOS system binary -- no key material is ever registered
+    /// anywhere outside the fixture directory, which `repo.destroy()` removes.
+    private func generateSSHKeypair(at path: String) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh-keygen")
+        process.arguments = ["-q", "-t", "ed25519", "-N", "", "-C", "t@t", "-f", path]
+        process.standardInput = FileHandle.nullDevice
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            struct SSHKeygenFailed: Swift.Error, CustomStringConvertible {
+                let status: Int32
+                let output: String
+                var description: String { "ssh-keygen exited \(status): \(output)" }
+            }
+            throw SSHKeygenFailed(status: process.terminationStatus, output: output)
+        }
+    }
+
+    /// Builds a repository with one real SSH-signed commit -- `gpg.format
+    /// ssh`, a fresh throwaway keypair (never registered anywhere but this
+    /// fixture directory), and an `allowedSignersFile` naming it, so git
+    /// calls the signature *good* rather than merely well-formed. Measured
+    /// end to end 2026-08-18 (issue #0325's Notes); a fake `gpg.program`
+    /// (`installFakeGpg`, #0270) cannot produce a signature git verifies as
+    /// good, which is what this test needs.
+    private func buildSSHSignedCommitRepo() throws -> FixtureRepository {
+        var repo = try FixtureRepository(refFormat: .files)
+        let keyPath = repo.url.appendingPathComponent("k").path
+        try generateSSHKeypair(at: keyPath)
+        let publicKey = try String(contentsOfFile: "\(keyPath).pub", encoding: .utf8)
+
+        try git.run(["config", "gpg.format", "ssh"], workingDirectory: repo.url.path)
+        try git.run(["config", "user.signingkey", "\(keyPath).pub"], workingDirectory: repo.url.path)
+        try repo.writeUntracked(["allowed": "t@t \(publicKey)"])
+        try git.run(
+            ["config", "gpg.ssh.allowedSignersFile", repo.url.appendingPathComponent("allowed").path],
+            workingDirectory: repo.url.path)
+
+        try git.run(
+            ["commit", "-q", "--allow-empty", "-S", "-m", "signed subject"],
+            workingDirectory: repo.url.path)
+
+        return repo
+    }
+
+    @Test func runReportsBareOidUnderLogShowSignatureTrue() throws {
+        let repo = try buildSSHSignedCommitRepo()
+        defer { repo.destroy() }
+        let realOid = try repo.revParse("HEAD")
+
+        try git.run(["config", "log.showSignature", "true"], workingDirectory: repo.url.path)
+
+        // Verify the config actually bites before trusting anything downstream
+        // (the #0320 pattern): plain `git log --format=%H`, with no override,
+        // must emit the verification prose ahead of the oid under this config
+        // -- the measured baseline the issue records. If this assertion cannot
+        // fail, it is not testing anything.
+        let plain = try git.run(["log", "-1", "--format=%H"], workingDirectory: repo.url.path)
+        #expect(
+            plain.text.contains("Good \"git\" signature for"),
+            "fixture did not provoke the config: log.showSignature=true produced no verification prose in plain --format=%H output: \(plain.text)")
+
+        let entries = try CommitLog.run(path: repo.url.path, rangeArguments: ["-1", "HEAD"])
+        try #require(entries.count == 1)
+        let oid = entries[0].oid
+        #expect(
+            oid.count == 40 && oid.allSatisfy(\.isHexDigit),
+            "oid must be a bare 40-hex commit id, not signature-verification prose: \(oid)")
+        #expect(oid == realOid)
+    }
+
     // MARK: - hasProvenance shortcut
 
     @Test func hasProvenanceReturnsFalseWhenEmptyTrailers() {
