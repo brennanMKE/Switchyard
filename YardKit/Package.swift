@@ -69,7 +69,9 @@ let package = Package(
         ),
         .testTarget(
             name: "YardUITests",
-            dependencies: ["YardUI"],
+            // YardGit for FixtureRepository, which #0339's loader test needs
+            // to build a real repository to load.
+            dependencies: ["YardUI", "YardGit"],
             path: "Tests/YardUITests"
         ),
         // Wire-shape tests: engine payloads encoding through YardKit's
