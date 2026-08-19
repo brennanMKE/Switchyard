@@ -78,8 +78,10 @@ let package = Package(
             // YardKit too: #0337's composition test calls runYard directly
             // to assert the yard-engine fallback (runEngineCommand ??
             // runYard) without needing the executable target itself, which
-            // SwiftPM does not allow a test target to depend on.
-            dependencies: ["YardCommands", "YardKit"],
+            // SwiftPM does not allow a test target to depend on. YardGit for
+            // FixtureRepository (#0343): the composition tests build their
+            // own repository rather than depending on the test process's cwd.
+            dependencies: ["YardCommands", "YardKit", "YardGit"],
             path: "Tests/YardCommandsTests"
         ),
         .testTarget(
