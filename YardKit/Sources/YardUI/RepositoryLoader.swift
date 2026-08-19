@@ -42,3 +42,22 @@ public func loadRepositorySummary(at path: String) async throws -> RepositorySum
     let status = try gitStatus(at: path)
     return RepositorySummary(whereAmI: info, status: status)
 }
+
+/// Loads the most recent commits reachable from `HEAD` at `path`, for the
+/// History pane (#0340).
+///
+/// `["-100", "HEAD"]` is a placeholder bound for paging, not a decision: an
+/// unbounded `git log` on a large repository is the first thing that would
+/// make this window feel broken.
+///
+/// `YardUI` sets `.defaultIsolation(MainActor.self)` (`Package.swift`), so
+/// this needs `@concurrent` for the same reason `loadRepositorySummary`
+/// above does: `CommitLog.run` shells out to `git` synchronously
+/// (`GitProcess.run`), and running that on the main actor blocks the
+/// window. `@concurrent` forces this function onto the concurrent executor
+/// regardless of the caller's isolation; callers `await` it from the main
+/// actor and get control back there once it returns.
+@concurrent
+public func loadCommitHistory(at path: String) async throws -> [CommitLogEntry] {
+    try CommitLog.run(path: path, rangeArguments: ["-100", "HEAD"])
+}
