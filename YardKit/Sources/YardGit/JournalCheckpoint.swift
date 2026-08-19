@@ -504,6 +504,12 @@ public extension JournalCheckpoint {
         // deliberately: `around`'s catch is the file's only writer and it
         // writes `entry.id.string` with no trailing newline, so there is
         // never whitespace to strip (#0333).
+        //
+        // **If a second writer is ever added, it must not append a newline.**
+        // A shell `echo "$id" > "$file"` does, and #0217's `post-rewrite`
+        // hook is the plausible candidate -- today it only *reads* this
+        // file. Use `printf %s`, or restore the trim along with a test that
+        // pins it.
         guard let id = JournalEntryID(contents) else {
             return nil
         }
