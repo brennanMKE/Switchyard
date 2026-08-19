@@ -85,3 +85,55 @@ public func loadCommitHistory(at path: String) async throws -> [CommitLogEntry] 
 public func loadCommitDiff(at path: String, revision: String) async throws -> [FileDiff] {
     try commitDiff(at: path, revision: revision)
 }
+
+/// A repository's refs and worktree list, loaded together for the Sidebar
+/// pane (#0081).
+///
+/// `nonisolated`: same reasoning as `RepositorySummary` above -- a plain
+/// immutable value type declared in this target would otherwise pick up
+/// `YardUI`'s `.defaultIsolation(MainActor.self)`, and `loadRepositorySidebar`
+/// below, running `@concurrent`, cannot call a `@MainActor` initialiser.
+///
+/// `currentWorktreePath` is `WorktreeContext.topLevel` for the opened path,
+/// not the raw `path` argument: both `git worktree list --porcelain`'s
+/// `worktree` field and `git rev-parse --show-toplevel` report git's
+/// canonicalized (`realpath(3)`-resolved) form, so comparing the two
+/// directly finds the opened worktree even when the caller passed a path
+/// containing a symlink. Comparing against the raw argument would miss that
+/// case.
+public nonisolated struct RepositorySidebarSummary: Sendable {
+    public let refs: RefSnapshot
+    public let worktrees: [WorktreeEntry]
+    public let currentWorktreePath: String?
+
+    public init(refs: RefSnapshot, worktrees: [WorktreeEntry], currentWorktreePath: String?) {
+        self.refs = refs
+        self.worktrees = worktrees
+        self.currentWorktreePath = currentWorktreePath
+    }
+}
+
+/// Loads the ref snapshot and worktree list for the repository at `path`, for
+/// the Sidebar pane (#0081).
+///
+/// `YardUI` sets `.defaultIsolation(MainActor.self)` (`Package.swift`), so
+/// this needs `@concurrent` for the same reason `loadRepositorySummary`,
+/// `loadCommitHistory` and `loadCommitDiff` above do: `WorktreeContext.resolve`,
+/// `RefSnapshot.capture` and `worktreeList` all shell out to `git`
+/// synchronously (`GitProcess.run`), and running that on the main actor
+/// blocks the window. `@concurrent` forces this function onto the concurrent
+/// executor regardless of the caller's isolation; callers `await` it from the
+/// main actor and get control back there once it returns.
+///
+/// `RefSnapshot.capture` already excludes `refs/switchyard/*`
+/// (`RefSnapshot.switchyardNamespace`, `RefSnapshot.swift:166`) -- the
+/// journal's own ref namespace never reaches this summary, and
+/// `RepositorySidebarViewFixtureTests` asserts that against a real anchor
+/// ref rather than trusting the filter silently.
+@concurrent
+public func loadRepositorySidebar(at path: String) async throws -> RepositorySidebarSummary {
+    let context = try WorktreeContext.resolve(path: path)
+    let refs = try RefSnapshot.capture(in: context)
+    let worktrees = try worktreeList(path: path)
+    return RepositorySidebarSummary(refs: refs, worktrees: worktrees, currentWorktreePath: context.topLevel)
+}

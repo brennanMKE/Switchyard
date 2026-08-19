@@ -57,6 +57,11 @@ public struct ContentView: View {
     /// of a blank diff.
     @State private var selectedCommitDiffError: String?
 
+    /// #0081's Sidebar pane content: refs and worktrees, loaded alongside
+    /// the summary. `nil` while loading -- `sidebarPane` shows a spinner
+    /// rather than an empty list in that window.
+    @State private var sidebar: RepositorySidebarSummary?
+
     /// A `public struct`'s memberwise initialiser is **internal**. Without this,
     /// `ContentView()` is unreachable from the app target — the same defect
     /// #0116 found on `WorktreeStatusEntry`, and one `@testable import` hides it
@@ -110,7 +115,7 @@ public struct ContentView: View {
                 .padding()
             Divider()
             HSplitView {
-                sidebarPane
+                sidebarPane(summary: summary)
                     .frame(minWidth: PaneLayout.sidebarMinWidth, maxWidth: .infinity, maxHeight: .infinity)
                 historyPane
                     .frame(minWidth: PaneLayout.historyMinWidth, maxWidth: .infinity, maxHeight: .infinity)
@@ -120,13 +125,20 @@ public struct ContentView: View {
         }
     }
 
-    /// Placeholder for #0081 -- branches, remotes, and stashes.
-    private var sidebarPane: some View {
-        placeholderPane(
-            systemImage: "sidebar.left",
-            title: "Sidebar",
-            detail: "Branches, remotes, and stashes land here in #0081."
-        )
+    /// #0081's real Sidebar content: branches, remotes, tags, worktrees, and
+    /// a stash count. `sidebar` loads alongside `summary` but off its own
+    /// `@concurrent` call, so it can still be `nil` for a moment after
+    /// `summary` first resolves -- a spinner covers that window rather than
+    /// showing an empty list.
+    private func sidebarPane(summary: RepositorySummary) -> some View {
+        Group {
+            if let sidebar {
+                RepositorySidebarView(summary: sidebar, stashCount: summary.whereAmI.stashCount)
+            } else {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
     }
 
     /// #0340's commit list. The round that built this shell left a
@@ -219,14 +231,16 @@ public struct ContentView: View {
         errorMessage = nil
         summary = nil
         history = []
+        sidebar = nil
         selectedCommit = nil
         do {
             summary = try await loadRepositorySummary(at: repositoryPath)
             // Separate from the summary load on purpose: a repository whose
             // log cannot be read (an unborn branch has no HEAD) must still
             // show its header and status rather than falling into the error
-            // state wholesale.
+            // state wholesale. Same reasoning for the sidebar load below.
             history = (try? await loadCommitHistory(at: repositoryPath)) ?? []
+            sidebar = try? await loadRepositorySidebar(at: repositoryPath)
         } catch {
             errorMessage = String(describing: error)
         }
