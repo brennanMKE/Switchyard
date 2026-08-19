@@ -808,25 +808,17 @@ struct CommitLogTests {
     /// Generates a throwaway ed25519 keypair with `/usr/bin/ssh-keygen`, a
     /// standard macOS system binary -- no key material is ever registered
     /// anywhere outside the fixture directory, which `repo.destroy()` removes.
+    ///
+    /// Runs through `GitProcess` with an overridden `executablePath` rather
+    /// than a hand-rolled `Process`: it already does the launch, the pipe
+    /// draining and the non-zero-exit-to-`Failure` mapping, and #0324's
+    /// fixture for the same keypair does it this way. Two spellings of one
+    /// fixture is how they drift.
     private func generateSSHKeypair(at path: String) throws {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/ssh-keygen")
-        process.arguments = ["-q", "-t", "ed25519", "-N", "", "-C", "t@t", "-f", path]
-        process.standardInput = FileHandle.nullDevice
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-        try process.run()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            let output = String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-            struct SSHKeygenFailed: Swift.Error, CustomStringConvertible {
-                let status: Int32
-                let output: String
-                var description: String { "ssh-keygen exited \(status): \(output)" }
-            }
-            throw SSHKeygenFailed(status: process.terminationStatus, output: output)
-        }
+        try GitProcess(executablePath: "/usr/bin/ssh-keygen").run(
+            ["-q", "-t", "ed25519", "-N", "", "-C", "t@t", "-f", path],
+            standardInput: Data()
+        )
     }
 
     /// Builds a repository with one real SSH-signed commit -- `gpg.format
