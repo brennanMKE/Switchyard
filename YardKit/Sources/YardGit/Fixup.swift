@@ -252,7 +252,7 @@ public struct Fixup: Equatable, Sendable {
     /// point it checks the sequencer itself before deciding to write
     /// anything. Since the `git rebase --abort` just below already ends
     /// this rebase, `around` finds no live sequencer and writes nothing for
-    /// this operation, so there was never a file here to clear. A
+    /// this operation, so there was never a file here to clear.
     /// A file left behind by an *earlier*, different interrupted operation
     /// cannot be reached at all since **guide §11 decision 24** (#0273): the
     /// entry id lives inside `rebase-merge/` / `rebase-apply/`, which git

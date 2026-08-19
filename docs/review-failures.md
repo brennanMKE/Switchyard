@@ -301,6 +301,24 @@ paths, guard clauses that skip. The question to answer is not "does the code do 
     own stderr. The script now also guards `## The files` and `## Expected behavior` being below the
     cut, but the habit is simpler: **those three sections go at the end of an issue, always.**
 
+8l. **Does the fixture make the two sides of the strengthened assertion distinguishable?**
+    #0327's whole point was that `shortOid`'s truncation *direction* was unasserted, and the issue
+    told the round to assert `shortOid == String(oid.prefix(12))`. That is still not enough: both
+    existing tests used a **uniform** oid (`"a" * 40`), for which `prefix(12)` and `suffix(12)` are
+    byte-identical, so the strengthened assertion would have passed under the exact mutation it was
+    written to kill. The round caught it and changed the fixtures to `"a"*20 + "b"*20`. **A stronger
+    assertion over a degenerate fixture is still a test that cannot fail** — the #0321 shape reached
+    from the other side, and the issue author is the one who should have seen it, not the implementer.
+
+8m. **Is the "confirm the config bites first" probe capable of failing?**
+    Every class-2 issue asks the round to prove the hostile config actually changes git's raw output
+    before asserting the engine survives it — otherwise a value git silently ignores would "pin"
+    nothing and the test would pass forever. #0323's round wrote that probe as
+    `#expect(plainLines.contains(""))` over a `split(omittingEmptySubsequences: false)`, which is
+    **vacuously true**: the trailing newline always yields a final empty element. It was caught in
+    review and re-anchored on a named position. **A guard clause that cannot fail is worse than no
+    guard**, because it reads as evidence in the work log.
+
 9. **Is there exactly one deliverable?** Not one theme — one file, one behaviour, one thing that is
    either done or not. If the Expected behavior names more than one new production file, it is more
    than one issue.
