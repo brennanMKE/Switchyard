@@ -744,3 +744,92 @@ func listHunksIgnoresDiffContextConfig(format: FixtureRepository.RefFormat) thro
     #expect(second.body.contains("-line 17"))
     #expect(second.body.contains("+line 17 CHANGED"))
 }
+
+// MARK: - diff.suppressBlankEmpty override (fixture-backed, #0323)
+
+/// `line 01`…`line 20` with two blank lines, at 04 and 14, positioned so
+/// each falls inside the 3-line context window of a separately-edited line
+/// (06 and 15 -- 9 lines apart, past the >6 threshold `twoHunkRepo` relies
+/// on to stay two hunks). A blank *context* line is what exposes the bug:
+/// `HunkBuilder.body.didSet` decrements its remaining-line budget from
+/// `added.first`, which is nil for an empty line, so an unbudgeted blank
+/// context line lets `wantsMoreBody` swallow the next hunk's `@@` header as
+/// body text.
+private func base20WithBlankLines() -> String {
+    var lines = (1...20).map { String(format: "line %02d", $0) }
+    lines[3] = ""   // line 04
+    lines[13] = ""  // line 14
+    return lines.joined(separator: "\n") + "\n"
+}
+
+private func edited20WithBlankLines() -> String {
+    var lines = (1...20).map { String(format: "line %02d", $0) }
+    lines[3] = ""
+    lines[13] = ""
+    lines[5] = "line 06 CHANGED"    // context 3-9 includes the blank at 04
+    lines[14] = "line 15 CHANGED"   // context 12-18 includes the blank at 14
+    return lines.joined(separator: "\n") + "\n"
+}
+
+/// The blank-context-line fixture with `diff.suppressBlankEmpty` configured
+/// to `true`. Measured (git 2.50.1): an *unconfigured* repo already prints
+/// the leading space on a blank context line -- `listHunks` must survive a
+/// user who has set this to true anywhere in their config, which strips it.
+private func suppressBlankEmptyConfiguredRepo(
+    _ format: FixtureRepository.RefFormat
+) throws -> FixtureRepository {
+    var repo = try FixtureRepository(refFormat: format)
+    try repo.build([.init("base", files: ["f.txt": base20WithBlankLines()])])
+    try repo.writeUntracked(["f.txt": edited20WithBlankLines()])
+    try GitProcess().run(["config", "diff.suppressBlankEmpty", "true"],
+                          workingDirectory: repo.url.path)
+    return repo
+}
+
+/// `listHunks` pins `-c diff.suppressBlankEmpty=false` precisely because
+/// git drops the leading space on a blank context line without it -- with
+/// no override, the second hunk's `@@` header is swallowed as body text and
+/// `listHunks` silently returns one hunk instead of two, with `patchText`
+/// no longer something `git apply` will accept.
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func listHunksIgnoresDiffSuppressBlankEmptyConfig(format: FixtureRepository.RefFormat) throws {
+    let repo = try suppressBlankEmptyConfiguredRepo(format)
+    defer { repo.destroy() }
+
+    // Confirm diff.suppressBlankEmpty actually takes effect before trusting
+    // the assertion below -- a value git ignores pins nothing. With the
+    // config set and no override, `git diff`'s blank context line loses its
+    // leading space: measured, git 2.50.1, the line between "line 03" and
+    // "line 05" is empty rather than a single space.
+    let plain = try GitProcess().run(["diff"], workingDirectory: repo.url.path).text
+    let plainLines = plain.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+    #expect(plainLines.contains(""))
+    #expect(!plainLines.contains(" "))
+
+    let files = try listHunks(at: repo.url.path, area: .unstaged)
+    #expect(files.map(\.path) == ["f.txt"])
+    let file = try #require(files.first)
+    #expect(file.hunks.count == 2)
+
+    let first = try #require(file.hunks.first)
+    #expect(first.oldStart == 3 && first.oldCount == 7)
+    #expect(first.newStart == 3 && first.newCount == 7)
+    #expect(first.body.contains(" "))          // the blank context line, space retained
+    #expect(first.body.contains("-line 06"))
+    #expect(first.body.contains("+line 06 CHANGED"))
+
+    let second = try #require(file.hunks.last)
+    #expect(second.oldStart == 12 && second.oldCount == 7)
+    #expect(second.newStart == 12 && second.newCount == 7)
+    #expect(second.body.contains(" "))
+    #expect(second.body.contains("-line 15"))
+    #expect(second.body.contains("+line 15 CHANGED"))
+
+    // patchText must still apply -- a hunk-count assertion alone would miss
+    // a subtler corruption than a dropped hunk. Checked against the index
+    // with --cached, matching how a future stage-by-id would use it.
+    let patch = file.headerText + file.hunks.map(\.patchText).joined()
+    try GitProcess().run(["apply", "--cached", "--check"],
+                          workingDirectory: repo.url.path,
+                          standardInput: Data(patch.utf8))
+}

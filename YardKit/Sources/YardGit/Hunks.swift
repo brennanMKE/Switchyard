@@ -366,13 +366,21 @@ public struct HunkParser {
 /// patch text), `--no-renames` (a rename would put two different paths on
 /// the `diff --git` line), `--default-prefix` (overrides `diff.noprefix`
 /// and `diff.mnemonicprefix`), `--unified=3` (overrides `diff.context`),
-/// and `core.quotepath=false` so non-ASCII paths print raw.
+/// `core.quotepath=false` so non-ASCII paths print raw, and
+/// `diff.suppressBlankEmpty=false` (there is no command-line flag for this
+/// one). With it set to `true`, git drops the leading space git otherwise
+/// prints on a blank context line -- `HunkBuilder.body.didSet` decrements
+/// its remaining-line budget from that space, so a blank context line under
+/// the config would consume no budget, `wantsMoreBody` would keep reporting
+/// true, and the next hunk's `@@` header would be swallowed as body text
+/// (#0323).
 public func listHunks(
     at path: String,
     area: DiffArea,
     git: GitProcess = GitProcess()
 ) throws -> [FileDiff] {
-    var arguments = ["-c", "core.quotepath=false", "diff"]
+    var arguments = ["-c", "core.quotepath=false",
+                      "-c", "diff.suppressBlankEmpty=false", "diff"]
     if area == .staged { arguments.append("--cached") }
     arguments += ["--no-color", "--no-ext-diff", "--no-textconv", "--no-renames",
                   "--default-prefix", "--unified=3"]
