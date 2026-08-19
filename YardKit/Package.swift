@@ -87,8 +87,11 @@ let package = Package(
         .testTarget(
             name: "YardUITests",
             // YardGit for FixtureRepository, which #0339's loader test needs
-            // to build a real repository to load.
-            dependencies: ["YardUI", "YardGit"],
+            // to build a real repository to load. YardKit for
+            // ServiceNames.journalRefPrefix, which #0081's sidebar loader
+            // test needs so it does not hardcode the journal ref namespace
+            // string itself (ServiceNamesTests.noOtherSwiftSourceHardcodesTheIdentifiers).
+            dependencies: ["YardUI", "YardGit", "YardKit"],
             path: "Tests/YardUITests"
         ),
         // Wire-shape tests: engine payloads encoding through YardKit's
