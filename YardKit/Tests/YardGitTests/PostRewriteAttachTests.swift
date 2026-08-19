@@ -323,16 +323,25 @@ struct PostRewriteAttachTests {
         // just below) so there is something here to lose; a mutation that
         // blanks either now reddens on the matching line.
         //
-        // `guardRefs` and `traversal` are pinned too, but honestly: no
-        // in-tree writer ever populates `guardRefs` (it stays `[:]` on
-        // every real entry today), and `traversal` is set only on
+        // `guardRefs`, `traversal` and `label` are pinned too, but
+        // honestly: no in-tree writer ever populates `guardRefs` (it stays
+        // `[:]` on every real entry today); `traversal` is set only on
         // undo/redo entries, which never rewrite a commit and so never
-        // reach `attachRewrite`. No fixture in this file can put a
-        // non-default value in either field ahead of a real attach, so
-        // these two assertions pin "stays at its received value" rather
-        // than "survives being non-default" -- the mutation that blanks
-        // all five fields at once still reddens, but through `command`/
-        // `agent`, not through these two.
+        // reach `attachRewrite`; and `label` cannot be set at all on this
+        // path, because `JournalCheckpoint.around` takes no `label:`
+        // parameter -- only `checkpoint` does -- so `after.label ==
+        // beforeAttach.label` is `nil == nil`. No fixture in this file can
+        // put a non-default value in any of the three ahead of a real
+        // attach, so these assertions pin "stays at its received value"
+        // rather than "survives being non-default" -- the mutation that
+        // blanks all five fields at once still reddens, but through
+        // `command`/`agent`, not through these three.
+        //
+        // `label` was mis-enumerated here as one of "these two" until the
+        // fourteenth umbrella pass (2026-08-18) mutated `label: label` ->
+        // `label: nil` and found it survived. **This becomes a real gap the
+        // moment `around` gains a `label:` parameter**, which M3's CLI
+        // plausibly wants; whoever adds it adds a fixture here too.
         #expect(beforeAttach.command != nil, "must be non-nil or the pin below proves nothing")
         #expect(beforeAttach.agent != nil, "must be non-nil or the pin below proves nothing")
         #expect(after.schemaVersion == beforeAttach.schemaVersion)
