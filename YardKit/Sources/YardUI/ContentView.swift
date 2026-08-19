@@ -4,6 +4,21 @@
 // no attempt to guess a repository at launch — a chosen folder that is not a
 // repository shows the error, not an empty list (#0140, guide §9 M1
 // criterion 3).
+//
+// #0080: splits the **loaded** state only into three panes -- Sidebar /
+// History / Detail. The empty, loading and error states below stay exactly
+// as #0339 left them: full-window, no panes.
+//
+// `HSplitView`, not `NavigationSplitView`: three fixed peer panes with plain
+// drag-to-resize dividers is exactly what `HSplitView` gives for free, while
+// `NavigationSplitView` bakes in a sidebar/detail *navigation* relationship
+// (programmatic collapse, `columnVisibility`) this issue does not need and
+// that would fight the "just three columns" shape #0080's planning settled
+// on.
+//
+// The History and Detail panes are placeholders for #0340 and #0082/#0052,
+// which are separate, concurrently-dispatched issues -- this file does not
+// import or reference `CommitHistoryView` or touch `RepositoryLoader.swift`.
 
 import AppKit
 import SwiftUI
@@ -22,6 +37,15 @@ public struct ContentView: View {
     /// Set when `loadRepositorySummary` throws — shown instead of an empty
     /// list (#0140).
     @State private var errorMessage: String?
+
+    /// #0340's commit history for the History pane, loaded alongside the
+    /// summary. Empty until the first successful load; a repository with no
+    /// commits legitimately stays empty.
+    @State private var history: [CommitLogEntry] = []
+
+    /// The History pane's selection, keyed on `oid`. Nothing observes it yet
+    /// — #0082's detail pane is what it exists for.
+    @State private var selectedCommit: String?
 
     /// A `public struct`'s memberwise initialiser is **internal**. Without this,
     /// `ContentView()` is unreachable from the app target — the same defect
@@ -72,6 +96,40 @@ public struct ContentView: View {
             RepositoryHeaderView(whereAmI: summary.whereAmI)
                 .padding()
             Divider()
+            HSplitView {
+                sidebarPane
+                    .frame(minWidth: PaneLayout.sidebarMinWidth, maxWidth: .infinity, maxHeight: .infinity)
+                historyPane
+                    .frame(minWidth: PaneLayout.historyMinWidth, maxWidth: .infinity, maxHeight: .infinity)
+                detailPane(summary: summary)
+                    .frame(minWidth: PaneLayout.detailMinWidth, maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+
+    /// Placeholder for #0081 -- branches, remotes, and stashes.
+    private var sidebarPane: some View {
+        placeholderPane(
+            systemImage: "sidebar.left",
+            title: "Sidebar",
+            detail: "Branches, remotes, and stashes land here in #0081."
+        )
+    }
+
+    /// #0340's commit list. The round that built this shell left a
+    /// placeholder here because #0340 was dispatched concurrently and owned
+    /// `CommitHistoryView.swift`; it landed first, so the wiring is done
+    /// here at review rather than deferred to a third issue. #0052 replaces
+    /// the flat list with lane rendering.
+    private var historyPane: some View {
+        CommitHistoryView(entries: history, selection: $selectedCommit)
+    }
+
+    /// The existing status list, unchanged from #0339 (#0082 replaces it).
+    /// Hosted here for now so nothing regresses while the Sidebar and History
+    /// panes are placeholders.
+    private func detailPane(summary: RepositorySummary) -> some View {
+        Group {
             if summary.status.entries.isEmpty {
                 Text("Working tree clean")
                     .foregroundStyle(.secondary)
@@ -82,6 +140,24 @@ public struct ContentView: View {
                 }
             }
         }
+    }
+
+    private func placeholderPane(systemImage: String, title: String, detail: String) -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.system(size: 24))
+                .foregroundStyle(.secondary)
+            Text("\(title) — placeholder")
+                .font(.headline)
+            Text(detail)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.background)
     }
 
     private func statusMessageView(systemImage: String, title: String, detail: String?) -> some View {
@@ -123,8 +199,15 @@ public struct ContentView: View {
         guard let repositoryPath else { return }
         errorMessage = nil
         summary = nil
+        history = []
+        selectedCommit = nil
         do {
             summary = try await loadRepositorySummary(at: repositoryPath)
+            // Separate from the summary load on purpose: a repository whose
+            // log cannot be read (an unborn branch has no HEAD) must still
+            // show its header and status rather than falling into the error
+            // state wholesale.
+            history = (try? await loadCommitHistory(at: repositoryPath)) ?? []
         } catch {
             errorMessage = String(describing: error)
         }
