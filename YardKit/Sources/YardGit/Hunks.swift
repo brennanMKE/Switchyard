@@ -371,10 +371,20 @@ public struct HunkParser {
 /// `--full-index` always prints the full 40-hex blob ids, and `headerText`
 /// is both a `schemaVersion: 1` wire field and the byte `Staging.swift`
 /// hands to `git apply`, so it cannot vary with a user's config),
-/// `--unified=3` (overrides `diff.context`), `core.quotepath=false` so
-/// non-ASCII paths print raw, and `diff.suppressBlankEmpty=false` (there is
-/// no command-line flag for this one). With it set to `true`, git drops the
-/// leading space git otherwise prints on a blank context line --
+/// `--unified=3` (overrides `diff.context`), `--inter-hunk-context=0`
+/// (overrides `diff.interHunkContext`, git's own default when it is unset --
+/// measured, git 2.50.1, on a 20-line file with an insertion after line 3
+/// and an edit at line 17: at the default, `git diff` prints two hunks,
+/// `@@ -1,6 +1,7 @@` and `@@ -14,7 +15,7 @@ line 13`; with
+/// `diff.interHunkContext=10` and no override, it prints one merged
+/// `@@ -1,20 +1,21 @@`; `--inter-hunk-context=0` restores the two-hunk
+/// output. `--unified=3` bounds the context *within* a hunk;
+/// `--inter-hunk-context` bounds the gap at which two hunks *merge* -- the
+/// same defect as `diff.context` above, one flag over (#0336),
+/// `core.quotepath=false` so non-ASCII paths print raw, and
+/// `diff.suppressBlankEmpty=false` (there is no command-line flag for this
+/// one). With it set to `true`, git drops the leading space git otherwise
+/// prints on a blank context line --
 /// `HunkBuilder.body.didSet` decrements its remaining-line budget from that
 /// space, so a blank context line under the config would consume no
 /// budget, `wantsMoreBody` would keep reporting true, and the next hunk's
@@ -388,7 +398,8 @@ public func listHunks(
                       "-c", "diff.suppressBlankEmpty=false", "diff"]
     if area == .staged { arguments.append("--cached") }
     arguments += ["--no-color", "--no-ext-diff", "--no-textconv", "--no-renames",
-                  "--default-prefix", "--full-index", "--unified=3"]
+                  "--default-prefix", "--full-index", "--unified=3",
+                  "--inter-hunk-context=0"]
     let output = try git.run(arguments, workingDirectory: path)
     return try HunkParser().parse(output.text)
 }

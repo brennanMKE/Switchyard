@@ -133,6 +133,22 @@ private func abbrevConfiguredRepo(_ format: FixtureRepository.RefFormat) throws 
     return repo
 }
 
+// MARK: - diff.interHunkContext override (fixture-backed, #0336)
+
+/// The two-hunk fixture with `diff.interHunkContext` configured to 10 --
+/// high enough that git's inter-hunk gap window spans the distance between
+/// the two edits and merges them into one hunk. Measured (git 2.50.1):
+/// `git diff` without `--inter-hunk-context=0` on this fixture prints a
+/// single `@@ -1,20 +1,21 @@` hunk; `git diff --inter-hunk-context=0`
+/// prints the usual two.
+private func interHunkContextConfiguredRepo(
+    _ format: FixtureRepository.RefFormat
+) throws -> FixtureRepository {
+    let repo = try twoHunkRepo(format)
+    try GitProcess().run(["config", "diff.interHunkContext", "10"], workingDirectory: repo.url.path)
+    return repo
+}
+
 // MARK: - Listing and id stability (fixture-backed)
 
 @Test(arguments: FixtureRepository.RefFormat.supported())
@@ -893,4 +909,45 @@ func listHunksIgnoresDiffSuppressBlankEmptyConfig(format: FixtureRepository.RefF
     try GitProcess().run(["apply", "--cached", "--check"],
                           workingDirectory: repo.url.path,
                           standardInput: Data(patch.utf8))
+}
+
+// MARK: - diff.interHunkContext override (fixture-backed, #0336)
+
+/// `listHunks` pins `--inter-hunk-context=0` precisely because
+/// `diff.interHunkContext` is ordinary user configuration -- set to widen the
+/// gap at which git merges two nearby edits into one hunk -- and a high
+/// enough value merges two otherwise-separate edits into a single hunk. Same
+/// defect as `listHunksIgnoresDiffContextConfig` (#0294), one flag over:
+/// `--unified=3` bounds the context *within* a hunk, `--inter-hunk-context`
+/// bounds the gap at which two hunks *merge*.
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func listHunksIgnoresDiffInterHunkContextConfig(format: FixtureRepository.RefFormat) throws {
+    let repo = try interHunkContextConfiguredRepo(format)
+    defer { repo.destroy() }
+
+    // Confirm diff.interHunkContext actually takes effect before trusting
+    // the assertion below -- a value git ignores pins nothing. Without
+    // --inter-hunk-context=0, the two edits merge into one hunk at
+    // interHunkContext=10: plain `git diff` prints exactly one `@@` line,
+    // not two.
+    let plain = try GitProcess().run(["diff"], workingDirectory: repo.url.path).text
+    let plainHeaders = plain.split(separator: "\n").filter { $0.hasPrefix("@@") }
+    #expect(plainHeaders == ["@@ -1,20 +1,21 @@"])
+
+    let files = try listHunks(at: repo.url.path, area: .unstaged)
+    #expect(files.map(\.path) == ["f.txt"])
+    let file = try #require(files.first { $0.path == "f.txt" })
+    #expect(file.hunks.count == 2)
+
+    let first = try #require(file.hunks.first)
+    #expect(first.header == "@@ -1,6 +1,7 @@")
+    #expect(first.oldStart == 1 && first.oldCount == 6)
+    #expect(first.newStart == 1 && first.newCount == 7)
+    #expect(first.body.contains("+inserted after 03"))
+
+    let second = try #require(file.hunks.last)
+    #expect(second.header == "@@ -14,7 +15,7 @@ line 13")
+    #expect(second.oldStart == 14 && second.newStart == 15)
+    #expect(second.body.contains("-line 17"))
+    #expect(second.body.contains("+line 17 CHANGED"))
 }
