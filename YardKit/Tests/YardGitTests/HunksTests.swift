@@ -803,7 +803,12 @@ func listHunksIgnoresDiffSuppressBlankEmptyConfig(format: FixtureRepository.RefF
     // "line 05" is empty rather than a single space.
     let plain = try GitProcess().run(["diff"], workingDirectory: repo.url.path).text
     let plainLines = plain.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-    #expect(plainLines.contains(""))
+    // Anchored on the context line before the blank one. `contains("")` alone
+    // would be vacuously true -- the trailing newline always yields a final
+    // empty element under `omittingEmptySubsequences: false` -- so the
+    // assertion names the position instead.
+    let line03 = try #require(plainLines.firstIndex(of: " line 03"))
+    #expect(plainLines[line03 + 1] == "")
     #expect(!plainLines.contains(" "))
 
     let files = try listHunks(at: repo.url.path, area: .unstaged)
