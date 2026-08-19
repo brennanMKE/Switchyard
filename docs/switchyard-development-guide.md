@@ -1325,6 +1325,33 @@ reviewer discharging it audits twenty-one named lines rather than searching an u
 *git does something nobody has seen*, and — #0321's shape — *our own helper is only ever called with
 degenerate input*. Neither is a property a milestone can be shown to have.
 
+**Correction from the fourteenth pass, 2026-08-18 — class 2 was not closed, and how it failed is the
+important part.** Pass 14 was asked to audit pass 13's enumeration rather than repeat it. **Class 4 held**
+under independent sampling. **Class 2 did not**: pass 14 found three more config levers in three of
+criterion 1's seven named functions — `diff.suppressBlankEmpty` (#0323, `hunks` silently drops a hunk and
+emits a patch `git apply` refuses), `log.showSignature` (#0324, #0325 — a validly signed commit reported
+unverifiable, and `oid` becoming an English sentence) and `i18n.logOutputEncoding` (#0326, mojibake in a
+UTF-8 envelope). **None appears in pass 13's immunity list**, so they were never enumerated rather than
+probed and dismissed.
+
+**The diagnosis, which changes the restatement:** pass 13 enumerated *the places the engine already
+passes a pinning flag* and asked whether each was needed — a space **bounded by what previous authors
+thought of**. The space clause (b) actually needs is *for each git command the engine runs, which configs
+does that command honour* — **bounded by git's documentation**. `git log` alone honours
+`log.showSignature`, `i18n.logOutputEncoding`, `log.excludeDecoration`, `log.date`, `log.follow`,
+`format.pretty` and `notes.displayRef`; one had been looked at. Sampling the sites pass 13 did not list
+hit three in about a dozen. **So class 2's honest state is *unknown*, not *closed*.**
+
+**And clause (e) needs one word changed.** #0327 — `shortOid`'s truncation direction, asserted by length
+only — survived thirteen passes because `shortOid` is a **computed** member, and an enumeration over
+*stored* result fields skips it by construction. **If the criterion is restated, (e) must read "every
+public member", not "every field".**
+
+**The highest-value next step if enforcement is extended**: a scan listing each `git.run` subcommand in
+the engine against a curated table of the configs that subcommand honours. That converts clause (b) from
+a reviewer's memory into a test — the only thing that would let it be called closed — and it is the
+direct analogue of what #0316 did for clauses (a) and (c).
+
 Decide these with Brennan, do not decide them in code.
 
 1. **Rebase engine scope.** GitUp wrote its own. How much of one does M5 actually require, and
