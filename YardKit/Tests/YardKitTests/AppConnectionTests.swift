@@ -120,14 +120,39 @@ private struct FakeBroker {
 
 /// Deadlines in this file are deliberately generous.
 ///
-/// The package runs 70 suites in parallel and most of them block in `git`
-/// subprocesses, which starves the cooperative thread pool badly enough that a
-/// reply can arrive tens of seconds late. **A late reply is not a failed
-/// reply**, and a test that says otherwise measures the machine — two tests
-/// asserting elapsed time cost a round on 2026-08-17, and five more failed on
-/// `main` the same day for the same reason with a 5-second deadline. The
-/// production defaults are unchanged: a CLI is one process making one call.
-private let testTimeout: Duration = .seconds(60)
+/// The package runs ~80 suites in parallel and most of them block in `git`
+/// subprocesses via `GitProcess.capture`'s unconditional, synchronous
+/// `readDataToEndOfFile()`/`waitUntilExit()` (see the comment there) —
+/// called from inside `async` test functions across the suite, which blocks
+/// whichever cooperative-pool thread happened to be running that test until
+/// the subprocess exits. With enough of those running at once the pool has
+/// no free thread left to resume *anything* suspended on it, including a
+/// `Task.sleep` timer firing or an already-arrived XPC reply's continuation
+/// — so a test can sit fully ready to complete while simply waiting for a
+/// worker thread.
+///
+/// **This was 60s (#0240) and that was not enough — #0272 diagnosed why and
+/// raised it again, this time with the failure mode identified rather than
+/// guessed at.** Reproduced deliberately by running two full `swift test`
+/// invocations concurrently (`AGENTS.md` Rule 3c; 12-core machine, ~80
+/// suites/1162 tests each): every `AppConnectionTests` test — including
+/// ones with no internal wait at all, like `brokerUnreachableMapsToExitCodeTwo`
+/// — took 46–79s of **wall-clock** time from "started" to "passed", even
+/// though every run in that trial still passed. That is the shape #0240's
+/// row in `docs/review-failures.md` predicts and this file's own doc comment
+/// already named: starvation, not a slow reply. `poll`'s internal deadlines
+/// (`launchTimeout: .milliseconds(200)` in the `--no-launch`/`--require-app`
+/// tests, `pollIsBoundedByItsTimeout`'s 300ms bound) are unaffected — those
+/// tests still passed at 58–79s wall-clock because the elapsed time is
+/// almost entirely the wait *before* the test's `Task` gets a thread at
+/// all, not time spent inside `poll`.
+///
+/// A 60s deadline left under 20% headroom over that measured 79s ceiling;
+/// 180s (~2.3x it) gives real margin against the same starvation recurring
+/// worse, while still being a bound — a hung app still fails a test, just
+/// not inside this file's own noise floor. The production defaults are
+/// unchanged: a CLI is one process making one call.
+private let testTimeout: Duration = .seconds(180)
 
 // MARK: - Tests
 
