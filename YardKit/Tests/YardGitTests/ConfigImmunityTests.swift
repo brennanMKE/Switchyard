@@ -207,19 +207,11 @@ private let configImmunityTable: [ConfigImmunityCase] = [
 /// a finding this sweep produced and has not yet been triaged into an issue,
 /// the issue it was triaged into).
 ///
-/// **#0336**: `listHunks(.unstaged)` under `diff.interHunkContext=10`.
-/// Measured 2026-08-18 on this sweep: with the hostile fixture's two hunks
-/// (an insertion after line 3, an edit at line 17), `--unified=3` is pinned
-/// (`Hunks.swift`) but nothing pins `--inter-hunk-context`, so a user's
-/// `diff.interHunkContext=10` merges the two otherwise-separate hunks into
-/// one -- a real config-dependent shape change `listHunks` does not guard
-/// against. Not one of the six blockers #0330 names as resolved -- this sweep
-/// found it itself, on its first run. **#0336 removes this entry as part of
-/// its fix**, which is what makes the exemption self-expiring rather than a
-/// permanent one wearing a temporary label.
-private let configImmunityAllowList: [String: String] = [
-    "listHunks(.unstaged)|diff.interHunkContext=10": "#0336",
-]
+/// #0336 removed the one entry this table ever held --
+/// `listHunks(.unstaged)|diff.interHunkContext=10` -- once `listHunks` pinned
+/// `--inter-hunk-context=0`, which is what made that exemption self-expiring
+/// rather than a permanent one wearing a temporary label.
+private let configImmunityAllowList: [String: String] = [:]
 
 // MARK: - The sweep
 
