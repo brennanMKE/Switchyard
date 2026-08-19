@@ -784,4 +784,76 @@ struct JournalObservedTests {
         #expect(metadata.source == "rebase",
                 "the surviving entry must be the authoritative final invocation, not the mid-rebase amend")
     }
+
+    // MARK: - Mint-site ordering (#0332)
+
+    /// **Pins `JournalEntryID.generate(after:)`'s own ordering contract.**
+    /// Both calls share one fixed `now`, so the timestamp component alone
+    /// cannot separate them -- only the `after:` argument can. This drives
+    /// the primitive directly and does not touch `JournalObserved` at all:
+    /// it pins the guarantee the two mint sites below depend on, not their
+    /// wiring to it.
+    @Test func generateAfterOrdersIdsMintedInTheSameMillisecond() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000.123)
+        let first = JournalEntryID.generate(now: now)
+        let second = JournalEntryID.generate(now: now, after: first)
+        #expect(second > first)
+    }
+
+    /// **End-to-end, the `ref_updates` mint site (`JournalObserved.swift:212`).**
+    /// Eight entries recorded back to back through the real call site, all
+    /// sharing one fixed `now` so their timestamp digits are identical and
+    /// only `after:` can keep them ordered. `JournalObserved.list` sorts by
+    /// id string, so if this site ever stopped threading the previous id
+    /// through, the eight ids would become an independently-random
+    /// permutation of recording order -- a 1-in-40320 chance of staying
+    /// accidentally sorted, not a plausible flake.
+    @Test func eightRefUpdateEntriesRecordedAtTheSameMillisecondListInRecordingOrder() throws {
+        let repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let context = try WorktreeContext.resolve(path: repo.url.path)
+        let head = try repo.revParse("HEAD")
+        let now = Date(timeIntervalSince1970: 1_700_000_000.456)
+
+        var recorded: [JournalEntryID] = []
+        for _ in 0..<8 {
+            let entry = try JournalObserved.record(
+                [ReferenceTransaction.RefUpdate(
+                    oldValue: String(repeating: "0", count: 40),
+                    newValue: head, refName: "refs/heads/main")],
+                in: context, now: now)
+            recorded.append(entry.id)
+        }
+        #expect(recorded.count == 8)
+
+        let listed = try JournalObserved.list(in: context)
+        #expect(!listed.isEmpty)
+        #expect(listed.map(\.id) == recorded,
+                "recording order must survive same-millisecond minting")
+    }
+
+    /// **End-to-end, the `rewrites` mint site (`JournalObserved.swift:310`).**
+    /// Same design as the ref-updates test above, driven through the
+    /// foreign-rewrite overload instead, so both mint sites named in #0332
+    /// are covered independently.
+    @Test func eightRewriteEntriesRecordedAtTheSameMillisecondListInRecordingOrder() throws {
+        let repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let context = try WorktreeContext.resolve(path: repo.url.path)
+        let now = Date(timeIntervalSince1970: 1_700_000_000.789)
+        let decision = Self.rewriteDecision(
+            source: "rebase", isOwn: false, pairs: [(Self.oidA, Self.oidB)])
+
+        var recorded: [JournalEntryID] = []
+        for _ in 0..<8 {
+            let entry = try #require(try JournalObserved.record(decision, in: context, now: now))
+            recorded.append(entry.id)
+        }
+        #expect(recorded.count == 8)
+
+        let listed = try JournalObserved.list(in: context)
+        #expect(!listed.isEmpty)
+        #expect(listed.map(\.id) == recorded,
+                "recording order must survive same-millisecond minting")
+    }
 }
