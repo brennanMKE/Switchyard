@@ -38,6 +38,15 @@ public struct ContentView: View {
     /// list (#0140).
     @State private var errorMessage: String?
 
+    /// #0340's commit history for the History pane, loaded alongside the
+    /// summary. Empty until the first successful load; a repository with no
+    /// commits legitimately stays empty.
+    @State private var history: [CommitLogEntry] = []
+
+    /// The History pane's selection, keyed on `oid`. Nothing observes it yet
+    /// — #0082's detail pane is what it exists for.
+    @State private var selectedCommit: String?
+
     /// A `public struct`'s memberwise initialiser is **internal**. Without this,
     /// `ContentView()` is unreachable from the app target — the same defect
     /// #0116 found on `WorktreeStatusEntry`, and one `@testable import` hides it
@@ -107,15 +116,13 @@ public struct ContentView: View {
         )
     }
 
-    /// Placeholder for #0340 (a flat commit list) and #0052 (lane rendering).
-    /// Deliberately does not reference `CommitHistoryView` -- #0340 is being
-    /// dispatched concurrently and owns that file.
+    /// #0340's commit list. The round that built this shell left a
+    /// placeholder here because #0340 was dispatched concurrently and owned
+    /// `CommitHistoryView.swift`; it landed first, so the wiring is done
+    /// here at review rather than deferred to a third issue. #0052 replaces
+    /// the flat list with lane rendering.
     private var historyPane: some View {
-        placeholderPane(
-            systemImage: "clock.arrow.circlepath",
-            title: "History",
-            detail: "The commit graph lands here in #0340 and #0052."
-        )
+        CommitHistoryView(entries: history, selection: $selectedCommit)
     }
 
     /// The existing status list, unchanged from #0339 (#0082 replaces it).
@@ -192,8 +199,15 @@ public struct ContentView: View {
         guard let repositoryPath else { return }
         errorMessage = nil
         summary = nil
+        history = []
+        selectedCommit = nil
         do {
             summary = try await loadRepositorySummary(at: repositoryPath)
+            // Separate from the summary load on purpose: a repository whose
+            // log cannot be read (an unborn branch has no HEAD) must still
+            // show its header and status rather than falling into the error
+            // state wholesale.
+            history = (try? await loadCommitHistory(at: repositoryPath)) ?? []
         } catch {
             errorMessage = String(describing: error)
         }
