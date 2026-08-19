@@ -500,8 +500,11 @@ public extension JournalCheckpoint {
         // since `generate`/`incremented` only ever draw from the id
         // alphabet -- and decision 24 already bounds the file's lifetime to
         // the sequencer directory that holds it, so a stale file written by
-        // anything else cannot survive to be read here.
-        guard let id = JournalEntryID(contents.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+        // anything else cannot survive to be read here. No trimming here,
+        // deliberately: `around`'s catch is the file's only writer and it
+        // writes `entry.id.string` with no trailing newline, so there is
+        // never whitespace to strip (#0333).
+        guard let id = JournalEntryID(contents) else {
             return nil
         }
 
