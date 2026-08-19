@@ -73,8 +73,14 @@ public struct SignatureVerification: Equatable, Sendable {
     /// Two git invocations, both through `GitProcess.run` so a bad revision or
     /// missing repository propagates as `GitProcess.Failure`:
     ///
-    /// 1. `git log -1 --format=%G?%x01%GS%x01%GK <revision> --` — flag, signer,
-    ///    key on stdout (exit 0 even when checking fails); the *why* on stderr.
+    /// 1. `git log -1 --format=%G?%x01%GS%x01%GK --no-show-signature <revision> --`
+    ///    — flag, signer, key on stdout (exit 0 even when checking fails); the
+    ///    *why* on stderr. `--no-show-signature` overrides `log.showSignature`
+    ///    (#0324): with that config set, git prepends a human-readable
+    ///    verification line ahead of `--format`'s output even though `--format`
+    ///    is explicit, which replaces the `\u{01}`-delimited fields this parser
+    ///    expects with prose and makes every signed commit read as
+    ///    `.cannotCheck`.
     /// 2. `git cat-file commit <revision>` — raw object, for format detection.
     ///
     /// - Parameter extraEnvironment: merged over the process environment for
@@ -87,7 +93,7 @@ public struct SignatureVerification: Equatable, Sendable {
         extraEnvironment: [String: String] = [:]
     ) throws -> SignatureVerification {
         let logOutput = try git.run(
-            ["log", "-1", "--format=%G?\u{01}%GS\u{01}%GK", revision, "--"],
+            ["log", "-1", "--format=%G?\u{01}%GS\u{01}%GK", "--no-show-signature", revision, "--"],
             workingDirectory: workingDirectory,
             extraEnvironment: extraEnvironment
         )
