@@ -319,6 +319,15 @@ paths, guard clauses that skip. The question to answer is not "does the code do 
     review and re-anchored on a named position. **A guard clause that cannot fail is worse than no
     guard**, because it reads as evidence in the work log.
 
+8p. **Does the issue assert what a *parser* will do, and was that run?**
+    #0341 stated that `HunkParser` "cannot parse" the bare commit-oid line `git diff-tree` prints
+    without `--no-commit-id`, and prescribed a mutation to prove it. **It parses fine** — the preamble
+    guard discards the line — so the mutation reddened nothing and the round had to correct the issue.
+    Harmless here because the flag is right for other reasons, but the same claim about a line the
+    parser *mis*handles would have sent a round chasing a defect that does not exist. **Feed the input
+    to the parser before writing what it does**; preflight 10 already says this about code samples,
+    and a claim about behaviour is the same thing.
+
 8o. **Does the issue put `CGFloat` into a test file, and has it said to import Foundation?**
     `AGENTS.md` Rule 8c has the measurement: without a direct `import Foundation`, `#expect` reports
     two bit-identical `CGFloat` values as unequal — `(computedWidth → 480.0) == (computedSum → 480.0)`
