@@ -4,6 +4,21 @@
 // no attempt to guess a repository at launch — a chosen folder that is not a
 // repository shows the error, not an empty list (#0140, guide §9 M1
 // criterion 3).
+//
+// #0080: splits the **loaded** state only into three panes -- Sidebar /
+// History / Detail. The empty, loading and error states below stay exactly
+// as #0339 left them: full-window, no panes.
+//
+// `HSplitView`, not `NavigationSplitView`: three fixed peer panes with plain
+// drag-to-resize dividers is exactly what `HSplitView` gives for free, while
+// `NavigationSplitView` bakes in a sidebar/detail *navigation* relationship
+// (programmatic collapse, `columnVisibility`) this issue does not need and
+// that would fight the "just three columns" shape #0080's planning settled
+// on.
+//
+// The History and Detail panes are placeholders for #0340 and #0082/#0052,
+// which are separate, concurrently-dispatched issues -- this file does not
+// import or reference `CommitHistoryView` or touch `RepositoryLoader.swift`.
 
 import AppKit
 import SwiftUI
@@ -72,6 +87,42 @@ public struct ContentView: View {
             RepositoryHeaderView(whereAmI: summary.whereAmI)
                 .padding()
             Divider()
+            HSplitView {
+                sidebarPane
+                    .frame(minWidth: PaneLayout.sidebarMinWidth, maxWidth: .infinity, maxHeight: .infinity)
+                historyPane
+                    .frame(minWidth: PaneLayout.historyMinWidth, maxWidth: .infinity, maxHeight: .infinity)
+                detailPane(summary: summary)
+                    .frame(minWidth: PaneLayout.detailMinWidth, maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+    }
+
+    /// Placeholder for #0081 -- branches, remotes, and stashes.
+    private var sidebarPane: some View {
+        placeholderPane(
+            systemImage: "sidebar.left",
+            title: "Sidebar",
+            detail: "Branches, remotes, and stashes land here in #0081."
+        )
+    }
+
+    /// Placeholder for #0340 (a flat commit list) and #0052 (lane rendering).
+    /// Deliberately does not reference `CommitHistoryView` -- #0340 is being
+    /// dispatched concurrently and owns that file.
+    private var historyPane: some View {
+        placeholderPane(
+            systemImage: "clock.arrow.circlepath",
+            title: "History",
+            detail: "The commit graph lands here in #0340 and #0052."
+        )
+    }
+
+    /// The existing status list, unchanged from #0339 (#0082 replaces it).
+    /// Hosted here for now so nothing regresses while the Sidebar and History
+    /// panes are placeholders.
+    private func detailPane(summary: RepositorySummary) -> some View {
+        Group {
             if summary.status.entries.isEmpty {
                 Text("Working tree clean")
                     .foregroundStyle(.secondary)
@@ -82,6 +133,24 @@ public struct ContentView: View {
                 }
             }
         }
+    }
+
+    private func placeholderPane(systemImage: String, title: String, detail: String) -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: systemImage)
+                .font(.system(size: 24))
+                .foregroundStyle(.secondary)
+            Text("\(title) — placeholder")
+                .font(.headline)
+            Text(detail)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.background)
     }
 
     private func statusMessageView(systemImage: String, title: String, detail: String?) -> some View {
