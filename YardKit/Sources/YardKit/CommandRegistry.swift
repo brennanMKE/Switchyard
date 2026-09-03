@@ -12,7 +12,7 @@ public enum CommandRegistry {
 
     /// All known `yard` command specifications in the order they should be
     /// rendered in help output.
-    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec]
+    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec]
 
     // MARK: - The switchyard spec — rendered by `yard --help`
 
@@ -231,6 +231,31 @@ public enum CommandRegistry {
         // `wtWhereSpec` (#0228), and `hunksSpec` (#0345): the schema carries
         // the self-reference form, and the wire tests pin the encoded keys
         // instead.
+        payload: nil
+    )
+
+    // MARK: - The graph spec — engine-backed, resolved by `YardCommands` (#0347)
+
+    static let graphSpec = CommandSpec(
+        name: "graph",
+        summary: "List the commit DAG as lane-assigned rows, one per commit, newest first.",
+        flags: [
+            FlagSpec(long: "limit", argument: "n", help: "Cap the number of rows, newest first (git rev-list --max-count)."),
+        ],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The command completed and returned the graph rows."),
+            ExitCodeSpec(code: 1, meaning: "A flag was malformed, unknown, or repeated — the only accepted form is --limit <n> with a positive integer value."),
+            ExitCodeSpec(code: 6, meaning: "The working directory is not inside a git repository."),
+        ],
+        schemaName: "graph",
+        // No `payload` shape (#0347): the result is an array of objects whose
+        // `parents` and `parentLanes` are nested arrays, and `PayloadShape`
+        // is flat-only (#0194: "nested objects and arrays are not supported
+        // ... do not half-build nesting to fit it in here"). Same precedent
+        // as `statusSpec` (#0225), `conflictsSpec` (#0226), `wtSpec` (#0227),
+        // `wtWhereSpec` (#0228), `hunksSpec` (#0345), and `logSpec` (#0346):
+        // the schema carries the self-reference form, and the wire tests pin
+        // the encoded keys instead.
         payload: nil
     )
 

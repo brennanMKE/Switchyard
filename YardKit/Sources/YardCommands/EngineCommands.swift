@@ -35,6 +35,12 @@ public func runEngineCommand(
         // repository access, so a flag is never silently ignored and never a
         // default guess.
         return runLog(arguments: arguments, workingDirectory: workingDirectory)
+    case "graph":
+        // One optional flag: `switchyard graph --limit 20` arrives as
+        // `["graph", "--limit", "20"]`. The arm parses the tail itself so a
+        // malformed or unknown flag is a usage envelope with exit 1 — never
+        // a default guess and never a silent ignore (#0347).
+        return runGraph(arguments: arguments, workingDirectory: workingDirectory)
     case "wt":
         // A two-token command: `switchyard wt list` arrives as
         // `["wt", "list"]`. Dispatch on the second token so #0228's
@@ -251,6 +257,66 @@ private func runLog(
     do {
         _ = try WorktreeContext.resolve(path: workingDirectory)
         let result = try CommitLog.run(path: workingDirectory, rangeArguments: tail)
+        let envelope = Envelope(result: EncodableResult(result))
+        return (stdout: encodeJSON(envelope), stderr: "", exitCode: .success)
+    } catch {
+        let message = String(describing: error)
+        let fail = EnvelopeFail(code: .repositoryError, message: message)
+        let human = "[error] \(fail.error.code.rawValue): \(fail.error.message)\n"
+        return (stdout: encodeJSON(fail), stderr: human, exitCode: .repositoryError)
+    }
+}
+
+/// `switchyard graph` — parses the optional limit flag, then resolves
+/// `WorktreeContext` for the **caller's** working directory before calling
+/// `graphRows`. The passed path is the caller's, never
+/// `FileManager.default.currentDirectoryPath`, which is the app's.
+///
+/// The argument grammar is strict: the only accepted tails are `[]` and
+/// `["--limit", "<positive int>"]`. The value must be bare ASCII digits —
+/// `Int("+3")` and `Int("-1")` both parse, and a sign, whitespace, or a
+/// decimal point is refused before `Int` ever sees it; zero and a digit run
+/// too long for `Int` are refused too. The joined form
+/// `--limit=3` is refused: one token, not the flag-then-value shape this
+/// surface accepts. A duplicated flag, a missing value, or any other token
+/// (e.g. `--all` — the app's graph view grows its own revision surface, not
+/// this command, #0347) is refused the way `runYard`'s unknown-subcommand
+/// path refuses (`EnvelopeFail(code: .usage, …)`, the human-readable line on
+/// stderr, exit 1). The refusal happens before any repository access, so it
+/// does not depend on where the command was run. `revisions` stays at the
+/// engine's default `["HEAD"]`. A thrown engine error is a repository
+/// failure at exit 6, like every other arm here.
+private func runGraph(
+    arguments: [String],
+    workingDirectory: String
+) -> (stdout: String, stderr: String, exitCode: ExitCode) {
+    let tail = Array(arguments.dropFirst())
+    var limit: Int?
+    var usageMessage: String?
+    switch tail.count {
+    case 0:
+        break
+    case 2 where tail[0] == "--limit":
+        let value = tail[1]
+        if !value.isEmpty,
+           value.allSatisfy({ ("0"..."9").contains($0) }),
+           let parsed = Int(value), parsed > 0 {
+            limit = parsed
+        } else {
+            usageMessage = "graph's --limit takes a positive integer value; got '\(value)'."
+        }
+    default:
+        usageMessage = "graph takes at most one optional --limit <n> flag; got '\(tail.joined(separator: " "))'."
+    }
+    if let usageMessage {
+        let fail = EnvelopeFail(code: .usage, message: usageMessage)
+        let human = "[error] \(fail.error.code.rawValue): \(fail.error.message)\n"
+        return (stdout: encodeJSON(fail), stderr: human, exitCode: .usage)
+    }
+
+    do {
+        _ = try WorktreeContext.resolve(path: workingDirectory)
+        let result = try graphRows(at: workingDirectory, limit: limit)
         let envelope = Envelope(result: EncodableResult(result))
         return (stdout: encodeJSON(envelope), stderr: "", exitCode: .success)
     } catch {

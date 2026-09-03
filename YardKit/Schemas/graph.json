@@ -1,0 +1,66 @@
+{
+  "command" : "graph",
+  "envelope" : {
+    "failure" : {
+      "error" : {
+        "code" : {
+          "enum" : [
+            "app_unavailable",
+            "blocked_on_conflicts",
+            "broker_unreachable",
+            "human_declined",
+            "ok",
+            "repository_error",
+            "request_failed",
+            "session_terminated",
+            "signing_failed",
+            "usage"
+          ],
+          "type" : "string"
+        },
+        "hint" : {
+          "optional" : true,
+          "type" : "string"
+        },
+        "message" : {
+          "type" : "string"
+        }
+      },
+      "ok" : false,
+      "schemaVersion" : 1
+    },
+    "success" : {
+      "ok" : true,
+      "result" : {
+        "optional" : true,
+        "schema" : "graph"
+      },
+      "schemaVersion" : 1
+    }
+  },
+  "exitCodes" : [
+    {
+      "code" : 0,
+      "meaning" : "The command completed and returned the graph rows."
+    },
+    {
+      "code" : 1,
+      "meaning" : "A flag was malformed, unknown, or repeated — the only accepted form is --limit <n> with a positive integer value."
+    },
+    {
+      "code" : 6,
+      "meaning" : "The working directory is not inside a git repository."
+    }
+  ],
+  "flags" : [
+    {
+      "argument" : "n",
+      "help" : "Cap the number of rows, newest first (git rev-list --max-count).",
+      "long" : "limit",
+      "short" : null
+    }
+  ],
+  "schemaName" : "graph",
+  "schemaVersion" : 1,
+  "summary" : "List the commit DAG as lane-assigned rows, one per commit, newest first."
+}
