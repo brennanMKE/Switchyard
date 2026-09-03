@@ -27,6 +27,14 @@ public func runEngineCommand(
         // missing or unknown flag is a usage envelope with exit 1 — never a
         // default guess and never a silent ignore (#0345).
         return runHunks(arguments: arguments, workingDirectory: workingDirectory)
+    case "log":
+        // Zero or more range arguments: `switchyard log` and
+        // `switchyard log main..HEAD` both pass their tail through as
+        // `rangeArguments`. No option flags exist on this surface (#0346) —
+        // any `-`-prefixed token is refused with a usage envelope, before any
+        // repository access, so a flag is never silently ignored and never a
+        // default guess.
+        return runLog(arguments: arguments, workingDirectory: workingDirectory)
     case "wt":
         // A two-token command: `switchyard wt list` arrives as
         // `["wt", "list"]`. Dispatch on the second token so #0228's
@@ -203,6 +211,46 @@ private func runHunks(
     do {
         _ = try WorktreeContext.resolve(path: workingDirectory)
         let result = try listHunks(at: workingDirectory, area: area)
+        let envelope = Envelope(result: EncodableResult(result))
+        return (stdout: encodeJSON(envelope), stderr: "", exitCode: .success)
+    } catch {
+        let message = String(describing: error)
+        let fail = EnvelopeFail(code: .repositoryError, message: message)
+        let human = "[error] \(fail.error.code.rawValue): \(fail.error.message)\n"
+        return (stdout: encodeJSON(fail), stderr: human, exitCode: .repositoryError)
+    }
+}
+
+/// `switchyard log` — refuses any option flag, then resolves
+/// `WorktreeContext` for the **caller's** working directory before calling
+/// `CommitLog.run`. The passed path is the caller's, never
+/// `FileManager.default.currentDirectoryPath`, which is the app's.
+///
+/// The argument tail is zero or more range arguments (e.g. `main..HEAD`);
+/// an empty tail is the engine's own default (explicit `HEAD`).
+/// `CommitLogOptions` stays engine-side: there are no option flags on this
+/// surface (#0346), so any `-`-prefixed token — anywhere in the tail — is
+/// refused the way `runYard`'s unknown-subcommand path refuses
+/// (`EnvelopeFail(code: .usage, …)`, the human-readable line on stderr,
+/// exit 1). The refusal happens before any repository access, so it does not
+/// depend on where the command was run. A thrown engine error is a
+/// repository failure at exit 6, like every other arm here.
+private func runLog(
+    arguments: [String],
+    workingDirectory: String
+) -> (stdout: String, stderr: String, exitCode: ExitCode) {
+    let tail = Array(arguments.dropFirst())
+    if let flag = tail.first(where: { $0.hasPrefix("-") }) {
+        let fail = EnvelopeFail(
+            code: .usage,
+            message: "log takes only range arguments (e.g. main..HEAD); got the flag '\(flag)'.")
+        let human = "[error] \(fail.error.code.rawValue): \(fail.error.message)\n"
+        return (stdout: encodeJSON(fail), stderr: human, exitCode: .usage)
+    }
+
+    do {
+        _ = try WorktreeContext.resolve(path: workingDirectory)
+        let result = try CommitLog.run(path: workingDirectory, rangeArguments: tail)
         let envelope = Envelope(result: EncodableResult(result))
         return (stdout: encodeJSON(envelope), stderr: "", exitCode: .success)
     } catch {

@@ -12,7 +12,7 @@ public enum CommandRegistry {
 
     /// All known `yard` command specifications in the order they should be
     /// rendered in help output.
-    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec]
+    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec]
 
     // MARK: - The switchyard spec — rendered by `yard --help`
 
@@ -208,6 +208,29 @@ public enum CommandRegistry {
         // `statusSpec` (#0225), `conflictsSpec` (#0226), `wtSpec` (#0227),
         // and `wtWhereSpec` (#0228): the schema carries the self-reference
         // form, and the wire tests pin the encoded keys instead.
+        payload: nil
+    )
+
+    // MARK: - The log spec — engine-backed, resolved by `YardCommands` (#0346)
+
+    static let logSpec = CommandSpec(
+        name: "log",
+        summary: "List the commit history reachable from HEAD (or a given range), newest first.",
+        flags: [],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The command completed and returned the commit log."),
+            ExitCodeSpec(code: 1, meaning: "An option flag was passed; log takes only range arguments, e.g. main..HEAD."),
+            ExitCodeSpec(code: 6, meaning: "The working directory is not inside a git repository."),
+        ],
+        schemaName: "log",
+        // No `payload` shape (#0346): the result is an array of objects with
+        // optional fields and nested trailer arrays, and `PayloadShape` is
+        // flat-only (#0194: "nested objects and arrays are not supported ...
+        // do not half-build nesting to fit it in here"). Same precedent as
+        // `statusSpec` (#0225), `conflictsSpec` (#0226), `wtSpec` (#0227),
+        // `wtWhereSpec` (#0228), and `hunksSpec` (#0345): the schema carries
+        // the self-reference form, and the wire tests pin the encoded keys
+        // instead.
         payload: nil
     )
 
