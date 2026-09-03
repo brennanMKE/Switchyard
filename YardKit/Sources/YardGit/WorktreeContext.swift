@@ -129,6 +129,59 @@ public struct WorktreeContext: Sendable, Equatable {
         )
     }
 
+    /// Async twin of `resolve(path:git:)` (#0344), for callers already on
+    /// Swift concurrency's cooperative pool: each `rev-parse` subprocess is
+    /// awaited on the non-blocking `GitProcess` path, so the pool thread is
+    /// released while git runs. Same three single-value calls in the same
+    /// order (the two-call split #0285 chose, and the separate
+    /// `--show-toplevel` ask, all preserved), same `Error` values.
+    public static func resolve(
+        path: String,
+        git: GitProcess = GitProcess()
+    ) async throws -> WorktreeContext {
+        let gitDirOutput = try await git.capture(
+            ["rev-parse", "--path-format=absolute", "--git-dir"],
+            workingDirectory: path
+        )
+        guard gitDirOutput.exitCode == 0, let rawGitDir = singleValue(gitDirOutput) else {
+            throw Error.notARepository(path: path, detail: gitDirOutput.standardError)
+        }
+        let commonDirOutput = try await git.capture(
+            ["rev-parse", "--path-format=absolute", "--git-common-dir"],
+            workingDirectory: path
+        )
+        guard commonDirOutput.exitCode == 0, let rawCommonDir = singleValue(commonDirOutput) else {
+            throw Error.notARepository(path: path, detail: commonDirOutput.standardError)
+        }
+        let gitDir = canonicalize(rawGitDir)
+        let commonDir = canonicalize(rawCommonDir)
+
+        let top = try await git.capture(
+            ["rev-parse", "--path-format=absolute", "--show-toplevel"],
+            workingDirectory: path
+        )
+        let topLevel: String? = {
+            guard top.exitCode == 0, let line = singleValue(top) else { return nil }
+            return canonicalize(line)
+        }()
+
+        var worktreeName: String?
+        if gitDir != commonDir {
+            let marker = "/worktrees/"
+            if let range = gitDir.range(of: marker, options: .backwards) {
+                let tail = String(gitDir[range.upperBound...])
+                worktreeName = tail.isEmpty ? nil : tail
+            }
+        }
+
+        return WorktreeContext(
+            topLevel: topLevel,
+            gitDir: gitDir,
+            commonDir: commonDir,
+            worktreeName: worktreeName
+        )
+    }
+
     /// Reads a `rev-parse` call's entire stdout as one value, instead of
     /// `.lines.first` splitting it into lines and keeping only the first.
     ///

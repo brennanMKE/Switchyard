@@ -20,7 +20,7 @@ func loadRepositorySidebarExcludesJournalAnchor() async throws {
     try repo.branch("feature", at: "b")
 
     let git = GitProcess()
-    try git.run(["tag", "v1.0", repo.oids["c"]!], workingDirectory: repo.url.path)
+    try await git.run(["tag", "v1.0", repo.oids["c"]!], workingDirectory: repo.url.path)
 
     // `RefSnapshot.capture` already filters `refs/switchyard/`
     // (`RefSnapshot.swift:166`) -- this writes a real anchor ref and asserts
@@ -29,8 +29,8 @@ func loadRepositorySidebarExcludesJournalAnchor() async throws {
     // rather than the literal string: `ServiceNamesTests.
     // noOtherSwiftSourceHardcodesTheIdentifiers` forbids hardcoding it
     // anywhere outside `ServiceNames.swift`.
-    try git.run(["update-ref", "\(ServiceNames.journalRefPrefix)anchor-test", repo.oids["c"]!],
-                workingDirectory: repo.url.path)
+    try await git.run(["update-ref", "\(ServiceNames.journalRefPrefix)anchor-test", repo.oids["c"]!],
+                      workingDirectory: repo.url.path)
 
     let sidebar = try await loadRepositorySidebar(at: repo.url.path)
 

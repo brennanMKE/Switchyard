@@ -447,15 +447,39 @@ public func gitStatus(
     // `-c` here always beats a repository-level `status.renames=copies` and
     // `gitStatus` can no longer report a copy (`C`) record for any
     // repository, however the user configures it.
+    let output = try git.run(
+        gitStatusArguments(includeIgnored: includeIgnored),
+        workingDirectory: repositoryPath
+    )
+
+    return try WorktreeStatusParser().parse(output.standardOutput)
+}
+
+/// The arguments `gitStatus` runs, shared byte-for-byte by the synchronous
+/// and async paths (#0344) so the pinned config levers above can never drift
+/// between them.
+private func gitStatusArguments(includeIgnored: Bool) -> [String] {
     var args: [String] = [
         "-c", "status.showUntrackedFiles=normal",
         "-c", "status.renames=true",
         "status", "--porcelain=v2", "-z",
     ]
     if includeIgnored { args.append("--ignored") }
+    return args
+}
 
-    let output = try git.run(
-        args,
+/// Async twin of `gitStatus(at:includeIgnored:git:)` (#0344), for callers
+/// already on Swift concurrency's cooperative pool: the `git status`
+/// subprocess is awaited on the non-blocking `GitProcess` path, so the pool
+/// thread is released while git runs. Same arguments (shared
+/// `gitStatusArguments`), same parser, same result.
+public func gitStatus(
+    at repositoryPath: String,
+    includeIgnored: Bool = false,
+    git: GitProcess = GitProcess()
+) async throws -> WorktreeStatus {
+    let output = try await git.run(
+        gitStatusArguments(includeIgnored: includeIgnored),
         workingDirectory: repositoryPath
     )
 

@@ -25,21 +25,20 @@ public nonisolated struct RepositorySummary: Sendable {
 ///
 /// `YardUI` sets `.defaultIsolation(MainActor.self)` (`Package.swift`), which
 /// makes every unannotated declaration in this target implicitly
-/// `@MainActor` — including free functions. `whereAmI(path:)` and
-/// `gitStatus(at:)` both shell out to `git` synchronously
-/// (`GitProcess.run`), so calling them from a `@MainActor` context blocks
-/// the window. `@concurrent` forces this function onto the concurrent
-/// executor regardless of the caller's isolation; callers `await` it from
-/// the main actor and get control back there once it returns, so assigning
-/// the result to `@State` needs no further hop.
+/// `@MainActor` — including free functions. Both engine calls go through the
+/// non-blocking async `GitProcess` path (#0344), so no cooperative-pool
+/// thread is held while `git` runs; `@concurrent` additionally keeps the
+/// parsing work off the main actor. Callers `await` it from the main actor
+/// and get control back there once it returns, so assigning the result to
+/// `@State` needs no further hop.
 ///
 /// - Throws: `WorktreeContext.Error.notARepository` when `path` is not
 ///   inside a git repository (#0140) — callers must show that error, not an
 ///   empty list (guide §9 M1 criterion 3).
 @concurrent
 public func loadRepositorySummary(at path: String) async throws -> RepositorySummary {
-    let info = try whereAmI(path: path)
-    let status = try gitStatus(at: path)
+    let info = try await whereAmI(path: path)
+    let status = try await gitStatus(at: path)
     return RepositorySummary(whereAmI: info, status: status)
 }
 
@@ -52,14 +51,14 @@ public func loadRepositorySummary(at path: String) async throws -> RepositorySum
 ///
 /// `YardUI` sets `.defaultIsolation(MainActor.self)` (`Package.swift`), so
 /// this needs `@concurrent` for the same reason `loadRepositorySummary`
-/// above does: `CommitLog.run` shells out to `git` synchronously
-/// (`GitProcess.run`), and running that on the main actor blocks the
-/// window. `@concurrent` forces this function onto the concurrent executor
-/// regardless of the caller's isolation; callers `await` it from the main
-/// actor and get control back there once it returns.
+/// above does: `CommitLog.run` shells out to `git` through the non-blocking
+/// async `GitProcess` path (#0344), and `@concurrent` keeps the call — and
+/// its parsing — off the main actor regardless of the caller's isolation;
+/// callers `await` it from the main actor and get control back there once
+/// it returns.
 @concurrent
 public func loadCommitHistory(at path: String) async throws -> [CommitLogEntry] {
-    try CommitLog.run(path: path, rangeArguments: ["-100", "HEAD"])
+    try await CommitLog.run(path: path, rangeArguments: ["-100", "HEAD"])
 }
 
 /// Loads the lane-assigned commit graph for the History pane's lane gutter
@@ -75,10 +74,10 @@ public func loadCommitHistory(at path: String) async throws -> [CommitLogEntry] 
 /// `YardUI` sets `.defaultIsolation(MainActor.self)` (`Package.swift`), so
 /// this needs `@concurrent` for the same reason `loadRepositorySummary`,
 /// `loadCommitHistory` and `loadCommitDiff` above do: `graphRows` shells out
-/// to `git` synchronously (`GitProcess.run`), and running that on the main
-/// actor blocks the window. `@concurrent` forces this function onto the
-/// concurrent executor regardless of the caller's isolation; callers `await`
-/// it from the main actor and get control back there once it returns.
+/// to `git` through the non-blocking async `GitProcess` path (#0344), and
+/// `@concurrent` keeps the call — and its parsing — off the main actor
+/// regardless of the caller's isolation; callers `await` it from the main
+/// actor and get control back there once it returns.
 ///
 /// `GraphRow` is declared in `YardGit`, which does not set `YardUI`'s
 /// default isolation, so it is already a `nonisolated` `Sendable` value type
@@ -86,7 +85,7 @@ public func loadCommitHistory(at path: String) async throws -> [CommitLogEntry] 
 /// above for `FileDiff`/`Hunk`.
 @concurrent
 public func loadCommitGraph(at path: String) async throws -> [GraphRow] {
-    try graphRows(at: path, limit: 100)
+    try await graphRows(at: path, limit: 100)
 }
 
 /// Loads the diff `revision` introduced, for the Detail pane's commit view
@@ -94,11 +93,11 @@ public func loadCommitGraph(at path: String) async throws -> [GraphRow] {
 ///
 /// `YardUI` sets `.defaultIsolation(MainActor.self)` (`Package.swift`), so
 /// this needs `@concurrent` for the same reason `loadRepositorySummary` and
-/// `loadCommitHistory` above do: `commitDiff` shells out to `git`
-/// synchronously (`GitProcess.run`), and running that on the main actor
-/// blocks the window. `@concurrent` forces this function onto the concurrent
-/// executor regardless of the caller's isolation; callers `await` it from
-/// the main actor and get control back there once it returns.
+/// `loadCommitHistory` above do: `commitDiff` shells out to `git` through
+/// the non-blocking async `GitProcess` path (#0344), and `@concurrent` keeps
+/// the call — and its parsing — off the main actor regardless of the
+/// caller's isolation; callers `await` it from the main actor and get
+/// control back there once it returns.
 ///
 /// `FileDiff` and `Hunk` are declared in `YardGit`, which does not set
 /// `YardUI`'s default isolation, so they are already `nonisolated`
@@ -110,7 +109,7 @@ public func loadCommitGraph(at path: String) async throws -> [GraphRow] {
 /// to show an explicit note instead of treating that as "nothing changed".
 @concurrent
 public func loadCommitDiff(at path: String, revision: String) async throws -> [FileDiff] {
-    try commitDiff(at: path, revision: revision)
+    try await commitDiff(at: path, revision: revision)
 }
 
 /// A repository's refs and worktree list, loaded together for the Sidebar
@@ -146,11 +145,11 @@ public nonisolated struct RepositorySidebarSummary: Sendable {
 /// `YardUI` sets `.defaultIsolation(MainActor.self)` (`Package.swift`), so
 /// this needs `@concurrent` for the same reason `loadRepositorySummary`,
 /// `loadCommitHistory` and `loadCommitDiff` above do: `WorktreeContext.resolve`,
-/// `RefSnapshot.capture` and `worktreeList` all shell out to `git`
-/// synchronously (`GitProcess.run`), and running that on the main actor
-/// blocks the window. `@concurrent` forces this function onto the concurrent
-/// executor regardless of the caller's isolation; callers `await` it from the
-/// main actor and get control back there once it returns.
+/// `RefSnapshot.capture` and `worktreeList` all shell out to `git` through
+/// the non-blocking async `GitProcess` path (#0344), and `@concurrent` keeps
+/// the calls — and their parsing — off the main actor regardless of the
+/// caller's isolation; callers `await` it from the main actor and get
+/// control back there once it returns.
 ///
 /// `RefSnapshot.capture` already excludes `refs/switchyard/*`
 /// (`RefSnapshot.switchyardNamespace`, `RefSnapshot.swift:166`) -- the
@@ -159,8 +158,8 @@ public nonisolated struct RepositorySidebarSummary: Sendable {
 /// ref rather than trusting the filter silently.
 @concurrent
 public func loadRepositorySidebar(at path: String) async throws -> RepositorySidebarSummary {
-    let context = try WorktreeContext.resolve(path: path)
-    let refs = try RefSnapshot.capture(in: context)
-    let worktrees = try worktreeList(path: path)
+    let context = try await WorktreeContext.resolve(path: path)
+    let refs = try await RefSnapshot.capture(in: context)
+    let worktrees = try await worktreeList(path: path)
     return RepositorySidebarSummary(refs: refs, worktrees: worktrees, currentWorktreePath: context.topLevel)
 }

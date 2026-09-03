@@ -187,6 +187,34 @@ public func graphRows(
     revisions: [String] = ["HEAD"],
     git: GitProcess = GitProcess()
 ) throws -> [GraphRow] {
+    let output = try git.run(
+        graphRowsArguments(limit: limit, revisions: revisions),
+        workingDirectory: path
+    )
+    return LaneAssigner.assign(try RevListParser().parse(output.text))
+}
+
+/// Async twin of `graphRows(at:limit:revisions:git:)` (#0344), for callers
+/// already on Swift concurrency's cooperative pool: the `git rev-list`
+/// subprocess is awaited on the non-blocking `GitProcess` path, so the pool
+/// thread is released while git runs. Same arguments (shared
+/// `graphRowsArguments`), same parser, same lane assignment.
+public func graphRows(
+    at path: String,
+    limit: Int? = nil,
+    revisions: [String] = ["HEAD"],
+    git: GitProcess = GitProcess()
+) async throws -> [GraphRow] {
+    let output = try await git.run(
+        graphRowsArguments(limit: limit, revisions: revisions),
+        workingDirectory: path
+    )
+    return LaneAssigner.assign(try RevListParser().parse(output.text))
+}
+
+/// The arguments `graphRows` runs, shared by the synchronous and async paths
+/// (#0344) so the journal-ref exclusion below cannot drift between them.
+private func graphRowsArguments(limit: Int?, revisions: [String]) -> [String] {
     var arguments = ["rev-list", "--topo-order", "--parents"]
     if let limit {
         arguments.append("--max-count=\(limit)")
@@ -202,8 +230,7 @@ public func graphRows(
 
     arguments += revisions
     arguments.append("--")
-    let output = try git.run(arguments, workingDirectory: path)
-    return LaneAssigner.assign(try RevListParser().parse(output.text))
+    return arguments
 }
 
 // MARK: - Wire encoding (#0133)

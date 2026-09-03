@@ -131,6 +131,22 @@ public struct RefSnapshot: Sendable, Equatable {
         )
     }
 
+    /// Async twin of `capture(in:git:)` (#0344), for callers already on
+    /// Swift concurrency's cooperative pool: the `symbolic-ref`, `rev-parse`
+    /// and `for-each-ref` subprocesses are awaited on the non-blocking
+    /// `GitProcess` path, so the pool thread is released while git runs.
+    /// Same calls in the same order, same parse, same `Error` values.
+    public static func capture(
+        in context: WorktreeContext,
+        git: GitProcess = GitProcess()
+    ) async throws -> RefSnapshot {
+        let base = context.topLevel ?? context.gitDir
+        return RefSnapshot(
+            head: try await captureHead(at: base, git: git),
+            refs: try await listDirectRefs(at: base, git: git)
+        )
+    }
+
     private static func captureHead(at base: String, git: GitProcess) throws -> Head {
         // Exit 1 with empty output means detached — information, not failure.
         let symref = try git.capture(
@@ -146,6 +162,21 @@ public struct RefSnapshot: Sendable, Equatable {
         return .detached(oid: line)
     }
 
+    private static func captureHead(at base: String, git: GitProcess) async throws -> Head {
+        // Exit 1 with empty output means detached — information, not failure.
+        let symref = try await git.capture(
+            ["symbolic-ref", "--quiet", "HEAD"], workingDirectory: base)
+        if symref.exitCode == 0, let target = symref.lines.first, !target.isEmpty {
+            return .symbolic(target: target)
+        }
+        let oid = try await git.run(
+            ["rev-parse", "--verify", "HEAD"], workingDirectory: base)
+        guard let line = oid.lines.first, !line.isEmpty else {
+            throw Error.malformedRefLine("rev-parse --verify HEAD printed nothing")
+        }
+        return .detached(oid: line)
+    }
+
     /// Every ref that is not a symref and not journal machinery.
     ///
     /// Ref names cannot contain space, NUL, or newline (git-check-ref-format),
@@ -153,6 +184,24 @@ public struct RefSnapshot: Sendable, Equatable {
     /// direct ref's `%(symref)` is empty and its line ends `name` + space.
     private static func listDirectRefs(at base: String, git: GitProcess) throws -> [Entry] {
         let out = try git.run(
+            ["for-each-ref", "--format=%(objectname) %(refname) %(symref)"],
+            workingDirectory: base)
+        var entries: [Entry] = []
+        for line in out.lines {
+            let fields = line.split(separator: " ", omittingEmptySubsequences: false)
+            guard fields.count == 3, !fields[0].isEmpty, !fields[1].isEmpty else {
+                throw Error.malformedRefLine(line)
+            }
+            guard fields[2].isEmpty else { continue } // symbolic — not captured
+            let name = String(fields[1])
+            guard !name.hasPrefix(switchyardNamespace) else { continue }
+            entries.append(Entry(name: name, oid: String(fields[0])))
+        }
+        return entries
+    }
+
+    private static func listDirectRefs(at base: String, git: GitProcess) async throws -> [Entry] {
+        let out = try await git.run(
             ["for-each-ref", "--format=%(objectname) %(refname) %(symref)"],
             workingDirectory: base)
         var entries: [Entry] = []

@@ -93,6 +93,21 @@ public func worktreeList(path: String, git: GitProcess = GitProcess()) throws ->
     return parsePorcelain(output.standardOutput, path: path)
 }
 
+/// Async twin of `worktreeList(path:git:)` (#0344), for callers already on
+/// Swift concurrency's cooperative pool: the `git worktree list` subprocess
+/// is awaited on the non-blocking `GitProcess` path, so the pool thread is
+/// released while git runs. Same arguments, same parse, same error.
+public func worktreeList(path: String, git: GitProcess = GitProcess()) async throws -> [WorktreeEntry] {
+    let output = try await git.capture(
+        ["worktree", "list", "--porcelain", "-z"],
+        workingDirectory: path
+    )
+    guard output.exitCode == 0 else {
+        throw WorktreeListError.couldNotList(detail: output.standardError)
+    }
+    return parsePorcelain(output.standardOutput, path: path)
+}
+
 /// Internal parser used by `worktreeList` and exercised directly by tests.
 internal func parsePorcelain(_ data: Data, path: String) -> [WorktreeEntry] {
     let bytes = Array(data)

@@ -156,6 +156,39 @@ public enum CommitLog {
     /// Run `git log`, decode its structured output and return a sequence of
     /// `CommitLogEntry`. Exceptions are propagated.
     public static func run(path: String, rangeArguments: [String], options: CommitLogOptions = [], git: GitProcess = GitProcess()) throws -> [CommitLogEntry] {
+        let output = try git.run(arguments(rangeArguments: rangeArguments), workingDirectory: path)
+        let entries = parse(output: output.text, options: options)
+
+        // `agentOnly` is applied once, inside `parse`'s loop (see the comment
+        // there) -- a second pass here used to re-check the identical value:
+        // `parse` builds each `CommitLogEntry.trailers` from the very same
+        // `trailers` array the in-loop filter tests, with no transformation
+        // in between, and `parse` is the only site that ever appends to
+        // `entries`. The two checks could never disagree, so re-filtering
+        // here was dead weight -- see #0302.
+        //
+        // `git log` already emits newest-first and `parse` preserves that order,
+        // so returning it unchanged is what matches the comment. Reversing here
+        // made the array oldest-first and broke eight assertions.
+        return entries
+    }
+
+    /// Async twin of `run(path:rangeArguments:options:git:)` (#0344), for
+    /// callers already on Swift concurrency's cooperative pool: the `git
+    /// log` subprocess is awaited on the non-blocking `GitProcess` path, so
+    /// the pool thread is released while git runs. Same arguments (shared
+    /// `arguments(rangeArguments:)`), same parser, same result.
+    public static func run(path: String, rangeArguments: [String], options: CommitLogOptions = [], git: GitProcess = GitProcess()) async throws -> [CommitLogEntry] {
+        let output = try await git.run(arguments(rangeArguments: rangeArguments), workingDirectory: path)
+        let entries = parse(output: output.text, options: options)
+        return entries
+    }
+
+    /// The argument vector both `run` paths execute, shared so the pinned
+    /// flags below cannot drift between the synchronous and async paths
+    /// (#0344). See the format-string and decoration commentary for why each
+    /// piece is pinned.
+    static func arguments(rangeArguments: [String]) -> [String] {
         var args: [String]
 
         // Build the format string by appending range arguments after an
@@ -218,21 +251,7 @@ public enum CommitLog {
             args.append(contentsOf: rangeArguments)
         }
 
-        let output = try git.run(args, workingDirectory: path)
-        let entries = parse(output: output.text, options: options)
-
-        // `agentOnly` is applied once, inside `parse`'s loop (see the comment
-        // there) -- a second pass here used to re-check the identical value:
-        // `parse` builds each `CommitLogEntry.trailers` from the very same
-        // `trailers` array the in-loop filter tests, with no transformation
-        // in between, and `parse` is the only site that ever appends to
-        // `entries`. The two checks could never disagree, so re-filtering
-        // here was dead weight -- see #0302.
-        //
-        // `git log` already emits newest-first and `parse` preserves that order,
-        // so returning it unchanged is what matches the comment. Reversing here
-        // made the array oldest-first and broke eight assertions.
-        return entries
+        return args
     }
 
     /// Parse the text produced by `run(path:rangeArguments:)`. Returns an

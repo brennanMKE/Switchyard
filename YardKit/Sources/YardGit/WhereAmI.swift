@@ -269,14 +269,10 @@ public func whereAmI(
         guard let out = try? git.capture(
             ["diff", "--name-only", "-z"], workingDirectory: path),
               out.exitCode == 0 else { return 0 }
-        // `out.standardOutput` is NUL-terminated, same convention as
-        // `conflictCount` below.
-        let bytes = out.standardOutput
-        guard !bytes.isEmpty else { return 0 }
-        // Strip the trailing NUL that `--name-only -z` appends.
-        let trimmed = bytes.dropLast(1)
-        guard !trimmed.isEmpty else { return 0 }
-        return Set(trimmed.split(whereSeparator: { $0 == 0 })).count
+        // Deduplicated: a conflicted path is listed once per side by plain
+        // `git diff` without `--diff-filter` (see the conflict probe below),
+        // and must not be double-counted here.
+        return countNULSeparatedPaths(out.standardOutput, deduplicated: true)
     }()
 
     // Staged: `diff-index --cached HEAD` lists entries with staged changes.
@@ -298,14 +294,7 @@ public func whereAmI(
         guard let out = try? git.capture(
             ["diff", "--name-only", "-z", "--diff-filter=U"], workingDirectory: path),
               out.exitCode == 0 else { return 0 }
-        // `out.standardOutput` is NUL-terminated. A clean index produces empty data;
-        // each conflicted path contributes one non-empty field separated by \0.
-        let bytes = out.standardOutput
-        guard !bytes.isEmpty else { return 0 }
-        // Strip the trailing NUL that `--name-only -z` appends.
-        let trimmed = bytes.dropLast(1)
-        guard !trimmed.isEmpty else { return 0 }
-        return trimmed.split(whereSeparator: { $0 == 0 }).count
+        return countNULSeparatedPaths(out.standardOutput, deduplicated: false)
     }()
 
     let hasConflicts: Bool = conflictCount > 0
@@ -331,6 +320,181 @@ public func whereAmI(
         unstagedCount: unstagedCount,
         stagedCount: stagedCount,
         hasConflicts: hasConflicts,
+        conflictCount: conflictCount,
+        headOID: shortOID,
+        rawHead: rawHead
+    )
+}
+
+/// Counts NUL-separated paths in `--name-only -z` output: strips the trailing
+/// NUL git appends, then counts the fields, deduplicating when asked (a
+/// conflicted path is listed once per side by plain `git diff` without
+/// `--diff-filter`, and `unstagedCount` must not double-count it). Shared by
+/// the synchronous and async `whereAmI` probes (#0344).
+private func countNULSeparatedPaths(_ bytes: Data, deduplicated: Bool) -> Int {
+    guard !bytes.isEmpty else { return 0 }
+    // Strip the trailing NUL that `--name-only -z` appends.
+    let trimmed = bytes.dropLast(1)
+    guard !trimmed.isEmpty else { return 0 }
+    let fields = trimmed.split(whereSeparator: { $0 == 0 })
+    return deduplicated ? Set(fields).count : fields.count
+}
+
+/// Async twin of `whereAmI(path:git:)` (#0344), for callers already on Swift
+/// concurrency's cooperative pool: every probe's `git` subprocess is awaited
+/// on the non-blocking `GitProcess` path, so the pool thread is released
+/// while git runs instead of being held for the whole call. This is the
+/// loader-facing path (#0344) — a repository load runs a dozen probes, and
+/// the synchronous version held a pool thread through all of them.
+///
+/// Keep this body probe-for-probe identical to the synchronous version above
+/// — same commands, same order, same fallbacks. The equivalence test
+/// `whereAmIAsyncMatchesSync` (GitProcessAsyncTests) pins the two against the
+/// same fixture repository.
+public func whereAmI(
+    path: String,
+    git: GitProcess = GitProcess()
+) async throws -> WhereAmI {
+    // The not-a-repository gate, same as the synchronous version: without it
+    // every probe below degrades to nil/0/"" on a non-repository.
+    _ = try await WorktreeContext.resolve(path: path, git: git)
+
+    // HEAD's raw form: a full SHA or empty.
+    var rawHead = ""
+    if let out = try? await git.run(["rev-parse", "HEAD"], workingDirectory: path) {
+        let text = out.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.isEmpty, text != "HEAD" { rawHead = text }
+    }
+
+    // Branch: the short ref name if HEAD points at a branch, nil on detached.
+    let branch = try await git.capture(
+        ["symbolic-ref", "-q", "--short", "HEAD"], workingDirectory: path
+    )
+    var branchName: String?
+    if branch.exitCode == 0, !branch.text.isEmpty {
+        branchName = branch.text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // Upstream via the reflog entry `@{upstream}`, with ahead/behind against
+    // it — only resolved on a branch, same as the synchronous version.
+    var upstream: String?
+    var ahead: Int?
+    var behind: Int?
+    if branchName != nil {
+        let upstreamOut = try await git.capture(
+            ["rev-parse", "--abbrev-ref", "@{upstream}"], workingDirectory: path
+        )
+        if upstreamOut.exitCode == 0, !upstreamOut.text.isEmpty {
+            upstream = upstreamOut.text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            let abOut = try await git.capture(
+                ["rev-list", "--left-right", "--count", "HEAD...@{upstream}"],
+                workingDirectory: path
+            )
+            if abOut.exitCode == 0, let firstTwo = abOut.lines.prefix(2).first {
+                let parts = firstTwo.split(omittingEmptySubsequences: true) { $0.isWhitespace }
+                if parts.count >= 2,
+                   let a = Int(parts[0]), let b = Int(parts[1]) {
+                    ahead = a; behind = b
+                }
+            }
+        }
+    }
+
+    // Rebase / merge / cherry-pick state via `git rev-parse --git-path`, so
+    // this is correct in a linked worktree and on reftable repositories.
+    var isMidRebase = false
+    for name in ["rebase-merge", "rebase-apply"] {
+        guard let p = try? await git.run(
+            ["rev-parse", "--path-format=absolute", "--git-path", name],
+            workingDirectory: path
+        ), let dir = p.lines.first, !dir.isEmpty else { continue }
+        if FileManager.default.fileExists(atPath: dir) {
+            isMidRebase = true
+            break
+        }
+    }
+
+    var mergePath = false
+    if let out = try? await git.run(
+        ["rev-parse", "--path-format=absolute", "--git-path", "MERGE_HEAD"],
+        workingDirectory: path), let p = out.lines.first, !p.isEmpty {
+        mergePath = FileManager.default.fileExists(atPath: p)
+    }
+
+    var cherryPath = false
+    if let out = try? await git.run(
+        ["rev-parse", "--path-format=absolute", "--git-path", "CHERRY_PICK_HEAD"],
+        workingDirectory: path), let p = out.lines.first, !p.isEmpty {
+        cherryPath = FileManager.default.fileExists(atPath: p)
+    }
+
+    // Stash count via `git stash list`; empty output (or a non-zero exit on
+    // an old git without stash) means zero.
+    var stashCount = 0
+    if let out = try? await git.capture(["stash", "list"], workingDirectory: path),
+       out.exitCode == 0 {
+        let text = out.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        stashCount = text.isEmpty ? 0 : text.split(separator: "\n").count
+    }
+
+    // Untracked: `ls-files -o --exclude-standard`, one path per line.
+    var untrackedCount = 0
+    if let out = try? await git.capture(
+        ["ls-files", "-o", "--exclude-standard"], workingDirectory: path),
+        out.exitCode == 0 {
+        untrackedCount = out.text
+            .split(separator: "\n", omittingEmptySubsequences: true).count
+    }
+
+    // Unstaged: `git diff --name-only -z` (index vs working tree), NUL-
+    // separated, deduplicated — see the synchronous version for why.
+    var unstagedCount = 0
+    if let out = try? await git.capture(
+        ["diff", "--name-only", "-z"], workingDirectory: path),
+        out.exitCode == 0 {
+        unstagedCount = countNULSeparatedPaths(out.standardOutput, deduplicated: true)
+    }
+
+    // Staged: `diff-index --cached HEAD`.
+    var stagedCount = 0
+    if let out = try? await git.capture(
+        ["diff-index", "--name-status", "--cached", "HEAD"], workingDirectory: path),
+        out.exitCode == 0 {
+        stagedCount = out.text
+            .split(separator: "\n", omittingEmptySubsequences: true).count
+    }
+
+    // Conflicts: `diff --name-only -z --diff-filter=U`, one NUL-terminated
+    // path per conflict — see the synchronous version for why this form.
+    var conflictCount = 0
+    if let out = try? await git.capture(
+        ["diff", "--name-only", "-z", "--diff-filter=U"], workingDirectory: path),
+        out.exitCode == 0 {
+        conflictCount = countNULSeparatedPaths(out.standardOutput, deduplicated: false)
+    }
+
+    // `git rev-parse --short=7 HEAD` returns a short hash and canonicalizes.
+    var shortOID = ""
+    if let out = try? await git.run(
+        ["rev-parse", "--short=7", "HEAD"], workingDirectory: path),
+        let line = out.lines.first, !line.isEmpty {
+        shortOID = line
+    }
+
+    return WhereAmI(
+        branch: branchName,
+        upstream: upstream,
+        ahead: ahead,
+        behind: behind,
+        isMidRebase: isMidRebase,
+        isMidMerge: mergePath,
+        isMidCherryPick: cherryPath,
+        stashCount: stashCount,
+        untrackedCount: untrackedCount,
+        unstagedCount: unstagedCount,
+        stagedCount: stagedCount,
+        hasConflicts: conflictCount > 0,
         conflictCount: conflictCount,
         headOID: shortOID,
         rawHead: rawHead

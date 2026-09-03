@@ -204,50 +204,24 @@ public struct GitProcess: Sendable {
         extraEnvironment: [String: String] = [:],
         timeout: Duration? = nil
     ) throws -> Output {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executablePath)
-
-        var argv: [String] = []
-        if let workingDirectory {
-            // -C rather than currentDirectoryURL: git resolves it the way the
-            // rest of git does, including for worktrees.
-            argv += ["-C", workingDirectory]
-        }
-        argv += arguments
-        process.arguments = argv
-        process.environment = Self.environment(
-            adding: extraEnvironment, entryID: journalEntryID?.string)
-
-        // stdout comes back through a pipe; stderr goes to a temporary file.
-        //
-        // Draining two pipes needs either concurrent reads or a run loop, and
-        // blocking on a DispatchGroup starves Swift concurrency's cooperative
-        // thread pool — which deadlocks the whole suite once swift-testing runs
-        // tests in parallel. A file has no buffer limit, so one pipe plus one
-        // file removes the problem rather than managing it.
-        let outPipe = Pipe()
-        process.standardOutput = outPipe
-
-        let errURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("yard-stderr-\(UUID().uuidString)")
-        FileManager.default.createFile(atPath: errURL.path, contents: nil)
-        guard let errHandle = try? FileHandle(forWritingTo: errURL) else {
-            throw Failure.launchFailed("could not open a stderr buffer")
-        }
+        let prepared = try prepare(
+            arguments,
+            workingDirectory: workingDirectory,
+            standardInput: standardInput,
+            extraEnvironment: extraEnvironment
+        )
         defer {
-            try? errHandle.close()
-            try? FileManager.default.removeItem(at: errURL)
+            try? prepared.stderrHandle.close()
+            try? FileManager.default.removeItem(at: prepared.stderrURL)
         }
-        process.standardError = errHandle
-        process.standardInput = standardInput == nil ? FileHandle.nullDevice : Pipe()
 
         do {
-            try process.run()
+            try prepared.process.run()
         } catch {
             throw Failure.launchFailed(error.localizedDescription)
         }
 
-        if let standardInput, let inPipe = process.standardInput as? Pipe {
+        if let standardInput, let inPipe = prepared.process.standardInput as? Pipe {
             inPipe.fileHandleForWriting.write(standardInput)
             inPipe.fileHandleForWriting.closeFile()
         }
@@ -265,9 +239,9 @@ public struct GitProcess: Sendable {
             // unlike the `else` branch, which every other `GitProcess`
             // call in the package still takes, unconditionally, on every
             // invocation.
-            let drain = StdoutDrain(pipe: outPipe)
+            let drain = StdoutDrain(pipe: prepared.outPipe)
             drain.start()
-            try Self.waitWithDeadline(process, timeout: timeout, arguments: arguments)
+            try Self.waitWithDeadline(prepared.process, timeout: timeout, arguments: arguments)
             outData = drain.finish()
         } else {
             // Drain stdout to completion, then wait. stderr is already going
@@ -283,16 +257,283 @@ public struct GitProcess: Sendable {
             // limit, so one pipe plus one file removes the problem rather
             // than managing it, and this is the unconditional path every
             // non-timeout call takes -- which is nearly all of them.
-            outData = outPipe.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
+            outData = prepared.outPipe.fileHandleForReading.readDataToEndOfFile()
+            prepared.process.waitUntilExit()
         }
-        let errData = (try? Data(contentsOf: errURL)) ?? Data()
+        let errData = (try? Data(contentsOf: prepared.stderrURL)) ?? Data()
 
         return Output(
             standardOutput: outData,
             standardError: String(decoding: errData, as: UTF8.self),
-            exitCode: process.terminationStatus
+            exitCode: prepared.process.terminationStatus
         )
+    }
+
+    /// A configured-but-unlaunched process plus the side channels around it:
+    /// the stdout pipe a caller must drain, and the temporary stderr file the
+    /// caller must close and delete.
+    private struct Prepared {
+        let process: Process
+        let outPipe: Pipe
+        let stderrURL: URL
+        let stderrHandle: FileHandle
+    }
+
+    /// Builds what both `capture` paths run: the argument vector (the working
+    /// directory prefixed as `-C`), the sanitized environment, the stdout
+    /// pipe, and stderr routed to a temporary file.
+    ///
+    /// stderr goes to a file, not a pipe — **this is the deadlock guard**:
+    /// draining two pipes needs either concurrent reads or a run loop, and
+    /// blocking on a DispatchGroup starves Swift concurrency's cooperative
+    /// thread pool — which deadlocks the whole suite once swift-testing runs
+    /// tests in parallel. A file has no buffer limit, so one pipe plus one
+    /// file removes the problem rather than managing it. The async twin of
+    /// this method drains its single pipe with `readabilityHandler`, so it
+    /// never has the two-pipe problem either.
+    private func prepare(
+        _ arguments: [String],
+        workingDirectory: String?,
+        standardInput: Data?,
+        extraEnvironment: [String: String]
+    ) throws -> Prepared {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executablePath)
+
+        var argv: [String] = []
+        if let workingDirectory {
+            // -C rather than currentDirectoryURL: git resolves it the way the
+            // rest of git does, including for worktrees.
+            argv += ["-C", workingDirectory]
+        }
+        argv += arguments
+        process.arguments = argv
+        process.environment = Self.environment(
+            adding: extraEnvironment, entryID: journalEntryID?.string)
+
+        let outPipe = Pipe()
+        process.standardOutput = outPipe
+
+        let errURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("yard-stderr-\(UUID().uuidString)")
+        FileManager.default.createFile(atPath: errURL.path, contents: nil)
+        guard let errHandle = try? FileHandle(forWritingTo: errURL) else {
+            throw Failure.launchFailed("could not open a stderr buffer")
+        }
+        process.standardError = errHandle
+        process.standardInput = standardInput == nil ? FileHandle.nullDevice : Pipe()
+
+        return Prepared(
+            process: process,
+            outPipe: outPipe,
+            stderrURL: errURL,
+            stderrHandle: errHandle
+        )
+    }
+
+    // MARK: - The non-blocking path (#0344)
+
+    /// Async twin of `run(_:workingDirectory:standardInput:extraEnvironment:
+    /// timeout:)`, for callers already on Swift concurrency's cooperative
+    /// pool (#0344). Same arguments, same `Failure` values, same `Output`;
+    /// the difference is only *where the thread sits* while `git` runs: the
+    /// synchronous entry points block the calling thread for the subprocess's
+    /// lifetime, this one suspends the calling task instead, so a
+    /// cooperative-pool thread is held for microseconds per call rather than
+    /// for the whole subprocess. Synchronous callers keep the synchronous
+    /// overloads -- this adds a path, it does not replace one.
+    @discardableResult
+    public func run(
+        _ arguments: [String],
+        workingDirectory: String? = nil,
+        standardInput: Data? = nil,
+        extraEnvironment: [String: String] = [:],
+        timeout: Duration? = nil
+    ) async throws -> Output {
+        let result = try await capture(
+            arguments,
+            workingDirectory: workingDirectory,
+            standardInput: standardInput,
+            extraEnvironment: extraEnvironment,
+            timeout: timeout
+        )
+        guard result.exitCode == 0 else {
+            throw Failure.exited(
+                code: result.exitCode,
+                stderr: result.standardError,
+                arguments: arguments
+            )
+        }
+        return result
+    }
+
+    /// Async twin of `capture(_:workingDirectory:standardInput:
+    /// extraEnvironment:timeout:)` (#0344): runs `git` and returns its output
+    /// whatever the exit code, without holding a cooperative-pool thread for
+    /// the subprocess's lifetime. Same `Output`, same `Failure` values, same
+    /// argument and environment construction (both paths share `prepare`),
+    /// same timeout semantics.
+    ///
+    /// How the thread is released:
+    ///
+    /// - **stdout** is drained by `readabilityHandler`, which Foundation
+    ///   invokes on its own queue as data arrives and once more with empty
+    ///   data at EOF. stderr still goes to a temporary file (`prepare`'s
+    ///   deadlock guard), so stdout is the only pipe and there is no
+    ///   two-pipe ordering problem to manage.
+    /// - **completion** requires *both* stdout EOF and process exit, because
+    ///   either can arrive last. Whichever event observes the second
+    ///   condition builds the `Output` and funnels it through
+    ///   `ResumeOnce` (modeled on the one in `BrokerConnection`), which
+    ///   guarantees the continuation is resumed exactly once no matter how
+    ///   the events interleave with the timeout or cancellation below.
+    /// - **timeout** is enforced by a detached watchdog task instead of
+    ///   `waitWithDeadline`'s `usleep` polling loop: it sleeps until the
+    ///   deadline, then runs the same escalation — `terminate()` (SIGTERM),
+    ///   `terminationGracePeriod`, `kill(pid, SIGKILL)` if the child ignored
+    ///   SIGTERM — reaps, and reports `Failure.timedOut` carrying the child's
+    ///   `terminationStatus` (15 or 9), exactly as the synchronous path
+    ///   documents (#0239). The watchdog marks the deadline expired *before*
+    ///   terminating, so the killed child's exit + EOF can never report
+    ///   success ahead of it — a child that had to be terminated is a
+    ///   timeout, whatever its exit status, as in the synchronous path.
+    /// - **cancellation** of the surrounding task terminates the child and
+    ///   resumes with `CancellationError`, with the same SIGTERM-then-SIGKILL
+    ///   escalation so a child that traps SIGTERM cannot outlive the caller.
+    ///
+    /// The handlers are installed *before* `run()`: Foundation does not
+    /// invoke `terminationHandler` for a child that exited before it was
+    /// set, and a fast child can exit within milliseconds of launch. Events
+    /// that fire before the continuation below attaches are stored as the
+    /// gate's pending result and delivered on attach.
+    @discardableResult
+    public func capture(
+        _ arguments: [String],
+        workingDirectory: String? = nil,
+        standardInput: Data? = nil,
+        extraEnvironment: [String: String] = [:],
+        timeout: Duration? = nil
+    ) async throws -> Output {
+        let prepared = try prepare(
+            arguments,
+            workingDirectory: workingDirectory,
+            standardInput: standardInput,
+            extraEnvironment: extraEnvironment
+        )
+        let process = prepared.process
+        let errURL = prepared.stderrURL
+        defer {
+            try? prepared.stderrHandle.close()
+            try? FileManager.default.removeItem(at: errURL)
+        }
+
+        let state = AsyncCaptureState()
+        let gate = ResumeOnce<Output>()
+
+        // Both completion sources funnel through here; whichever observes
+        // the last of the two conditions builds the result. Reading the
+        // stderr file is safe: the child has exited by then, so its stderr
+        // is final, and the `defer` above cannot have removed the file yet
+        // -- this function stays suspended inside the continuation below
+        // until `gate.finish` resumes it.
+        let complete: @Sendable () -> Void = { [state, gate] in
+            let (outData, exitCode) = state.snapshot()
+            let errData = (try? Data(contentsOf: errURL)) ?? Data()
+            gate.finish(.success(Output(
+                standardOutput: outData,
+                standardError: String(decoding: errData, as: UTF8.self),
+                exitCode: exitCode
+            )))
+        }
+
+        prepared.outPipe.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            let eof = chunk.isEmpty
+            if eof {
+                // Empty data is EOF (the write end closed); nil the handler
+                // or Foundation keeps invoking it forever.
+                handle.readabilityHandler = nil
+            }
+            if state.record(chunk: chunk, isEOF: eof) {
+                complete()
+            }
+        }
+        process.terminationHandler = { child in
+            // terminationStatus is valid inside the handler -- Foundation
+            // has reaped the child by the time it runs.
+            if state.markExited(child.terminationStatus) {
+                complete()
+            }
+        }
+
+        do {
+            try process.run()
+        } catch {
+            throw Failure.launchFailed(error.localizedDescription)
+        }
+
+        if let standardInput, let inPipe = process.standardInput as? Pipe {
+            // Written from a dedicated thread, not the calling task's: a
+            // large payload can fill the pipe and block the write, and this
+            // path exists precisely so no cooperative-pool thread is held
+            // while the child runs.
+            nonisolated(unsafe) let writeHandle = inPipe.fileHandleForWriting
+            Thread.detachNewThread {
+                writeHandle.write(standardInput)
+                writeHandle.closeFile()
+            }
+        }
+
+        // The watchdog and the cancellation handler touch the process from
+        // other threads. `Process` is not `Sendable`; every access here is a
+        // status check or the escalation `waitWithDeadline` already performs
+        // from a foreign thread, and the two closures never mutate it.
+        nonisolated(unsafe) let childProcess = process
+
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation {
+                (continuation: CheckedContinuation<Output, any Error>) in
+                gate.attach(continuation)
+
+                if let timeout {
+                    Task.detached(priority: .utility) { [state, gate] in
+                        try? await Task.sleep(for: timeout)
+                        guard !gate.isFinished else { return }
+                        // Mark the deadline expired BEFORE terminating: the
+                        // killed child's exit + EOF must not be able to
+                        // report success ahead of the timedOut below.
+                        state.markDeadlineExpired()
+                        if childProcess.isRunning { childProcess.terminate() }
+                        try? await Task.sleep(for: Self.terminationGracePeriod)
+                        guard !gate.isFinished else { return }
+                        if childProcess.isRunning {
+                            kill(childProcess.processIdentifier, SIGKILL)
+                        }
+                        childProcess.waitUntilExit()
+                        gate.finish(.failure(Failure.timedOut(
+                            after: timeout,
+                            arguments: arguments,
+                            terminationStatus: childProcess.terminationStatus
+                        )))
+                    }
+                }
+            }
+        } onCancel: {
+            if childProcess.isRunning {
+                childProcess.terminate()
+            }
+            gate.finish(.failure(CancellationError()))
+            // Same escalation the timeout path uses, so a child that traps
+            // SIGTERM cannot outlive the caller that cancelled it. The gate
+            // is already finished, so nothing this task does later can
+            // double-resume; it only finishes the job.
+            Task.detached(priority: .utility) {
+                try? await Task.sleep(for: Self.terminationGracePeriod)
+                if childProcess.isRunning {
+                    kill(childProcess.processIdentifier, SIGKILL)
+                }
+            }
+        }
     }
 
     /// Waits for `process` up to `timeout`, then escalates: `terminate()`
@@ -418,6 +659,106 @@ private final class StdoutDrain: @unchecked Sendable {
     func finish() -> Data {
         semaphore.wait()
         return result
+    }
+}
+
+/// Guarantees a continuation is resumed exactly once, from whichever of the
+/// stdout-EOF, process-exit, timeout, or cancellation event gets there first.
+/// Modeled on the `ResumeOnce` in `YardKit`'s `BrokerConnection.swift`;
+/// duplicated here because `YardGit` cannot depend on `YardKit`. Unlike that
+/// one, `finish` marks the gate finished even when it stashes a pending
+/// result, so two events racing before `attach` cannot both stick.
+private final class ResumeOnce<T: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<T, any Error>?
+    private var pending: Result<T, any Error>?
+    private var finished = false
+
+    /// True once a result has been delivered or is waiting to be.
+    var isFinished: Bool {
+        lock.withLock { finished }
+    }
+
+    func attach(_ continuation: CheckedContinuation<T, any Error>) {
+        let ready: Result<T, any Error>? = lock.withLock {
+            // An event can beat `attach` if the child is very fast, so a
+            // result that arrived early is stashed and delivered here.
+            if let pending {
+                return pending
+            }
+            self.continuation = continuation
+            return nil
+        }
+        if let ready {
+            continuation.resume(with: ready)
+        }
+    }
+
+    func finish(_ result: Result<T, any Error>) {
+        let target: CheckedContinuation<T, any Error>? = lock.withLock {
+            guard !finished else { return nil }
+            finished = true
+            guard let continuation else {
+                pending = result
+                return nil
+            }
+            self.continuation = nil
+            return continuation
+        }
+        target?.resume(with: result)
+    }
+}
+
+/// The async `capture`'s shared mutable state: the stdout buffer drained by
+/// `readabilityHandler`, and the completion conditions. All access is
+/// funnelled through one lock; `record`/`markExited` return true exactly
+/// once each, on the single call that observes both conditions met, so the
+/// result is built by exactly one event source.
+private final class AsyncCaptureState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var buffer = Data()
+    private var sawEOF = false
+    private var sawExit = false
+    private var deadlineExpired = false
+    private var exitStatus: Int32 = 0
+
+    /// Appends a drained chunk; `isEOF` is true for the empty-data EOF call.
+    /// Returns true exactly once, when EOF and process exit have both been
+    /// recorded and the deadline has not expired.
+    func record(chunk: Data, isEOF: Bool) -> Bool {
+        lock.withLock {
+            buffer.append(chunk)
+            if isEOF { sawEOF = true }
+            return sawEOF && sawExit && !deadlineExpired
+        }
+    }
+
+    /// Records the child's exit status. Returns true exactly once, when EOF
+    /// and process exit have both been recorded and the deadline has not
+    /// expired.
+    func markExited(_ status: Int32) -> Bool {
+        lock.withLock {
+            exitStatus = status
+            sawExit = true
+            return sawEOF && sawExit && !deadlineExpired
+        }
+    }
+
+    /// Called by the watchdog the moment the deadline expires, *before* it
+    /// terminates the child. From here the child's death (exit + EOF) can no
+    /// longer report success -- a child that had to be terminated is reported
+    /// as `Failure.timedOut` by the watchdog, never as a successful capture
+    /// that happens to carry a signal exit status. This mirrors the
+    /// synchronous `waitWithDeadline`, which throws `timedOut` whenever it
+    /// had to escalate, whatever the child's status.
+    func markDeadlineExpired() {
+        lock.withLock { deadlineExpired = true }
+    }
+
+    /// The drained stdout and the child's exit status. Valid once either
+    /// `record` or `markExited` has returned true.
+    func snapshot() -> (data: Data, exitCode: Int32) {
+        lock.withLock { (buffer, exitStatus) }
     }
 }
 

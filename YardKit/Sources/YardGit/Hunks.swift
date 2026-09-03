@@ -643,12 +643,33 @@ public func commitDiff(
     revision: String,
     git: GitProcess = GitProcess()
 ) throws -> [FileDiff] {
+    let output = try git.run(commitDiffArguments(revision: revision), workingDirectory: path)
+    return try HunkParser().parse(output.text)
+}
+
+/// Async twin of `commitDiff(at:revision:git:)` (#0344), for callers already
+/// on Swift concurrency's cooperative pool: the `git diff-tree` subprocess
+/// is awaited on the non-blocking `GitProcess` path, so the pool thread is
+/// released while git runs. Same arguments (shared `commitDiffArguments`),
+/// same parser, same result.
+public func commitDiff(
+    at path: String,
+    revision: String,
+    git: GitProcess = GitProcess()
+) async throws -> [FileDiff] {
+    let output = try await git.run(commitDiffArguments(revision: revision), workingDirectory: path)
+    return try HunkParser().parse(output.text)
+}
+
+/// The arguments `commitDiff` runs, shared by the synchronous and async
+/// paths (#0344) so the pinned config overrides and flags cannot drift
+/// between them.
+private func commitDiffArguments(revision: String) -> [String] {
     var arguments = pinnedDiffConfigOverrides
     arguments += ["diff-tree", "--root", "-p", "--cc", "--no-commit-id"]
     arguments += pinnedDiffFlags
     arguments.append(revision)
-    let output = try git.run(arguments, workingDirectory: path)
-    return try HunkParser().parse(output.text)
+    return arguments
 }
 
 // MARK: - Wire encoding (#0132)
