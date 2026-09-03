@@ -196,6 +196,7 @@
 				26BA44843026752800DDB2E9 /* YardGit */,
 				26BA44863026752800DDB2E9 /* YardKit */,
 				CCCCCCCCCCCCCCCCCCCCCCCC /* YardCommands */,
+				F9E8D7C6B5A4938271605F4E /* SlidingTabs */,
 			);
 			productName = Switchyard;
 			productReference = 26B64D3430251BCE00EB4FD0 /* Switchyard.app */;
@@ -306,6 +307,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				26BA44803025CBFE00DDB2E9 /* XCLocalSwiftPackageReference "YardKit" */,
+				A1B2C3D4E5F6789012ABCDEF /* XCRemoteSwiftPackageReference "SlidingTabs" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 26B64D3530251BCE00EB4FD0 /* Products */;
@@ -797,6 +799,17 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		A1B2C3D4E5F6789012ABCDEF /* XCRemoteSwiftPackageReference "SlidingTabs" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/brennanMKE/SlidingTabs";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCLocalSwiftPackageReference section */
 		26BA44803025CBFE00DDB2E9 /* XCLocalSwiftPackageReference "YardKit" */ = {
 			isa = XCLocalSwiftPackageReference;
@@ -824,6 +837,11 @@
 		CCCCCCCCCCCCCCCCCCCCCCCC /* YardCommands */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = YardCommands;
+		};
+		F9E8D7C6B5A4938271605F4E /* SlidingTabs */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A1B2C3D4E5F6789012ABCDEF /* XCRemoteSwiftPackageReference "SlidingTabs" */;
+			productName = SlidingTabs;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
