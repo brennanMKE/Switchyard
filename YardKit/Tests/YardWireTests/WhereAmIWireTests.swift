@@ -134,11 +134,56 @@ struct WhereAmIWireTests {
         #expect(schemaFieldNames == encodedKeys,
                 "schema declares \(schemaFieldNames.sorted()); the type encodes \(encodedKeys.sorted())")
     }
+
+    /// The second half of the binding (#0243), beside #0194's name half: a
+    /// minimally-populated `WhereAmI` — every optional nil — must omit
+    /// exactly the keys `whereami.json` marks `optional`, no more, no fewer.
+    /// #0194's test says nothing about absence, and #0243 measured that
+    /// flipping an `optional` flag and regenerating the golden file leaves
+    /// every gate green with a schema that lies. The convention at stake:
+    /// absent means absent, not `null` — an agent told a field is required
+    /// which is then simply missing fails in a way the schema was supposed
+    /// to prevent. Goes through the shared helper, so the next command's
+    /// wire test is the same one call.
+    ///
+    /// Mutation A — flip `branch`'s `optional: true` to `false` in
+    /// `CommandRegistry.whereamiSpec`, regenerate the golden file
+    /// (`SCHEMA_REGENERATE=1 swift test --filter checkedInSchemasMatchEmitter`):
+    /// the golden gate is green again, and THIS test reddens — `branch` is
+    /// absent from the minimal value but the schema now calls it required.
+    ///
+    /// Mutation B — mark a required field optional instead (e.g. `rawHead`),
+    /// regenerate, and this test reddens the other way: `rawHead` is still
+    /// encoded by the minimal value but the schema now says it may be absent.
+    @Test func schemaOptionalFieldsMatchTheKeysAMinimalValueOmits() throws {
+        let fullyPopulated = WhereAmI(
+            branch: "main", upstream: "origin/main", ahead: 2, behind: 1,
+            isMidRebase: false, isMidMerge: true, isMidCherryPick: false,
+            stashCount: 3, untrackedCount: 4, unstagedCount: 5, stagedCount: 6,
+            hasConflicts: true, conflictCount: 7,
+            headOID: "a1b2c3d",
+            rawHead: "a1b2c3d4e5f6a7b8c9d0a1b2c3d4e5f6a7b8c9d0")
+        let minimallyPopulated = WhereAmI(
+            branch: nil, upstream: nil, ahead: nil, behind: nil,
+            isMidRebase: false, isMidMerge: false, isMidCherryPick: false,
+            stashCount: 0, untrackedCount: 0, unstagedCount: 0, stagedCount: 0,
+            hasConflicts: false, conflictCount: 0,
+            headOID: "a1b2c3d",
+            rawHead: "a1b2c3d4e5f6a7b8c9d0a1b2c3d4e5f6a7b8c9d0")
+        let fullKeys = try topLevelKeys(ofJSON: wireJSON(fullyPopulated))
+        #expect(!fullKeys.isEmpty, "a fully-populated value must encode at least one key")
+        let minimalKeys = try topLevelKeys(ofJSON: wireJSON(minimallyPopulated))
+        #expect(!minimalKeys.isEmpty, "a minimally-populated value must encode at least one key")
+        #expect(minimalKeys.isSubset(of: fullKeys),
+                "the minimal value's keys must be a subset of the full value's keys")
+
+        try assertSchemaOptionalFlagsMatchEncodedAbsence(
+            schemaURL: Self.whereamiSchemaURL,
+            encodedFullKeys: fullKeys,
+            encodedMinimalKeys: minimalKeys)
+    }
 }
 
-/// Top-level key set of a JSON object given as text.
-private func topLevelKeys(ofJSON text: String) throws -> Set<String> {
-    let object = try JSONSerialization.jsonObject(with: Data(text.utf8))
-    let dictionary = try #require(object as? [String: Any], "expected a JSON object")
-    return Set(dictionary.keys)
-}
+    // `topLevelKeys(ofJSON:)` moved to `SchemaPayloadBinding.swift` (#0243)
+    // as a shared internal helper, so the next command's wire test binds both
+    // halves of the schema contract without re-deriving it.
