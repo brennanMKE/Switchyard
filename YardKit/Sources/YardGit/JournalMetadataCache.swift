@@ -11,6 +11,22 @@ import Foundation
 /// `snapshotRef` — the ref that anchors the entry, which is circular inside the
 /// commit that ref points at — plus the speed of not walking every anchor.
 ///
+/// **A `JournalAnchor.updateMetadata` rewrite does not update a cached row
+/// (#0224).** The rewrite replaces the entry's `metadata.json` blob and
+/// re-points its anchor ref at a new snapshot commit; it touches neither this
+/// file nor anything a read of it consults. A `Row`'s `snapshotRef` stores a
+/// ref **name**, not an oid, so the name survives the rewrite untouched —
+/// which is exactly what makes the staleness quiet: the staleness is in the
+/// embedded `metadata`, never in the ref, so a reader sees a valid-looking
+/// row whose metadata predates the rewrite and a mapping attached after the
+/// entry was written (#0221's own-invocation rewrite attach) is simply absent
+/// — #0064's rewrite-diff would silently return nothing. Whoever wires this
+/// cache into a read path must therefore either update the cached row
+/// whenever `updateMetadata` changes an entry, or detect the staleness on
+/// read. The remedy that needs no wiring: rebuilding from refs (#0030) and
+/// `rewrite(from:)` recovers from any staleness, because the refs are the
+/// authority.
+///
 /// The file is addressed relative to `WorktreeContext.commonDir`, never through
 /// `git rev-parse --git-path`: for a subpath git does not know, `--git-path`
 /// resolves **per-worktree**, so a linked worktree would get its own private
