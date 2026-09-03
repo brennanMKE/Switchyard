@@ -19,6 +19,8 @@ public func runEngineCommand(
         return runWhereAmI(workingDirectory: workingDirectory)
     case "status":
         return runStatus(workingDirectory: workingDirectory)
+    case "conflicts":
+        return runConflicts(workingDirectory: workingDirectory)
     default:
         return nil
     }
@@ -69,6 +71,26 @@ private func runStatus(
     do {
         _ = try WorktreeContext.resolve(path: workingDirectory)
         let result = try gitStatus(at: workingDirectory)
+        let envelope = Envelope(result: EncodableResult(result))
+        return (stdout: encodeJSON(envelope), stderr: "", exitCode: .success)
+    } catch {
+        let message = String(describing: error)
+        let fail = EnvelopeFail(code: .repositoryError, message: message)
+        let human = "[error] \(fail.error.code.rawValue): \(fail.error.message)\n"
+        return (stdout: encodeJSON(fail), stderr: human, exitCode: .repositoryError)
+    }
+}
+
+/// `switchyard conflicts` — resolves `WorktreeContext` for the **caller's**
+/// working directory first, before calling `conflictedFiles`. The passed path
+/// is the caller's, never `FileManager.default.currentDirectoryPath`, which
+/// is the app's.
+private func runConflicts(
+    workingDirectory: String
+) -> (stdout: String, stderr: String, exitCode: ExitCode) {
+    do {
+        _ = try WorktreeContext.resolve(path: workingDirectory)
+        let result = try conflictedFiles(at: workingDirectory)
         let envelope = Envelope(result: EncodableResult(result))
         return (stdout: encodeJSON(envelope), stderr: "", exitCode: .success)
     } catch {

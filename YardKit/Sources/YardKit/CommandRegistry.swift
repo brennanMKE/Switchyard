@@ -12,7 +12,7 @@ public enum CommandRegistry {
 
     /// All known `yard` command specifications in the order they should be
     /// rendered in help output.
-    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec]
+    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec]
 
     // MARK: - The switchyard spec — rendered by `yard --help`
 
@@ -106,6 +106,26 @@ public enum CommandRegistry {
         // (#0194: "nested objects can wait ... do not half-build nesting to
         // fit it in here"). The schema carries the self-reference form until
         // array support is its own issue.
+        payload: nil
+    )
+
+    // MARK: - The conflicts spec — engine-backed, resolved by `YardCommands` (#0226)
+
+    static let conflictsSpec = CommandSpec(
+        name: "conflicts",
+        summary: "Report every conflicted path in the index, with the blob id and mode of each stage.",
+        flags: [],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The command completed and returned the conflicted paths."),
+            ExitCodeSpec(code: 6, meaning: "The working directory is not inside a git repository."),
+        ],
+        schemaName: "conflicts",
+        // No `payload` shape (#0226): the result is an array of objects, each
+        // carrying nested stage entries (`oid`/`mode`), and `PayloadShape` is
+        // flat-only (#0194: "nested objects and arrays are not supported ...
+        // do not half-build nesting to fit it in here"). Same precedent as
+        // `statusSpec` (#0225): the schema carries the self-reference form
+        // until array support is its own issue.
         payload: nil
     )
 
