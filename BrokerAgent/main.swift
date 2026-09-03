@@ -38,7 +38,16 @@ private let logger = Logger(subsystem: ServiceNames.logSubsystem, category: "bro
 
 // MARK: - Exported object
 
-private final class BrokerService: NSObject, BrokerProtocol {
+/// `nonisolated` and `@unchecked Sendable`: XPC invokes this exported object's
+/// methods on its own queues, and the invalidation handler below captures the
+/// instance from a `@Sendable` closure. Both assertions are honest — `owner`
+/// is immutable and `registry` is an `EndpointRegistry`, which guards its
+/// state with a lock. The BrokerAgent target already defaults to nonisolated;
+/// these pin that against a future change of the target's default isolation,
+/// and the #0053 guard checks it.
+private nonisolated final class BrokerService: NSObject, BrokerProtocol,
+    @unchecked Sendable
+{
     let registry: EndpointRegistry<NSXPCListenerEndpoint>
 
     /// This connection's registration token. Minted once per connection so
@@ -83,7 +92,11 @@ private final class BrokerService: NSObject, BrokerProtocol {
 
 // MARK: - Listener delegate
 
-private final class ListenerDelegate: NSObject, NSXPCListenerDelegate {
+/// `nonisolated` for the same reason as `AppXPCServer.ListenerDelegate` in
+/// the app: XPC invokes the delegate on its own queues, and a class hosting
+/// an `exportedObject`-bearing `shouldAcceptNewConnection` must not inherit
+/// main-actor isolation.
+private nonisolated final class ListenerDelegate: NSObject, NSXPCListenerDelegate {
     let registry: EndpointRegistry<NSXPCListenerEndpoint>
 
     init(registry: EndpointRegistry<NSXPCListenerEndpoint>) {
@@ -104,7 +117,11 @@ private final class ListenerDelegate: NSObject, NSXPCListenerDelegate {
         // When the app quits, the endpoint it registered becomes a dead mach
         // right. Drop it, or the next CLI is handed a corpse and fails in a far
         // more confusing way than "app not running".
-        connection.invalidationHandler = { [service] in
+        //
+        // @Sendable is the repo-wide convention for XPC callback closures
+        // (issue #0053): it pins this closure nonisolated even if the
+        // BrokerAgent target's default isolation ever changes.
+        connection.invalidationHandler = { @Sendable [service] in
             service.clearIfRegistered()
         }
 

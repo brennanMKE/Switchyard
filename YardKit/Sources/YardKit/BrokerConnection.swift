@@ -114,7 +114,10 @@ public final class BrokerConnection: @unchecked Sendable {
                 try await withCheckedThrowingContinuation { continuation in
                     once.attach(continuation)
 
-                    let proxy = self.connection.remoteObjectProxyWithErrorHandler { error in
+                    // @Sendable for the same reason AppConnection's error
+                    // handler is annotated: Foundation types this parameter as
+                    // a plain closure, and XPC fires it on its own queue.
+                    let proxy = self.connection.remoteObjectProxyWithErrorHandler { @Sendable error in
                         once.finish(.failure(CLIError.brokerUnreachable(error)))
                     }
                     guard let broker = proxy as? any BrokerProtocol else {
