@@ -13,11 +13,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     let server = AppXPCServer()
     let agentRegistrar = AgentRegistrar()
 
+    /// #0216: feeds the transport pane's model from `agentRegistrar` (and,
+    /// once a source exists, from `server`'s connection accounting).
+    let transportBridge: TransportStatusBridge
+
+    override init() {
+        transportBridge = TransportStatusBridge(registrar: agentRegistrar)
+        super.init()
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Register the launch agent before handing the endpoint to the
         // broker — launchd cannot own the Mach service name until the agent
         // is registered.
         agentRegistrar.registerIfNeeded()
+        // The registration above may have moved the status; the pane reads
+        // what is in the model, so write it through.
+        transportBridge.refresh()
 
         server.repairHandler = { [weak self] in
             self?.agentRegistrar.repair()

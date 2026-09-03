@@ -21,7 +21,10 @@ struct SwitchyardApp: App {
 
     var body: some Scene {
         WindowGroup(for: WindowID.self) { _ in
-            ContentView()
+            // #0216: the transport pane's model lives on the app delegate,
+            // which owns both `AgentRegistrar` and `AppXPCServer` — the two
+            // app-target objects that know the real status.
+            ContentView(transportStatus: appDelegate.transportBridge.model)
         } defaultValue: {
             // Return the WindowID already seeded in WindowStore.shared, so
             // SwiftUI's first content window reuses the existing runtime

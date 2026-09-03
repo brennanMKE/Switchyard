@@ -68,11 +68,22 @@ public struct ContentView: View {
     /// rather than an empty list in that window.
     @State private var sidebar: RepositorySidebarSummary?
 
+    /// #0216's transport pane model, injected by the app target from its own
+    /// `AgentRegistrar`/`AppXPCServer` state. `nil` when nothing is injected
+    /// (tests, previews) and the pane is not rendered at all.
+    public var transportStatus: TransportStatusModel?
+
+    /// The transport pane's disclosure state. Local UI state, so `@State`
+    /// is the right home; nothing else reads it.
+    @State private var transportExpanded = false
+
     /// A `public struct`'s memberwise initialiser is **internal**. Without this,
     /// `ContentView()` is unreachable from the app target — the same defect
     /// #0116 found on `WorktreeStatusEntry`, and one `@testable import` hides it
     /// because `@testable` grants internal access.
-    public init() {}
+    public init(transportStatus: TransportStatusModel? = nil) {
+        self.transportStatus = transportStatus
+    }
 
     public var body: some View {
         Group {
@@ -98,6 +109,22 @@ public struct ContentView: View {
             }
         }
         .frame(minWidth: 480, minHeight: 360)
+        // #0216: the transport pane, pinned below whatever the window shows —
+        // it is app-global, not per-repository, and the "the CLI can't
+        // connect" diagnosis usually happens with no repository open. Only
+        // rendered when the app target injected a model; tests and previews
+        // pass nothing and see nothing.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if let transportStatus {
+                DisclosureGroup("Transport", isExpanded: $transportExpanded) {
+                    TransportStatusPane(model: transportStatus)
+                        .padding()
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 6)
+                .background(.bar)
+            }
+        }
         .toolbar {
             ToolbarItem {
                 Button {
