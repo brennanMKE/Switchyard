@@ -41,6 +41,13 @@ public func runEngineCommand(
         // malformed or unknown flag is a usage envelope with exit 1 — never
         // a default guess and never a silent ignore (#0347).
         return runGraph(arguments: arguments, workingDirectory: workingDirectory)
+    case "verify":
+        // One required revision argument: `switchyard verify HEAD` arrives as
+        // `["verify", "HEAD"]`. The arm parses the revision tail itself so a
+        // missing, duplicated, or flag-shaped argument is a usage envelope
+        // with exit 1 — never a default guess and never a silent ignore
+        // (#0348).
+        return runVerify(arguments: arguments, workingDirectory: workingDirectory)
     case "wt":
         // A two-token command: `switchyard wt list` arrives as
         // `["wt", "list"]`. Dispatch on the second token so #0228's
@@ -317,6 +324,52 @@ private func runGraph(
     do {
         _ = try WorktreeContext.resolve(path: workingDirectory)
         let result = try graphRows(at: workingDirectory, limit: limit)
+        let envelope = Envelope(result: EncodableResult(result))
+        return (stdout: encodeJSON(envelope), stderr: "", exitCode: .success)
+    } catch {
+        let message = String(describing: error)
+        let fail = EnvelopeFail(code: .repositoryError, message: message)
+        let human = "[error] \(fail.error.code.rawValue): \(fail.error.message)\n"
+        return (stdout: encodeJSON(fail), stderr: human, exitCode: .repositoryError)
+    }
+}
+
+/// `switchyard verify` — parses the required revision argument, then resolves
+/// `WorktreeContext` for the **caller's** working directory before calling
+/// `SignatureVerification.run`. The passed path is the caller's, never
+/// `FileManager.default.currentDirectoryPath`, which is the app's.
+///
+/// Exactly one revision argument is accepted (e.g. `HEAD`): an empty tail,
+/// two or more tokens, or any `-`-prefixed token is refused the way
+/// `runYard`'s unknown-subcommand path refuses (`EnvelopeFail(code: .usage,
+/// …)`, the human-readable line on stderr, exit 1). The refusal happens
+/// before any repository access, so it does not depend on where the command
+/// was run.
+///
+/// The exit code reports whether the command ran, not what the verdict was:
+/// a commit with a bad or missing signature is a successful command whose
+/// `SignatureVerification` payload says so. The engine throws only on
+/// repository/transport failure, which maps to `repository_error` at exit 6,
+/// like every other arm here. `extraEnvironment` stays empty from the CLI —
+/// tests may use it, the production surface does not.
+private func runVerify(
+    arguments: [String],
+    workingDirectory: String
+) -> (stdout: String, stderr: String, exitCode: ExitCode) {
+    let tail = Array(arguments.dropFirst())
+    guard tail.count == 1, !tail[0].hasPrefix("-") else {
+        let received = tail.isEmpty ? "no revision" : "'\(tail.joined(separator: " "))'"
+        let fail = EnvelopeFail(
+            code: .usage,
+            message: "verify requires exactly one revision argument (e.g. HEAD); got \(received).")
+        let human = "[error] \(fail.error.code.rawValue): \(fail.error.message)\n"
+        return (stdout: encodeJSON(fail), stderr: human, exitCode: .usage)
+    }
+    let revision = tail[0]
+
+    do {
+        _ = try WorktreeContext.resolve(path: workingDirectory)
+        let result = try SignatureVerification.run(revision: revision, in: workingDirectory)
         let envelope = Envelope(result: EncodableResult(result))
         return (stdout: encodeJSON(envelope), stderr: "", exitCode: .success)
     } catch {

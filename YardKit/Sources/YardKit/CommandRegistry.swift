@@ -12,7 +12,7 @@ public enum CommandRegistry {
 
     /// All known `yard` command specifications in the order they should be
     /// rendered in help output.
-    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec]
+    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec]
 
     // MARK: - The switchyard spec — rendered by `yard --help`
 
@@ -256,6 +256,30 @@ public enum CommandRegistry {
         // `wtWhereSpec` (#0228), `hunksSpec` (#0345), and `logSpec` (#0346):
         // the schema carries the self-reference form, and the wire tests pin
         // the encoded keys instead.
+        payload: nil
+    )
+
+    // MARK: - The verify spec — engine-backed, resolved by `YardCommands` (#0348)
+
+    static let verifySpec = CommandSpec(
+        name: "verify",
+        summary: "Report git's verification verdict for the signature on one commit (default HEAD).",
+        flags: [],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The command completed and returned the verification verdict. A bad or missing signature is still a completed command — the verdict is in the payload."),
+            ExitCodeSpec(code: 1, meaning: "The revision argument is missing, duplicated, or looks like a flag — pass exactly one revision, e.g. verify HEAD."),
+            ExitCodeSpec(code: 6, meaning: "The working directory is not inside a git repository, or the revision could not be read."),
+        ],
+        schemaName: "verify",
+        // No `payload` shape (#0348): the result is a single object whose
+        // `state` is a nested object (`code`, plus `reason` on one case) with
+        // absent-when-nil optionals, and `PayloadShape` is flat-only (#0194:
+        // "nested objects and arrays are not supported ... do not half-build
+        // nesting to fit it in here"). Same precedent as `statusSpec`
+        // (#0225), `conflictsSpec` (#0226), `wtSpec` (#0227), `wtWhereSpec`
+        // (#0228), `hunksSpec` (#0345), `logSpec` (#0346), and `graphSpec`
+        // (#0347): the schema carries the self-reference form, and the wire
+        // tests pin the encoded keys instead.
         payload: nil
     )
 
