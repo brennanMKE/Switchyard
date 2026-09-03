@@ -72,9 +72,22 @@
 		48178BDA2A706B46B93DF235 /* co.sstools.Switchyard.broker.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = co.sstools.Switchyard.broker.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		008400840084008400840084 /* Exceptions for "Switchyard" folder in "Switchyard" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 26B64D3330251BCE00EB4FD0 /* Switchyard */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		26B64D3630251BCE00EB4FD0 /* Switchyard */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				008400840084008400840084 /* Exceptions for "Switchyard" folder in "Switchyard" target */,
+			);
 			path = Switchyard;
 			sourceTree = "<group>";
 		};
@@ -525,6 +538,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Switchyard/Info.plist;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -569,6 +583,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Switchyard/Info.plist;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;

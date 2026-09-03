@@ -107,6 +107,14 @@ public struct ContentView: View {
                 }
             }
         }
+        // #0084: dropping a folder on the window is one of the four
+        // repository-open entry points, so it goes through the same
+        // focus-or-open rule as File ▸ Open, the URL scheme, and XPC. The
+        // Dock-icon half of drag-and-drop arrives at the app delegate's
+        // `application(_:open:)` instead.
+        .dropDestination(for: URL.self) { urls, _ in
+            RepositoryOpener.openDropped(urls: urls) != nil
+        } isTargeted: { _ in }
         .task(id: repositoryPath) {
             await reload()
         }
@@ -215,17 +223,22 @@ public struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// `NSOpenPanel` limited to directories. No repository validation
-    /// happens here — `whereAmI` is the single source of truth for whether
-    /// a folder is a repository, run once via `reload()`.
+    /// `NSOpenPanel` limited to directories, routed through
+    /// `RepositoryOpener.chooseAndOpen` (#0084) so the toolbar button and
+    /// the empty-state button obey the same focus-or-open rule as every
+    /// other entry point: an already-open repository is focused, not
+    /// duplicated, and a non-repository shows the shared refusal message.
+    /// No repository validation happens here — the resolver inside
+    /// `open(path:)` is the single gate.
     private func chooseFolder() {
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Open"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        repositoryPath = url.path
+        guard let outcome = RepositoryOpener.chooseAndOpen(store: .shared) else { return }
+        switch outcome {
+        case .opened(let tab), .focusedExisting(let tab, _):
+            // The pane follows the repository the open landed on.
+            repositoryPath = tab.context.topLevel ?? tab.context.commonDir
+        case .refused:
+            break // RepositoryOpener already presented the refusal
+        }
     }
 
     private func reload() async {

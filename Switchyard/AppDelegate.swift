@@ -1,6 +1,7 @@
 // AppDelegate.swift
 
 import AppKit
+import YardUI
 
 /// AppKit delegate for the app.
 ///
@@ -24,5 +25,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         server.start()
         server.registerWithBroker()
+    }
+
+    // #0084: everything the OS delivers — document drops on the Dock icon
+    // and `switchyard://` URL opens alike — funnels through the same
+    // focus-or-open rule as the other entry points. This delegate method is
+    // the app's ONLY URL handler: the scene volunteers for no external
+    // events (#0078's `.handlesExternalEvents(matching: Set())`), so no
+    // extra window can open for one, and there is no `.onOpenURL` anywhere
+    // to volunteer one.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        RepositoryOpener.openDelivered(urls: urls)
     }
 }

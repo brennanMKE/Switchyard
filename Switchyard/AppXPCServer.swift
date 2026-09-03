@@ -9,8 +9,10 @@
 // accepted connections, long-lived sessions, heartbeats, teardown, and
 // orphan reaping are #0213 — this file does not implement any of them.
 
+import AppKit
 import Foundation
 import YardKit
+import YardUI
 import os
 
 /// The app's side of the direct CLI connection.
@@ -192,6 +194,9 @@ private nonisolated final class ListenerDelegate: NSObject, NSXPCListenerDelegat
 /// object on its own queues, not the main actor, and the app target compiles
 /// with `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`.
 private nonisolated final class AppService: NSObject, AppServiceProtocol {
+    private static let logger = Logger(
+        subsystem: ServiceNames.logSubsystem, category: "app-service")
+
     func appPing(reply: @escaping @Sendable (String) -> Void) {
         // Bundle.main.infoDictionary is safe to read from any queue, so no
         // main-actor hop is needed here.
@@ -202,11 +207,36 @@ private nonisolated final class AppService: NSObject, AppServiceProtocol {
     /// Forwards to `performCommand`, the single body both sides of the wire
     /// run — kept in `YardKit` so the package test suite exercises the exact
     /// bytes this app sends, rather than a copy that could drift from it.
+    ///
+    /// #0084: a request names its repository by its working directory, so
+    /// the request also opens that repository through the SAME focus-or-open
+    /// rule every other entry point uses (`RepositoryTabs.open(path:)`).
+    /// When the repository has no tab yet, the new one attaches to the
+    /// user's active window (`openInFrontmostWindow`), and the activation
+    /// below brings the app's frontmost window forward — `NSApp.windows`
+    /// ordering is only visible here, which is what makes this half
+    /// app-target code, checked by #0054's manual script. The hop is
+    /// fire-and-forget: the CLI's reply must not wait on UI work, and a
+    /// refusal is logged rather than shown as a modal the user never asked
+    /// for.
     func perform(
         arguments: [String],
         workingDirectory: String,
         reply: @escaping @Sendable (Data, Int32) -> Void
     ) {
+        if !workingDirectory.isEmpty {
+            Task { @MainActor in
+                NSApp.activate()
+                let outcome = RepositoryTabs.shared.openInFrontmostWindow(
+                    path: workingDirectory,
+                    windowStore: .shared
+                )
+                if case .refused(let path, let detail) = outcome {
+                    Self.logger.error(
+                        "XPC open refused for \(path, privacy: .public): \(detail, privacy: .public)")
+                }
+            }
+        }
         let result = performCommand(arguments: arguments, workingDirectory: workingDirectory)
         reply(result.stdout, result.exitCode)
     }

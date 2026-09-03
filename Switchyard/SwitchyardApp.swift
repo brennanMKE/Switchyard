@@ -40,5 +40,11 @@ struct SwitchyardApp: App {
         // actions and are unaffected -- only OS URL opens are suppressed
         // (#0078; Batty #0251's second root cause).
         .handlesExternalEvents(matching: Set())
+        // #0084: File ▸ Open… and Open Recent, both funnelled through
+        // `RepositoryOpener`. Pure menu declarations; the focus-or-open
+        // behaviour lives in YardUI.
+        .commands {
+            SwitchyardCommands()
+        }
     }
 }
