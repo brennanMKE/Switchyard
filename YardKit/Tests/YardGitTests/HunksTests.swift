@@ -538,7 +538,10 @@ func stagedAreaListsTheIndexNotTheWorktree(format: FixtureRepository.RefFormat) 
     // Synthetic order: a `diff --cc` block after a `diff --git` block.
     // Measured git output puts all --cc blocks first, but the parser must
     // not depend on that: without a boundary here, the --cc block's
-    // `--- a/m.txt` line would overwrite the open file's path.
+    // `--- a/m.txt` line would overwrite the open file's path. Since #0342
+    // the --cc block parses as its own FileDiff instead of being dropped —
+    // its bytes are the measured unmerged-path output of `git diff` during
+    // a conflict.
     let text = """
     diff --git a/a.txt b/a.txt
     index 2cdcdb0..1c76fbc 100644
@@ -550,37 +553,44 @@ func stagedAreaListsTheIndexNotTheWorktree(format: FixtureRepository.RefFormat) 
      a2
      a3
     diff --cc m.txt
-    index abd82df,846f043..0000000
+    index b19a1e9,950b81b..0000000
     --- a/m.txt
     +++ b/m.txt
     @@@ -1,1 -1,1 +1,5 @@@
     ++<<<<<<< HEAD
-     +main version
+     +ours
     ++=======
-     + side version
+    + theirs
     ++>>>>>>> side
 
     """
     let files = try HunkParser().parse(text)
-    #expect(files.map(\.path) == ["a.txt"])
-    let file = try #require(files.first)
-    #expect(file.hunks.count == 1)
-    #expect(!file.headerText.contains("m.txt"))
+    #expect(files.map(\.path) == ["a.txt", "m.txt"])
+    let aTxt = try #require(files.first { $0.path == "a.txt" })
+    #expect(aTxt.hunks.count == 1)
+    #expect(!aTxt.headerText.contains("m.txt"))
+    // The combined block parses as its own file, verbatim.
+    let mTxt = try #require(files.first { $0.path == "m.txt" })
+    let hunk = try #require(mTxt.hunks.first)
+    #expect(hunk.header == "@@@ -1,1 -1,1 +1,5 @@@")
+    #expect(hunk.body == ["++<<<<<<< HEAD", " +ours", "++=======", "+ theirs",
+                          "++>>>>>>> side"])
 }
 
 @Test func combinedDiffFirstThenNormalFileParses() throws {
     // The order git actually emits (measured): every `diff --cc` block
-    // precedes every `diff --git` block.
+    // precedes every `diff --git` block. Both parse; the normal file's
+    // parse is unaffected by the combined one before it.
     let text = """
     diff --cc m.txt
-    index abd82df,846f043..0000000
+    index b19a1e9,950b81b..0000000
     --- a/m.txt
     +++ b/m.txt
     @@@ -1,1 -1,1 +1,5 @@@
     ++<<<<<<< HEAD
-     +main version
+     +ours
     ++=======
-     + side version
+    + theirs
     ++>>>>>>> side
     diff --git a/z.txt b/z.txt
     index c1c940f..b759132 100644
@@ -594,8 +604,16 @@ func stagedAreaListsTheIndexNotTheWorktree(format: FixtureRepository.RefFormat) 
 
     """
     let files = try HunkParser().parse(text)
-    #expect(files.map(\.path) == ["z.txt"])
-    #expect(files.first?.hunks.count == 1)
+    #expect(files.map(\.path) == ["m.txt", "z.txt"])
+    let mTxt = try #require(files.first { $0.path == "m.txt" })
+    let hunk = try #require(mTxt.hunks.first)
+    #expect(hunk.header == "@@@ -1,1 -1,1 +1,5 @@@")
+    #expect(hunk.body == ["++<<<<<<< HEAD", " +ours", "++=======", "+ theirs",
+                          "++>>>>>>> side"])
+    let zTxt = try #require(files.first { $0.path == "z.txt" })
+    #expect(zTxt.hunks.count == 1)
+    let zHunk = try #require(zTxt.hunks.first)
+    #expect(zHunk.body == ["-z1", "+z1 CHANGED", " z2", " z3"])
 }
 
 // MARK: - Rename handling (fixture-backed, #0267)
@@ -999,22 +1017,185 @@ func commitDiffOfARootCommitShowsTheFileAsAdded(format: FixtureRepository.RefFor
     #expect(hunk.body == ["+x"])
 }
 
-/// Measured, git 2.50.1: `git diff-tree --root -p --no-commit-id` on a
-/// two-parent merge commit -- built here from `FixtureRepository.merged`,
-/// whose `merge` commit both combines two branches' independent additions
-/// and adds `merge.txt` of its own -- prints nothing, exit 0. `diff-tree`
-/// does not pick a parent to diff against without `-m` or `-c`/`--cc`, so
-/// `commitDiff` reports an empty result for any merge commit, whatever it
-/// changed. Documented on `commitDiff` itself; asserted here so a future
-/// git that changes this default is caught.
+/// `--cc` (#0342, guide §11 decision 26) is what makes `diff-tree` say
+/// anything at all about a merge commit: without `-m`/`-c`/`--cc` it picks
+/// no parent and prints nothing (measured #0341), which made a merge
+/// indistinguishable from "changed nothing". With `--cc` a merge gets its
+/// **combined diff** — what `git show` prints for a merge — which shows
+/// exactly what the merge introduced relative to *all* parents and nothing
+/// else. `FixtureRepository.merged`'s merge adds `merge.txt`, a file in
+/// neither parent, so that one file is the whole combined output; the two
+/// branches' own additions each match a parent and are omitted by `--cc`'s
+/// design.
 @Test(arguments: FixtureRepository.RefFormat.supported())
-func commitDiffOfAMergeCommitIsEmpty(format: FixtureRepository.RefFormat) throws {
+func commitDiffOfAMergeShowsOnlyItsOwnContribution(format: FixtureRepository.RefFormat) throws {
     let repo = try FixtureRepository.merged(refFormat: format)
     defer { repo.destroy() }
     let merge = try #require(repo.oids["merge"])
 
     let files = try commitDiff(at: repo.url.path, revision: merge)
-    #expect(files.isEmpty)
+    // The combined diff names only what differs from *all* parents: the
+    // merge's own `merge.txt`. Neither branch's file appears — each
+    // matches one parent — which is what makes `--cc` honest where a
+    // one-parent diff would present one side as the whole story.
+    #expect(files.map(\.path) == ["merge.txt"])
+    let file = try #require(files.first)
+    #expect(file.headerText.hasPrefix("diff --cc merge.txt\n"))
+    #expect(file.oldMode == nil && file.newMode == "100644")
+    let hunk = try #require(file.hunks.first)
+    #expect(hunk.header == "@@@ -1,0 -1,0 +1,1 @@@")
+    #expect(hunk.body == ["++merge"])
+    // First parent column and result column of the two-column header.
+    #expect(hunk.oldStart == 1 && hunk.oldCount == 0)
+    #expect(hunk.newStart == 1 && hunk.newCount == 1)
+}
+
+/// A merge that changed nothing of its own — no file it holds differs from
+/// *every* parent — produces an empty combined diff. That emptiness is the
+/// honest verdict "this merge introduced no changes of its own", not the
+/// parentless-refusal state #0341 pinned, where `diff-tree` without
+/// `-m`/`-c`/`--cc` printed nothing for any merge and made the merge look
+/// like an `--allow-empty` commit.
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func commitDiffOfAMergeWithNoChangesOfItsOwnIsEmpty(format: FixtureRepository.RefFormat) throws {
+    var repo = try FixtureRepository(refFormat: format)
+    defer { repo.destroy() }
+    // Two branches add different files off one base; the merge adds
+    // nothing of its own (the restated a.txt is already in both parents'
+    // ancestor and unchanged by the merge).
+    try repo.build([
+        .init("base", files: ["a.txt": "a\n"]),
+        .init("b", parents: ["base"], files: ["b.txt": "b\n"]),
+        .init("side", parents: ["base"], files: ["side.txt": "side\n"]),
+        .init("merge", parents: ["b", "side"], files: ["a.txt": "a\n"]),
+    ])
+    let merge = try #require(repo.oids["merge"])
+    let parents = try GitProcess().run(["rev-list", "--parents", "-1", merge],
+                                       workingDirectory: repo.url.path).lines[0]
+    #expect(parents.split(separator: " ").count == 3, "merge commit must have two parents")
+
+    let files = try commitDiff(at: repo.url.path, revision: merge)
+    #expect(files.isEmpty,
+            "a merge that introduced no changes of its own has an empty combined diff — the honest verdict, not diff-tree's parent-picking refusal")
+}
+
+/// The same `--cc` argument vector on a merge that resolved a conflict by
+/// hand: the result differs from **both** parents, so `--cc` prints a
+/// combined diff -- a `diff --cc` file block with an `@@@` hunk whose
+/// two-column body lines are byte-for-byte what git prints. This is also
+/// the mutation killer for the flag itself: drop `--cc` from commitDiff's
+/// arguments and `diff-tree` prints nothing for any merge, so this test
+/// goes red.
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func commitDiffOfAConflictedMergeShowsTheCombinedDiff(format: FixtureRepository.RefFormat) throws {
+    var repo = try FixtureRepository(refFormat: format)
+    defer { repo.destroy() }
+    // The merge's own file write resolves the conflict the fixture's
+    // `build` left in the index, so the commit is a real two-parent merge.
+    try repo.build([
+        .init("base", files: ["f.txt": "original\n"]),
+        .init("ours", parents: ["base"], files: ["f.txt": "ours\n"]),
+        .init("theirs", parents: ["base"], files: ["f.txt": "theirs\n"]),
+        .init("merge", parents: ["ours", "theirs"], files: ["f.txt": "resolved\n"]),
+    ])
+    let merge = try #require(repo.oids["merge"])
+    // Guard against vacuity: the commit must really be a merge.
+    let parents = try GitProcess().run(["rev-list", "--parents", "-1", merge],
+                                       workingDirectory: repo.url.path).lines[0]
+    #expect(parents.split(separator: " ").count == 3, "merge commit must have two parents")
+
+    let files = try commitDiff(at: repo.url.path, revision: merge)
+    #expect(files.map(\.path) == ["f.txt"])
+    let file = try #require(files.first)
+    #expect(file.headerText.hasPrefix("diff --cc f.txt\n"))
+    let hunk = try #require(file.hunks.first)
+    // Measured, git 2.50.1, with commitDiff's full pinned flag set: the
+    // result ("resolved") differs from both parents ("ours", "theirs").
+    #expect(hunk.header == "@@@ -1,1 -1,1 +1,1 @@@")
+    #expect(hunk.body == ["- ours", " -theirs", "++resolved"])
+    // The single-column members carry the first parent column and the
+    // result column; the verbatim header is where the full picture lives.
+    #expect(hunk.oldStart == 1 && hunk.oldCount == 1)
+    #expect(hunk.newStart == 1 && hunk.newCount == 1)
+}
+
+/// `HunkParser` stores a combined hunk verbatim — the measured bytes of a
+/// real dirty merge (`git diff-tree --root -p --cc --no-commit-id` on a
+/// conflict resolved by hand): the `@@@` header keeps both parent columns
+/// and the result column, and each body line keeps its raw two-character
+/// prefix. No mangling, no dropping.
+@Test func hunkParserStoresACombinedHunkVerbatim() throws {
+    let text = """
+    diff --cc f.txt
+    index b19a1e9,950b81b..2ab19ae
+    --- a/f.txt
+    +++ b/f.txt
+    @@@ -1,1 -1,1 +1,1 @@@
+    - ours
+     -theirs
+    ++resolved
+
+    """
+    let files = try HunkParser().parse(text)
+    #expect(files.map(\.path) == ["f.txt"])
+    let file = try #require(files.first)
+    #expect(file.headerText.contains("index b19a1e9,950b81b..2ab19ae"))
+    #expect(file.hunks.count == 1)
+    let hunk = try #require(file.hunks.first)
+    #expect(hunk.header == "@@@ -1,1 -1,1 +1,1 @@@")
+    #expect(hunk.body == ["- ours", " -theirs", "++resolved"])
+    #expect(hunk.oldStart == 1 && hunk.oldCount == 1)
+    #expect(hunk.newStart == 1 && hunk.newCount == 1)
+}
+
+/// Two conflict regions resolved by hand in one file produce two `@@@`
+/// hunks in one `diff --cc` block — measured bytes, git 2.50.1. The point
+/// is the boundary: the first hunk's budgets must land on zero exactly at
+/// its last body line, or the second `@@@` header is swallowed as body
+/// text. Note the second header's trailing section heading (`@@@ … @@@ l`),
+/// which the parser must tolerate like a `@@` header's trailing text.
+@Test func hunkParserHandlesTwoCombinedHunksInOneFile() throws {
+    let text = """
+    diff --cc f.txt
+    index 73183e1,131d820..5a83d52
+    --- a/f.txt
+    +++ b/f.txt
+    @@@ -1,6 -1,6 +1,6 @@@
+      l1
+      l2
+    - ours3
+     -theirs3
+    ++resolved3
+      l4
+      l5
+      l6
+    @@@ -9,7 -9,7 +9,7 @@@ l
+      l9
+      l10
+      l11
+    - ours12
+     -theirs12
+    ++resolved12
+      l13
+      l14
+      l15
+
+    """
+    let files = try HunkParser().parse(text)
+    #expect(files.map(\.path) == ["f.txt"])
+    let file = try #require(files.first)
+    #expect(file.hunks.count == 2, "both regions must parse as separate hunks")
+    let first = try #require(file.hunks.first)
+    #expect(first.header == "@@@ -1,6 -1,6 +1,6 @@@")
+    #expect(first.body == [
+        "  l1", "  l2", "- ours3", " -theirs3", "++resolved3", "  l4", "  l5", "  l6",
+    ])
+    let second = try #require(file.hunks.last)
+    #expect(second.header == "@@@ -9,7 -9,7 +9,7 @@@ l")
+    #expect(second.body == [
+        "  l9", "  l10", "  l11", "- ours12", " -theirs12", "++resolved12",
+        "  l13", "  l14", "  l15",
+    ])
 }
 
 @Test func commitDiffOfUnknownRevisionThrowsRepositoryError() throws {

@@ -168,11 +168,14 @@ func stagingADeletionHunkStagesTheDeletion(format: FixtureRepository.RefFormat) 
 }
 
 @Test(arguments: FixtureRepository.RefFormat.supported())
-func conflictedFileIsUnaddressableButOthersStage(format: FixtureRepository.RefFormat) throws {
+func conflictedFileIsVisibleButItsHunksCannotBeStaged(format: FixtureRepository.RefFormat) throws {
     // A conflict in m.txt plus an ordinary edit in a.txt. Unmerged paths
     // print as combined diffs (`diff --cc`, `@@@` headers) ahead of every
-    // `diff --git` block — measured — and carry no stable ids, so no id can
-    // address a conflicted file's content.
+    // `diff --git` block — measured — and since #0342's parser policy they
+    // surface as their own FileDiff instead of being dropped. The hunks
+    // have stable ids, but staging one is still refused: `git apply` does
+    // not accept combined patches (measured: exit 128, "No valid patches
+    // in input").
     var repo = try FixtureRepository(refFormat: format)
     defer { repo.destroy() }
     try repo.build([.init("base", files: ["m.txt": "original\n", "a.txt": "a1\na2\na3\n"])])
@@ -187,18 +190,43 @@ func conflictedFileIsUnaddressableButOthersStage(format: FixtureRepository.RefFo
     #expect(unmerged.lines.count == 3)   // guard against vacuity: a real conflict
     try repo.writeUntracked(["a.txt": "a1 CHANGED\na2\na3\n"])
 
-    // The conflicted path never appears in the listing.
+    // The conflicted path appears in the listing, first (measured: git
+    // prints every `diff --cc` block ahead of every `diff --git` block),
+    // with its combined hunk verbatim.
     let files = try listHunks(at: repo.url.path, area: .unstaged)
-    #expect(files.map(\.path) == ["a.txt"])
+    #expect(files.map(\.path) == ["m.txt", "a.txt"])
+    let conflictedFile = try #require(files.first { $0.path == "m.txt" })
+    let conflictedHunk = try #require(conflictedFile.hunks.first)
+    #expect(conflictedHunk.header == "@@@ -1,1 -1,1 +1,5 @@@")
+    // Measured, git 2.50.1. The final marker's label is the merged-in
+    // commit's oid — this fixture merges a detached oid, not a branch —
+    // so the last line is asserted by its fixed prefix.
+    #expect(conflictedHunk.body.count == 5)
+    #expect(conflictedHunk.body.prefix(4) == ["++<<<<<<< HEAD", " +ours",
+                                              "++=======", "+ theirs"])
+    #expect(conflictedHunk.body.last?.hasPrefix("++>>>>>>>") == true,
+            "the closing marker labels the merged-in commit, whose oid varies per run")
 
     // Staging the ordinary file works over an unmerged index (measured:
     // `git apply --cached` touches only its own paths).
-    let hunk = try #require(files.first?.hunks.first)
+    let ordinaryFile = try #require(files.first { $0.path == "a.txt" })
+    let hunk = try #require(ordinaryFile.hunks.first)
     try stageHunks(ids: [hunk.id], at: repo.url.path)
     let staged = try listHunks(at: repo.url.path, area: .staged)
     #expect(staged.map(\.path) == ["a.txt"])
 
-    // Any id aimed at the conflicted file's content fails typed.
+    // Staging the conflicted file's hunk id is refused by git itself: the
+    // patch is a combined diff, which `git apply --cached` does not accept
+    // (measured exit 128). Everything stays unstaged — the all-or-none
+    // refusal keeps conflicted content out of the index.
+    let applyFailure = try #require(throws: GitProcess.Failure.self) {
+        try stageHunks(ids: [conflictedHunk.id], at: repo.url.path)
+    }
+    #expect(applyFailure.exitClass == .repositoryError)
+    let stillUnstaged = try listHunks(at: repo.url.path, area: .staged)
+    #expect(stillUnstaged.map(\.path) == ["a.txt"], "nothing staged by the refused apply")
+
+    // Any id aimed at nothing fails typed.
     let bogus = "111111111111"
     let error = try #require(throws: StagingError.self) {
         try stageHunks(ids: [bogus], at: repo.url.path)

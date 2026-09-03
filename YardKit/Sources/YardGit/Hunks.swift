@@ -33,20 +33,31 @@ public struct Hunk: Sendable, Equatable {
     public let path: String
 
     /// Old-side start line from the `@@` header. 0 for a newly added file.
+    /// For a combined (`@@@`) hunk: the **first parent** column's range;
+    /// the remaining parent columns ride only in the verbatim `header`.
     public let oldStart: Int
-    /// Old-side line count. An omitted count in the header means 1.
+    /// Old-side line count. An omitted count in the header means 1. For a
+    /// combined (`@@@`) hunk: the first parent column's count.
     public let oldCount: Int
-    /// New-side start line from the `@@` header.
+    /// New-side start line from the `@@` header. For a combined (`@@@`)
+    /// hunk: the result column's range.
     public let newStart: Int
-    /// New-side line count. An omitted count in the header means 1.
+    /// New-side line count. An omitted count in the header means 1. For a
+    /// combined (`@@@`) hunk: the result column's count.
     public let newCount: Int
 
-    /// The full `@@ -a,b +c,d @@ …` line, exactly as git printed it.
+    /// The full `@@ -a,b +c,d @@ …` line -- or, for a combined diff, the
+    /// full `@@@ -a,b -c,d +e,f @@@ …` line -- exactly as git printed it.
+    /// Combined hunks keep every column verbatim here; the single-column
+    /// members above carry only the first parent column and the result
+    /// column, and reading the rest is the pane's job.
     public let header: String
 
-    /// Body lines, each with its leading marker — ` `, `-`, `+`, or `\`
+    /// Body lines, each with its leading marker -- ` `, `-`, `+`, or `\`
     /// (the `\ No newline at end of file` marker), exactly as git printed
-    /// them.
+    /// them. For a combined hunk each line keeps its raw two-character
+    /// (one per parent) prefix verbatim, e.g. `-- old`, ` -theirs`,
+    /// `++resolved` -- no mangled or dropped lines (#0342).
     public let body: [String]
 
     public init(id: String, path: String,
@@ -64,7 +75,11 @@ public struct Hunk: Sendable, Equatable {
 
     /// The hunk as patch text: the header line, the body lines, and a
     /// trailing newline. Prepending the owning `FileDiff.headerText` yields
-    /// input `git apply --cached` accepts byte-for-byte.
+    /// input `git apply --cached` accepts byte-for-byte for an ordinary
+    /// `@@` hunk. A combined `@@@` hunk also reconstructs byte-for-byte,
+    /// but `git apply` refuses combined patches outright (measured, exit
+    /// 128, "No valid patches in input") -- which is what keeps a
+    /// conflicted file's content unstitchable even though it now lists.
     public var patchText: String {
         ([header] + body).joined(separator: "\n") + "\n"
     }
@@ -77,7 +92,9 @@ public struct FileDiff: Sendable, Equatable {
 
     /// Path relative to the repository root. Taken from the `+++ b/…` line
     /// (or `--- a/…` for a deletion); for binary and mode-only files, which
-    /// have neither, derived from the `diff --git a/P b/P` line.
+    /// have neither, derived from the `diff --git a/P b/P` line. A combined
+    /// block names its path on the `diff --cc P` line itself -- no `a/`
+    /// or `b/` prefixes (measured) -- and its `+++ b/…` line confirms it.
     public let path: String
 
     /// From an `old mode` or `deleted file mode` header line. Nil when the
@@ -113,9 +130,15 @@ public struct FileDiff: Sendable, Equatable {
 /// Parses `git diff` patch output into per-file hunks.
 ///
 /// Pure function on text — no `Process` construction, no filesystem access.
-/// Expects the flags `listHunks(at:area:git:)` passes: no color, no external
-/// diff, no rename detection (so the two sides of `diff --git` are always
-/// the same path), default `a/`/`b/` prefixes, and `core.quotepath=false`.
+/// Expects the flags `listHunks(at:area:git:)` and `commitDiff` pass: no
+/// color, no external diff, no rename detection (so the two sides of
+/// `diff --git` are always the same path), default `a/`/`b/` prefixes, and
+/// `core.quotepath=false`.
+///
+/// Combined diffs parse too (#0342): a `diff --cc` block becomes its own
+/// `FileDiff`, whose hunks carry verbatim `@@@` headers and verbatim
+/// two-column bodies — no mangling, no silently dropped lines. Reading the
+/// per-parent columns is the pane's job.
 public struct HunkParser {
 
     public enum Failure: Error, Equatable, CustomStringConvertible {
@@ -167,13 +190,20 @@ public struct HunkParser {
                 continue
             }
             if line.hasPrefix("diff --cc ") {
-                // A combined diff — an unmerged path. It has no stable ids
-                // and is not stageable; close the open file so none of its
-                // lines (`--- a/…`, `@@@ …`, `++<<<<<<<`) are mis-attributed
-                // to a neighbouring file. Measured: git prints all `diff
+                // A combined diff -- the `--cc` output `commitDiff` requests
+                // for every commit (#0342), and the block `git diff` prints
+                // for an unmerged path during a conflict. Both parse now:
+                // the `@@@` hunks below are stored with verbatim headers
+                // and verbatim two-column bodies, and the per-parent
+                // columns are the pane's job to read. The open file is
+                // still closed first so none of this block's lines
+                // (`--- a/…`, `@@@ …`, `++<<<<<<<`) are mis-attributed to
+                // a neighbouring file. Measured: git prints all `diff
                 // --cc` blocks ahead of every `diff --git` block, but
                 // correctness here must not depend on that ordering.
                 closeFile()
+                file = FileBuilder(path: try Self.pathFromDiffCCLine(line),
+                                   headerLines: [line])
                 continue
             }
             guard file != nil else { continue }  // preamble; git emits none
@@ -186,7 +216,9 @@ public struct HunkParser {
                 closeHunk()
             }
 
-            if line.hasPrefix("@@ ") {
+            if line.hasPrefix("@@@ ") {
+                hunk = try HunkBuilder(combinedHeader: line)
+            } else if line.hasPrefix("@@ ") {
                 hunk = try HunkBuilder(header: line)
             } else if line.hasPrefix("old mode ") {
                 file?.oldMode = String(line.dropFirst("old mode ".count))
@@ -265,6 +297,19 @@ public struct HunkParser {
         return path
     }
 
+    /// Path from `diff --cc P`. Combined diffs print the single path with
+    /// no `a/`/`b/` prefixes (measured), and a path containing a space is
+    /// simply the rest of the line (`diff --cc my file.txt`). Rename
+    /// detection is off, so no two-path form is produced.
+    static func pathFromDiffCCLine(_ line: String) throws -> String {
+        let rest = String(line.dropFirst("diff --cc ".count))
+        if rest.hasPrefix("\"") { throw Failure.quotedPath(line) }
+        var path = rest
+        if path.hasSuffix("\t") { path.removeLast() }
+        guard !path.isEmpty else { throw Failure.malformedFileHeader(line) }
+        return path
+    }
+
     /// Path from a `--- a/P` or `+++ b/P` line, nil for `/dev/null`. Git
     /// appends a tab after a path that contains a space; strip it.
     static func path(fromMarkerLine line: String, prefix: String) throws -> String? {
@@ -312,48 +357,148 @@ public struct HunkParser {
         let oldStart: Int, oldCount: Int, newStart: Int, newCount: Int
         var body: [String] = [] {
             didSet {
-                guard let added = body.last, let marker = added.first else { return }
-                switch marker {
-                case " ": oldRemaining -= 1; newRemaining -= 1
-                case "-": oldRemaining -= 1
-                case "+": newRemaining -= 1
-                default: break                   // "\" counts on neither side
+                guard let added = body.last else { return }
+                if isCombined {
+                    consumeCombined(added)
+                } else {
+                    consumePlain(added)
                 }
             }
         }
-        private var oldRemaining: Int
-        private var newRemaining: Int
+        /// Line budgets still unconsumed, one entry per side the header
+        /// counts: old and new for an ordinary `@@` hunk; one per parent,
+        /// in header order, and then the result side, for a combined
+        /// `@@@` hunk.
+        private var remaining: [Int]
+        /// How many leading status characters a body line carries: 1 for
+        /// `@@` (its ` `/`-`/`+` marker), one per parent for `@@@`.
+        private let statusColumns: Int
+        private let isCombined: Bool
 
         /// Body membership is decided by the header's line counts, not by
         /// line prefixes alone: an added line reading `++ x` prints as
         /// `+++ x`, which prefix-dispatch would swallow as a file header.
-        /// After both counts are consumed, only a trailing `\ No newline`
-        /// marker still belongs to the hunk.
+        /// After every side's count is consumed, only a trailing `\ No
+        /// newline` marker still belongs to the hunk.
+        ///
+        /// For a combined hunk the counts and the line's own shape must
+        /// *both* say "body": a line that does not start with a status
+        /// character (`@@@`, `diff`, `index`) can never be body text, so a
+        /// header can never be swallowed even if its counts were not fully
+        /// consumed by some future output shape. Every measured shape
+        /// consumes its counts exactly, so the conjunction never truncates
+        /// a real body (#0342).
         func wantsMoreBody(marker: Character?) -> Bool {
-            oldRemaining > 0 || newRemaining > 0 || marker == "\\"
+            if marker == "\\" { return true }
+            if isCombined {
+                guard let marker else { return false }
+                return remaining.contains { $0 > 0 }
+                    && (marker == " " || marker == "-" || marker == "+")
+            }
+            return remaining[0] > 0 || remaining[1] > 0
+        }
+
+        /// The ordinary `@@` consumption rule, keyed on the single status
+        /// marker: context consumes both sides, `-` the old side, `+` the
+        /// new, `\` neither.
+        private mutating func consumePlain(_ line: String) {
+            guard let marker = line.first else { return }
+            switch marker {
+            case " ": remaining[0] -= 1; remaining[1] -= 1
+            case "-": remaining[0] -= 1
+            case "+": remaining[1] -= 1
+            default: break                            // "\" counts on neither side
+            }
+        }
+
+        /// The combined `@@@` consumption rule, derived from measured git
+        /// output and exact on every measured shape (#0342). The prefix is
+        /// one status character per parent: a line carrying `-` in column
+        /// k is deleted relative to parent k and consumes only that
+        /// parent's budget -- its other columns are padding, not shared
+        /// content (measured: ` -theirs` in a merge where parent 1 has no
+        /// such line still prints a space in parent 1's column). A line
+        /// with no `-` at all is in the result: it consumes the result
+        /// budget once, and each parent whose column reads ` ` (the line
+        /// is shared with that parent). A `\ No newline` marker consumes
+        /// neither side.
+        private mutating func consumeCombined(_ line: String) {
+            let columns = Array(line.prefix(statusColumns))
+            guard columns.count == statusColumns,
+                  columns.allSatisfy({ " -+\\".contains($0) }) else { return }
+            if columns.contains("-") {
+                for index in columns.indices where columns[index] == "-" {
+                    remaining[index] -= 1
+                }
+            } else {
+                remaining[statusColumns] -= 1
+                for index in columns.indices where columns[index] == " " {
+                    remaining[index] -= 1
+                }
+            }
         }
 
         /// Parses `@@ -a[,b] +c[,d] @@ …`. An omitted count means 1.
         init(header: String) throws {
-            func range(_ token: Substring) throws -> (Int, Int) {
-                let parts = token.split(separator: ",", omittingEmptySubsequences: false)
-                guard let start = Int(parts[0]),
-                      parts.count <= 2,
-                      let count = parts.count == 2 ? Int(parts[1]) : 1 else {
-                    throw Failure.malformedHunkHeader(header)
-                }
-                return (start, count)
-            }
             let tokens = header.split(separator: " ")
             guard tokens.count >= 4, tokens[0] == "@@", tokens[3].hasPrefix("@@"),
                   tokens[1].hasPrefix("-"), tokens[2].hasPrefix("+") else {
                 throw Failure.malformedHunkHeader(header)
             }
             self.header = header
-            (oldStart, oldCount) = try range(tokens[1].dropFirst())
-            (newStart, newCount) = try range(tokens[2].dropFirst())
-            oldRemaining = oldCount
-            newRemaining = newCount
+            (oldStart, oldCount) = try Self.range(tokens[1].dropFirst(), of: header)
+            (newStart, newCount) = try Self.range(tokens[2].dropFirst(), of: header)
+            remaining = [oldCount, newCount]
+            isCombined = false
+            statusColumns = 1
+        }
+
+        /// Parses `@@@ -a[,b] -c[,d] … +e[,f] @@@ …` -- one `-` range per
+        /// parent, then the result range. An omitted count means 1, as in
+        /// a `@@` header. The header is stored verbatim;
+        /// `oldStart`/`oldCount` carry the **first parent** column and
+        /// `newStart`/`newCount` the result column -- the remaining parent
+        /// columns ride only in the verbatim header (see `Hunk.header`).
+        init(combinedHeader header: String) throws {
+            let tokens = header.split(separator: " ")
+            guard tokens.count >= 4, tokens[0] == "@@@" else {
+                throw Failure.malformedHunkHeader(header)
+            }
+            var parents: [(start: Int, count: Int)] = []
+            var index = 1
+            while index < tokens.count, tokens[index].hasPrefix("-") {
+                parents.append(try Self.range(tokens[index].dropFirst(), of: header))
+                index += 1
+            }
+            guard !parents.isEmpty, index < tokens.count,
+                  tokens[index].hasPrefix("+") else {
+                throw Failure.malformedHunkHeader(header)
+            }
+            let result = try Self.range(tokens[index].dropFirst(), of: header)
+            index += 1
+            // The closing `@@@`; anything after it is a section heading,
+            // ignored exactly as a `@@` header's trailing text is.
+            guard index < tokens.count, tokens[index].hasPrefix("@@@") else {
+                throw Failure.malformedHunkHeader(header)
+            }
+            self.header = header
+            (oldStart, oldCount) = (parents[0].start, parents[0].count)
+            (newStart, newCount) = result
+            remaining = parents.map(\.count) + [result.1]
+            isCombined = true
+            statusColumns = parents.count
+        }
+
+        /// `-a[,b]` → (a, b). An omitted count means 1.
+        private static func range(_ token: Substring,
+                                  of header: String) throws -> (Int, Int) {
+            let parts = token.split(separator: ",", omittingEmptySubsequences: false)
+            guard let start = Int(parts[0]),
+                  parts.count <= 2,
+                  let count = parts.count == 2 ? Int(parts[1]) : 1 else {
+                throw Failure.malformedHunkHeader(header)
+            }
+            return (start, count)
         }
     }
 }
@@ -383,7 +528,11 @@ private let pinnedDiffConfigOverrides = ["-c", "core.quotepath=false",
 /// e45c..6319` while `--full-index` always prints the full 40-hex blob ids,
 /// and `headerText` is both a `schemaVersion: 1` wire field and the byte
 /// `Staging.swift` hands to `git apply`, so it cannot vary with a user's
-/// config), `--unified=3` (overrides `diff.context`), `--inter-hunk-context=0`
+/// config -- and the same holds for the combined blocks a merge commit's
+/// `--cc` output contains: measured, `core.abbrev=4` shortens a `diff --cc`
+/// block's `index` line to `a238,0bf9..fe05` without `--full-index`, and
+/// with it the line is full 40-hex regardless of `core.abbrev`),
+/// `--unified=3` (overrides `diff.context`), `--inter-hunk-context=0`
 /// (overrides `diff.interHunkContext`, git's own default when it is unset --
 /// measured, git 2.50.1, on a 20-line file with an insertion after line 3
 /// and an edit at line 17: at the default, `git diff` prints two hunks,
@@ -394,7 +543,7 @@ private let pinnedDiffConfigOverrides = ["-c", "core.quotepath=false",
 /// `--inter-hunk-context` bounds the gap at which two hunks *merge* -- the
 /// same defect as `diff.context` above, one flag over (#0336). Appended
 /// after the subcommand and its own arguments, e.g. `diff --cached` or
-/// `diff-tree --root -p --no-commit-id <rev>`, both of which accept these as
+/// `diff-tree --root -p --cc --no-commit-id <rev>`, both of which accept these as
 /// ordinary diff-machinery flags.
 ///
 /// **One shared copy for #0330's config-immunity sweep to guard**: two
@@ -423,7 +572,7 @@ public func listHunks(
 
 /// The diff a single commit introduced -- what `#0082`'s detail pane shows
 /// for a selected commit. Empty when the commit introduced no changes
-/// (e.g. an `--allow-empty` commit).
+/// (e.g. an `--allow-empty` commit, or a **clean merge** -- see below).
 ///
 /// `git diff <rev>^!` is the obvious spelling and is wrong: on a **root**
 /// commit it has no parent, so `<rev>^` does not resolve and `git diff`
@@ -431,21 +580,46 @@ public func listHunks(
 /// commit. Measured, git 2.50.1, fresh repository with one commit:
 /// `git diff …flags… 'HEAD^!'` prints nothing, exit 0.
 ///
-/// `git diff-tree --root -p --no-commit-id` handles all three shapes this
-/// function needs to tell apart:
+/// `git diff-tree --root -p --cc --no-commit-id` handles all four shapes
+/// this function needs to tell apart. `--cc` is what `git show` prints for
+/// a merge by default -- the combined diff -- and it changes nothing for the
+/// other shapes: measured byte-identical output for an ordinary commit with
+/// and without it. It is passed for every revision so the argument vector
+/// does not fork on the commit's parent count:
 ///
 /// - **Root commit**: `--root` makes `diff-tree` diff it against the empty
 ///   tree instead of refusing for lack of a parent -- measured, same
 ///   fixture: the file appears with `--- /dev/null`, i.e. `oldMode == nil`.
-/// - **Ordinary commit**: an unremarkable one-parent diff.
-/// - **Merge commit**: measured, git 2.50.1, a two-parent merge built from
-///   `FixtureRepository.merged` (branch off `a`, merged back into `b`,
-///   itself adding `merge.txt`) -- `git diff-tree --root -p --no-commit-id
-///   <merge-oid>` prints **nothing**, exit 0. This is `diff-tree`'s
-///   documented behavior for a merge commit with neither `-m` nor `-c`/`--cc`
-///   given: it does not pick a parent to diff against on its own, so an
-///   empty diff is what this function reports for any merge commit,
-///   including one that changed files relative to both parents.
+/// - **Ordinary commit**: an unremarkable one-parent diff; `--cc` is inert
+///   for it (measured: identical bytes).
+/// - **Merge commit, clean**: when the merge introduced no changes of its
+///   own -- no file it holds differs from every parent -- the combined
+///   diff is **empty**, and that emptiness is the honest verdict "this
+///   merge introduced no changes of its own" rather than diff-tree's
+///   refusal to pick a parent (the state #0341 pinned, indistinguishable
+///   from an `--allow-empty` commit). Measured, git 2.50.1, a merge of two
+///   branches that each added their own file with nothing contributed by
+///   the merge itself: zero bytes, exit 0.
+/// - **Merge commit, dirty**: a merge whose content differs from *all*
+///   parents somewhere -- a hand-resolved conflict, or a file the merge
+///   itself added -- shows exactly that, and only that. A merge that adds
+///   its own file (`FixtureRepository.merged` adds `merge.txt`, in neither
+///   parent) yields just that file's block: `diff --cc merge.txt`,
+///   `new file mode 100644`, `@@@ -1,0 -1,0 +1,1 @@@` over `++merge` --
+///   measured. A conflict resolved to a fourth value yields a `@@@`
+///   hunk with two-character-prefixed body lines: `@@@ -1,1 -1,1 +1,1 @@@`
+///   over `- ours`, ` -theirs`, `++resolved` -- measured. The two
+///   branches' own additions never appear (each matches a parent, which
+///   `--cc` omits by design). `HunkParser` stores such hunks verbatim --
+///   header and body -- and the per-parent reading belongs to the pane.
+///
+/// The alternatives measured against that same fixture: without any of
+/// `-m`/`-c`/`--cc`, `diff-tree` picks no parent for a merge and prints
+/// **nothing** (the state #0341 pinned, indistinguishable from an
+/// `--allow-empty` commit); `--first-parent -m` shows only parent 1's side
+/// and silently hides what came from the other side -- untruthful in a
+/// bug-report context; plain `-m` yields one diff per parent and needs a
+/// parent-picker UI that does not exist.
 ///
 /// `--no-commit-id` removes the bare 40-hex oid line `diff-tree` otherwise
 /// prints first. Measured (mutation, #0341): dropping the flag does **not**
@@ -460,14 +634,17 @@ public func listHunks(
 ///
 /// See `pinnedDiffConfigOverrides` and `pinnedDiffFlags` for why each flag
 /// here is pinned -- the same vector `listHunks` carries, so the two cannot
-/// diverge.
+/// diverge. Note for combined blocks specifically: `--full-index` is what
+/// keeps their `index` line config-stable -- measured, `core.abbrev=4`
+/// shortens it to `a238,0bf9..fe05` without `--full-index`, and with it the
+/// line is full 40-hex regardless of `core.abbrev`.
 public func commitDiff(
     at path: String,
     revision: String,
     git: GitProcess = GitProcess()
 ) throws -> [FileDiff] {
     var arguments = pinnedDiffConfigOverrides
-    arguments += ["diff-tree", "--root", "-p", "--no-commit-id"]
+    arguments += ["diff-tree", "--root", "-p", "--cc", "--no-commit-id"]
     arguments += pinnedDiffFlags
     arguments.append(revision)
     let output = try git.run(arguments, workingDirectory: path)

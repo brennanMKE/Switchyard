@@ -1285,7 +1285,42 @@ a feature at any milestone on the grounds that GitUp had it.
     keeps its parsing tested. Without that note the next reader goes looking for the code path that
     produces it.
 
+26. **`commitDiff` returns a merge commit's combined diff (`--cc`), and `HunkParser` stores combined
+    hunks verbatim.** Decided 2026-08-18 — **#0342.** `git diff-tree --root -p --no-commit-id` prints
+    nothing for a merge (measured #0341): `diff-tree` picks no parent without `-m`/`-c`/`--cc`, so the
+    detail pane showed a merge as an empty pane, indistinguishable from "changed nothing". `--cc` —
+    the combined diff, what `git show` prints for a merge by default — is the choice, and `commitDiff`
+    passes it for **every** revision so the argument vector does not fork on parent count: measured
+    byte-identical output for ordinary and root commits. For merges it shows exactly what the merge
+    contributed relative to *all* parents: empty when the merge introduced no changes of its own
+    (honest — not the parentless-refusal emptiness #0341 pinned), and otherwise only the files that
+    differ from every parent — a merge-added file, or a hand-resolved conflict's `@@@` hunks.
+    `--first-parent -m` was rejected for silently hiding one side's changes — untruthful in a
+    bug-report context; plain `-m` was rejected because it yields one diff per parent and needs a
+    parent-picker UI that does not exist.
 
+    The parser side is policy, not interpretation: a `@@@` header line and a combined body line's
+    two-character prefix (one column per parent — `--`, `- `, ` -`, `++`) are stored **verbatim**, and
+    the per-column semantic reading is the pane's job. The budget rule that bounds a combined body
+    (needed so a body can never swallow the next header) was derived from measured output and is exact
+    on every measured shape: a line carrying `-` in column k consumes only parent k's budget; a line
+    with no `-` consumes the result budget once plus each parent whose column is a space. Measured
+    shapes: a dirty two-parent merge with and without surrounding context, a two-region merge (two
+    `@@@` hunks in one block), the unmerged-path block `git diff` prints during a conflict, and a
+    merge-added file (`@@@ -1,0 -1,0 +1,1 @@@` over `++merge`).
+
+    **The policy necessarily widened `listHunks` too**, because the same `diff --cc` shape reaches it:
+    `git diff` prints unmerged paths as combined blocks during a conflict, and those were silently
+    dropped before. They now appear in the listing as their own `FileDiff` with stable ids. Staging a
+    conflicted file's hunk id is still refused — `git apply` does not accept combined patches
+    (measured: exit 128, "No valid patches in input"), so the all-or-none refusal keeps conflicted
+    content out of the index — but the failure is now git's own refusal at the apply step rather than
+    `StagingError.unknownHunkIDs`, and `Staging.swift`'s doc comment was updated to say so. If the
+    reviewer wants the old typed refusal back, the place is `selectPatch`, not the parser.
+
+    `--full-index` was re-measured for combined blocks specifically: `core.abbrev=4` shortens a
+    `diff --cc` block's `index` line to `a238,0bf9..fe05` without it, and with it the line is full
+    40-hex regardless of `core.abbrev` — the existing pin covers the new output shape unchanged.
 
 ### Still open
 

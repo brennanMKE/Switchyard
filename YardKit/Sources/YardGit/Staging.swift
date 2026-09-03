@@ -37,10 +37,14 @@ public enum StagingError: Error, Equatable, CustomStringConvertible, Sendable {
 /// is atomic — measured: a two-file patch whose second file fails leaves the
 /// first unstaged. An unknown or stale id therefore stages nothing.
 ///
-/// Conflicted files are unaddressable: git prints unmerged paths as combined
-/// diffs (`diff --cc`), which carry no stable ids, so no id can name a hunk
-/// of a conflicted file — staging one fails with `unknownHunkIDs`. Other
-/// files stage normally while the index holds unmerged entries (measured).
+/// Conflicted files still stage nothing: git prints unmerged paths as
+/// combined diffs (`diff --cc`, `@@@` hunks), which #0342's parser now
+/// lists as their own files — with stable ids — but `git apply` refuses
+/// combined patches outright (measured: exit 128, "No valid patches in
+/// input"), so staging a conflicted file's id fails at the apply step and
+/// stages nothing; the all-or-none contract covers a mixed selection the
+/// same way. Other files stage normally while the index holds unmerged
+/// entries (measured).
 ///
 /// An empty `ids` array is a no-op: nothing to resolve, and `git apply` on
 /// an empty patch is an error (`No valid patches in input`, exit 128), so
@@ -107,8 +111,9 @@ func selectPatch(ids: [String], from files: [FileDiff], area: DiffArea) throws -
 
 /// A stale or unknown id is a repository-state failure — the state the id
 /// referred to no longer exists — guide §6 code 6. Not conflicts (8): a
-/// conflicted file's hunks are unlisted, so an id for one lands here too,
-/// and the caller's recovery is the same either way: re-list.
+/// conflicted file's hunks *are* listed since #0342 (as a combined diff),
+/// but staging one dies at `git apply` instead, with git's own refusal —
+/// the caller's recovery is the same either way: re-list.
 extension StagingError: ExitClassCarrying {
     public var exitClass: ExitClass { .repositoryError }
 }

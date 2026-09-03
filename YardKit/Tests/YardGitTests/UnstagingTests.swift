@@ -136,8 +136,16 @@ func unstagingWorksWhileAnotherPathIsUnmerged(format: FixtureRepository.RefForma
     #expect(unmerged.lines.count == 3)   // a real conflict, not vacuously green
 
     try repo.writeUntracked(["a.txt": "a1 CHANGED\na2\na3\n"])
+    // The conflicted path lists first since #0342 (its combined `diff --cc`
+    // block precedes every `diff --git` block), so a.txt must be found by
+    // path, not taken as the first file.
+    let conflictedFile = try #require(listHunks(at: repo.url.path, area: .unstaged)
+        .first { $0.path == "m.txt" })
+    let conflictedHunk = try #require(conflictedFile.hunks.first)
+    #expect(conflictedHunk.header == "@@@ -1,1 -1,1 +1,5 @@@",
+            "guard against vacuity: the unmerged path really parses as a combined diff")
     let hunk = try #require(try listHunks(at: repo.url.path, area: .unstaged)
-        .first?.hunks.first)
+        .first { $0.path == "a.txt" }?.hunks.first)
     try stageHunks(ids: [hunk.id], at: repo.url.path)
 
     // a.txt sorts before m.txt, so its staged block precedes the unmerged
@@ -146,7 +154,8 @@ func unstagingWorksWhileAnotherPathIsUnmerged(format: FixtureRepository.RefForma
     let staged = try listHunks(at: repo.url.path, area: .staged)
     #expect(staged.isEmpty)
     let unstagedIDs = try listedHunks(in: repo, area: .unstaged).map(\.id)
-    #expect(unstagedIDs == [hunk.id])
+    #expect(unstagedIDs == [conflictedHunk.id, hunk.id],
+            "a.txt's hunk is back unstaged, after the still-conflicted path's combined listing")
 }
 
 @Test(arguments: FixtureRepository.RefFormat.supported())
