@@ -31,6 +31,8 @@ public func runEngineCommand(
         switch arguments[1] {
         case "list":
             return runWorktreeList(workingDirectory: workingDirectory)
+        case "where":
+            return runWorktreeWhere(workingDirectory: workingDirectory)
         default:
             return nil
         }
@@ -125,6 +127,28 @@ private func runWorktreeList(
     do {
         _ = try WorktreeContext.resolve(path: workingDirectory)
         let result = try worktreeList(path: workingDirectory)
+        let envelope = Envelope(result: EncodableResult(result))
+        return (stdout: encodeJSON(envelope), stderr: "", exitCode: .success)
+    } catch {
+        let message = String(describing: error)
+        let fail = EnvelopeFail(code: .repositoryError, message: message)
+        let human = "[error] \(fail.error.code.rawValue): \(fail.error.message)\n"
+        return (stdout: encodeJSON(fail), stderr: human, exitCode: .repositoryError)
+    }
+}
+
+/// `switchyard wt where` — resolves `WorktreeContext` for the **caller's**
+/// working directory first, before calling `yardWhere`. The passed path is
+/// the caller's, never `FileManager.default.currentDirectoryPath`, which is
+/// the app's. `yardWhere` resolves `WorktreeContext` internally as well (and
+/// throws outside a repository on its own), so the explicit call here is the
+/// same documentation gate the other engine arms keep, not the only check.
+private func runWorktreeWhere(
+    workingDirectory: String
+) -> (stdout: String, stderr: String, exitCode: ExitCode) {
+    do {
+        _ = try WorktreeContext.resolve(path: workingDirectory)
+        let result = try yardWhere(path: workingDirectory)
         let envelope = Envelope(result: EncodableResult(result))
         return (stdout: encodeJSON(envelope), stderr: "", exitCode: .success)
     } catch {

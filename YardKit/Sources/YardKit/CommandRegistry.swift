@@ -12,7 +12,7 @@ public enum CommandRegistry {
 
     /// All known `yard` command specifications in the order they should be
     /// rendered in help output.
-    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec]
+    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec]
 
     // MARK: - The switchyard spec — rendered by `yard --help`
 
@@ -155,6 +155,34 @@ public enum CommandRegistry {
         // to fit it in here"). Same precedent as `statusSpec` (#0225) and
         // `conflictsSpec` (#0226): the schema carries the self-reference form
         // until array support is its own issue.
+        payload: nil
+    )
+
+    // MARK: - The wt where spec — engine-backed, resolved by `YardCommands` (#0228)
+
+    /// The spec is named `wt where`, distinct from `wt`: the distinct-names
+    /// guarantee is what lets `lookup(name:)` hand back this spec's own
+    /// schema (`wt-where.json`) instead of `wt`'s. Routing stays safe —
+    /// `route(_:)` in `CommandLineRunner.swift` classifies by the **first**
+    /// token, and `wt` is already a known command, so `switchyard wt where`
+    /// reaches the engine arm regardless of this name; the engine arm
+    /// dispatches on the second token beside `list`.
+    static let wtWhereSpec = CommandSpec(
+        name: "wt where",
+        summary: "Report the current worktree's name, path, git dir, common dir, and the main worktree's path.",
+        flags: [],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The command completed and returned the worktree context."),
+            ExitCodeSpec(code: 6, meaning: "The working directory is not inside a git repository."),
+        ],
+        schemaName: "wt-where",
+        // No `payload` shape (#0228): the result is a single object whose
+        // fields are flat strings/optionals, which `PayloadShape` could
+        // express — but the engine commands' established precedent
+        // (`statusSpec` #0225, `conflictsSpec` #0226, `wtSpec` #0227) is
+        // `payload: nil` with the schema's self-reference form, and no
+        // precedent yet supports adding a shape for one command alone.
+        // `WorktreeWhereCommandTests` pins the encoded keys instead.
         payload: nil
     )
 
