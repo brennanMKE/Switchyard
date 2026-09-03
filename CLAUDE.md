@@ -141,6 +141,25 @@ An issue that turns out to belong to a different milestone gets re-milestoned ra
 into the goal, and an issue that is genuinely blocked goes back to `open` with the blocker written
 into it — the goal moves on. Neither is a reason to stop and ask.
 
+### A quest is the outermost stopping condition
+
+When Brennan sets a quest (`.opencode/quest.json`, status `active`), **the quest's completion test —
+not the end of an issue, a round, or a milestone-loop iteration — is the only ordinary reason to
+stop.** He is not watching the session and cannot confirm stops in real time; a stop the quest did
+not require is a stall nobody will see until hours later.
+
+- Finishing an issue is not a stopping point. Claim the next one immediately: set status, preflight,
+  worktree, dispatch — in the same turn, taking tool calls the whole way.
+- Narration between issues is quitting, whatever it is called. No "shall I continue?", no progress
+  summary as a turn-ender, no reporting back after each one.
+- Blocked on one issue: checkpoint the quest, reroute to the next unblocked one, and batch the
+  questions into one report at the end.
+- The legitimate stops are: a genuine stop-list item, a compaction boundary with the checkpoint
+  written and `nextAction` executable, and the quest's completion test passing — audited against
+  the tracker (`scripts/list-issues-by-milestone`), never against memory.
+- A quest never overrides the stop-list, licensing, or verification rules. Complete what is safely
+  completable, checkpoint the rest, report the conflict once.
+
 ## Implementation is delegated
 
 **Three roles, set 2026-08-16.** No local model, no OpenCode, no Fable.

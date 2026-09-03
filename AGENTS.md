@@ -606,6 +606,20 @@ raw output and read the first `error:` in them.
 Do not treat an empty grep as inconclusive. An expected line that is absent is a finding, not a
 missing view of one.
 
+## Rule 11 — When a quest is set, the quest is the stopping condition.
+
+A quest (`.opencode/quest.json`, status `active`) is the outermost objective, and Brennan is **not
+watching the session**. The only ordinary reasons to stop are: the quest's completion test passing —
+audited against the tracker, not against memory — a genuine blocker from the stop-list, or a
+compaction boundary with the checkpoint written.
+
+- Finishing an issue is not a stopping point. Claim the next one immediately: set status, preflight,
+  worktree, dispatch — in the same turn, taking tool calls the whole way.
+- Narration between issues is quitting. No "shall I continue?", no progress summary as a turn-ender.
+- Blocked on one issue: checkpoint the quest, reroute to the next unblocked one, batch the questions.
+- A quest never overrides the stop-list, licensing, or verification rules. Complete what is safely
+  completable, checkpoint the rest, report the conflict once.
+
 ## Build commands
 
 ```sh
