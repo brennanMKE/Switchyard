@@ -32,12 +32,12 @@ func registryHasAtLeastTwoEntries() {
     }
 }
 
-@Test("registry reports exactly five entries")
-func registryHasExactlyFiveEntries() {
-    #expect(CommandRegistry.all.count == 5)
+@Test("registry reports exactly six entries")
+func registryHasExactlySixEntries() {
+    #expect(CommandRegistry.all.count == 6)
 
     let names: [String] = CommandRegistry.all.map(\.name)
-    #expect(Set(names).count == 5, "Names must be distinct so lookup returns the right spec.")
+    #expect(Set(names).count == 6, "Names must be distinct so lookup returns the right spec.")
 }
 
 @Test("registry lookup by name returns the matching spec")

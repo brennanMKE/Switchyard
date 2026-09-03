@@ -12,7 +12,7 @@ public enum CommandRegistry {
 
     /// All known `yard` command specifications in the order they should be
     /// rendered in help output.
-    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec]
+    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec]
 
     // MARK: - The switchyard spec — rendered by `yard --help`
 
@@ -125,6 +125,35 @@ public enum CommandRegistry {
         // flat-only (#0194: "nested objects and arrays are not supported ...
         // do not half-build nesting to fit it in here"). Same precedent as
         // `statusSpec` (#0225): the schema carries the self-reference form
+        // until array support is its own issue.
+        payload: nil
+    )
+
+    // MARK: - The wt spec — engine-backed, resolved by `YardCommands` (#0227)
+
+    /// The spec is named `wt`, not `wt list`: `route(_:)` in
+    /// `CommandLineRunner.swift` classifies a command line by its **first
+    /// token** (`isKnownRemoteCommand(arguments.first)`), so a spec named
+    /// "wt list" would be unreachable from the router — `switchyard wt list`
+    /// would classify as `.unknown` and be answered "Unknown subcommand"
+    /// even though the registry knows it. Naming it `wt` keeps the router
+    /// and the registry in agreement for the whole `wt` group; the engine
+    /// arm dispatches on the second token (`list` today, `where` in #0228).
+    static let wtSpec = CommandSpec(
+        name: "wt",
+        summary: "Report the repository's worktrees, as `git worktree list --porcelain` sees them.",
+        flags: [],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The command completed and returned the worktree list."),
+            ExitCodeSpec(code: 1, meaning: "Missing or unknown wt subcommand."),
+            ExitCodeSpec(code: 6, meaning: "The working directory is not inside a git repository."),
+        ],
+        schemaName: "wt-list",
+        // No `payload` shape (#0227): the result is an array of objects with
+        // optional fields, and `PayloadShape` is flat-only (#0194: "nested
+        // objects and arrays are not supported ... do not half-build nesting
+        // to fit it in here"). Same precedent as `statusSpec` (#0225) and
+        // `conflictsSpec` (#0226): the schema carries the self-reference form
         // until array support is its own issue.
         payload: nil
     )

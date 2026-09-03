@@ -21,6 +21,19 @@ public func runEngineCommand(
         return runStatus(workingDirectory: workingDirectory)
     case "conflicts":
         return runConflicts(workingDirectory: workingDirectory)
+    case "wt":
+        // A two-token command: `switchyard wt list` arrives as
+        // `["wt", "list"]`. Dispatch on the second token so #0228's
+        // `wt where` lands beside `wt list` as one more case. A missing or
+        // unknown subcommand returns nil so the app's `runYard` fallback
+        // answers with its own usage envelope.
+        guard arguments.count >= 2 else { return nil }
+        switch arguments[1] {
+        case "list":
+            return runWorktreeList(workingDirectory: workingDirectory)
+        default:
+            return nil
+        }
     default:
         return nil
     }
@@ -91,6 +104,27 @@ private func runConflicts(
     do {
         _ = try WorktreeContext.resolve(path: workingDirectory)
         let result = try conflictedFiles(at: workingDirectory)
+        let envelope = Envelope(result: EncodableResult(result))
+        return (stdout: encodeJSON(envelope), stderr: "", exitCode: .success)
+    } catch {
+        let message = String(describing: error)
+        let fail = EnvelopeFail(code: .repositoryError, message: message)
+        let human = "[error] \(fail.error.code.rawValue): \(fail.error.message)\n"
+        return (stdout: encodeJSON(fail), stderr: human, exitCode: .repositoryError)
+    }
+}
+
+/// `switchyard wt list` — resolves `WorktreeContext` for the **caller's**
+/// working directory first, before calling `worktreeList`. The passed path
+/// is the caller's, never `FileManager.default.currentDirectoryPath`, which
+/// is the app's. Entry paths may contain newlines; the arm renders JSON
+/// only, so porcelain's human-readable form is never involved.
+private func runWorktreeList(
+    workingDirectory: String
+) -> (stdout: String, stderr: String, exitCode: ExitCode) {
+    do {
+        _ = try WorktreeContext.resolve(path: workingDirectory)
+        let result = try worktreeList(path: workingDirectory)
         let envelope = Envelope(result: EncodableResult(result))
         return (stdout: encodeJSON(envelope), stderr: "", exitCode: .success)
     } catch {
