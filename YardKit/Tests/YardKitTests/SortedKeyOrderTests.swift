@@ -19,7 +19,13 @@ struct SortedKeyOrderTests {
         // `sorted()` guarantees it whatever order the encoder produced. This
         // catches any drift away from `.sortedKeys` on the FIRST run, with no
         // loop and no chance of a lucky pass.
-        #expect(stdout == #"{"ok":true,"result":"switchyard \#(YardKit.version)","schemaVersion":1}"#,
+        //
+        // The version half is resolved, not pinned: the summary comes from
+        // VersionResolver (#0219), which falls back to the package version
+        // outside a bundle. What this test pins byte-exact is the key order.
+        let executable = currentExecutableURL()
+        let summary = VersionResolver.cliVersionSummary(forExecutableAt: executable)
+        #expect(stdout == #"{"ok":true,"result":"\#(summary)","schemaVersion":1}"#,
                 "the success envelope must be byte-identical, keys in alphabetical order")
     }
 

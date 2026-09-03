@@ -77,8 +77,8 @@ func route(_ arguments: [String]) -> Route {
 public func runYard(arguments: [String]) -> (stdout: String, stderr: String, exitCode: ExitCode) {
 
     guard !arguments.isEmpty else {
-        let summary = "\(ServiceNames.cliName) \(YardKit.version)"
-        let env = Envelope(result: EncodableResult(summary))
+        let env = Envelope(result: EncodableResult(VersionResolver.cliVersionSummary(
+            forExecutableAt: currentExecutableURL())))
         return (stdout: jsonString(env), stderr: "", exitCode: .success)
     }
 
@@ -94,7 +94,7 @@ public func runYard(arguments: [String]) -> (stdout: String, stderr: String, exi
     case "--help":
         return helpForTopLevel()
     case "--version", "-v":
-        let summary = "\(ServiceNames.cliName) \(YardKit.version)"
+        let summary = VersionResolver.cliVersionSummary(forExecutableAt: currentExecutableURL())
         return (stdout: summary + "\n", stderr: "", exitCode: .success)
 
     case "schema":
@@ -181,6 +181,16 @@ private func runSchema() -> (stdout: String, stderr: String, exitCode: ExitCode)
 }
 
 // MARK: - Internal helpers (exposed for testing)
+
+/// The executable the version resolver walks up from. `Bundle.main` is the
+/// honest answer for a real CLI process — a bundled binary, or a bare one —
+/// with the raw `argv[0]` as the fallback when there is no bundle at all.
+/// `VersionResolver` takes this as a parameter rather than reading
+/// `Bundle.main` internally, which is what keeps its two branches testable.
+internal func currentExecutableURL() -> URL {
+    if let executable = Bundle.main.executableURL { return executable }
+    return URL(fileURLWithPath: CommandLine.arguments.first ?? "")
+}
 
 internal func jsonString<T: Encodable>(_ value: T) -> String {
     let encoder = JSONEncoder()
