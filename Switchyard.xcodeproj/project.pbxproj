@@ -193,6 +193,7 @@
 				26B64D3030251BCE00EB4FD0 /* Sources */,
 				26B64D3130251BCE00EB4FD0 /* Frameworks */,
 				26B64D3230251BCE00EB4FD0 /* Resources */,
+				0050E00D0050E00D0050A001 /* Embed switchyard CLI */,
 				6B48FF2E294F42D830A8AC7C /* Embed Broker Agent Executable */,
 				59893A6AA309E3A9BC46E7F4 /* Embed Broker Agent Plist */,
 			);
@@ -358,6 +359,24 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		0050E00D0050E00D0050A001 /* Embed switchyard CLI */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Embed switchyard CLI";
+			outputPaths = (
+				"$(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/Resources/bin/switchyard",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "set -euo pipefail\n\n# SwiftUI preview builds re-run script phases; nothing here is needed for one.\nif [ \"${ENABLE_PREVIEWS:-NO}\" = \"YES\" ] && [ -n \"${PREVIEW_FRAMEWORK_PATHS:-}\" ]; then\n    echo \"note: skipping CLI embed for preview build\"\n    exit 0\nfi\n\nPACKAGE_DIR=\"$SRCROOT/YardKit\"\n\ncase \"$CONFIGURATION\" in\n    Release) SWIFT_CONFIG=release ;;\n    *)       SWIFT_CONFIG=debug ;;\nesac\n\n# One --arch per Xcode arch, so a universal app gets a universal CLI.\nARCH_FLAGS=\"\"\nfor arch in $ARCHS; do\n    ARCH_FLAGS=\"$ARCH_FLAGS --arch $arch\"\ndone\n\n# Scratch path under DERIVED_FILE_DIR rather than the package's .build, so an\n# Xcode build does not fight a `swift build` running in a terminal.\nSCRATCH=\"$DERIVED_FILE_DIR/yardkit\"\n\nBUILD_ARGS=\"--package-path $PACKAGE_DIR --scratch-path $SCRATCH \\\n            --configuration $SWIFT_CONFIG $ARCH_FLAGS --product switchyard\"\n\nxcrun swift build $BUILD_ARGS\nBIN_DIR=\"$(xcrun swift build $BUILD_ARGS --show-bin-path)\"\n\nDEST_DIR=\"$BUILT_PRODUCTS_DIR/$CONTENTS_FOLDER_PATH/Resources/bin\"\nmkdir -p \"$DEST_DIR\"\ncp -f \"$BIN_DIR/switchyard\" \"$DEST_DIR/switchyard\"\n\n# Xcode does not sign a Mach-O that a script phase drops into the bundle, and an\n# unsigned nested binary breaks the bundle seal. Unsigned builds must keep\n# working, so this is guarded rather than unconditional.\nif [ \"${CODE_SIGNING_REQUIRED:-YES}\" != \"NO\" ] && [ -n \"${EXPANDED_CODE_SIGN_IDENTITY:-}\" ]; then\n    codesign --force --sign \"$EXPANDED_CODE_SIGN_IDENTITY\" \\\n        --options runtime --timestamp=none \"$DEST_DIR/switchyard\"\nelse\n    echo \"note: code signing disabled; embedded CLI left unsigned\"\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		26B64D3030251BCE00EB4FD0 /* Sources */ = {
@@ -536,6 +555,7 @@
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Switchyard/Info.plist;
@@ -581,6 +601,7 @@
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = Switchyard/Info.plist;
