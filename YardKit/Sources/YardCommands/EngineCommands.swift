@@ -17,6 +17,8 @@ public func runEngineCommand(
     switch command {
     case "whereami":
         return runWhereAmI(workingDirectory: workingDirectory)
+    case "status":
+        return runStatus(workingDirectory: workingDirectory)
     default:
         return nil
     }
@@ -44,6 +46,29 @@ private func runWhereAmI(
     do {
         _ = try WorktreeContext.resolve(path: workingDirectory)
         let result = try whereAmI(path: workingDirectory)
+        let envelope = Envelope(result: EncodableResult(result))
+        return (stdout: encodeJSON(envelope), stderr: "", exitCode: .success)
+    } catch {
+        let message = String(describing: error)
+        let fail = EnvelopeFail(code: .repositoryError, message: message)
+        let human = "[error] \(fail.error.code.rawValue): \(fail.error.message)\n"
+        return (stdout: encodeJSON(fail), stderr: human, exitCode: .repositoryError)
+    }
+}
+
+/// `switchyard status` — resolves `WorktreeContext` for the **caller's**
+/// working directory first, before calling `gitStatus`. The passed path is
+/// the caller's, never `FileManager.default.currentDirectoryPath`, which is
+/// the app's.
+///
+/// `includeIgnored` stays at its default (`false`) — a flag surface is
+/// #0010/#0011's, not this issue's.
+private func runStatus(
+    workingDirectory: String
+) -> (stdout: String, stderr: String, exitCode: ExitCode) {
+    do {
+        _ = try WorktreeContext.resolve(path: workingDirectory)
+        let result = try gitStatus(at: workingDirectory)
         let envelope = Envelope(result: EncodableResult(result))
         return (stdout: encodeJSON(envelope), stderr: "", exitCode: .success)
     } catch {

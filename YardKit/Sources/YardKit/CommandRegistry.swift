@@ -12,7 +12,7 @@ public enum CommandRegistry {
 
     /// All known `yard` command specifications in the order they should be
     /// rendered in help output.
-    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec]
+    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec]
 
     // MARK: - The switchyard spec — rendered by `yard --help`
 
@@ -88,6 +88,25 @@ public enum CommandRegistry {
             PayloadField(name: "rawHead", type: .string,
                          description: "The full form of HEAD's object id, for debugging. A full SHA, or empty on a fresh repository with no commits yet."),
         ])
+    )
+
+    // MARK: - The status spec — engine-backed, resolved by `YardCommands` (#0225)
+
+    static let statusSpec = CommandSpec(
+        name: "status",
+        summary: "Report the per-file worktree status, as `git status --porcelain=v2` sees it.",
+        flags: [],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The command completed and returned the worktree status."),
+            ExitCodeSpec(code: 6, meaning: "The working directory is not inside a git repository."),
+        ],
+        schemaName: "status",
+        // No `payload` shape yet (#0225): the result type's only wire key is
+        // `entries` — an array of objects — and `PayloadShape` is flat-only
+        // (#0194: "nested objects can wait ... do not half-build nesting to
+        // fit it in here"). The schema carries the self-reference form until
+        // array support is its own issue.
+        payload: nil
     )
 
     /// Look up a `CommandSpec` by its name, returning nil if the spec is not in
