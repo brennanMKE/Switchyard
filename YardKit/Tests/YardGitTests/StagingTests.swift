@@ -173,9 +173,9 @@ func conflictedFileIsVisibleButItsHunksCannotBeStaged(format: FixtureRepository.
     // print as combined diffs (`diff --cc`, `@@@` headers) ahead of every
     // `diff --git` block — measured — and since #0342's parser policy they
     // surface as their own FileDiff instead of being dropped. The hunks
-    // have stable ids, but staging one is still refused: `git apply` does
-    // not accept combined patches (measured: exit 128, "No valid patches
-    // in input").
+    // have stable ids, but staging one is refused typed (#0350): `git
+    // apply` does not accept combined patches (measured: exit 128, "No
+    // valid patches in input"), so the engine refuses before git runs.
     var repo = try FixtureRepository(refFormat: format)
     defer { repo.destroy() }
     try repo.build([.init("base", files: ["m.txt": "original\n", "a.txt": "a1\na2\na3\n"])])
@@ -207,22 +207,34 @@ func conflictedFileIsVisibleButItsHunksCannotBeStaged(format: FixtureRepository.
     #expect(conflictedHunk.body.last?.hasPrefix("++>>>>>>>") == true,
             "the closing marker labels the merged-in commit, whose oid varies per run")
 
-    // Staging the ordinary file works over an unmerged index (measured:
-    // `git apply --cached` touches only its own paths).
+    // A mixed selection — the combined id plus an ordinary one — is
+    // refused with the same typed error, and the all-or-none contract
+    // holds: nothing at all is staged (#0350: the refusal precedes
+    // `git apply`, so git cannot partially apply either).
     let ordinaryFile = try #require(files.first { $0.path == "a.txt" })
     let hunk = try #require(ordinaryFile.hunks.first)
+    let mixedError = try #require(throws: StagingError.self) {
+        try stageHunks(ids: [conflictedHunk.id, hunk.id], at: repo.url.path)
+    }
+    #expect(mixedError == .combinedHunkNotStageable(path: "m.txt"))
+    #expect(try listHunks(at: repo.url.path, area: .staged).isEmpty,
+            "the typed refusal must leave the index untouched")
+
+    // Staging the ordinary file works over an unmerged index (measured:
+    // `git apply --cached` touches only its own paths).
     try stageHunks(ids: [hunk.id], at: repo.url.path)
     let staged = try listHunks(at: repo.url.path, area: .staged)
     #expect(staged.map(\.path) == ["a.txt"])
 
-    // Staging the conflicted file's hunk id is refused by git itself: the
-    // patch is a combined diff, which `git apply --cached` does not accept
-    // (measured exit 128). Everything stays unstaged — the all-or-none
-    // refusal keeps conflicted content out of the index.
-    let applyFailure = try #require(throws: GitProcess.Failure.self) {
+    // Staging the conflicted file's hunk id is refused typed, before git
+    // runs (#0350): the error is ours — `StagingError`, not git's
+    // `GitProcess.Failure` — and its detail says what to do instead.
+    let combinedError = try #require(throws: StagingError.self) {
         try stageHunks(ids: [conflictedHunk.id], at: repo.url.path)
     }
-    #expect(applyFailure.exitClass == .repositoryError)
+    #expect(combinedError == .combinedHunkNotStageable(path: "m.txt"))
+    #expect(combinedError.description.contains("resolve the conflict"))
+    #expect(combinedError.exitClass == .repositoryError)
     let stillUnstaged = try listHunks(at: repo.url.path, area: .staged)
     #expect(stillUnstaged.map(\.path) == ["a.txt"], "nothing staged by the refused apply")
 
@@ -292,9 +304,50 @@ private func hunk(path: String, header: String, body: [String]) -> Hunk {
     }
 }
 
+@Test func selectPatchRefusesACombinedBlockTypedInBothAreas() throws {
+    // #0350: the refusal lives in selectPatch, which staging and unstaging
+    // share, so both areas must refuse the same way — before any patch is
+    // assembled or `git apply` run.
+    #expect(DiffArea.allCases.count == 2)   // the loop below must cover both
+    let body = ["++<<<<<<< HEAD", " +ours", "++=======", "+ theirs", "++>>>>>>> theirs"]
+    let combined = hunk(path: "m.txt", header: "@@@ -1,1 -1,1 +1,5 @@@", body: body)
+    let file = FileDiff(path: "m.txt", oldMode: nil, newMode: nil, isBinary: false,
+                        headerText: "diff --cc m.txt\nindex 0123456..89abcde 100644\n"
+                            + "--- a/m.txt\n+++ b/m.txt\n",
+                        hunks: [combined])
+    for area in DiffArea.allCases {
+        let error = try #require(throws: StagingError.self) {
+            try selectPatch(ids: [combined.id], from: [file], area: area)
+        }
+        #expect(error == .combinedHunkNotStageable(path: "m.txt"))
+    }
+}
+
+@Test func selectPatchTreatsAnOrdinaryDiffGitBlockAsStageable() throws {
+    // The discriminator is the `diff --cc ` prefix specifically: an
+    // ordinary `diff --git` block must select normally, including beside a
+    // conflict (the fixture-backed conflicted test measures that).
+    let h1 = hunk(path: "f.txt", header: "@@ -1 +1 @@", body: ["-a", "+A"])
+    let file = FileDiff(path: "f.txt", oldMode: nil, newMode: nil, isBinary: false,
+                        headerText: "diff --git a/f.txt b/f.txt\n"
+                            + "index 0123456..89abcde 100644\n"
+                            + "--- a/f.txt\n+++ b/f.txt\n",
+                        hunks: [h1])
+    let patch = try selectPatch(ids: [h1.id], from: [file], area: .unstaged)
+    #expect(patch == file.headerText + h1.patchText)
+}
+
 @Test func stagingErrorMapsToRepositoryError() {
     let error = StagingError.unknownHunkIDs(ids: ["abc"], area: .unstaged)
     #expect(error.exitClass == .repositoryError)
+    // #0350: the combined refusal is the same class — this issue changed
+    // the error's shape, not its §6 mapping — and the detail string is
+    // pinned exactly: it is what an agent parses for the way out.
+    let combined = StagingError.combinedHunkNotStageable(path: "m.txt")
+    #expect(combined.exitClass == .repositoryError)
+    #expect(combined.description == "hunk(s) of m.txt belong to a combined diff "
+        + "(`diff --cc`) — a conflicted file is not stageable by hunk; "
+        + "resolve the conflict, then stage the resolved content")
 }
 
 // MARK: - #0212: stageHunks writes exactly one journal entry per call, so

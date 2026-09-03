@@ -23,6 +23,13 @@ import Foundation
 /// `StagingError.unknownHunkIDs` and unstages nothing — and the selected
 /// hunks go to git as one atomic `git apply` invocation.
 ///
+/// A combined (`diff --cc`) hunk is refused typed before apply, exactly as
+/// in staging (#0350): the check lives in the shared `selectPatch`, so
+/// unstage inherits it for both areas. Git itself never prints a combined
+/// block for the *staged* area — an unmerged path is a `* Unmerged path`
+/// line there, which the parser drops — so the shared check guards the
+/// shape rather than a measured staging-area state.
+///
 /// An empty `ids` array is a no-op; git is not invoked.
 ///
 /// **Writes exactly one journal entry per call (#0212)**, via

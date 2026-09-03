@@ -14,12 +14,26 @@ public enum StagingError: Error, Equatable, CustomStringConvertible, Sendable {
     /// a stale id stage the wrong thing silently.
     case unknownHunkIDs(ids: [String], area: DiffArea)
 
+    /// A requested hunk belongs to a combined (`diff --cc`) block — the
+    /// shape `git diff` prints for an unmerged path during a conflict
+    /// (#0350). `git apply` refuses combined patches outright (measured:
+    /// exit 128, "No valid patches in input"), so the hunk cannot be
+    /// staged — or unstaged — by id at all; the refusal is raised here,
+    /// before git runs, so the caller sees this typed error rather than
+    /// git's raw exit 128. The way out is the way git means it: resolve
+    /// the conflict, then stage the resolved content.
+    case combinedHunkNotStageable(path: String)
+
     public var description: String {
         switch self {
         case let .unknownHunkIDs(ids, area):
             "unknown hunk id(s) in the \(area.rawValue) listing: "
                 + ids.joined(separator: ", ")
                 + " — stale (the hunk changed since it was listed) or never valid"
+        case let .combinedHunkNotStageable(path):
+            "hunk(s) of \(path) belong to a combined diff (`diff --cc`) — a "
+                + "conflicted file is not stageable by hunk; resolve the "
+                + "conflict, then stage the resolved content"
         }
     }
 }
@@ -37,14 +51,18 @@ public enum StagingError: Error, Equatable, CustomStringConvertible, Sendable {
 /// is atomic — measured: a two-file patch whose second file fails leaves the
 /// first unstaged. An unknown or stale id therefore stages nothing.
 ///
-/// Conflicted files still stage nothing: git prints unmerged paths as
-/// combined diffs (`diff --cc`, `@@@` hunks), which #0342's parser now
-/// lists as their own files — with stable ids — but `git apply` refuses
-/// combined patches outright (measured: exit 128, "No valid patches in
-/// input"), so staging a conflicted file's id fails at the apply step and
-/// stages nothing; the all-or-none contract covers a mixed selection the
-/// same way. Other files stage normally while the index holds unmerged
-/// entries (measured).
+/// Conflicted files stage nothing, and the refusal is typed (#0350): git
+/// prints unmerged paths as combined diffs (`diff --cc`, `@@@` hunks),
+/// which #0342's parser now lists as their own files — with stable ids —
+/// but `git apply` refuses combined patches outright (measured: exit 128,
+/// "No valid patches in input"). `selectPatch` therefore refuses a
+/// requested combined block **before** git is invoked, throwing
+/// `StagingError.combinedHunkNotStageable(path:)` — the error is ours,
+/// not git's, and its detail says what to do instead: resolve the
+/// conflict, then stage the resolved content. The all-or-none contract
+/// covers a mixed selection the same way: one combined id in the request
+/// stages nothing at all. Other files stage normally while the index
+/// holds unmerged entries (measured).
 ///
 /// An empty `ids` array is a no-op: nothing to resolve, and `git apply` on
 /// an empty patch is an error (`No valid patches in input`, exit 128), so
@@ -85,14 +103,31 @@ func stageHunksWithoutCheckpoint(
 /// hunks' `patchText` in **listing order** — hunks inside one file patch must
 /// stay in file order whatever order the caller passed the ids in. Duplicate
 /// ids in the request select the hunk once. Throws `unknownHunkIDs` (in
-/// caller order, deduplicated) when any id matches nothing; returns "" for
-/// an empty request.
+/// caller order, deduplicated) when any id matches nothing, or
+/// `combinedHunkNotStageable(path:)` when a requested id belongs to a
+/// combined (`diff --cc`) block — the shape `git diff` prints for an
+/// unmerged path during a conflict (#0350). That refusal fires before any
+/// patch text is assembled, so it precedes `git apply` and the error is
+/// ours, not git's; a combined file with none of its hunks requested is
+/// skipped untouched, and ordinary files keep staging normally beside a
+/// conflict. Returns "" for an empty request.
 func selectPatch(ids: [String], from files: [FileDiff], area: DiffArea) throws -> String {
     var wanted = Set(ids)
     var patch = ""
     for file in files {
         let selected = file.hunks.filter { wanted.contains($0.id) }
         guard !selected.isEmpty else { continue }
+        // A combined (`diff --cc`) block — what `git diff` prints for an
+        // unmerged path during a conflict — is refused here, before any
+        // `git apply` can run (#0350): apply rejects combined patches
+        // outright (measured exit 128, "No valid patches in input"), so
+        // the refusal is moved ahead of it and made typed. Only a
+        // *requested* combined block refuses; the all-or-none contract
+        // then covers a mixed selection — one combined id in the request
+        // stages nothing at all.
+        if file.headerText.hasPrefix("diff --cc ") {
+            throw StagingError.combinedHunkNotStageable(path: file.path)
+        }
         for hunk in selected { wanted.remove(hunk.id) }
         patch += file.headerText + selected.map(\.patchText).joined()
     }
@@ -110,10 +145,11 @@ func selectPatch(ids: [String], from files: [FileDiff], area: DiffArea) throws -
 // MARK: - §6 exit class (#0141)
 
 /// A stale or unknown id is a repository-state failure — the state the id
-/// referred to no longer exists — guide §6 code 6. Not conflicts (8): a
-/// conflicted file's hunks *are* listed since #0342 (as a combined diff),
-/// but staging one dies at `git apply` instead, with git's own refusal —
-/// the caller's recovery is the same either way: re-list.
+/// referred to no longer exists — guide §6 code 6. The combined-hunk
+/// refusal (#0350) shares the class: the unresolved conflict *is* the
+/// repository's state, and the class was already code 6 back when the
+/// refusal surfaced as git's own exit 128; this issue changed the error's
+/// shape, not its class.
 extension StagingError: ExitClassCarrying {
     public var exitClass: ExitClass { .repositoryError }
 }
