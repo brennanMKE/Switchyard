@@ -1,0 +1,72 @@
+{
+  "command" : "hunks",
+  "envelope" : {
+    "failure" : {
+      "error" : {
+        "code" : {
+          "enum" : [
+            "app_unavailable",
+            "blocked_on_conflicts",
+            "broker_unreachable",
+            "human_declined",
+            "ok",
+            "repository_error",
+            "request_failed",
+            "session_terminated",
+            "signing_failed",
+            "usage"
+          ],
+          "type" : "string"
+        },
+        "hint" : {
+          "optional" : true,
+          "type" : "string"
+        },
+        "message" : {
+          "type" : "string"
+        }
+      },
+      "ok" : false,
+      "schemaVersion" : 1
+    },
+    "success" : {
+      "ok" : true,
+      "result" : {
+        "optional" : true,
+        "schema" : "hunks"
+      },
+      "schemaVersion" : 1
+    }
+  },
+  "exitCodes" : [
+    {
+      "code" : 0,
+      "meaning" : "The command completed and returned the hunks."
+    },
+    {
+      "code" : 1,
+      "meaning" : "The area flag is missing, unknown, or duplicated — pass exactly one of --staged or --unstaged."
+    },
+    {
+      "code" : 6,
+      "meaning" : "The working directory is not inside a git repository."
+    }
+  ],
+  "flags" : [
+    {
+      "argument" : null,
+      "help" : "Diff HEAD against the index, as `git diff --cached` sees it.",
+      "long" : "staged",
+      "short" : null
+    },
+    {
+      "argument" : null,
+      "help" : "Diff the index against the worktree.",
+      "long" : "unstaged",
+      "short" : null
+    }
+  ],
+  "schemaName" : "hunks",
+  "schemaVersion" : 1,
+  "summary" : "Report the per-file diff hunks for one area, staged or unstaged."
+}

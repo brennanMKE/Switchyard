@@ -21,6 +21,12 @@ public func runEngineCommand(
         return runStatus(workingDirectory: workingDirectory)
     case "conflicts":
         return runConflicts(workingDirectory: workingDirectory)
+    case "hunks":
+        // A one-flag command: `switchyard hunks --staged` arrives as
+        // `["hunks", "--staged"]`. The arm parses the area tail itself so a
+        // missing or unknown flag is a usage envelope with exit 1 — never a
+        // default guess and never a silent ignore (#0345).
+        return runHunks(arguments: arguments, workingDirectory: workingDirectory)
     case "wt":
         // A two-token command: `switchyard wt list` arrives as
         // `["wt", "list"]`. Dispatch on the second token so #0228's
@@ -149,6 +155,54 @@ private func runWorktreeWhere(
     do {
         _ = try WorktreeContext.resolve(path: workingDirectory)
         let result = try yardWhere(path: workingDirectory)
+        let envelope = Envelope(result: EncodableResult(result))
+        return (stdout: encodeJSON(envelope), stderr: "", exitCode: .success)
+    } catch {
+        let message = String(describing: error)
+        let fail = EnvelopeFail(code: .repositoryError, message: message)
+        let human = "[error] \(fail.error.code.rawValue): \(fail.error.message)\n"
+        return (stdout: encodeJSON(fail), stderr: human, exitCode: .repositoryError)
+    }
+}
+
+/// `switchyard hunks` — parses the required area flag, then resolves
+/// `WorktreeContext` for the **caller's** working directory before calling
+/// `listHunks`. The passed path is the caller's, never
+/// `FileManager.default.currentDirectoryPath`, which is the app's.
+///
+/// `area` is required with no default: exactly one of `--staged` or
+/// `--unstaged` maps to `DiffArea.staged`/`.unstaged`. A missing,
+/// unparseable, or duplicated flag — any argument tail that is not exactly
+/// one known area flag — is refused the way `runYard`'s unknown-subcommand
+/// path refuses (`EnvelopeFail(code: .usage, …)`, the human-readable line on
+/// stderr, exit 1), and the refusal happens before any repository access, so
+/// it does not depend on where the command was run. A thrown engine error is
+/// a repository failure at exit 6, like every other arm here.
+private func runHunks(
+    arguments: [String],
+    workingDirectory: String
+) -> (stdout: String, stderr: String, exitCode: ExitCode) {
+    let tail = Array(arguments.dropFirst())
+    let area: DiffArea? = {
+        guard tail.count == 1 else { return nil }
+        switch tail[0] {
+        case "--staged": return .staged
+        case "--unstaged": return .unstaged
+        default: return nil
+        }
+    }()
+    guard let area else {
+        let received = tail.isEmpty ? "no area flag" : "'\(tail.joined(separator: " "))'"
+        let fail = EnvelopeFail(
+            code: .usage,
+            message: "hunks requires exactly one area flag, --staged or --unstaged; got \(received).")
+        let human = "[error] \(fail.error.code.rawValue): \(fail.error.message)\n"
+        return (stdout: encodeJSON(fail), stderr: human, exitCode: .usage)
+    }
+
+    do {
+        _ = try WorktreeContext.resolve(path: workingDirectory)
+        let result = try listHunks(at: workingDirectory, area: area)
         let envelope = Envelope(result: EncodableResult(result))
         return (stdout: encodeJSON(envelope), stderr: "", exitCode: .success)
     } catch {

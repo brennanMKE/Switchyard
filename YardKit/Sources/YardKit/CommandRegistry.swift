@@ -12,7 +12,7 @@ public enum CommandRegistry {
 
     /// All known `yard` command specifications in the order they should be
     /// rendered in help output.
-    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec]
+    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec]
 
     // MARK: - The switchyard spec — rendered by `yard --help`
 
@@ -183,6 +183,31 @@ public enum CommandRegistry {
         // `payload: nil` with the schema's self-reference form, and no
         // precedent yet supports adding a shape for one command alone.
         // `WorktreeWhereCommandTests` pins the encoded keys instead.
+        payload: nil
+    )
+
+    // MARK: - The hunks spec — engine-backed, resolved by `YardCommands` (#0345)
+
+    static let hunksSpec = CommandSpec(
+        name: "hunks",
+        summary: "Report the per-file diff hunks for one area, staged or unstaged.",
+        flags: [
+            FlagSpec(long: "staged", argument: nil, help: "Diff HEAD against the index, as `git diff --cached` sees it."),
+            FlagSpec(long: "unstaged", argument: nil, help: "Diff the index against the worktree."),
+        ],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The command completed and returned the hunks."),
+            ExitCodeSpec(code: 1, meaning: "The area flag is missing, unknown, or duplicated — pass exactly one of --staged or --unstaged."),
+            ExitCodeSpec(code: 6, meaning: "The working directory is not inside a git repository."),
+        ],
+        schemaName: "hunks",
+        // No `payload` shape (#0345): the result is an array of objects with
+        // optional fields and nested hunk arrays, and `PayloadShape` is
+        // flat-only (#0194: "nested objects and arrays are not supported ...
+        // do not half-build nesting to fit it in here"). Same precedent as
+        // `statusSpec` (#0225), `conflictsSpec` (#0226), `wtSpec` (#0227),
+        // and `wtWhereSpec` (#0228): the schema carries the self-reference
+        // form, and the wire tests pin the encoded keys instead.
         payload: nil
     )
 
