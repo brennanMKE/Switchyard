@@ -47,7 +47,12 @@ public final class RepositoryTab: Identifiable {
     /// The resolved repository identity. `context.commonDir` is the tab's
     /// key; `context.worktreeName` names the linked worktree this tab was
     /// opened by, if any.
-    public let context: WorktreeContext
+    ///
+    /// Only the restore path (#0083) starts a tab with a fabricated context
+    /// (`isRestored`), and only `open`'s focus path replaces one -- with the
+    /// freshly resolved context for the SAME `commonDir` (identity is what
+    /// matched, so the replacement is safe).
+    public internal(set) var context: WorktreeContext
 
     /// The path the tab was opened by, as the user spelled it. Kept for
     /// diagnostics only -- never used for identity.
@@ -57,6 +62,25 @@ public final class RepositoryTab: Identifiable {
     /// worktree. Reopening the repository by any path re-selects the
     /// worktree the opening path names.
     public var selectedWorktreeName: String?
+
+    /// True while this tab exists but has never been resolved against git
+    /// this session -- it was restored from persisted state by
+    /// `RepositoryTabs.restoreTab` (#0083). Its context is fabricated from
+    /// the stored `commonDir`; opening the repository by any path upgrades
+    /// it in place to a real resolved context. False for tabs `open`
+    /// created.
+    public internal(set) var isRestored: Bool
+
+    /// True when this tab was restored from persisted state (#0083) and its
+    /// stored `commonDir` no longer exists on disk -- the moved-or-deleted
+    /// repository the issue calls the normal case, since agent worktrees
+    /// are torn down constantly. The tab STAYS PRESENT and is reported in
+    /// its tab (the view names it and marks it missing); it is never
+    /// dropped, and restoring never crashes on it. Detection is a plain
+    /// file-existence check, deliberately NOT a `WorktreeContext.resolve`:
+    /// restore performs no git subprocess at all. Opening the repository by
+    /// any path repairs the tab and clears this.
+    public internal(set) var repositoryMissing: Bool
 
     /// Fired exactly once, by `RepositoryTabs.close`, when this tab is
     /// closed. This is where per-tab engine resources are released. There
@@ -73,12 +97,27 @@ public final class RepositoryTab: Identifiable {
         // A tab opened by a linked-worktree path starts on that worktree;
         // nil for the main worktree, which is the "no selection" default.
         self.selectedWorktreeName = context.worktreeName
+        self.isRestored = false
+        self.repositoryMissing = false
     }
 
-    /// The name a tab chip renders: the working tree's folder name, or the
-    /// repository directory's for a bare repository (no top level).
+    /// The name a tab chip renders: the working tree's folder name, the
+    /// repository directory's for a bare repository (no top level), or --
+    /// for a tab restored from persisted state (#0083), whose context is
+    /// fabricated with no top level -- the repository directory recovered
+    /// from the stored `$GIT_COMMON_DIR` by dropping its `.git` component.
+    /// That is presentation of a path git itself produced (a non-bare
+    /// repository's commonDir always ends in `/​.git`), not a guess about
+    /// where a repository keeps its state.
     public var displayName: String {
-        let base = context.topLevel ?? context.commonDir
+        let base: String
+        if let topLevel = context.topLevel {
+            base = topLevel
+        } else if context.commonDir.hasSuffix("/.git") {
+            base = String(context.commonDir.dropLast("/.git".count))
+        } else {
+            base = context.commonDir
+        }
         return (base as NSString).lastPathComponent
     }
 }
@@ -91,6 +130,13 @@ public final class RepositoryTab: Identifiable {
 /// that tab was just created or already existed.
 @Observable
 public final class RepositoryTabs {
+
+    /// The store the app's scene declarations and launch wiring reach
+    /// (#0083): `WindowStore.restore(from:tabs:)` restores the persisted
+    /// layout into the shared pair. The initialiser is public so tests that
+    /// import YardUI without `@testable` can construct isolated stores; the
+    /// running app uses `shared`. Same choice as `WindowStore.shared`.
+    public static let shared = RepositoryTabs()
 
     /// What `open(path:)` did.
     public enum Outcome {
@@ -115,11 +161,30 @@ public final class RepositoryTabs {
     /// The open tabs, in tab-bar order. Public so the tab bar view can bind
     /// reorder commits through `@Bindable` -- the same choice `WindowState`
     /// makes with `tabIDs` (#0078).
-    public var tabs: [RepositoryTab] = []
+    ///
+    /// #0083: ANY mutation -- an `open` append, a `close` removal, or a
+    /// reorder the tab bar binding commits straight into this array -- is a
+    /// structural change and marks a save pending on `stateWriter`.
+    public var tabs: [RepositoryTab] = [] {
+        didSet { stateWriter?.scheduleWrite() }
+    }
 
     /// The selected tab's id, or nil when no tab is open (or nothing is
     /// selected). The tab bar's active-id binding.
-    public var selectedTabID: UUID?
+    ///
+    /// #0083: activation is one of the structural changes that marks a save
+    /// pending, and it fires through the same `didSet` the binding writes
+    /// through -- so rapid tab switches coalesce in the
+    /// `CoalescingStateWriter` no matter who sets the selection.
+    public var selectedTabID: UUID? {
+        didSet { stateWriter?.scheduleWrite() }
+    }
+
+    /// #0083: the coalescing writer structural changes mark pending writes
+    /// through, or nil when the store is used without persistence wiring.
+    /// The app target attaches the production writer to `shared`; tests
+    /// attach a spy to count writes.
+    public var stateWriter: CoalescingStateWriter?
 
     private let resolve: Resolver
 
@@ -161,6 +226,16 @@ public final class RepositoryTabs {
 
         if let index = tabs.firstIndex(where: { $0.context.commonDir == context.commonDir }) {
             let tab = tabs[index]
+            // #0083: opening a repository a restored tab already keyed on
+            // upgrades it in place -- the fabricated, unresolved context is
+            // replaced by the real resolved one for the SAME commonDir
+            // (identity is what matched), and the missing flag clears. The
+            // tab never disappears from the list to make this happen.
+            if tab.isRestored {
+                tab.context = context
+                tab.isRestored = false
+                tab.repositoryMissing = false
+            }
             tab.selectedWorktreeName = context.worktreeName
             selectedTabID = tab.id
             return .focusedExisting(tab: tab, selectedWorktreeName: context.worktreeName)
@@ -170,6 +245,53 @@ public final class RepositoryTabs {
         tabs.append(tab)
         selectedTabID = tab.id
         return .opened(tab: tab)
+    }
+
+    /// Inserts a tab for a repository known from persisted state (#0083),
+    /// keyed by the stored `commonDir` -- **without resolving it**. This is
+    /// the restore path `WindowStore.restore(from:tabs:)` drives, and it
+    /// never calls `WorktreeContext.resolve`: no git subprocess runs, no
+    /// matter what is on disk.
+    ///
+    /// - The tab stays present and is REPORTED even when the repository has
+    ///   moved or been deleted -- the normal case for torn-down agent
+    ///   worktrees. Detection is a plain file-existence check on the stored
+    ///   path, surfacing as `RepositoryTab.repositoryMissing`; it is never
+    ///   dropped and never a crash.
+    /// - The tab's context is fabricated (`isRestored`): identity data from
+    ///   the store, no working-tree top level, no worktree name. Opening
+    ///   the repository by any path upgrades the tab to a real resolved
+    ///   context in place.
+    /// - When a tab for that `commonDir` is already open, the existing tab
+    ///   is returned unchanged -- the same one-tab-per-repository invariant
+    ///   `open` enforces. A repository is never duplicated by restore.
+    /// - Selection is untouched: `WindowStore.restore` sets the active tab
+    ///   once, from the snapshot's `isActive` flag. An insert-only seam must
+    ///   not fight it.
+    @discardableResult
+    public func restoreTab(
+        commonDir: String,
+        selectedWorktreeName: String? = nil
+    ) -> RepositoryTab {
+        if let existing = tabs.first(where: { $0.context.commonDir == commonDir }) {
+            return existing
+        }
+        // The context a restored tab carries until something re-resolves it:
+        // `topLevel` nil (asking git for it is exactly what this seam must
+        // not do), `gitDir` the stored commonDir, identity the stored
+        // commonDir -- the value save wrote out, and the tab's key.
+        let context = WorktreeContext(
+            topLevel: nil,
+            gitDir: commonDir,
+            commonDir: commonDir,
+            worktreeName: nil
+        )
+        let tab = RepositoryTab(context: context, openPath: commonDir)
+        tab.selectedWorktreeName = selectedWorktreeName
+        tab.isRestored = true
+        tab.repositoryMissing = !FileManager.default.fileExists(atPath: commonDir)
+        tabs.append(tab)
+        return tab
     }
 
     /// Closes the tab with id `id` -- a no-op when no tab with that id is

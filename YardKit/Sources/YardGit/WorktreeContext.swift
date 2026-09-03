@@ -36,6 +36,21 @@ public struct WorktreeContext: Sendable, Equatable {
     /// True when there is no working tree.
     public var isBare: Bool { topLevel == nil }
 
+    /// Builds a context directly from already-known values. This exists for
+    /// the persistence-restore path (#0083): a tab restored from saved state
+    /// must carry its stored identity (`commonDir`) without invoking git --
+    /// the repository may not even exist any more, which is the normal case
+    /// for torn-down agent worktrees. The values are stored as given: they
+    /// are **not** canonicalized and **not** verified. Do not use this where
+    /// `resolve(path:)` would work; a fabricated `topLevel` or `worktreeName`
+    /// would misreport a repository the engine could have asked git about.
+    public init(topLevel: String?, gitDir: String, commonDir: String, worktreeName: String?) {
+        self.topLevel = topLevel
+        self.gitDir = gitDir
+        self.commonDir = commonDir
+        self.worktreeName = worktreeName
+    }
+
     // MARK: - Resolution
 
     /// Resolves the context for a path, which may be the working tree root, any

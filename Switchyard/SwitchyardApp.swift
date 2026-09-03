@@ -7,6 +7,18 @@ import YardUI
 struct SwitchyardApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
+    init() {
+        // #0083, declarations only: both stores restore the persisted
+        // layout from the state directory before the first scene is built,
+        // so `initialWindowID` (the defaultValue below) names a restored
+        // window rather than the fresh-launch placeholder. All of the
+        // behaviour lives in YardUI -- `WindowStore.restore(from:tabs:)`
+        // and `RepositoryTabs.restoreTab` -- and a missing or corrupt file
+        // degrades to the single-window launch, never a crash. A real
+        // relaunch is not testable here; the launch smoke test is #0125's.
+        WindowStore.shared.restore(from: WindowStore.stateFileURL, tabs: RepositoryTabs.shared)
+    }
+
     var body: some Scene {
         WindowGroup(for: WindowID.self) { _ in
             ContentView()
