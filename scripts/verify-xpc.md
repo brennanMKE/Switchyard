@@ -14,6 +14,7 @@ payload named the CLI's repository", "scenario 3: unrun on this machine because 
    `Contents/Resources/bin/switchyard`, and the app's install action links it at
    `/usr/local/bin/switchyard`. Launching the app once also registers the broker launch agent
    (`SMAppService.agent(plistName: "co.sstools.Switchyard.broker.plist")`, `Switchyard/AgentRegistrar.swift`).
+   The install/uninstall act itself is hand-verified separately, in `scripts/verify-install.md` (#0222).
 2. **For the scenarios that do not need the app, a repo-built binary works:**
 
    ```sh

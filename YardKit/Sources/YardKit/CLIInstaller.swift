@@ -156,6 +156,93 @@ public enum CLIInstaller {
         "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 
+    // MARK: - The act (#0222)
+
+    /// How a privileged step ended. ``cancelled`` is the user declining the
+    /// authentication dialog — a decision the app presents nothing about,
+    /// never an error; ``failed`` carries the AppleScript error message for
+    /// the app to alert on.
+    public enum AuthOutcome: Equatable, Sendable {
+        case cancelled
+        case failed(String)
+    }
+
+    /// Classifies an `NSAppleScript` error dictionary's `errorNumber`.
+    ///
+    /// `-128` is `userCanceledErr` — the number macOS reports when the user
+    /// dismisses the administrator dialog (read from RemoteControl's
+    /// BridgeKit installer, not guessed). Everything else is a real failure:
+    /// the app alerts on ``failed`` and presents nothing on ``cancelled``.
+    ///
+    /// - Parameters:
+    ///   - number: `NSAppleScript.errorNumber` from the error dictionary.
+    ///   - message: `NSAppleScript.errorMessage` from the same dictionary;
+    ///     a failure with no message still names the error number.
+    public static func authOutcome(
+        fromAppleScriptError number: Int,
+        message: String? = nil
+    ) -> AuthOutcome {
+        if number == -128 { return .cancelled }
+        return .failed(message ?? "AppleScript error \(number)")
+    }
+
+    /// The exact privileged shell command that installs the tool.
+    ///
+    /// Returned, never run: the package links no AppKit and presents no
+    /// dialogs, so the app executes this string through its in-process
+    /// `NSAppleScript` runner. `mkdir -p` because `/usr/local/bin` does not
+    /// exist on a clean macOS, and `ln -sfn` so an existing link is replaced
+    /// atomically rather than dereferenced. Every path goes through
+    /// ``shellQuoted`` — this string is the shell-injection boundary.
+    ///
+    /// When `legacyDestination` is non-nil, `rm -f` clears it FIRST, in the
+    /// same privileged step: the legacy location sits earlier on `PATH`, so
+    /// leaving it would shadow the install that just succeeded. The decision
+    /// is the caller's — pass the legacy location only when
+    /// ``legacySweepReport(bundledCLI:legacyDestination:)`` reported it as
+    /// ours, so a link to somebody else's tool is never removed.
+    public static func installCommand(
+        bundledCLI: URL,
+        destination: URL,
+        legacyDestination: URL?
+    ) -> String {
+        let directory = destination.deletingLastPathComponent().path
+        var segments = ["mkdir -p \(shellQuoted(directory))"]
+        if let legacyDestination {
+            segments.append("rm -f \(shellQuoted(legacyDestination.path))")
+        }
+        segments.append(
+            "ln -sfn \(shellQuoted(bundledCLI.path)) \(shellQuoted(destination.path))"
+        )
+        return segments.joined(separator: " && ")
+    }
+
+    /// The exact privileged shell command that uninstalls the tool: `rm -f`
+    /// of the destination and — when `legacyDestination` is non-nil — of the
+    /// legacy link in the same step, legacy first, so uninstall genuinely
+    /// leaves nothing of ours behind. Same rule as ``installCommand``: only
+    /// pass the legacy location when ``legacySweepReport`` reported it ours.
+    public static func uninstallCommand(
+        destination: URL,
+        legacyDestination: URL?
+    ) -> String {
+        let paths = [legacyDestination?.path, destination.path].compactMap(\.self)
+        return "rm -f " + paths.map { shellQuoted($0) }.joined(separator: " ")
+    }
+
+    /// The install action's precondition: the report to present — the reason
+    /// no command is ever built — when this bundle would not produce a
+    /// durable link. `nil` clears the install to proceed.
+    public static func installPreconditionReport(
+        bundle: URL,
+        destination: URL
+    ) -> Report? {
+        guard isBundleDurable(bundle) else {
+            return buildDirectoryRefusalReport(bundle: bundle, destination: destination)
+        }
+        return nil
+    }
+
     // MARK: - Shadowing
 
     /// Reports a `switchyard` executable on `PATH` that would shadow the

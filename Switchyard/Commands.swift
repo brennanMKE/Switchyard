@@ -5,6 +5,11 @@
 // same funnel the drag-and-drop, URL, and XPC entry points use, so there is
 // exactly one focus-or-open rule (#0079) in the app.
 //
+// #0222 adds the CLI install/uninstall items: both always present, the
+// inapplicable one disabled (RemoteControl docs §5), each funnelled through
+// `CLIInstallActions` -- the privileged runner and the report presentation
+// live there, not in this declaration surface.
+//
 // The recent-repositories menu has no persistence of its own: the open tabs
 // ARE the recents for focus purposes, so the menu reads
 // `RepositoryTabs.shared.tabs` and re-opening an entry re-selects that tab
@@ -34,6 +39,22 @@ struct SwitchyardCommands: Commands {
                 }
             }
             .disabled(store.tabs.isEmpty)
+
+            Divider()
+
+            // #0222: the ellipsis on Install is Apple's convention for an
+            // action that opens a dialog before completing (the authorization
+            // prompt); Uninstall gets none. A cancelled prompt surfaces as
+            // nothing -- CLIInstallActions presents nil reports as no alert.
+            Button("Install Command Line Tool…") {
+                CLIInstallActions.present(CLIInstallActions.install())
+            }
+            .disabled(!CLIInstallActions.canInstall)
+
+            Button("Uninstall Command Line Tool") {
+                CLIInstallActions.present(CLIInstallActions.uninstall())
+            }
+            .disabled(!CLIInstallActions.canUninstall)
         }
     }
 }
