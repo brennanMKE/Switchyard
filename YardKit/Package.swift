@@ -20,6 +20,15 @@ let package = Package(
         .library(name: "YardCommands", targets: ["YardCommands"]),
         .executable(name: "switchyard", targets: ["switchyard"]),
     ],
+    dependencies: [
+        // #0079: the tab bar chrome, consumed ONLY by the YardUI target. The
+        // package-level declaration is required, but scoping happens in the
+        // target below: only YardUI's `dependencies` names the product, so the
+        // `switchyard` executable — which inherits its targets' dependencies —
+        // never links SlidingTabs. Verified with `otool -L` on the built
+        // switchyard binary.
+        .package(url: "https://github.com/brennanMKE/SlidingTabs", from: "1.0.0"),
+    ],
     targets: [
         .target(
             name: "YardGit",
@@ -33,7 +42,10 @@ let package = Package(
         ),
         .target(
             name: "YardUI",
-            dependencies: ["YardKit", "YardGit"],
+            // SlidingTabs is named HERE ONLY — see the package-level
+            // dependency note above (#0079).
+            dependencies: ["YardKit", "YardGit",
+                           .product(name: "SlidingTabs", package: "SlidingTabs")],
             path: "Sources/YardUI",
             swiftSettings: [.defaultIsolation(MainActor.self)]
         ),

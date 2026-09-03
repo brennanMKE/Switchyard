@@ -1,0 +1,15 @@
+{
+  "originHash" : "395b806f89b9a800dbf840ec6d71264357065527308163aedaa0e897026f396c",
+  "pins" : [
+    {
+      "identity" : "slidingtabs",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/brennanMKE/SlidingTabs",
+      "state" : {
+        "revision" : "569f4b852f593d1095cfc7c7fbb12f7aa56b3bd6",
+        "version" : "1.0.0"
+      }
+    }
+  ],
+  "version" : 3
+}
