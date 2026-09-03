@@ -28,6 +28,42 @@ private final class FakeAppService: NSObject, AppServiceProtocol {
         let result = performCommand(arguments: arguments, workingDirectory: workingDirectory)
         reply(result.stdout, result.exitCode)
     }
+
+    /// What the last hook request carried, for the wire round-trip test.
+    /// The real body (`runReferenceTransactionHook`, app-side in
+    /// YardCommands) is total and always exits 0; this fake replies 0 and
+    /// captures the request, so the test can assert the wire carried it
+    /// intact rather than re-implementing the decision.
+    struct CapturedHookRequest: Equatable {
+        let state: String
+        let environment: [String: String]
+        let standardInput: Data
+        let workingDirectory: String
+    }
+
+    private let hookLock = NSLock()
+    private var _capturedHookRequest: CapturedHookRequest?
+
+    var capturedHookRequest: CapturedHookRequest? {
+        hookLock.withLock { _capturedHookRequest }
+    }
+
+    func performReferenceTransactionHook(
+        state: String,
+        environment: [String: String],
+        standardInput: Data,
+        workingDirectory: String,
+        reply: @escaping @Sendable (Int32) -> Void
+    ) {
+        hookLock.withLock {
+            _capturedHookRequest = CapturedHookRequest(
+                state: state,
+                environment: environment,
+                standardInput: standardInput,
+                workingDirectory: workingDirectory)
+        }
+        reply(0)
+    }
 }
 
 private final class AppListenerDelegate: NSObject, NSXPCListenerDelegate {
@@ -450,5 +486,38 @@ struct AppConnectionTests {
     @Test func knownExitCodeValueMapsThrough() {
         let mapped = ExitCode(fromAppReply: 3)
         #expect(mapped == .appUnavailable)
+    }
+
+    // MARK: - The hook request crosses the wire intact (#0154)
+
+    /// The hook arm ships state + environment + stdin bytes over
+    /// `performReferenceTransactionHook`. This asserts all three arrive at
+    /// the other side byte-for-byte and the `Int32` reply comes back — the
+    /// same round-trip guarantee `performRoundTripsBytesExactly` gives
+    /// `perform`, for the request shape argv cannot carry.
+    @Test func performReferenceTransactionHookRoundTripsTheRequest() async throws {
+        let fake = FakeAppListener()
+        defer { fake.listener.invalidate() }
+        let app = fake.connect()
+        defer { app.close() }
+
+        let environment = ["SWITCHYARD_YARD_INVOCATION": "", "HOME": "/Users/nobody"]
+        let standardInput = Data("0000000 1234567 refs/heads/main\n".utf8)
+
+        let exitCode = try await app.performReferenceTransactionHook(
+            state: "committed",
+            environment: environment,
+            standardInput: standardInput,
+            workingDirectory: "/tmp/some-repo",
+            timeout: testTimeout)
+
+        #expect(exitCode == 0)
+        let captured = try #require(
+            fake.delegate.service.capturedHookRequest,
+            "the hook request must have reached the app side")
+        #expect(captured.state == "committed")
+        #expect(captured.environment == environment)
+        #expect(captured.standardInput == standardInput)
+        #expect(captured.workingDirectory == "/tmp/some-repo")
     }
 }

@@ -187,6 +187,29 @@ public final class AppConnection: @unchecked Sendable {
         }
     }
 
+    /// Sends one hook invocation to the app (#0154): the state argument, the
+    /// hook process's environment, and the stdin bytes the CLI already gated
+    /// and drained. Returns the app's exit code for the decision — always 0
+    /// by #0042's totality invariant, and the hook arm exits 0 even when
+    /// this call throws.
+    public func performReferenceTransactionHook(
+        state: String,
+        environment: [String: String],
+        standardInput: Data,
+        workingDirectory: String,
+        timeout: Duration = .seconds(5)
+    ) async throws -> Int32 {
+        try await call(timeout: timeout) { app, complete in
+            app.performReferenceTransactionHook(
+                state: state,
+                environment: environment,
+                standardInput: standardInput,
+                workingDirectory: workingDirectory) { exitCode in
+                complete(.success(exitCode))
+            }
+        }
+    }
+
     private func call<T: Sendable>(
         timeout: Duration,
         _ invoke: @escaping @Sendable (any AppServiceProtocol, @escaping @Sendable (Result<T, any Error>) -> Void) -> Void

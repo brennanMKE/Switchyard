@@ -11,6 +11,7 @@
 
 import AppKit
 import Foundation
+import YardCommands
 import YardKit
 import YardUI
 import os
@@ -239,5 +240,25 @@ private nonisolated final class AppService: NSObject, AppServiceProtocol {
         }
         let result = performCommand(arguments: arguments, workingDirectory: workingDirectory)
         reply(result.stdout, result.exitCode)
+    }
+
+    /// Forwards to `runReferenceTransactionHook` (YardCommands), the single
+    /// body the package tests exercise — same pattern as `perform` above.
+    /// The hook arm (#0154) connects with `launchIfNeeded: false`, so this
+    /// only ever runs for an app that was already up, and the reply is the
+    /// decision's exit code — 0 by #0042's totality invariant; the arm
+    /// exits 0 regardless.
+    func performReferenceTransactionHook(
+        state: String,
+        environment: [String: String],
+        standardInput: Data,
+        workingDirectory: String,
+        reply: @escaping @Sendable (Int32) -> Void
+    ) {
+        reply(runReferenceTransactionHook(
+            state: state,
+            environment: environment,
+            standardInput: standardInput,
+            workingDirectory: workingDirectory))
     }
 }

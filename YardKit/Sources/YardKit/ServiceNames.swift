@@ -35,6 +35,15 @@ public enum ServiceNames {
     /// `Contents/Library/LaunchAgents/`.
     public static let agentPlistName = "co.sstools.Switchyard.broker.plist"
 
+    /// Environment variable naming Switchyard's own git invocations, so the
+    /// `reference-transaction` hook can tell Switchyard's own ref writes from
+    /// a foreign tool's (#0042). The engine side of this constant is
+    /// `GitProcess.markerVariable`, which stamps it onto every invocation;
+    /// the two live in different targets (layering: the CLI does not link
+    /// `YardGit`) and cannot see each other, so `YardWireTests` pins them
+    /// equal and a rename cannot half-land.
+    public static let yardInvocationMarkerVariable = "SWITCHYARD_YARD_INVOCATION"
+
     /// Broker executable name inside `Contents/MacOS/`.
     public static let brokerExecutableName = "BrokerAgent"
 

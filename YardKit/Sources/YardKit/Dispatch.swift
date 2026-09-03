@@ -28,10 +28,26 @@ import Foundation
 public func dispatch(
     arguments: [String],
     workingDirectory: String,
-    connect: () async throws -> AppConnection = { try await AppConnection.connect() }
+    connect: () async throws -> AppConnection = { try await AppConnection.connect() },
+    connectHook: () async throws -> AppConnection = {
+        try await AppConnection.connect(launchIfNeeded: false)
+    }
 ) async -> (stdout: String, stderr: String, exitCode: ExitCode) {
     switch route(arguments) {
     case .local, .unknown:
+        // The hook arm (#0154) is local but not pure — it drains stdin and
+        // reaches the app over XPC — so dispatch intercepts it before the
+        // synchronous `runYard`. Its connector is a second injectable with
+        // `launchIfNeeded: false` baked in: a hook must never launch the
+        // app, which the ordinary remote `connect` above would do. (`route`
+        // can only classify `hook` as `.local`, never `.unknown` — it is in
+        // `localCommandNames` — so the name check below is exact.)
+        if arguments.first == HookArm.commandName {
+            return await HookArm.run(
+                arguments: arguments,
+                workingDirectory: workingDirectory,
+                connect: connectHook)
+        }
         return runYard(arguments: arguments)
 
     case .remote:

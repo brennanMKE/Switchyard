@@ -73,6 +73,40 @@ import Foundation
         workingDirectory: String,
         reply: @escaping @Sendable (Data, Int32) -> Void
     )
+
+    /// Runs one `reference-transaction` hook invocation app-side (#0154).
+    ///
+    /// A separate method rather than a `perform` argument because the wire
+    /// needs bytes this shape cannot carry as argv: the hook's stdin and its
+    /// environment. The app-side body is `runReferenceTransactionHook` in
+    /// `YardCommands` (the decision core, `ReferenceTransaction.decide`,
+    /// lives in `YardGit`, which the CLI does not link).
+    ///
+    /// - Parameters:
+    ///   - state: the hook's state argument, verbatim — `prepared`,
+    ///     `committed`, `aborted`, or anything a future git adds. The
+    ///     decision core re-derives every gate from it; the CLI's own gate
+    ///     only decides whether stdin was worth draining.
+    ///   - environment: the hook process's environment, shipped whole — the
+    ///     decision core looks up its own marker variable in it. Property-
+    ///     list-safe: `NSXPCInterface` carries `[String: String]` as an
+    ///     `NSDictionary` of strings.
+    ///   - standardInput: the hook's stdin bytes, already drained by the
+    ///     CLI. The decision core re-derives whether stdin was worth reading
+    ///     (own `committed` transactions skip it), so the CLI gating first
+    ///     never drops data the core would have wanted.
+    ///   - workingDirectory: the hook process's cwd — the invoking worktree's
+    ///     top, per #0041's script. The app resolves the repository from it.
+    ///   - reply: the process exit code the decision produced — always 0 by
+    ///     #0042's totality invariant. The CLI arm exits 0 regardless, so a
+    ///     future non-total reply still cannot abort a user's transaction.
+    func performReferenceTransactionHook(
+        state: String,
+        environment: [String: String],
+        standardInput: Data,
+        workingDirectory: String,
+        reply: @escaping @Sendable (Int32) -> Void
+    )
 }
 
 /// `NSXPCInterface` values for ``BrokerProtocol`` and ``AppServiceProtocol``.

@@ -5,15 +5,21 @@ import Foundation
 internal let encodingFailureEnvelope =
     #"{"schemaVersion":1,"ok":false,"error":{"code":"request_failed","message":"Failed to encode the response."}}"#
 
-/// Command names `runYard` answers on its own — no repository, no app.
-/// `dispatch(arguments:workingDirectory:connect:)` in `Dispatch.swift` is
-/// the only other reader of this set (via `isAnsweredLocally` below): that
-/// is what lets it decide "local or app?" without keeping a second,
-/// independently-maintained list that could silently drift from this one.
-/// Bare invocation (no arguments at all) is local too, but has no command
-/// name to put in a set — `runYard` and `isAnsweredLocally` each handle
-/// that case (`arguments.isEmpty`) directly.
-let localCommandNames: Set<String> = ["--help", "--version", "-v", "schema", "noop"]
+/// Command names the CLI answers on its own — no repository, no app. For
+/// every name here except `hook`, `runYard` answers it directly; `hook` is
+/// intercepted by `dispatch` (`Dispatch.swift`) and answered by
+/// `HookArm.run`, which is asynchronous (it drains stdin, then reaches the
+/// app over XPC) and so cannot live in the pure `runYard`. `runYard` keeps a
+/// `hook` case that refuses with usage, so a stray remote request never
+/// falls through to the unknown-command shape by accident.
+/// `dispatch(arguments:workingDirectory:connect:)` is the only other reader
+/// of this set (via `isAnsweredLocally` below): that is what lets it decide
+/// "local or app?" without keeping a second, independently-maintained list
+/// that could silently drift from this one. Bare invocation (no arguments at
+/// all) is local too, but has no command name to put in a set — `runYard`
+/// and `isAnsweredLocally` each handle that case (`arguments.isEmpty`)
+/// directly.
+let localCommandNames: Set<String> = ["--help", "--version", "-v", "schema", "noop", "hook"]
 
 /// True when `dispatch` can answer `arguments` without reaching the app —
 /// either `arguments` is empty (bare invocation) or its first element is in
@@ -102,6 +108,19 @@ public func runYard(arguments: [String]) -> (stdout: String, stderr: String, exi
 
     case "noop":
         return (stdout: jsonString(Envelope()), stderr: "", exitCode: .success)
+
+    case HookArm.commandName:
+        // Answered by dispatch → `HookArm.run`, which reads stdin and
+        // reaches the app over XPC — neither of which the pure `runYard`
+        // may do. Reaching this case means a direct call or a stray remote
+        // request (`perform(arguments: ["hook", …])`): refuse with the same
+        // usage shape as an unknown subcommand. Hook logic never runs
+        // app-side, where no hook process's stdin or environment exists.
+        let env = EnvelopeFail(
+            code: .usage,
+            message: "'hook' is answered by the local hook arm and is never a remote command.")
+        let human = "[error] \(env.error.code.rawValue): \(env.error.message)\n"
+        return (stdout: jsonString(env), stderr: human, exitCode: .usage)
 
     default:
         // Unreachable: isAnsweredLocally(arguments) admits exactly
