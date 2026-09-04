@@ -62,7 +62,19 @@ final class AppXPCServer {
     /// state) and round 2's sheet can bind to the same instance.
     private let pendingReviews = PendingReviewStore()
 
-    init() {}
+    /// #0055 round 2: the review sheet's bridge, over the same store. The
+    /// app delegate hands `reviewBridge.center` to `ContentView`; the
+    /// delegate threads the bridge into each `AppService` so a review
+    /// request's diff reaches the sheet.
+    let reviewBridge: ReviewSheetBridge
+
+    init() {
+        reviewBridge = ReviewSheetBridge(store: pendingReviews)
+    }
+
+    /// The store behind `reviewBridge` — what `ListenerDelegate` threads
+    /// into each `AppService`.
+    var pendingReviewStore: PendingReviewStore { pendingReviews }
 
     // MARK: - Lifecycle
 
@@ -73,7 +85,9 @@ final class AppXPCServer {
     /// live so its `endpoint` is a real, resumed one by the time it is
     /// handed to the broker.
     func start() {
-        let delegate = ListenerDelegate(pendingReviews: pendingReviews)
+        let delegate = ListenerDelegate(
+            pendingReviews: pendingReviews,
+            reviewBridge: reviewBridge)
         listenerDelegate = delegate
         listener.delegate = delegate
         listener.resume()
@@ -176,9 +190,11 @@ final class AppXPCServer {
 /// target compiles with `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`.
 private nonisolated final class ListenerDelegate: NSObject, NSXPCListenerDelegate {
     private let pendingReviews: PendingReviewStore
+    private let reviewBridge: ReviewSheetBridge
 
-    init(pendingReviews: PendingReviewStore) {
+    init(pendingReviews: PendingReviewStore, reviewBridge: ReviewSheetBridge) {
         self.pendingReviews = pendingReviews
+        self.reviewBridge = reviewBridge
         super.init()
     }
 
@@ -189,7 +205,9 @@ private nonisolated final class ListenerDelegate: NSObject, NSXPCListenerDelegat
         // Both must be set BEFORE resume(), or calls silently do nothing — no
         // error, no reply, no crash. Same rule as the client side.
         connection.exportedInterface = XPCInterfaces.appService
-        connection.exportedObject = AppService(pendingReviews: pendingReviews)
+        connection.exportedObject = AppService(
+            pendingReviews: pendingReviews,
+            reviewBridge: reviewBridge)
         connection.resume()
         return true
     }
@@ -215,8 +233,13 @@ private nonisolated final class AppService: NSObject, AppServiceProtocol {
     /// delegate. All accepted connections register into the same store.
     private let pendingReviews: PendingReviewStore
 
-    init(pendingReviews: PendingReviewStore) {
+    /// #0055 round 2: delivers a registered request's resolved context and
+    /// diff to the review sheets.
+    private let reviewBridge: ReviewSheetBridge
+
+    init(pendingReviews: PendingReviewStore, reviewBridge: ReviewSheetBridge) {
         self.pendingReviews = pendingReviews
+        self.reviewBridge = reviewBridge
         super.init()
     }
 
@@ -295,11 +318,21 @@ private nonisolated final class AppService: NSObject, AppServiceProtocol {
         reply: @escaping @Sendable (Data) -> Void
     ) {
         let store = pendingReviews
+        let bridge = reviewBridge
         Task {
             let outcomeData = await runReviewRequest(
                 requestData: request,
                 workingDirectory: workingDirectory,
-                store: store)
+                store: store,
+                onPending: { requestData, context, files, errorMessage in
+                    Task { @MainActor in
+                        bridge.pendingDidRegister(
+                            request: requestData,
+                            context: context,
+                            files: files,
+                            errorMessage: errorMessage)
+                    }
+                })
             reply(outcomeData)
         }
     }

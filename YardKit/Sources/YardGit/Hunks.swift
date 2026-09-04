@@ -570,6 +570,22 @@ public func listHunks(
     return try HunkParser().parse(output.text)
 }
 
+/// Async twin of `listHunks(at:area:git:)` (#0344), for callers already on
+/// Swift concurrency's cooperative pool: the `git diff` subprocess is
+/// awaited on the non-blocking `GitProcess` path, so the pool thread is
+/// released while git runs. Same arguments, same parser, same result.
+public func listHunks(
+    at path: String,
+    area: DiffArea,
+    git: GitProcess = GitProcess()
+) async throws -> [FileDiff] {
+    var arguments = pinnedDiffConfigOverrides + ["diff"]
+    if area == .staged { arguments.append("--cached") }
+    arguments += pinnedDiffFlags
+    let output = try await git.run(arguments, workingDirectory: path)
+    return try HunkParser().parse(output.text)
+}
+
 /// The diff a single commit introduced -- what `#0082`'s detail pane shows
 /// for a selected commit. Empty when the commit introduced no changes
 /// (e.g. an `--allow-empty` commit, or a **clean merge** -- see below).

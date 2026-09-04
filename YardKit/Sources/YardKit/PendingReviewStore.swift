@@ -36,6 +36,15 @@ public final class PendingReviewStore: @unchecked Sendable {
     public struct Pending: Sendable, Equatable {
         public let id: UUID
         public let request: ReviewRequest
+
+        /// Public so a test can construct a pending directly — the same
+        /// value shape the store hands its observers. The store generates
+        /// its own ids in `awaitDecision`; a constructed one is for
+        /// driving models and views.
+        public init(id: UUID, request: ReviewRequest) {
+            self.id = id
+            self.request = request
+        }
     }
 
     private struct Slot {
@@ -46,6 +55,20 @@ public final class PendingReviewStore: @unchecked Sendable {
 
     private let lock = NSLock()
     private var slots: [String: Slot] = [:]
+
+    /// Fired whenever a pending review is registered or resolves (#0055
+    /// round 2). `outcome` is nil for a registration and the typed outcome
+    /// for a resolution — decided, timedOut, or superseded — so the UI
+    /// side can create the sheet on registration and reflect (or dismiss
+    /// on) the store's outcome without polling `pendingReviews`.
+    ///
+    /// Called OUTSIDE the lock, on whatever task or queue touched the store,
+    /// right after the store's own state change is complete — the same
+    /// discipline as the continuation resume above. The observer hops where
+    /// it needs to (the UI side lands on the main actor via a `Task`).
+    /// Set before serving begins; the store reads it unlocked, so a caller
+    /// that mutates it mid-serving owns that race.
+    public var onPendingChange: (@Sendable (Pending, ReviewOutcome?) -> Void)?
 
     public init() {}
 
@@ -65,6 +88,7 @@ public final class PendingReviewStore: @unchecked Sendable {
         let id = UUID()
         let commonDir = request.commonDir
         return await withCheckedContinuation { continuation in
+            let newPending = Pending(id: id, request: request)
             // The timeout is armed for THIS request: one sleep per pending,
             // cancelled when the slot resolves any other way. `try?` on the
             // sleep swallows only cancellation — a cancelled task returns
@@ -82,7 +106,7 @@ public final class PendingReviewStore: @unchecked Sendable {
             lock.lock()
             supersededSlot = slots.removeValue(forKey: commonDir)
             slots[commonDir] = Slot(
-                pending: Pending(id: id, request: request),
+                pending: newPending,
                 continuation: continuation,
                 timeoutTask: timeoutTask)
             lock.unlock()
@@ -92,7 +116,9 @@ public final class PendingReviewStore: @unchecked Sendable {
             if let supersededSlot {
                 supersededSlot.timeoutTask?.cancel()
                 supersededSlot.continuation.resume(returning: .superseded)
+                onPendingChange?(supersededSlot.pending, .superseded)
             }
+            onPendingChange?(newPending, nil)
         }
     }
 
@@ -127,6 +153,7 @@ public final class PendingReviewStore: @unchecked Sendable {
         guard let slot else { return false }
         slot.timeoutTask?.cancel()
         slot.continuation.resume(returning: outcome)
+        onPendingChange?(slot.pending, outcome)
         return true
     }
 }

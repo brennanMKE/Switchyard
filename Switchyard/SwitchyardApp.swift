@@ -23,8 +23,11 @@ struct SwitchyardApp: App {
         WindowGroup(for: WindowID.self) { _ in
             // #0216: the transport pane's model lives on the app delegate,
             // which owns both `AgentRegistrar` and `AppXPCServer` — the two
-            // app-target objects that know the real status.
-            ContentView(transportStatus: appDelegate.transportBridge.model)
+            // app-target objects that know the real status. #0055: the
+            // review sheets come from the same server's bridge.
+            ContentView(
+                transportStatus: appDelegate.transportBridge.model,
+                reviews: appDelegate.server.reviewBridge.center)
         } defaultValue: {
             // Return the WindowID already seeded in WindowStore.shared, so
             // SwiftUI's first content window reuses the existing runtime

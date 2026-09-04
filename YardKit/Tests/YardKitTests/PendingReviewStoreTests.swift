@@ -132,4 +132,96 @@ struct PendingReviewStoreTests {
         #expect(store.resolve(id: UUID(), decision: reply(decision: .approve)) == false)
         #expect(store.pendingReviews.isEmpty)
     }
+
+    // MARK: - The change hook (round 2's sheet observation seam)
+
+    /// Collects `(pending, outcome)` events on the hook's own queue; reads
+    /// are bounded polls, so no test reads a clock.
+    private final class EventCollector: @unchecked Sendable {
+        private let lock = NSLock()
+        private var items: [(PendingReviewStore.Pending, ReviewOutcome?)] = []
+        func record(_ pending: PendingReviewStore.Pending, _ outcome: ReviewOutcome?) {
+            lock.lock()
+            items.append((pending, outcome))
+            lock.unlock()
+        }
+        var all: [(PendingReviewStore.Pending, ReviewOutcome?)] {
+            lock.withLock { items }
+        }
+    }
+
+    @Test func registrationFiresTheHookWithNoOutcome() async throws {
+        let store = PendingReviewStore()
+        let events = EventCollector()
+        store.onPendingChange = { pending, outcome in events.record(pending, outcome) }
+        let request = ReviewRequest(commonDir: commonDir, selector: .staged, timeoutSeconds: 60)
+
+        async let outcome = store.awaitDecision(for: request)
+        try await waitUntil { !store.pendingReviews.isEmpty }
+
+        let registered = try #require(events.all.last, "registration must fire the hook")
+        #expect(registered.0.request == request)
+        #expect(registered.1 == nil, "a registration carries no outcome")
+
+        #expect(store.resolve(commonDir: commonDir, decision: reply(decision: .approve)))
+        #expect(await outcome == .decided(reply(decision: .approve)))
+    }
+
+    @Test func resolutionFiresTheHookWithTheTypedOutcome() async throws {
+        let store = PendingReviewStore()
+        let events = EventCollector()
+        store.onPendingChange = { pending, outcome in events.record(pending, outcome) }
+        let expected = reply(decision: .reject)
+        let request = ReviewRequest(commonDir: commonDir, selector: .staged, timeoutSeconds: 60)
+
+        async let outcome = store.awaitDecision(for: request)
+        try await waitUntil { !store.pendingReviews.isEmpty }
+        #expect(store.resolve(commonDir: commonDir, decision: expected))
+        #expect(await outcome == .decided(expected))
+
+        let finished = try #require(events.all.last, "resolution must fire the hook")
+        #expect(finished.0.request == request)
+        #expect(finished.1 == .decided(expected))
+    }
+
+    @Test func supersedeFiresTheHookWithSupersededForTheOlderPending() async throws {
+        let store = PendingReviewStore()
+        let events = EventCollector()
+        store.onPendingChange = { pending, outcome in events.record(pending, outcome) }
+        let request = ReviewRequest(commonDir: commonDir, selector: .staged, timeoutSeconds: 60)
+
+        async let first = store.awaitDecision(for: request)
+        try await waitUntil { !store.pendingReviews.isEmpty }
+        let oldPending = try #require(store.pendingReviews.first)
+        let secondRequest = ReviewRequest(commonDir: commonDir, selector: .range("main..HEAD"), timeoutSeconds: 60)
+        async let secondOutcome = store.awaitDecision(for: secondRequest)
+        try await waitUntil { store.pendingReviews.count == 1 }
+
+        #expect(await first == .superseded)
+        let superseded = try #require(
+            events.all.last(where: { $0.1 == .superseded }),
+            "the replaced request must be reported as superseded")
+        #expect(superseded.0.id == oldPending.id)
+        #expect(superseded.0.request == oldPending.request)
+
+        #expect(store.resolve(commonDir: commonDir, decision: reply(decision: .approve)))
+        #expect(await secondOutcome == .decided(reply(decision: .approve)))
+    }
+
+    @Test func timeoutFiresTheHookWithTimedOut() async throws {
+        let store = PendingReviewStore()
+        let events = EventCollector()
+        store.onPendingChange = { pending, outcome in events.record(pending, outcome) }
+        let request = ReviewRequest(commonDir: commonDir, selector: .staged, timeoutSeconds: 1)
+
+        async let outcome = store.awaitDecision(for: request)
+        #expect(await outcome == .timedOut)
+
+        let timedOut = try await AppConnection.poll(timeout: .seconds(60), interval: .milliseconds(10)) {
+            events.all.last { $0.1 == .timedOut }
+        }
+        let event = try #require(timedOut, "the typed timeout must fire the hook")
+        #expect(event.0.request == request)
+        #expect(store.pendingReviews.isEmpty)
+    }
 }

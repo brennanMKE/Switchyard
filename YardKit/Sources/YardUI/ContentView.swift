@@ -73,6 +73,13 @@ public struct ContentView: View {
     /// (tests, previews) and the pane is not rendered at all.
     public var transportStatus: TransportStatusModel?
 
+    /// #0055's review centre, injected by the app target. While this view
+    /// shows a repository, the pending review for THAT repository presents
+    /// as this view's sheet — per-tab, never app-modal: a review on one
+    /// repository does not block another's window. `nil` when nothing is
+    /// injected (tests, previews) and no sheet is ever presented.
+    public var reviews: ReviewCenter?
+
     /// The transport pane's disclosure state. Local UI state, so `@State`
     /// is the right home; nothing else reads it.
     @State private var transportExpanded = false
@@ -81,8 +88,9 @@ public struct ContentView: View {
     /// `ContentView()` is unreachable from the app target — the same defect
     /// #0116 found on `WorktreeStatusEntry`, and one `@testable import` hides it
     /// because `@testable` grants internal access.
-    public init(transportStatus: TransportStatusModel? = nil) {
+    public init(transportStatus: TransportStatusModel? = nil, reviews: ReviewCenter? = nil) {
         self.transportStatus = transportStatus
+        self.reviews = reviews
     }
 
     public var body: some View {
@@ -147,6 +155,25 @@ public struct ContentView: View {
         }
         .task(id: selectedCommit) {
             await reloadSelectedCommitDiff()
+        }
+        // #0055: the pending review for the repository this view shows,
+        // presented as a sheet. The centre removes a decided model — which
+        // clears the binding and dismisses — and a timed-out or superseded
+        // sheet stays until the human closes its banner.
+        .sheet(item: Binding<ReviewSheetModel?>(
+            get: {
+                guard let reviews, let repositoryPath else { return nil }
+                return reviews.activeSheet(forRepositoryPath: repositoryPath)
+            },
+            set: { newValue in
+                guard newValue == nil,
+                      let reviews, let repositoryPath,
+                      let current = reviews.activeSheet(forRepositoryPath: repositoryPath)
+                else { return }
+                reviews.dismiss(current)
+            }
+        )) { sheetModel in
+            ReviewSheet(model: sheetModel)
         }
     }
 
