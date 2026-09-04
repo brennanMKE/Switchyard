@@ -1,4 +1,4 @@
-// ReviewSheet.swift — the human's review surface (#0055 round 2)
+// ReviewSheet.swift — the human's review surface (#0055, rounds 2–3)
 //
 // Three types, kept on the #0216 TransportStatus pattern: the model is
 // VALUE-DRIVEN — the app target feeds it (pending registrations from the
@@ -7,6 +7,11 @@
 // centre owns lifecycle and tab routing; the view is a pure function of the
 // model. All behaviour lives here in YardUI (guide §11 decision 10); the
 // app target only constructs and injects.
+//
+// Round 3 adds amend's application (the edited patch goes to the index
+// through the engine's staging path before the reply resolves, with a typed
+// failure to the sheet when it cannot) and the per-line picker (the hunk
+// body's own new-side lines, feeding `ReviewComment.line`).
 //
 // The diff renders through #0082's `FileDiffView` — the same component the
 // Detail pane uses; nothing here is a second diff renderer. Per-hunk comment
@@ -69,8 +74,19 @@ public final class ReviewSheetModel: Identifiable {
     public private(set) var comments: [ReviewComment] = []
 
     /// Amend's capture surface: the patch text the human can edit, seeded
-    /// from the resolved diff. Round 3 owns applying it; round 2 captures it.
+    /// from the resolved diff. Round 3 applies it: sending amend writes this
+    /// text to the index through the engine's staging path (`stagePatch`)
+    /// BEFORE the reply resolves, so the amended index is the reviewed state
+    /// the reply refers to; the reply still carries the text for the agent's
+    /// record.
     public var editedPatch: String
+
+    /// Amend's typed apply failure, or nil. Set when the apply path threw —
+    /// a stale patch the index no longer matches, for example — and cleared
+    /// by a successful apply or `clearApplyError()`. A failed apply never
+    /// resolves the pending: the human sees this, edits the patch and sends
+    /// again, or cancels back to the three decisions.
+    public private(set) var applyError: String?
 
     /// The store's typed outcome once the pending resolved — nil while the
     /// human still decides. `.decided` never lands here for display: the
@@ -82,6 +98,14 @@ public final class ReviewSheetModel: Identifiable {
     /// `PendingReviewStore.resolve(id:decision:)`; a test can wire a double
     /// or a real store.
     @ObservationIgnored public var onDecide: ((ReviewReply) -> Bool)?
+
+    /// Amend's application path: applies the edited patch to the index at
+    /// the review's repository. The centre wires the engine's staging path
+    /// (`YardGit.stagePatch` at the request's resolved origin); a test wires
+    /// the same seam with a fixture repository or a double. nil means amend
+    /// with a non-empty patch is refused with a typed `applyError` — never a
+    /// silent success and never an unwired no-op.
+    @ObservationIgnored public var onApplyPatch: ((String) throws -> Void)?
 
     /// The banner's Close action, set by the centre (its `dismiss`).
     @ObservationIgnored public var onClose: (() -> Void)?
@@ -187,15 +211,81 @@ public final class ReviewSheetModel: Identifiable {
     /// Sends the decision through `onDecide`. A sheet with a typed outcome
     /// (or nothing wired to resolve through) refuses: the pending is no
     /// longer there to answer.
+    ///
+    /// Amend's application contract (#0055 round 3): the edited patch is
+    /// written to the index BEFORE the reply resolves — apply-then-resolve,
+    /// so a reply that leaves always refers to an index that was actually
+    /// amended. An empty patch is nothing to apply and resolves without an
+    /// apply call. A failed apply (a stale patch) is a typed outcome to the
+    /// sheet — `applyError`, the human retries with a corrected patch or
+    /// cancels back to the three decisions — never a crash, never a
+    /// resolution, never a silent success.
     @discardableResult
     public func decide(_ decision: ReviewDecision) -> Bool {
         guard decisionsEnabled, let onDecide else { return false }
+        if decision == .amend && !editedPatch.isEmpty {
+            guard let onApplyPatch else {
+                applyError = "no apply path is wired for this sheet"
+                return false
+            }
+            do {
+                try onApplyPatch(editedPatch)
+                applyError = nil
+            } catch {
+                applyError = String(describing: error)
+                return false
+            }
+        }
         return onDecide(composedReply(for: decision))
+    }
+
+    /// Clears amend's typed apply failure — the Cancel affordance: a stale
+    /// patch the human chose not to retry must not resurface the next time
+    /// Amend… is selected.
+    public func clearApplyError() {
+        applyError = nil
     }
 
     /// The banner's Close: the centre owns removal, the model only forwards.
     public func close() {
         onClose?()
+    }
+
+    // MARK: - Per-line comment affordance (#0055 round 3)
+
+    /// One pickable line inside a hunk: its number on the NEW side of the
+    /// diff, and the label the picker shows.
+    public struct LineChoice: Identifiable, Equatable, Sendable {
+        public let number: Int
+        public let label: String
+
+        public var id: Int { number }
+    }
+
+    /// The hunk body's pickable lines: context and added lines, numbered
+    /// from `newStart` (a context line and an added line each occupy one
+    /// new-side line; a deleted line occupies none and is not offered). This
+    /// is what the sheet's per-line picker offers, so a per-line comment
+    /// attaches to a real line of the diff — never a free-typed number that
+    /// may not exist. Round 2's wire field (`ReviewComment.line`) is
+    /// unchanged; this is the UI affordance feeding it.
+    public static func lineChoices(for hunk: Hunk) -> [LineChoice] {
+        var choices: [LineChoice] = []
+        var newLine = hunk.newStart
+        for body in hunk.body {
+            guard let marker = body.first else { continue }
+            switch marker {
+            case " ", "+":
+                choices.append(
+                    LineChoice(number: newLine, label: "\(newLine)  \(body.dropFirst())"))
+                newLine += 1
+            default:
+                // "-" occupies no new-side line; "\" marks a "\ No newline"
+                // marker; anything else is not a diff body line.
+                continue
+            }
+        }
+        return choices
     }
 
     /// Amend's seed text: each file's header block followed by its hunks'
@@ -205,6 +295,23 @@ public final class ReviewSheetModel: Identifiable {
         files.map { file in
             file.headerText + file.hunks.map(\.patchText).joined()
         }.joined()
+    }
+}
+
+/// Why the centre could not even attempt amend's application (#0055 round
+/// 3) — distinct from git's own apply failure, which the engine's
+/// `stagePatch` throws and the model records verbatim.
+public enum ReviewApplyError: Error, CustomStringConvertible, Sendable {
+    /// The request's repository has not been resolved yet, so there is no
+    /// working directory to apply the patch at.
+    case originUnresolved
+
+    public var description: String {
+        switch self {
+        case .originUnresolved:
+            "the review's repository has not been resolved yet — the diff "
+                + "has not arrived, so there is nothing to apply the patch at"
+        }
     }
 }
 
@@ -329,6 +436,17 @@ public final class ReviewCenter {
                 guard let self else { return false }
                 return self.store.resolve(id: model.pendingID, decision: reply)
             }
+            model.onApplyPatch = { [weak model] patch in
+                guard let origin = model?.originPath else {
+                    throw ReviewApplyError.originUnresolved
+                }
+                // The engine's staging path (#0055 round 3): the same
+                // `git apply --cached` + journal checkpoint `stageHunks`
+                // uses — never a second apply implementation. The origin is
+                // the request's resolved worktree root, which is the root
+                // the diff's paths are relative to.
+                try stagePatch(patch, at: origin)
+            }
             model.onClose = { [weak self, weak model] in
                 guard let self, let model else { return }
                 self.dismiss(model)
@@ -358,7 +476,10 @@ public struct ReviewSheet: View {
 
     /// Per-hunk comment drafts, keyed by hunk id; cleared on add.
     @State private var commentDrafts: [String: String] = [:]
-    @State private var commentLineDrafts: [String: String] = [:]
+
+    /// The per-line picker's selection, keyed by hunk id: the picked
+    /// new-side line number, or nil (absent) for a whole-hunk comment.
+    @State private var commentLineSelections: [String: Int?] = [:]
 
     public init(model: ReviewSheetModel) {
         self.model = model
@@ -443,9 +564,11 @@ public struct ReviewSheet: View {
     }
 
     /// The per-hunk comment affordance: a disclosure per hunk with a text
-    /// field and an optional line field (empty = per-hunk). The comment
-    /// attaches to the hunk's stable content-derived id, so it survives the
-    /// re-listing round 3's application path will do.
+    /// field and a per-LINE picker — the hunk body's own new-side lines
+    /// (`ReviewSheetModel.lineChoices`), "Whole hunk" when no line is
+    /// picked. The comment attaches to the hunk's stable content-derived id
+    /// and the picked line, so it survives the re-listing round 3's
+    /// application path will do.
     private func commentAffordance(path: String, hunk: Hunk) -> some View {
         DisclosureGroup("Comment on \(hunk.header)") {
             VStack(alignment: .leading, spacing: 6) {
@@ -455,20 +578,26 @@ public struct ReviewSheet: View {
                         get: { commentDrafts[hunk.id] ?? "" },
                         set: { commentDrafts[hunk.id] = $0 }))
                     .textFieldStyle(.roundedBorder)
-                TextField(
+                Picker(
                     "Line (optional)",
-                    text: Binding(
-                        get: { commentLineDrafts[hunk.id] ?? "" },
-                        set: { commentLineDrafts[hunk.id] = $0 }))
-                    .textFieldStyle(.roundedBorder)
+                    selection: Binding(
+                        get: { commentLineSelections[hunk.id] ?? nil },
+                        set: { commentLineSelections[hunk.id] = $0 })
+                ) {
+                    Text("Whole hunk").tag(Int?.none)
+                    ForEach(ReviewSheetModel.lineChoices(for: hunk)) { choice in
+                        Text(choice.label).tag(Int?.some(choice.number))
+                    }
+                }
+                .pickerStyle(.menu)
                 Button("Add comment") {
                     model.addComment(
                         path: path,
                         hunkID: hunk.id,
-                        line: Int(commentLineDrafts[hunk.id] ?? ""),
+                        line: commentLineSelections[hunk.id] ?? nil,
                         text: commentDrafts[hunk.id] ?? "")
                     commentDrafts[hunk.id] = nil
-                    commentLineDrafts[hunk.id] = nil
+                    commentLineSelections[hunk.id] = nil
                 }
                 .disabled(!model.decisionsEnabled)
             }
@@ -519,12 +648,25 @@ public struct ReviewSheet: View {
                         .font(.system(.caption, design: .monospaced))
                         .frame(minHeight: 140)
                         .border(.quaternary)
+                    if let applyError = model.applyError {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("The edited patch could not be applied to the index: \(applyError)")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                            Text("Edit the patch and send again, or Cancel to choose a different decision.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                 }
             }
             HStack {
                 Spacer()
                 if amendSelected {
-                    Button("Cancel") { amendSelected = false }
+                    Button("Cancel") {
+                        model.clearApplyError()
+                        amendSelected = false
+                    }
                     Button("Send amend") {
                         model.decide(.amend)
                         amendSelected = false

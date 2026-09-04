@@ -1,4 +1,4 @@
-// ReviewSheetTests.swift — the review sheet's model layer (#0055 round 2)
+// ReviewSheetTests.swift — the review sheet's model layer (#0055, rounds 2–3)
 //
 // This target imports YardUI WITHOUT `@testable`, so everything asserted
 // here is reachable at exactly the access level the app target sees. The
@@ -168,32 +168,167 @@ struct ReviewSheetTests {
         #expect(reply.editedPatch == nil, "a reject carries no patch")
     }
 
-    @Test func amendRoundTripsTheEditedPatchThroughTheStore() async throws {
+    /// Amend now APPLIES the edited patch to the index (round 3) through the
+    /// centre's real engine wiring (`stagePatch` at the request's resolved
+    /// origin), so this test needs a real fixture repository: the patch the
+    /// sheet seeds is the diff of a worktree change whose preimage is still
+    /// what the index holds, so `git apply --cached` succeeds and the index
+    /// demonstrably gains the change.
+    @Test func amendAppliesTheEditedPatchToTheIndexAndRoundTripsIt() async throws {
+        var repo = try FixtureRepository()
+        defer { repo.destroy() }
+        try repo.build([FixtureRepository.Commit("base", files: ["f.txt": "one\ntwo\nthree\n"])])
+        // The change under review: in the worktree, NOT in the index — the
+        // patch's preimage matches the index, so amend's `git apply --cached`
+        // succeeds and the amended index gains the edit.
+        try "one\ntwo\nthree\nfour\n".write(
+            to: repo.url.appendingPathComponent("f.txt"), atomically: true, encoding: .utf8)
+        let files = try await listHunks(at: repo.url.path, area: .unstaged)
+        #expect(files.first?.hunks.first?.body.contains("+four") == true,
+                "the fixture's change must be the unstaged diff under review")
+
         let store = PendingReviewStore()
         let center = ReviewCenter(store: store)
-        let request = ReviewRequest(commonDir: "/repos/a/.git", selector: .range("main..HEAD"), timeoutSeconds: 60)
+        let request = ReviewRequest(commonDir: repo.url.path, selector: .staged, timeoutSeconds: 60)
 
         async let outcome = store.awaitDecision(for: request)
         try await waitUntil { !center.sheets.isEmpty }
         let model = try #require(center.sheets.first)
 
-        let file = fixtureFile(path: "Sources/A.swift")
-        model.attachDiff(originPath: "/repos/a", files: [file], errorMessage: nil)
+        model.attachDiff(originPath: repo.url.path, files: files, errorMessage: nil)
         let seed = model.editedPatch
         #expect(!seed.isEmpty, "the patch editor is seeded from the resolved diff")
-        #expect(seed.contains(file.path), "the seed covers the file's own block")
-        #expect(seed.contains("+line two (added)"), "the seed carries the hunk body")
+        #expect(seed.contains("+four"), "the seed is the real patch text git apply will receive")
 
-        model.editedPatch = seed + "\n# edited by the human\n"
         #expect(model.decide(.amend))
+        #expect(model.applyError == nil, "a successful apply is not a failure")
 
         let reply = try #require(await decidedReply(from: outcome))
         #expect(reply.decision == .amend)
-        #expect(reply.editedPatch == seed + "\n# edited by the human\n")
+        #expect(reply.editedPatch == seed, "the reply still carries the patch for the agent's record")
         #expect(reply.comments.isEmpty)
+        try await waitUntil { center.sheets.isEmpty }
+
+        // The amended index IS the reviewed state: the staged listing now
+        // holds exactly what the patch applied.
+        let staged = try await listHunks(at: repo.url.path, area: .staged)
+        let stagedFile = try #require(staged.first, "the index must hold the applied patch")
+        #expect(stagedFile.path == "f.txt")
+        #expect(stagedFile.hunks.first?.body.contains("+four") == true,
+                "the amended index gained the edited patch's line")
         #expect(model.composedReply(for: .approve).editedPatch == nil,
                 "a non-amend decision never carries the patch")
-        try await waitUntil { center.sheets.isEmpty }
+    }
+
+    /// A patch whose preimage the index does not hold fails `git apply
+    /// --cached`; the failure is a typed outcome on the sheet and the pending
+    /// stays receivable — never a crash, never a resolution, never a silent
+    /// success.
+    @Test func staleAmendPatchSurfacesAsATypedErrorAndLeavesThePendingIntact() async throws {
+        var repo = try FixtureRepository()
+        defer { repo.destroy() }
+        try repo.build([FixtureRepository.Commit("base", files: ["f.txt": "one\n"])])
+
+        let store = PendingReviewStore()
+        let center = ReviewCenter(store: store)
+        let request = ReviewRequest(commonDir: repo.url.path, selector: .staged, timeoutSeconds: 60)
+
+        async let outcome = store.awaitDecision(for: request)
+        try await waitUntil { !center.sheets.isEmpty }
+        let model = try #require(center.sheets.first)
+        model.attachDiff(originPath: repo.url.path, files: [], errorMessage: nil)
+
+        // The human hand-writes a patch whose context the index ("one\n")
+        // does not hold — the stale-patch shape the apply path must refuse.
+        model.editedPatch = """
+        diff --git a/f.txt b/f.txt
+        --- a/f.txt
+        +++ b/f.txt
+        @@ -1 +1 @@
+        -absent context line
+        +edited line
+        """
+        #expect(!model.decide(.amend), "a failed apply must not resolve the review")
+        #expect(model.applyError != nil, "the failure is typed to the sheet, not silent")
+        #expect(model.decisionsEnabled, "the human can still retry or choose another decision")
+
+        // The pending is intact: a later decision still resolves it, so the
+        // failed amend never consumed the review.
+        #expect(store.resolve(id: model.pendingID, decision: ReviewReply(decision: .approve)))
+        #expect(await outcome == .decided(ReviewReply(decision: .approve)))
+    }
+
+    /// An empty patch is nothing to apply: amend resolves without an apply
+    /// call (the centre's engine wiring is never invoked) and the reply
+    /// carries no patch — "no patch" is absent, never null.
+    @Test func amendWithAnEmptyPatchResolvesWithoutApplying() async throws {
+        let store = PendingReviewStore()
+        let center = ReviewCenter(store: store)
+        let request = ReviewRequest(commonDir: "/repos/a/.git", selector: .staged, timeoutSeconds: 60)
+
+        async let outcome = store.awaitDecision(for: request)
+        try await waitUntil { !center.sheets.isEmpty }
+        let model = try #require(center.sheets.first)
+        // No diff ever attaches, so the seed stays empty; the origin points
+        // nowhere real, which is safe because an empty patch never applies.
+        model.attachDiff(originPath: "/repos/none", files: [], errorMessage: nil)
+        #expect(model.editedPatch.isEmpty)
+
+        #expect(model.decide(.amend))
+        #expect(model.applyError == nil, "nothing to apply is not a failure")
+        let reply = try #require(await decidedReply(from: outcome))
+        #expect(reply.decision == .amend)
+        #expect(reply.editedPatch == nil, "an empty patch is absent on the wire, never null")
+    }
+
+    /// A model with a resolver but no apply path refuses a non-empty amend
+    /// with a typed error — the "never a silent success" contract does not
+    /// depend on the centre's wiring existing.
+    @Test func amendWithoutAWiredApplyPathRefusesWithATypedError() {
+        let model = ReviewSheetModel(pending: pending(commonDir: "/repos/a/.git"))
+        model.onDecide = { _ in true }
+        model.editedPatch = "diff --git a/f.txt b/f.txt\n"
+        #expect(!model.decide(.amend), "an unwired apply must not resolve the review")
+        #expect(model.applyError != nil, "the refusal is typed to the sheet")
+    }
+
+    // MARK: - Per-line comments (round 3's picker)
+
+    /// The picker's data: context and added lines numbered from `newStart`;
+    /// a deleted line occupies no new-side line and is not offered.
+    @Test func lineChoicesListTheNewSideLinesOfTheHunkBody() {
+        let hunk = Hunk(
+            id: "h", path: "f.txt",
+            oldStart: 2, oldCount: 4, newStart: 3, newCount: 4,
+            header: "@@ -2,4 +3,4 @@",
+            body: [" keep", "+added", "-removed", " tail"])
+        let choices = ReviewSheetModel.lineChoices(for: hunk)
+        #expect(choices.count == 3, "a deleted line has no new-side number and is not offered")
+        #expect(choices.map(\.number) == [3, 4, 5])
+        #expect(choices.map(\.label) == ["3  keep", "4  added", "5  tail"])
+    }
+
+    /// A comment composed with a picked line rides the wire on
+    /// `ReviewComment.line` — the per-line affordance feeds the same
+    /// structured data the issue pins.
+    @Test func perLineCommentCarriesThePickedLineOnTheWire() throws {
+        let model = ReviewSheetModel(pending: pending(commonDir: "/repos/a/.git"))
+        let file = fixtureFile(path: "Sources/A.swift")
+        model.attachDiff(originPath: "/repos/a", files: [file], errorMessage: nil)
+
+        let hunk = try #require(file.hunks.first)
+        let choices = ReviewSheetModel.lineChoices(for: hunk)
+        #expect(!choices.isEmpty, "the fixture hunk must offer its new-side lines")
+        let picked = try #require(choices.first { $0.number == 2 },
+                                  "the fixture's added line is new-side line 2")
+        #expect(picked.label == "2  line two (added)")
+
+        model.addComment(path: file.path, hunkID: hunk.id, line: picked.number, text: "on the added line")
+        let reply = model.composedReply(for: .reject)
+        #expect(reply.comments.count == 1)
+        #expect(reply.comments.first?.line == 2, "the picked line rides the wire")
+        #expect(reply.comments.first?.hunkID == hunk.id)
+        #expect(reply.comments.first?.text == "on the added line")
     }
 
     // MARK: - The store's typed outcomes, reflected by the sheet

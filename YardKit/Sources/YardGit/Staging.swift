@@ -93,9 +93,51 @@ func stageHunksWithoutCheckpoint(
     let files = try listHunks(at: path, area: .unstaged, git: git)
     let patch = try selectPatch(ids: ids, from: files, area: .unstaged)
     guard !patch.isEmpty else { return }
+    try applyPatchToIndex(patch, at: path, git: git)
+}
+
+/// The one `git apply --cached` invocation everything that writes a patch to
+/// the index goes through — #0140-era staging's apply, reused verbatim by
+/// `stagePatch` so there is exactly one place in the codebase that runs it.
+func applyPatchToIndex(_ patch: String, at path: String, git: GitProcess) throws {
     try git.run(["apply", "--cached"],
                 workingDirectory: path,
                 standardInput: Data(patch.utf8))
+}
+
+/// Applies an arbitrary patch text to the index: the index gains exactly the
+/// patch's changes, through **one** `git apply --cached` invocation — the same
+/// apply path `stageHunks` uses, which is atomic (measured under `stageHunks`:
+/// a two-file patch whose second file fails leaves the first unstaged), so a
+/// patch that cannot apply changes nothing.
+///
+/// This is #0055 round 3's amend-application primitive: the review sheet's
+/// amend decision hands the human's edited patch here, and the amended index
+/// becomes the reviewed state the reply refers to. A patch whose context no
+/// longer matches the index — a stale patch, or one written against a
+/// different preimage — fails here with git's own message ("error: patch
+/// failed: …", "does not apply") as `GitProcess.Failure.exited`; the caller
+/// surfaces that as a typed outcome to the human, never as a silent success.
+/// Note the matching is against the **index**: a patch whose changes are
+/// already staged fails ("does not apply") the same way a stale one does —
+/// the sheet's amend editor is free text exactly so the human can write the
+/// delta they mean rather than resend what is already there.
+///
+/// Writes exactly one journal entry per call (#0212), via
+/// `JournalCheckpoint.around`, so `undo` works after an amend's application
+/// the same way it does after staging. An empty patch is a true no-op —
+/// nothing to apply, nothing to undo, no journal entry, and no `git apply`
+/// invocation (git refuses an empty patch as an error, and "the human sent
+/// no patch" is not a failure).
+public func stagePatch(
+    _ patch: String,
+    at path: String,
+    git: GitProcess = GitProcess()
+) throws {
+    guard !patch.isEmpty else { return }
+    try JournalCheckpoint.around(operation: "stage", at: path, git: git) { git in
+        try applyPatchToIndex(patch, at: path, git: git)
+    }
 }
 
 /// Builds the patch text for the requested hunk ids: for every file owning
