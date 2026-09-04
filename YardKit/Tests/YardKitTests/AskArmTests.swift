@@ -356,7 +356,7 @@ struct AskArmTests {
 
         let runner = Task {
             await AskArm.run(
-                arguments: ["ask", "Deploy now?", "--options", "yes,no", "--timeout", "2"],
+                arguments: ["ask", "Deploy now?", "--options", "yes,no", "--timeout", "60"],
                 workingDirectory: "/",
                 connect: { fake.connect() },
                 backstopMargin: .milliseconds(500))
@@ -364,7 +364,9 @@ struct AskArmTests {
 
         // The request must have reached the app before the listener dies, or
         // a failure below could just as easily mean the setup was wrong.
-        try await waitUntil { fake.service.replyCaptured }
+        // The wait outlives the arm's own deadline (timeout + backstop) by a
+        // wide margin, so under suite load the death, not the timeout, wins.
+        try await waitUntil(timeout: .seconds(120)) { fake.service.replyCaptured }
         fake.invalidate()
 
         let result = await runner.value

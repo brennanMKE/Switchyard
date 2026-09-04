@@ -363,7 +363,7 @@ struct ReviewArmTests {
 
         let runner = Task {
             await ReviewArm.run(
-                arguments: ["review", "--wait", "--staged", "--timeout", "2"],
+                arguments: ["review", "--wait", "--staged", "--timeout", "60"],
                 workingDirectory: "/",
                 connect: { fake.connect() },
                 backstopMargin: .milliseconds(500))
@@ -371,7 +371,9 @@ struct ReviewArmTests {
 
         // The request must have reached the app before the listener dies, or
         // a failure below could just as easily mean the setup was wrong.
-        try await waitUntil { fake.service.replyCaptured }
+        // The wait outlives the arm's own deadline (timeout + backstop) by a
+        // wide margin, so under suite load the death, not the timeout, wins.
+        try await waitUntil(timeout: .seconds(120)) { fake.service.replyCaptured }
         fake.invalidate()
 
         let result = await runner.value

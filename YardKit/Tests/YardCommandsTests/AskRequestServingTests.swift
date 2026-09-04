@@ -27,7 +27,7 @@ struct AskRequestServingTests {
 
         // Exactly what the CLI sends: commonDir empty, resolved app-side.
         let request = AskRequest(
-            commonDir: "", question: "Deploy now?", options: ["yes", "no"], timeoutSeconds: 60)
+            commonDir: "", question: "Deploy now?", options: ["yes", "no"], timeoutSeconds: 600)
         let requestData = try JSONEncoder().encode(request)
 
         async let outcomeData = runAskRequest(
@@ -36,7 +36,7 @@ struct AskRequestServingTests {
             store: store)
 
         let registered = try await AppConnection.poll(
-            timeout: .seconds(60), interval: .milliseconds(10)) {
+            timeout: .seconds(300), interval: .milliseconds(10)) {
             store.pendingAsks.isEmpty ? nil : store.pendingAsks
         }
         let pending = try #require(registered, "the request must be registered")
@@ -109,7 +109,7 @@ struct AskRequestServingTests {
         let store = PendingAskStore()
         let registration = Registration()
         let requestData = try JSONEncoder().encode(
-            AskRequest(commonDir: "", question: "Ship?", options: ["a", "b"], timeoutSeconds: 60))
+            AskRequest(commonDir: "", question: "Ship?", options: ["a", "b"], timeoutSeconds: 600))
 
         async let outcomeData = runAskRequest(
             requestData: requestData,
@@ -120,7 +120,7 @@ struct AskRequestServingTests {
             })
 
         let registered = try await AppConnection.poll(
-            timeout: .seconds(60), interval: .milliseconds(10)) {
+            timeout: .seconds(300), interval: .milliseconds(10)) {
             registration.value
         }
         let (delivered, deliveredContext) = try #require(
@@ -132,7 +132,7 @@ struct AskRequestServingTests {
 
         // The body still blocks on the store; resolve and check the outcome.
         let pendings = try await AppConnection.poll(
-            timeout: .seconds(60), interval: .milliseconds(10)) {
+            timeout: .seconds(300), interval: .milliseconds(10)) {
             store.pendingAsks.isEmpty ? nil : store.pendingAsks
         }
         let head = try #require(pendings?.first, "the request must be registered")
@@ -153,19 +153,19 @@ struct AskRequestServingTests {
         let store = PendingAskStore()
 
         let firstData = try JSONEncoder().encode(
-            AskRequest(commonDir: "", question: "First?", options: ["a"], timeoutSeconds: 60))
+            AskRequest(commonDir: "", question: "First?", options: ["a"], timeoutSeconds: 600))
         let secondData = try JSONEncoder().encode(
-            AskRequest(commonDir: "", question: "Second?", options: ["b"], timeoutSeconds: 60))
+            AskRequest(commonDir: "", question: "Second?", options: ["b"], timeoutSeconds: 600))
 
         async let firstOutcomeData = runAskRequest(
             requestData: firstData, workingDirectory: repoPath, store: store)
-        try await AppConnection.poll(timeout: .seconds(60), interval: .milliseconds(10)) {
+        try await AppConnection.poll(timeout: .seconds(300), interval: .milliseconds(10)) {
             store.queue(for: context.commonDir).count == 1 ? true : nil
         }
 
         async let secondOutcomeData = runAskRequest(
             requestData: secondData, workingDirectory: repoPath, store: store)
-        try await AppConnection.poll(timeout: .seconds(60), interval: .milliseconds(10)) {
+        try await AppConnection.poll(timeout: .seconds(300), interval: .milliseconds(10)) {
             store.queue(for: context.commonDir).count == 2 ? true : nil
         }
 

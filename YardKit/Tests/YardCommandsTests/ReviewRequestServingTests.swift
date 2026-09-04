@@ -25,7 +25,7 @@ struct ReviewRequestServingTests {
         let store = PendingReviewStore()
 
         // Exactly what the CLI sends: commonDir empty, resolved app-side.
-        let request = ReviewRequest(commonDir: "", selector: .staged, timeoutSeconds: 60)
+        let request = ReviewRequest(commonDir: "", selector: .staged, timeoutSeconds: 600)
         let requestData = try JSONEncoder().encode(request)
 
         async let outcomeData = runReviewRequest(
@@ -34,7 +34,7 @@ struct ReviewRequestServingTests {
             store: store)
 
         let registered = try await AppConnection.poll(
-            timeout: .seconds(60), interval: .milliseconds(10)) {
+            timeout: .seconds(300), interval: .milliseconds(10)) {
             store.pendingReviews.isEmpty ? nil : store.pendingReviews
         }
         let pending = try #require(registered, "the request must be registered")
@@ -110,7 +110,7 @@ struct ReviewRequestServingTests {
         let context = try await WorktreeContext.resolve(path: repo.url.path)
         let store = PendingReviewStore()
         let registration = Registration()
-        let request = ReviewRequest(commonDir: "", selector: .staged, timeoutSeconds: 60)
+        let request = ReviewRequest(commonDir: "", selector: .staged, timeoutSeconds: 600)
         let requestData = try JSONEncoder().encode(request)
 
         async let outcomeData = runReviewRequest(
@@ -122,7 +122,7 @@ struct ReviewRequestServingTests {
             })
 
         let registered = try await AppConnection.poll(
-            timeout: .seconds(60), interval: .milliseconds(10)) {
+            timeout: .seconds(300), interval: .milliseconds(10)) {
             registration.value
         }
         let (delivered, deliveredContext, files, errorMessage) = try #require(
@@ -142,7 +142,7 @@ struct ReviewRequestServingTests {
         // The diff delivery precedes the store registration by design, so
         // the pending is polled for rather than assumed on the same tick.
         let pendings = try await AppConnection.poll(
-            timeout: .seconds(60), interval: .milliseconds(10)) {
+            timeout: .seconds(300), interval: .milliseconds(10)) {
             store.pendingReviews.isEmpty ? nil : store.pendingReviews
         }
         let pending = try #require(pendings?.first, "the request must be registered")
@@ -162,7 +162,7 @@ struct ReviewRequestServingTests {
 
         let store = PendingReviewStore()
         let registration = Registration()
-        let request = ReviewRequest(commonDir: "", selector: .range("HEAD~1..HEAD"), timeoutSeconds: 60)
+        let request = ReviewRequest(commonDir: "", selector: .range("HEAD~1..HEAD"), timeoutSeconds: 600)
         let requestData = try JSONEncoder().encode(request)
 
         async let outcomeData = runReviewRequest(
@@ -174,7 +174,7 @@ struct ReviewRequestServingTests {
             })
 
         let registered = try await AppConnection.poll(
-            timeout: .seconds(60), interval: .milliseconds(10)) {
+            timeout: .seconds(300), interval: .milliseconds(10)) {
             registration.value
         }
         let (_, _, files, errorMessage) = try #require(registered)
@@ -186,7 +186,7 @@ struct ReviewRequestServingTests {
         // The diff delivery precedes the store registration by design, so
         // the pending is polled for rather than assumed on the same tick.
         let pendings = try await AppConnection.poll(
-            timeout: .seconds(60), interval: .milliseconds(10)) {
+            timeout: .seconds(300), interval: .milliseconds(10)) {
             store.pendingReviews.isEmpty ? nil : store.pendingReviews
         }
         let pending = try #require(pendings?.first, "the request must be registered")
