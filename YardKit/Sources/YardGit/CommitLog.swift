@@ -87,11 +87,16 @@ public struct CommitLogEntry: Equatable {
     public let message: String     // the full commit body, verbatim (first non-empty line = subject)
     /// Parsed trailer lines from the commit message, in order.
     public let trailers: [Trailer]
+    /// The commit's note from `ReviewNotes.refNamespace` (#0059) — the review
+    /// decision's JSON, verbatim. `nil` means the commit carries no note;
+    /// absent means absent, never `null` on the wire (#0129 Decision 4).
+    public let note: String?
 
     /// Public memberwise initializer (#0133). Declaring it replaces the
     /// compiler-provided memberwise init, which is internal — the wire tests
     /// construct entries from a non-`@testable` import, the same way any
-    /// public caller would (#0116 failure class).
+    /// public caller would (#0116 failure class). `note` defaults to `nil` so
+    /// callers written before #0059 keep compiling unchanged.
     public init(
         oid: String,
         parents: [String],
@@ -99,7 +104,8 @@ public struct CommitLogEntry: Equatable {
         refs: String,
         signatureStatus: SignatureStatus,
         message: String,
-        trailers: [Trailer]
+        trailers: [Trailer],
+        note: String? = nil
     ) {
         self.oid = oid
         self.parents = parents
@@ -108,6 +114,7 @@ public struct CommitLogEntry: Equatable {
         self.signatureStatus = signatureStatus
         self.message = message
         self.trailers = trailers
+        self.note = note
     }
 }
 
@@ -151,7 +158,15 @@ public enum CommitLog {
     /// characters, merge commits and multi-paragraph bodies. The trailing
     /// `%B%x00` keeps the body verbatim (newlines and blank lines preserved)
     /// and terminates each record with NUL so the parser can split reliably.
-    static let formatString = "--format=%H\u{01}%P\u{01}%an\u{01}%G?\u{01}%D\u{01}%B%x00"
+    ///
+    /// `%N` (the commit's note) sits between `%D` and `%B` — the note field,
+    /// then the body last, exactly as before (#0059). The note is fed from the
+    /// single ref `ReviewNotes.refNamespace` via the `--notes=` /
+    /// `--no-standard-notes` flags in `arguments`, and a note written by the
+    /// review flow is JSON, whose encoder escapes every control character —
+    /// so the note body can never contain a raw SOH/NUL and the field split
+    /// below stays unambiguous.
+    static let formatString = "--format=%H\u{01}%P\u{01}%an\u{01}%G?\u{01}%D\u{01}%N\u{01}%B%x00"
 
     /// Run `git log`, decode its structured output and return a sequence of
     /// `CommitLogEntry`. Exceptions are propagated.
@@ -240,7 +255,18 @@ public enum CommitLog {
         // characters instead of its real bytes. A `schemaVersion: 1` envelope
         // is UTF-8 by definition, so `--encoding=UTF-8` pins git's output to
         // UTF-8 regardless of `i18n.logOutputEncoding` (#0326).
-        args = ["log"] + decorateRefs + ["--no-show-signature", "--encoding=UTF-8", "--format=\(fmt)"]
+        //
+        // The `%N` field is fed from exactly one notes ref — the review-decision
+        // namespace (#0059). `--notes=<ref>` alone would, on git builds where the
+        // documented "in addition to the default" behavior applies, also surface
+        // `refs/notes/commits` notes from other tools as if they were decisions,
+        // so `--no-standard-notes` pins the set to the dedicated namespace alone.
+        // Measured on 2.50.1: `--notes=<ref>` shows only that ref and the flag is
+        // redundant — kept anyway so the pin does not depend on that measurement.
+        args = ["log"] + decorateRefs
+            + ["--no-show-signature", "--encoding=UTF-8",
+               "--notes=\(ReviewNotes.refNamespace)", "--no-standard-notes",
+               "--format=\(fmt)"]
 
         if rangeArguments.isEmpty {
             args.append("HEAD")
@@ -278,10 +304,12 @@ public enum CommitLog {
 
             // Split each record on SOH into fields. The body is the last field
             // and may contain newlines, and SOH itself -- so this split can
-            // produce more than six parts, and the body is rejoined below.
+            // produce more than seven parts, and the body is rejoined below.
             let parts = text.split(separator: "\u{01}", omittingEmptySubsequences: false)
 
-            guard parts.count >= 5 else { continue }
+            // Minimum: oid, parents, author, sig, refs, note -- the body field
+            // itself may be absent, in which case the message is empty.
+            guard parts.count >= 6 else { continue }
 
             let oid = String(parts[0]).trimmingCharacters(in: .whitespaces)
             guard !oid.isEmpty else { continue }
@@ -291,13 +319,26 @@ public enum CommitLog {
             let sigFlag = String(parts[3]).trimmingCharacters(in: .whitespaces)
             let refs = String(parts[4])
 
-            // The body is everything after the 5th SOH. `git log --format=%B`
+            // The note (%N) is field 5. One measured formatter quirk (git
+            // 2.50.1, 2026-09-04): %N appends exactly one newline when the
+            // stored note does not already end with one — `git notes show`
+            // does not. Our notes are JSON and never end with a newline, so
+            // stripping exactly one trailing newline restores the bytes
+            // `ReviewNotes.record` wrote (pinned byte-identical by tests).
+            // The documented cost: a note that genuinely ends with a newline
+            // — only possible from a foreign write into the namespace — reads
+            // through the log one byte short; `ReviewNotes.list` reads it
+            // verbatim.
+            var noteField = String(parts[5])
+            if noteField.hasSuffix("\n") { noteField = String(noteField.dropLast()) }
+
+            // The body is everything after the 6th SOH. `git log --format=%B`
             // emits newlines literally, so the body arrives as one string with
             // actual \n chars in it. Since the format ends with `%B%x00` and
-            // `%B` is the last field, joining parts[5...] with SOH preserves any
-            // embedded delimiters in the body verbatim. When only five fields
+            // `%B` is the last field, joining parts[6...] with SOH preserves any
+            // embedded delimiters in the body verbatim. When only six fields
             // are present there is no trailing field and the message is empty.
-            let message = parts.count > 5 ? parts[5...].joined(separator: "\u{01}") : ""
+            let message = parts.count > 6 ? parts[6...].joined(separator: "\u{01}") : ""
 
             // Parents: space-separated hex. Empty means root commit.
             let parents = parentsRaw.isEmpty ? [String]() : parentsRaw.split(separator: " ").map(String.init)
@@ -315,7 +356,8 @@ public enum CommitLog {
                 refs: refs,
                 signatureStatus: SignatureStatus(sigFlag),
                 message: message,
-                trailers: trailers
+                trailers: trailers,
+                note: noteField.isEmpty ? nil : noteField
             ))
         }
 
@@ -472,7 +514,7 @@ extension CommitLogEntry: Encodable, Sendable {
     /// and `trailers`. The enum is rename-safety; `LogGraphWireTests` pins
     /// the bytes.
     private enum CodingKeys: String, CodingKey {
-        case oid, parents, author, refs, signatureStatus, message, trailers
+        case oid, parents, author, refs, signatureStatus, message, trailers, note
     }
 }
 

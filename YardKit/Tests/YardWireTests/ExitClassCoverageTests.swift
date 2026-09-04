@@ -113,6 +113,10 @@ struct ExitClassCoverageTests {
             Row("JournalObserved.Metadata.SerializationError",
                 JournalObserved.Metadata.SerializationError.undecodable(detail: "not JSON"),
                 .repositoryError),
+            // #0059: an unparseable `git notes list` line is a repository-state
+            // failure, the same class as RefSnapshot.Error's malformed ref line.
+            Row("ReviewNotes.Error", ReviewNotes.Error.malformedNotesListLine("bad line"),
+                .repositoryError),
         ]
     }
 

@@ -195,6 +195,13 @@ public struct RefSnapshot: Sendable, Equatable {
             guard fields[2].isEmpty else { continue } // symbolic — not captured
             let name = String(fields[1])
             guard !name.hasPrefix(switchyardNamespace) else { continue }
+            // Review-decision notes (#0059) are engine bookkeeping the same way
+            // journal refs are: a snapshot that captured `refs/notes
+            // /switchyard-review` would, on restore, roll the recorded decisions
+            // back to an older state. Notes do not change commit SHAs, so
+            // leaving this ref untouched on restore is exactly right — the
+            // decisions survive the undo.
+            guard !name.hasPrefix(ReviewNotes.refNamespace) else { continue }
             entries.append(Entry(name: name, oid: String(fields[0])))
         }
         return entries
@@ -213,6 +220,8 @@ public struct RefSnapshot: Sendable, Equatable {
             guard fields[2].isEmpty else { continue } // symbolic — not captured
             let name = String(fields[1])
             guard !name.hasPrefix(switchyardNamespace) else { continue }
+            // Review-decision notes: same exclusion as the sync path above (#0059).
+            guard !name.hasPrefix(ReviewNotes.refNamespace) else { continue }
             entries.append(Entry(name: name, oid: String(fields[0])))
         }
         return entries

@@ -76,12 +76,32 @@ Trailers change the commit SHA because they are part of the commit object. Notes
 | Concern | Carrier | When written | Affects signature? |
 | --- | --- | --- | --- |
 | Agent provenance (who, what model) | Trailer on the commit message | At commit time | Yes — by virtue of being part of the signed blob |
-| Review decisions, approvals, `review --wait` outcomes | Note on `refs/notes/switchyard/review/<sha>` | After the commit exists | No — attaching a note never changes the SHA |
+| Review decisions, approvals, `review --wait` outcomes | Note on `refs/notes/switchyard-review` | After the commit exists | No — attaching a note never changes the SHA |
 
 Provenance is not negotiable: signing it means you mean what the signature says. Notes are records
 of post-hoc conversation; they must never invalidate a commit because the only reason to record them
 is so that a human can look at a commit and see what happened around it without rewriting history to
 make the record permanent.
+
+As implemented (#0059), the decision notes carry more obligations than "somewhere to put a reply":
+
+- **The namespace is dedicated and invisible.** `refs/notes/switchyard-review`, never git's default
+  `refs/notes/commits`: another tool's notes must not be readable as decisions, and ours must not be
+  mistaken for theirs. The engine excludes the namespace everywhere it enumerates ordinary refs —
+  `RefSnapshot.capture` does not capture it (a journal restore therefore leaves recorded decisions
+  untouched), and `graphRows`' `--all` traversal excludes it (a notes ref has its own commit, which
+  is not a commit of the repository's history and must not render as a graph row). `yard log` is the
+  one surface that reads it: a commit's entry carries the decision as its optional `note` field.
+- **The note body is the decision's JSON** (`ReviewReply` from #0055, `sortedKeys` — the same wire
+  shape the XPC reply uses), written by the app-side review flow the moment the human decides. A
+  record failure is swallowed and logged, never surfaced as a review failure — the #0160 invariant,
+  one surface over.
+- **Byte fidelity is the contract.** `git notes add` applies `stripspace` by default, which appends a
+  trailing newline to the stored blob; the engine writes with `--no-stripspace` over stdin so the
+  stored note is byte-identical to the JSON the flow encoded, and reads back through `git notes show`
+  (verbatim) and `%N` (which appends one newline when the note does not end with one — stripped, the
+  one measured formatter quirk). That a note never changes the commit SHA is asserted by a test,
+  because it is the property everything else here stands on.
 
 The split is documented here once so that the question does not get relitigated for every feature
 that touches either carrier. `docs/switchyard-development-guide.md` §6 "Agent provenance" points at

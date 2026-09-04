@@ -160,21 +160,23 @@ struct CommitLogTests {
         let oid = "a" + String(repeating: "0", count: 39)
         let soH = "\u{01}"
         let bodyWithDelimiter = "has \(soH) delimiter inside\n\nbody"
-        // Six fields separated by SOH: OID, parents (empty), author, sig (empty), refs, body.
-        // The body itself contains a SOH byte so split would produce 7 parts; the rejoin must
+        // Seven fields separated by SOH: OID, parents (empty), author, sig (empty),
+        // refs, note (empty — no review note on this commit), body.
+        // The body itself contains a SOH byte so split would produce 8 parts; the rejoin must
         // recover the original message exactly.
-        let record = "\(oid)\(soH)\(soH)fixture<fixture@example.invalid>\(soH)\(soH)(HEAD, main)\(soH)\(bodyWithDelimiter)\u{0}"
+        let record = "\(oid)\(soH)\(soH)fixture<fixture@example.invalid>\(soH)\(soH)(HEAD, main)\(soH)\(soH)\(bodyWithDelimiter)\u{0}"
         let entries = CommitLog.parse(output: record)
         #expect(entries.count == 1)
         let entry = try #require(entries.first(where: { $0.oid == oid }))
         #expect(entry.message == bodyWithDelimiter)
+        #expect(entry.note == nil)
     }
 
     @Test func parseBodyWithoutEmbeddedDelimiterIsByteIdentical() throws {
         let oid = "b" + String(repeating: "0", count: 39)
         let soH = "\u{01}"
         let body = "subject one\n\nline two"
-        let record = "\(oid)\(soH)\(soH)fixture<fixture@example.invalid>\(soH)\(soH)(HEAD, main)\(soH)\(body)\u{0}"
+        let record = "\(oid)\(soH)\(soH)fixture<fixture@example.invalid>\(soH)\(soH)(HEAD, main)\(soH)\(soH)\(body)\u{0}"
         let entries = CommitLog.parse(output: record)
         #expect(entries.count == 1)
         let entry = try #require(entries.first(where: { $0.oid == oid }))
@@ -187,7 +189,7 @@ struct CommitLogTests {
         // The body must retain its trailing newline -- the raw output from %B ends in \n
         // before the NUL terminator, and CommitLog must not eat it.
         let body = "subject\n\nbody line"
-        let record = "\(oid)\(soH)\(soH)fixture<fixture@example.invalid>\(soH)\(soH)(HEAD, main)\(soH)\(body)\n\u{0}"
+        let record = "\(oid)\(soH)\(soH)fixture<fixture@example.invalid>\(soH)\(soH)(HEAD, main)\(soH)\(soH)\(body)\n\u{0}"
         let entries = CommitLog.parse(output: record)
         #expect(entries.count == 1)
         let entry = try #require(entries.first(where: { $0.oid == oid }))
@@ -207,7 +209,7 @@ struct CommitLogTests {
         let oid2 = "e" + String(repeating: "0", count: 39)
         let soH = "\u{01}"
         func record(_ oid: String, _ body: String) -> String {
-            "\(oid)\(soH)\(soH)fixture<fixture@example.invalid>\(soH)\(soH)(HEAD, main)\(soH)\(body)\n\u{0}\n"
+            "\(oid)\(soH)\(soH)fixture<fixture@example.invalid>\(soH)\(soH)(HEAD, main)\(soH)\(soH)\(body)\n\u{0}\n"
         }
         let output = record(oid1, "first commit") + record(oid2, "second commit")
 
@@ -226,7 +228,7 @@ struct CommitLogTests {
         let oid = "e" + String(repeating: "0", count: 39)
         let soH = "\u{01}"
         let body = "subject\n\nbody line"
-        let record = "\(oid)\(soH)\(soH)fixture<fixture@example.invalid>\(soH)\(soH)(HEAD, main)\(soH)\(body)\n\u{0}"
+        let record = "\(oid)\(soH)\(soH)fixture<fixture@example.invalid>\(soH)\(soH)(HEAD, main)\(soH)\(soH)\(body)\n\u{0}"
         let entries = CommitLog.parse(output: record)
         #expect(entries.count == 1)
         let entry = try #require(entries.first(where: { $0.oid == oid }))

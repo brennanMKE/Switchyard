@@ -102,6 +102,38 @@ struct LogGraphWireTests {
         #expect(!json.contains("null"))
     }
 
+    /// #0059: the note rides as an ordinary JSON string value (the review
+    /// decision's own JSON, escaped by the envelope encoder), sorted into the
+    /// key order like every other field. The two pins above — constructed
+    /// without `note` — pin the absent side: a `nil` note is omitted, never
+    /// `null` (#0129 Decision 4); the second assertion here states that
+    /// omission explicitly on the same fixture.
+    @Test func commitLogEntryWithNoteEncodesTheNoteKeyAndOmitsItWhenAbsent() throws {
+        let withNote = CommitLogEntry(
+            oid: "d4cd73b7ccc0810ce9a389b130133adc17b38281",
+            parents: [],
+            author: "Ada Lovelace",
+            refs: "",
+            signatureStatus: .noSig,
+            message: "Initial commit\n",
+            trailers: [],
+            note: #"{"decision":"approve"}"#)
+        let json = try wireJSON(withNote)
+        #expect(json == #"{"author":"Ada Lovelace","message":"Initial commit\n","note":"{\"decision\":\"approve\"}","oid":"d4cd73b7ccc0810ce9a389b130133adc17b38281","parents":[],"refs":"","signatureStatus":"noSig","trailers":[]}"#)
+
+        let withoutNote = CommitLogEntry(
+            oid: "d4cd73b7ccc0810ce9a389b130133adc17b38281",
+            parents: [],
+            author: "Ada Lovelace",
+            refs: "",
+            signatureStatus: .noSig,
+            message: "Initial commit\n",
+            trailers: [])
+        let absent = try wireJSON(withoutNote)
+        #expect(!absent.contains(#""note":"#),
+                "a commit with no review note must omit the key entirely, not encode null")
+    }
+
     // MARK: - GraphRow
 
     /// The planning fixture's whole laid-out graph, exactly as

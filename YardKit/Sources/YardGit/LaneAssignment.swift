@@ -228,6 +228,14 @@ private func graphRowsArguments(limit: Int?, revisions: [String]) -> [String] {
     // the revisions array and would miss `--branches`, `--tags`, `--remotes`.
     arguments.append("--exclude=\(RefSnapshot.switchyardNamespace)*")
 
+    // Review-decision notes are the same class of engine bookkeeping (#0059),
+    // and --all really does traverse them: measured on git 2.50.1, a
+    // repository with `refs/notes/switchyard-review` attached shows the notes
+    // ref's own commit as an extra `rev-list --all` row, a node that is not a
+    // commit of the repository's history at all. Same placement rule: the
+    // pattern must precede the pseudo-option it qualifies.
+    arguments.append("--exclude=\(ReviewNotes.refNamespace)*")
+
     arguments += revisions
     arguments.append("--")
     return arguments
