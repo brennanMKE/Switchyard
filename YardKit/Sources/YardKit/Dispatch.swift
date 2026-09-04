@@ -34,6 +34,9 @@ public func dispatch(
     },
     connectReview: () async throws -> AppConnection = {
         try await AppConnection.connect(launchIfNeeded: false)
+    },
+    connectAsk: () async throws -> AppConnection = {
+        try await AppConnection.connect(launchIfNeeded: false)
     }
 ) async -> (stdout: String, stderr: String, exitCode: ExitCode) {
     switch route(arguments) {
@@ -67,6 +70,18 @@ public func dispatch(
                 arguments: arguments,
                 workingDirectory: workingDirectory,
                 connect: connectReview)
+        }
+        // The ask arm (#0056) shares review's shape — a request that stays
+        // open while the human decides — and gets the same treatment: its
+        // own `launchIfNeeded: false` connector (ask never launches the
+        // app; the app being down is exit 3). If this interception were
+        // ever dropped, an ask argv would reach the app as an ordinary
+        // `perform` request and come back "Unknown subcommand" at exit 1.
+        if arguments.first == AskArm.commandName {
+            return await AskArm.run(
+                arguments: arguments,
+                workingDirectory: workingDirectory,
+                connect: connectAsk)
         }
         do {
             let app = try await connect()

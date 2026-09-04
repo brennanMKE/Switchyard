@@ -1,11 +1,11 @@
-// ReviewArmTests.swift — the `review --wait` arm's blocking semantics (#0055)
+// AskArmTests.swift — the `ask` arm's blocking semantics (#0056)
 //
 // The arm is exercised against real anonymous XPC listeners, the way
-// `AppConnectionTests` exercises the connection: the serve mode runs the REAL
-// app-side body (`ReviewServing.handle`) against a REAL `PendingReviewStore`,
-// so the typed timeout below is produced by the store, not faked. No
-// assertion reads a clock (Rule 7c): the timeout test uses a SHORT real
-// timeout and asserts the typed outcome and exit code, never elapsed time.
+// `ReviewArmTests` exercises review: the serve mode runs the REAL app-side
+// body (`AskServing.handle`) against a REAL `PendingAskStore`, so the typed
+// timeout below is produced by the store, not faked. No assertion reads a
+// clock (Rule 7c): the timeout test uses a SHORT real timeout and asserts
+// the typed outcome and exit code, never elapsed time.
 
 import Foundation
 import Testing
@@ -13,21 +13,21 @@ import Testing
 
 // MARK: - In-process fakes
 
-private final class ReviewFakeAppService: NSObject, AppServiceProtocol {
+private final class AskFakeAppService: NSObject, AppServiceProtocol {
 
-    /// What the fake does with a review request.
+    /// What the fake does with an ask request.
     enum Mode: Sendable {
         /// Runs the real serving body against a real store — the same body
         /// the app's `AppService` runs, minus the engine's common-dir
         /// resolution (passed in directly).
-        case serving(store: PendingReviewStore, commonDir: String)
+        case serving(store: PendingAskStore, commonDir: String)
         /// Captures the request and replies the encoded outcome immediately.
-        case replying(ReviewOutcome)
+        case replying(AskOutcome)
         /// Captures the request and replies raw bytes — the undecodable-reply
         /// path.
         case replyingRaw(Data)
-        /// Captures the request (and the reply block) and never replies —
-        /// the app-death test invalidates the listener while the CLI waits.
+        /// Captures the request and never replies — the app-death test
+        /// invalidates the listener while the CLI waits.
         case neverReplying
     }
 
@@ -77,6 +77,14 @@ private final class ReviewFakeAppService: NSObject, AppServiceProtocol {
         workingDirectory: String,
         reply: @escaping @Sendable (Data) -> Void
     ) {
+        reply(Data())
+    }
+
+    func performAsk(
+        request: Data,
+        workingDirectory: String,
+        reply: @escaping @Sendable (Data) -> Void
+    ) {
         lock.withLock {
             _capturedRequest = (request, workingDirectory)
             _replyCaptured = true
@@ -84,7 +92,7 @@ private final class ReviewFakeAppService: NSObject, AppServiceProtocol {
         switch mode {
         case .serving(let store, let commonDir):
             Task {
-                let outcomeData = await ReviewServing.handle(
+                let outcomeData = await AskServing.handle(
                     requestData: request,
                     commonDir: commonDir,
                     store: store)
@@ -100,20 +108,12 @@ private final class ReviewFakeAppService: NSObject, AppServiceProtocol {
             break
         }
     }
-
-    func performAsk(
-        request: Data,
-        workingDirectory: String,
-        reply: @escaping @Sendable (Data) -> Void
-    ) {
-        reply(Data())
-    }
 }
 
-private final class ReviewListenerDelegate: NSObject, NSXPCListenerDelegate {
-    let service: ReviewFakeAppService
+private final class AskListenerDelegate: NSObject, NSXPCListenerDelegate {
+    let service: AskFakeAppService
 
-    init(service: ReviewFakeAppService) {
+    init(service: AskFakeAppService) {
         self.service = service
     }
 
@@ -128,17 +128,18 @@ private final class ReviewListenerDelegate: NSObject, NSXPCListenerDelegate {
     }
 }
 
-/// Owns the listener and its delegate so both stay alive for the length of a
-/// test. `@unchecked Sendable` for the same reason as `AppConnection`: it
-/// wraps non-Sendable NS objects but is only ever used from one test flow.
-private final class ReviewFakeAppListener: @unchecked Sendable {
+/// Owns the listener and its delegate so both stay alive for the length of
+/// a test. `@unchecked Sendable` for the same reason as
+/// `ReviewFakeAppListener`: it wraps non-Sendable NS objects but is only
+/// ever used from one test flow.
+private final class AskFakeAppListener: @unchecked Sendable {
     let listener = NSXPCListener.anonymous()
-    let service: ReviewFakeAppService
-    private let delegate: ReviewListenerDelegate
+    let service: AskFakeAppService
+    private let delegate: AskListenerDelegate
 
-    init(mode: ReviewFakeAppService.Mode) {
-        self.service = ReviewFakeAppService(mode: mode)
-        self.delegate = ReviewListenerDelegate(service: service)
+    init(mode: AskFakeAppService.Mode) {
+        self.service = AskFakeAppService(mode: mode)
+        self.delegate = AskListenerDelegate(service: service)
         listener.delegate = delegate
         listener.resume()
     }
@@ -157,8 +158,8 @@ private final class ReviewFakeAppListener: @unchecked Sendable {
 
 // MARK: - Tests
 
-@Suite("review arm")
-struct ReviewArmTests {
+@Suite("ask arm")
+struct AskArmTests {
 
     private func errorBody(ofJSON stdout: String) throws -> [String: Any] {
         let object = try #require(
@@ -180,70 +181,59 @@ struct ReviewArmTests {
 
     // MARK: - The registry spec
 
-    /// Kills mutation 3 (drop `reviewSpec` from `CommandRegistry.all`): the
+    /// Kills mutation 3 (drop `askSpec` from `CommandRegistry.all`): the
     /// spec must be registered, with a non-empty summary, the right schema
-    /// name, the three flags, and every documented exit code.
-    @Test func reviewSpecIsRegisteredWithRequiredMetadata() throws {
-        let spec = try #require(CommandRegistry.lookup(name: "review"),
-                                "review must be in CommandRegistry.all")
+    /// name, the two flags, and every documented exit code.
+    @Test func askSpecIsRegisteredWithRequiredMetadata() throws {
+        let spec = try #require(CommandRegistry.lookup(name: "ask"),
+                                "ask must be in CommandRegistry.all")
         #expect(!spec.summary.isEmpty)
-        #expect(spec.schemaName == "review")
+        #expect(spec.schemaName == "ask")
         let flags = Set(spec.flags.map(\.long))
-        #expect(flags == ["staged", "wait", "timeout"],
-                "the review spec must document --staged, --wait, and --timeout; got \(flags.sorted())")
+        #expect(flags == ["options", "timeout"],
+                "the ask spec must document --options and --timeout; got \(flags.sorted())")
         let codes = Set(spec.exitCodes.map(\.code))
-        for required: Int32 in [0, 1, 3, 4, 5, 7, 10] {
-            #expect(codes.contains(required), "the review spec must document exit \(required)")
+        for required: Int32 in [0, 1, 3, 5, 7, 10] {
+            #expect(codes.contains(required), "the ask spec must document exit \(required)")
         }
-    }
-
-    // MARK: - The exit-code vocabulary
-
-    @Test func timedOutIsTenAndDistinctFromAppDownAppDeathAndRejection() {
-        #expect(ExitCode.timedOut.rawValue == 10)
-        #expect(ExitCode.timedOut.codeLabel == "timed_out")
-        #expect(ExitCode.timedOut != .appUnavailable, "3 is the app not running")
-        #expect(ExitCode.timedOut != .sessionTerminated, "5 is the app dying")
-        #expect(ExitCode.timedOut != .humanDeclined, "7 is the human rejecting")
-        #expect(ExitCode.timedOut != .blockedOnConflicts, "8 was taken; the timeout code must not collide")
-    }
-
-    @Test func envelopeErrorCodeTimedOutMapsToExitTen() {
-        #expect(EnvelopeErrorCode.timedOut.exitCode == .timedOut)
-        #expect(EnvelopeErrorCode(rawValue: ExitCode.timedOut.codeLabel) == .timedOut)
     }
 
     // MARK: - Usage refusals
 
-    @Test func nonWaitFormIsRefusedAsUsage() async throws {
-        // The connect closure would exit 3 if it were ever reached — it is
-        // not: a refusal is decided in argv, before any connection.
-        let result = await ReviewArm.run(
-            arguments: ["review", "main..HEAD"],
-            workingDirectory: "/") {
-            throw AppConnectionError.appUnavailable
-        }
-        #expect(result.exitCode == .usage)
-        let error = try errorBody(ofJSON: result.stdout)
-        #expect(error["code"] as? String == "usage")
-        let message = try #require(error["message"] as? String)
-        #expect(message.contains("--wait"), "the refusal must say the blocking form requires --wait")
-    }
-
-    @Test func missingSelectorIsRefusedAsUsage() async throws {
-        let result = await ReviewArm.run(
-            arguments: ["review", "--wait"],
+    @Test func missingQuestionIsRefusedAsUsage() async throws {
+        let result = await AskArm.run(
+            arguments: ["ask", "--options", "a,b"],
             workingDirectory: "/") {
             throw AppConnectionError.appUnavailable
         }
         #expect(result.exitCode == .usage)
         let message = try #require(try errorBody(ofJSON: result.stdout)["message"] as? String)
-        #expect(message.contains("range") || message.contains("staged"))
+        #expect(message.contains("question"))
     }
 
-    @Test func rangeAndStagedTogetherIsRefusedAsUsage() async throws {
-        let result = await ReviewArm.run(
-            arguments: ["review", "--wait", "main..HEAD", "--staged"],
+    @Test func missingOptionsIsRefusedAsUsage() async throws {
+        let result = await AskArm.run(
+            arguments: ["ask", "Deploy now?"],
+            workingDirectory: "/") {
+            throw AppConnectionError.appUnavailable
+        }
+        #expect(result.exitCode == .usage)
+        let message = try #require(try errorBody(ofJSON: result.stdout)["message"] as? String)
+        #expect(message.contains("--options"))
+    }
+
+    @Test func emptyOptionInsideTheListIsRefusedAsUsage() async throws {
+        let result = await AskArm.run(
+            arguments: ["ask", "Deploy now?", "--options", "yes,,no"],
+            workingDirectory: "/") {
+            throw AppConnectionError.appUnavailable
+        }
+        #expect(result.exitCode == .usage)
+    }
+
+    @Test func emptyOptionsListIsRefusedAsUsage() async throws {
+        let result = await AskArm.run(
+            arguments: ["ask", "Deploy now?", "--options", ","],
             workingDirectory: "/") {
             throw AppConnectionError.appUnavailable
         }
@@ -251,8 +241,8 @@ struct ReviewArmTests {
     }
 
     @Test func malformedTimeoutIsRefusedAsUsage() async throws {
-        let result = await ReviewArm.run(
-            arguments: ["review", "--wait", "--timeout", "abc", "main..HEAD"],
+        let result = await AskArm.run(
+            arguments: ["ask", "Deploy now?", "--options", "a", "--timeout", "abc"],
             workingDirectory: "/") {
             throw AppConnectionError.appUnavailable
         }
@@ -260,8 +250,8 @@ struct ReviewArmTests {
     }
 
     @Test func unknownFlagIsRefusedAsUsage() async throws {
-        let result = await ReviewArm.run(
-            arguments: ["review", "--wait", "--bogus", "main..HEAD"],
+        let result = await AskArm.run(
+            arguments: ["ask", "Deploy now?", "--bogus", "--options", "a"],
             workingDirectory: "/") {
             throw AppConnectionError.appUnavailable
         }
@@ -270,31 +260,33 @@ struct ReviewArmTests {
 
     // MARK: - Parse acceptance
 
-    @Test func acceptedInvocationDefaultsToTheJudgementTimeout() throws {
-        switch ReviewArm.parseInvocation(["review", "--wait", "main..HEAD"]) {
+    @Test func acceptedInvocationCarriesQuestionOptionsAndDefaultTimeout() throws {
+        switch AskArm.parseInvocation(["ask", "Deploy now?", "--options", "yes,no"]) {
         case .refused(let message):
             Issue.record("expected a run invocation, got refused: \(message)")
         case .run(let invocation):
+            #expect(invocation.question == "Deploy now?")
+            #expect(invocation.options == ["yes", "no"], "options keep the order given")
             #expect(invocation.timeoutSeconds == 3600, "the default timeout is a judgement, 3600 s")
-            #expect(invocation.selector == .range("main..HEAD"))
         }
     }
 
-    @Test func acceptedInvocationCarriesStagedAndExplicitTimeout() throws {
-        switch ReviewArm.parseInvocation(["review", "--wait", "--staged", "--timeout", "30"]) {
+    @Test func acceptedInvocationCarriesExplicitTimeoutAndFlagOrder() throws {
+        switch AskArm.parseInvocation(["ask", "--timeout", "30", "--options", "b,a", "Go?"]) {
         case .refused(let message):
             Issue.record("expected a run invocation, got refused: \(message)")
         case .run(let invocation):
+            #expect(invocation.question == "Go?")
+            #expect(invocation.options == ["b", "a"])
             #expect(invocation.timeoutSeconds == 30)
-            #expect(invocation.selector == .staged)
         }
     }
 
     // MARK: - The app is down → exit 3, never a fallback
 
     @Test func appDownExitsThreeWithTheAppUnavailableEnvelope() async throws {
-        let result = await ReviewArm.run(
-            arguments: ["review", "--wait", "--staged"],
+        let result = await AskArm.run(
+            arguments: ["ask", "Deploy now?", "--options", "yes,no"],
             workingDirectory: "/") {
             throw AppConnectionError.appUnavailable
         }
@@ -303,33 +295,33 @@ struct ReviewArmTests {
         #expect(error["code"] as? String == "app_unavailable")
     }
 
-    /// The dispatch-level guarantee: `review` is intercepted with its OWN
-    /// connector (`launchIfNeeded: false` — review never launches the app),
+    /// The dispatch-level guarantee: `ask` is intercepted with its OWN
+    /// connector (`launchIfNeeded: false` — ask never launches the app),
     /// and the ordinary remote `connect` is never reached for it.
-    @Test func dispatchRoutesReviewToTheArmWithItsOwnConnector() async throws {
+    @Test func dispatchRoutesAskToTheArmWithItsOwnConnector() async throws {
         actor Counter {
             private(set) var count = 0
             func increment() { count += 1 }
         }
         let remoteCounter = Counter()
-        let reviewCounter = Counter()
+        let askCounter = Counter()
 
         let result = await dispatch(
-            arguments: ["review", "--wait", "--staged"],
+            arguments: ["ask", "Deploy now?", "--options", "yes,no"],
             workingDirectory: "/",
             connect: {
                 await remoteCounter.increment()
                 throw AppConnectionError.appUnavailable
             },
-            connectReview: {
-                await reviewCounter.increment()
+            connectAsk: {
+                await askCounter.increment()
                 throw AppConnectionError.appUnavailable
             })
 
         #expect(await remoteCounter.count == 0,
-                "review must never go down the generic perform path")
-        #expect(await reviewCounter.count == 1,
-                "review must use its own launchIfNeeded:false connector exactly once")
+                "ask must never go down the generic perform path")
+        #expect(await askCounter.count == 1,
+                "ask must use its own launchIfNeeded:false connector exactly once")
         #expect(result.exitCode == .appUnavailable)
     }
 
@@ -337,15 +329,15 @@ struct ReviewArmTests {
 
     /// The full loop, through a real listener and the REAL serving body and
     /// store: the CLI asks for a 1-second wait, the store fires its typed
-    /// timeout, and the arm maps it to exit 10 with the `timed_out` envelope.
-    /// Kills mutation 1 (map a timeout to exit 0 instead).
+    /// timeout, and the arm maps it to exit 10 with the `timed_out`
+    /// envelope. Kills mutation 1 (map a timeout to exit 0 instead).
     @Test func storeTimeoutArrivesAsExitTenWithTheTypedEnvelope() async throws {
-        let fake = ReviewFakeAppListener(
-            mode: .serving(store: PendingReviewStore(), commonDir: "/repos/fixture/.git"))
+        let fake = AskFakeAppListener(
+            mode: .serving(store: PendingAskStore(), commonDir: "/repos/fixture/.git"))
         defer { fake.invalidate() }
 
-        let result = await ReviewArm.run(
-            arguments: ["review", "--wait", "--staged", "--timeout", "1"],
+        let result = await AskArm.run(
+            arguments: ["ask", "Deploy now?", "--options", "yes,no", "--timeout", "1"],
             workingDirectory: "/",
             connect: { fake.connect() })
 
@@ -357,13 +349,14 @@ struct ReviewArmTests {
     // MARK: - App death → exit 5, never a decision
 
     /// The listener dies while the CLI is mid-wait: the connection's error
-    /// path must surface as exit 5 — never as a decision, never as a timeout.
-    @Test func appDeathMidReviewExitsFive() async throws {
-        let fake = ReviewFakeAppListener(mode: .neverReplying)
+    /// path must surface as exit 5 — never as a decision, never as a
+    /// timeout.
+    @Test func appDeathMidAskExitsFive() async throws {
+        let fake = AskFakeAppListener(mode: .neverReplying)
 
         let runner = Task {
-            await ReviewArm.run(
-                arguments: ["review", "--wait", "--staged", "--timeout", "2"],
+            await AskArm.run(
+                arguments: ["ask", "Deploy now?", "--options", "yes,no", "--timeout", "2"],
                 workingDirectory: "/",
                 connect: { fake.connect() },
                 backstopMargin: .milliseconds(500))
@@ -376,90 +369,79 @@ struct ReviewArmTests {
 
         let result = await runner.value
         #expect(result.exitCode == .sessionTerminated,
-                "app death mid-review is exit 5, got \(result.exitCode)")
+                "app death mid-ask is exit 5, got \(result.exitCode)")
         let error = try errorBody(ofJSON: result.stdout)
         #expect(error["code"] as? String == "session_terminated")
     }
 
     // MARK: - Decided outcomes
 
-    /// The decision→exit mapping: approve and amend exit 0 (amend is NOT a
-    /// rejection), reject exits 7 — and in every row the envelope itself
-    /// carries the decision. Kills mutation 3b (treat amend as a rejection).
-    @Test(
-        "decided replies map to their exit codes",
-        arguments: [
-            (ReviewDecision.approve, ExitCode.success),
-            (ReviewDecision.reject, ExitCode.humanDeclined),
-            (ReviewDecision.amend, ExitCode.success),
-        ] as [(ReviewDecision, ExitCode)]
-    )
-    func decidedRepliesMapToTheirExitCodes(decision: ReviewDecision, expected: ExitCode) async throws {
-        let reply = ReviewReply(decision: decision, message: nil, comments: [], editedPatch: nil)
-        let fake = ReviewFakeAppListener(mode: .replying(.decided(reply)))
+    /// The full loop to an answer, through a real listener and the REAL
+    /// serving body and store: the CLI blocks, the store registers, the
+    /// "human" (the test) resolves the head, and the arm maps the decided
+    /// outcome to exit 0 with the reply as the payload.
+    @Test func pickedOptionRoundTripsAsExitZeroWithTheReplyAsPayload() async throws {
+        let store = PendingAskStore()
+        let fake = AskFakeAppListener(
+            mode: .serving(store: store, commonDir: "/repos/fixture/.git"))
         defer { fake.invalidate() }
 
-        let result = await ReviewArm.run(
-            arguments: ["review", "--wait", "--staged"],
+        let runner = Task {
+            await AskArm.run(
+                arguments: ["ask", "Deploy now?", "--options", "yes,no"],
+                workingDirectory: "/",
+                connect: { fake.connect() })
+        }
+
+        try await waitUntil { !store.pendingAsks.isEmpty }
+        let head = try #require(store.pendingAsks.first, "the ask must be registered as the head")
+        #expect(head.request.question == "Deploy now?")
+        #expect(head.request.options == ["yes", "no"])
+        let reply = AskReply.chosen(index: 1, text: "no", message: "not yet")
+        #expect(store.resolve(id: head.id, answer: reply))
+
+        let result = await runner.value
+        #expect(result.exitCode == .success, "a picked option is exit 0, got \(result.exitCode)")
+
+        let object = try #require(
+            try JSONSerialization.jsonObject(with: Data(result.stdout.utf8)) as? [String: Any])
+        #expect(object["ok"] as? Bool == true)
+        let payload = try #require(object["result"] as? [String: Any],
+                                   "the payload IS the reply, per the wire contract")
+        #expect(payload["optionIndex"] as? Int == 1)
+        #expect(payload["optionText"] as? String == "no")
+        #expect(payload["message"] as? String == "not yet")
+    }
+
+    /// A decline is a decided reply with declined semantics: exit 7 — and
+    /// the envelope still carries the declined reply, `"ok":true`. Kills
+    /// mutation 3b (treat a decline as a success or as a timeout).
+    @Test func declinedAnswerExitsSevenWithTheReplyInTheEnvelope() async throws {
+        let fake = AskFakeAppListener(mode: .replying(.decided(AskReply.declined(message: "not my call"))))
+        defer { fake.invalidate() }
+
+        let result = await AskArm.run(
+            arguments: ["ask", "Deploy now?", "--options", "yes,no"],
             workingDirectory: "/",
             connect: { fake.connect() })
 
-        #expect(result.exitCode == expected,
-                "\(decision) must exit \(expected.rawValue), got \(result.exitCode.rawValue)")
-
+        #expect(result.exitCode == .humanDeclined,
+                "a decline is exit 7, got \(result.exitCode)")
         let object = try #require(
             try JSONSerialization.jsonObject(with: Data(result.stdout.utf8)) as? [String: Any])
         #expect(object["ok"] as? Bool == true,
-                "even a rejection is a completed review: the envelope says ok:true")
-        let payload = try #require(object["result"] as? [String: Any],
-                                   "the payload IS the reply, per the wire contract")
-        #expect(payload["decision"] as? String == decision.rawValue)
-    }
-
-    /// Amend's whole point: the edited patch survives into the envelope.
-    @Test func amendCarriesTheEditedPatchInTheEnvelope() async throws {
-        let reply = ReviewReply(
-            decision: .amend, message: nil, comments: [], editedPatch: "patch-bytes")
-        let fake = ReviewFakeAppListener(mode: .replying(.decided(reply)))
-        defer { fake.invalidate() }
-
-        let result = await ReviewArm.run(
-            arguments: ["review", "--wait", "--staged"],
-            workingDirectory: "/",
-            connect: { fake.connect() })
-
-        #expect(result.exitCode == .success)
-        let object = try #require(
-            try JSONSerialization.jsonObject(with: Data(result.stdout.utf8)) as? [String: Any])
+                "even a decline is a completed ask: the envelope says ok:true")
         let payload = try #require(object["result"] as? [String: Any])
-        #expect(payload["editedPatch"] as? String == "patch-bytes")
-    }
-
-    // MARK: - Superseded and undecodable
-
-    @Test func supersededOutcomeIsRequestFailedAndNeverADecision() async throws {
-        let fake = ReviewFakeAppListener(mode: .replying(.superseded))
-        defer { fake.invalidate() }
-
-        let result = await ReviewArm.run(
-            arguments: ["review", "--wait", "--staged"],
-            workingDirectory: "/",
-            connect: { fake.connect() })
-
-        #expect(result.exitCode == .requestFailed,
-                "a superseded wait received no decision; it is not a rejection either")
-        let error = try errorBody(ofJSON: result.stdout)
-        #expect(error["code"] as? String == "request_failed")
-        let message = try #require(error["message"] as? String)
-        #expect(message.contains("superseded"))
+        #expect(payload["declined"] as? Bool == true)
+        #expect(payload["message"] as? String == "not my call")
     }
 
     @Test func undecodableReplyIsRequestFailed() async throws {
-        let fake = ReviewFakeAppListener(mode: .replyingRaw(Data("not json".utf8)))
+        let fake = AskFakeAppListener(mode: .replyingRaw(Data("not json".utf8)))
         defer { fake.invalidate() }
 
-        let result = await ReviewArm.run(
-            arguments: ["review", "--wait", "--staged"],
+        let result = await AskArm.run(
+            arguments: ["ask", "Deploy now?", "--options", "yes,no"],
             workingDirectory: "/",
             connect: { fake.connect() })
 
@@ -471,24 +453,24 @@ struct ReviewArmTests {
     // MARK: - The serving body's degenerate paths
 
     @Test func undecodableRequestYieldsTheRequestFailedEnvelope() async throws {
-        let data = await ReviewServing.handle(
+        let data = await AskServing.handle(
             requestData: Data("not a request".utf8),
             commonDir: "/repos/fixture/.git",
-            store: PendingReviewStore())
+            store: PendingAskStore())
         let failure = try #require(try? JSONDecoder().decode(EnvelopeFail.self, from: data))
         #expect(failure.error.code == .requestFailed)
     }
 
     @Test func unresolvableRepositoryYieldsTheRepositoryErrorEnvelope() async throws {
-        let store = PendingReviewStore()
-        let request = ReviewRequest(commonDir: "", selector: .staged, timeoutSeconds: 60)
-        let data = await ReviewServing.handle(
+        let store = PendingAskStore()
+        let request = AskRequest(commonDir: "", question: "Q?", options: ["a"], timeoutSeconds: 60)
+        let data = await AskServing.handle(
             requestData: try JSONEncoder().encode(request),
             commonDir: nil,
             store: store)
         let failure = try #require(try? JSONDecoder().decode(EnvelopeFail.self, from: data))
         #expect(failure.error.code == .repositoryError)
-        #expect(store.pendingReviews.isEmpty,
-                "an unresolvable repository is never registered as a pending review")
+        #expect(store.pendingAsks.isEmpty,
+                "an unresolvable repository is never registered as a pending ask")
     }
 }

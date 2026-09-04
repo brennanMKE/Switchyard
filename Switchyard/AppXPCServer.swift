@@ -62,19 +62,34 @@ final class AppXPCServer {
     /// state) and round 2's sheet can bind to the same instance.
     private let pendingReviews = PendingReviewStore()
 
+    /// The app's pending asks (#0056) — one FIFO queue per repository, the
+    /// head presented and armed with its own timeout. Owned by the server
+    /// for the same reason as `pendingReviews`: a pending ask is not
+    /// per-connection state, and the sheet binds to the same instance.
+    private let pendingAsks = PendingAskStore()
+
     /// #0055 round 2: the review sheet's bridge, over the same store. The
     /// app delegate hands `reviewBridge.center` to `ContentView`; the
     /// delegate threads the bridge into each `AppService` so a review
     /// request's diff reaches the sheet.
     let reviewBridge: ReviewSheetBridge
 
+    /// #0056: the ask sheet's bridge, over the ask store — the same shape
+    /// as `reviewBridge`.
+    let askBridge: AskSheetBridge
+
     init() {
         reviewBridge = ReviewSheetBridge(store: pendingReviews)
+        askBridge = AskSheetBridge(store: pendingAsks)
     }
 
     /// The store behind `reviewBridge` — what `ListenerDelegate` threads
     /// into each `AppService`.
     var pendingReviewStore: PendingReviewStore { pendingReviews }
+
+    /// The store behind `askBridge` — what `ListenerDelegate` threads into
+    /// each `AppService`.
+    var pendingAskStore: PendingAskStore { pendingAsks }
 
     // MARK: - Lifecycle
 
@@ -87,7 +102,9 @@ final class AppXPCServer {
     func start() {
         let delegate = ListenerDelegate(
             pendingReviews: pendingReviews,
-            reviewBridge: reviewBridge)
+            pendingAsks: pendingAsks,
+            reviewBridge: reviewBridge,
+            askBridge: askBridge)
         listenerDelegate = delegate
         listener.delegate = delegate
         listener.resume()
@@ -190,11 +207,20 @@ final class AppXPCServer {
 /// target compiles with `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`.
 private nonisolated final class ListenerDelegate: NSObject, NSXPCListenerDelegate {
     private let pendingReviews: PendingReviewStore
+    private let pendingAsks: PendingAskStore
     private let reviewBridge: ReviewSheetBridge
+    private let askBridge: AskSheetBridge
 
-    init(pendingReviews: PendingReviewStore, reviewBridge: ReviewSheetBridge) {
+    init(
+        pendingReviews: PendingReviewStore,
+        pendingAsks: PendingAskStore,
+        reviewBridge: ReviewSheetBridge,
+        askBridge: AskSheetBridge
+    ) {
         self.pendingReviews = pendingReviews
+        self.pendingAsks = pendingAsks
         self.reviewBridge = reviewBridge
+        self.askBridge = askBridge
         super.init()
     }
 
@@ -207,7 +233,9 @@ private nonisolated final class ListenerDelegate: NSObject, NSXPCListenerDelegat
         connection.exportedInterface = XPCInterfaces.appService
         connection.exportedObject = AppService(
             pendingReviews: pendingReviews,
-            reviewBridge: reviewBridge)
+            pendingAsks: pendingAsks,
+            reviewBridge: reviewBridge,
+            askBridge: askBridge)
         connection.resume()
         return true
     }
@@ -233,13 +261,27 @@ private nonisolated final class AppService: NSObject, AppServiceProtocol {
     /// delegate. All accepted connections register into the same store.
     private let pendingReviews: PendingReviewStore
 
+    /// The server's shared pending-ask store (#0056) — same discipline.
+    private let pendingAsks: PendingAskStore
+
     /// #0055 round 2: delivers a registered request's resolved context and
     /// diff to the review sheets.
     private let reviewBridge: ReviewSheetBridge
 
-    init(pendingReviews: PendingReviewStore, reviewBridge: ReviewSheetBridge) {
+    /// #0056: delivers a registered ask's resolved context to the ask
+    /// sheets (tab routing only — an ask has no diff).
+    private let askBridge: AskSheetBridge
+
+    init(
+        pendingReviews: PendingReviewStore,
+        pendingAsks: PendingAskStore,
+        reviewBridge: ReviewSheetBridge,
+        askBridge: AskSheetBridge
+    ) {
         self.pendingReviews = pendingReviews
+        self.pendingAsks = pendingAsks
         self.reviewBridge = reviewBridge
+        self.askBridge = askBridge
         super.init()
     }
 
@@ -331,6 +373,33 @@ private nonisolated final class AppService: NSObject, AppServiceProtocol {
                             context: context,
                             files: files,
                             errorMessage: errorMessage)
+                    }
+                })
+            reply(outcomeData)
+        }
+    }
+
+    /// Forwards to `runAskRequest` (YardCommands), the single body the
+    /// package tests exercise — same pattern as `performReview` above. The
+    /// reply may take minutes: the serving body runs on its own task and
+    /// the reply block is called when the human answers the head of the
+    /// repository's queue, the head times out — long after this method
+    /// returns.
+    func performAsk(
+        request: Data,
+        workingDirectory: String,
+        reply: @escaping @Sendable (Data) -> Void
+    ) {
+        let store = pendingAsks
+        let bridge = askBridge
+        Task {
+            let outcomeData = await runAskRequest(
+                requestData: request,
+                workingDirectory: workingDirectory,
+                store: store,
+                onPending: { requestData, context in
+                    Task { @MainActor in
+                        bridge.pendingDidRegister(request: requestData, context: context)
                     }
                 })
             reply(outcomeData)

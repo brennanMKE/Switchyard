@@ -100,6 +100,17 @@ private final class FakeAppService: NSObject, AppServiceProtocol {
         encoder.outputFormatting.insert(.sortedKeys)
         reply((try? encoder.encode(outcome)) ?? Data())
     }
+
+    func performAsk(
+        request: Data,
+        workingDirectory: String,
+        reply: @escaping @Sendable (Data) -> Void
+    ) {
+        let outcome = AskOutcome.decided(AskReply.chosen(index: 0, text: "a"))
+        let encoder = JSONEncoder()
+        encoder.outputFormatting.insert(.sortedKeys)
+        reply((try? encoder.encode(outcome)) ?? Data())
+    }
 }
 
 private final class AppListenerDelegate: NSObject, NSXPCListenerDelegate {

@@ -80,6 +80,13 @@ public struct ContentView: View {
     /// injected (tests, previews) and no sheet is ever presented.
     public var reviews: ReviewCenter?
 
+    /// #0056's ask centre, injected by the app target. The HEAD of a
+    /// repository's pending-ask queue presents as this view's sheet — the
+    /// first still-pending model for this repository, since registration
+    /// order is queue order. Per-tab like reviews; asks on one repository
+    /// never block another's window.
+    public var asks: AskCenter?
+
     /// The transport pane's disclosure state. Local UI state, so `@State`
     /// is the right home; nothing else reads it.
     @State private var transportExpanded = false
@@ -88,9 +95,14 @@ public struct ContentView: View {
     /// `ContentView()` is unreachable from the app target — the same defect
     /// #0116 found on `WorktreeStatusEntry`, and one `@testable import` hides it
     /// because `@testable` grants internal access.
-    public init(transportStatus: TransportStatusModel? = nil, reviews: ReviewCenter? = nil) {
+    public init(
+        transportStatus: TransportStatusModel? = nil,
+        reviews: ReviewCenter? = nil,
+        asks: AskCenter? = nil
+    ) {
         self.transportStatus = transportStatus
         self.reviews = reviews
+        self.asks = asks
     }
 
     public var body: some View {
@@ -174,6 +186,25 @@ public struct ContentView: View {
             }
         )) { sheetModel in
             ReviewSheet(model: sheetModel)
+        }
+        // #0056: the head of the pending-ask queue for the repository this
+        // view shows, presented as a sheet. The centre removes a decided
+        // model — which clears the binding and dismisses — and a timed-out
+        // ask's banner stays until the human closes it.
+        .sheet(item: Binding<AskSheetModel?>(
+            get: {
+                guard let asks, let repositoryPath else { return nil }
+                return asks.activeSheet(forRepositoryPath: repositoryPath)
+            },
+            set: { newValue in
+                guard newValue == nil,
+                      let asks, let repositoryPath,
+                      let current = asks.activeSheet(forRepositoryPath: repositoryPath)
+                else { return }
+                asks.dismiss(current)
+            }
+        )) { sheetModel in
+            AskSheet(model: sheetModel)
         }
     }
 

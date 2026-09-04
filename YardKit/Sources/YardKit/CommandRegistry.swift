@@ -12,7 +12,7 @@ public enum CommandRegistry {
 
     /// All known `yard` command specifications in the order they should be
     /// rendered in help output.
-    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, reviewSpec]
+    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, reviewSpec, askSpec]
 
     // MARK: - The switchyard spec — rendered by `yard --help`
 
@@ -315,6 +315,43 @@ public enum CommandRegistry {
         // ... do not half-build nesting to fit it in here"). Same precedent
         // as `statusSpec` (#0225) through `verifySpec` (#0348): the schema
         // carries the self-reference form, and `ReviewWireTests` pins the
+        // encoded keys instead.
+        payload: nil
+    )
+
+    // MARK: - The ask spec — remote over XPC, answered by `AskArm` (#0056)
+
+    /// The spec is named `ask`; `dispatch` intercepts it before the generic
+    /// `perform` path for the same reason it intercepts `review`: the call
+    /// stays open while the human decides, which the argv-in/envelope-out
+    /// shape cannot carry. The question is positional, the options are a
+    /// comma-separated `--options` list presented in the order given. A
+    /// second ask for a repository with one already pending queues behind
+    /// it rather than replacing it (#0056) — so unlike `reviewSpec` there
+    /// is no superseded exit code.
+    static let askSpec = CommandSpec(
+        name: "ask",
+        summary: "Ask the human a question in the app and block until they pick an option, decline, or the wait times out.",
+        flags: [
+            FlagSpec(long: "options", argument: "a,b,c", help: "The answer options, comma-separated, presented in this order. Required; an empty list or an empty option is a usage refusal."),
+            FlagSpec(long: "timeout", argument: "seconds", help: "Give up the wait after this many seconds (default 3600). On expiry the CLI exits 10 with a typed timeout outcome — never a decline. A queued ask's timer starts when it reaches the head of its repository's queue."),
+        ],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The human picked an option; the payload is the ask reply (optionIndex, optionText, optional message)."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — no question, no --options, an empty option in the list, or a malformed --timeout."),
+            ExitCodeSpec(code: 3, meaning: "The Switchyard app is not running. Ask never launches the app."),
+            ExitCodeSpec(code: 5, meaning: "The app quit before the human decided — never reported as a decision."),
+            ExitCodeSpec(code: 7, meaning: "The human declined to answer; the payload still carries the declined reply with ok:true."),
+            ExitCodeSpec(code: 10, meaning: "No answer arrived within --timeout — a typed timeout outcome, never a decline and never an app failure."),
+        ],
+        schemaName: "ask",
+        // No `payload` shape (#0056): the result is the ask reply — an
+        // object carrying `options`-indexed data — and the command's input
+        // options are an array, which `PayloadShape` is flat-only about
+        // (#0194: "nested objects and arrays are not supported ... do not
+        // half-build nesting to fit it in here"). Same precedent as
+        // `statusSpec` (#0225) through `reviewSpec` (#0055): the schema
+        // carries the self-reference form, and `AskWireTests` pins the
         // encoded keys instead.
         payload: nil
     )
