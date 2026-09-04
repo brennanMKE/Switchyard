@@ -12,7 +12,7 @@ public enum CommandRegistry {
 
     /// All known `yard` command specifications in the order they should be
     /// rendered in help output.
-    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec]
+    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, reviewSpec]
 
     // MARK: - The switchyard spec — rendered by `yard --help`
 
@@ -280,6 +280,42 @@ public enum CommandRegistry {
         // (#0228), `hunksSpec` (#0345), `logSpec` (#0346), and `graphSpec`
         // (#0347): the schema carries the self-reference form, and the wire
         // tests pin the encoded keys instead.
+        payload: nil
+    )
+
+    // MARK: - The review spec — remote over XPC, answered by `ReviewArm` (#0055)
+
+    /// The spec is named `review`; `dispatch` intercepts it before the
+    /// generic `perform` path because the call does not round-trip like a
+    /// command — it stays open while the human decides, which the argv-in/
+    /// envelope-out shape cannot carry. The engine never runs CLI-side: the
+    /// app resolves the diff from the request's range (rounds 2/3), which is
+    /// the same layering rule `HookArm` follows.
+    static let reviewSpec = CommandSpec(
+        name: "review",
+        summary: "Push a diff to the app and block until the human decides, returning the decision as structured data.",
+        flags: [
+            FlagSpec(long: "staged", argument: nil, help: "Review the staged changes (HEAD against the index) instead of a range."),
+            FlagSpec(long: "wait", argument: nil, help: "Block until the human decides. Required in this build; a non-blocking form does not exist yet."),
+            FlagSpec(long: "timeout", argument: "seconds", help: "Give up the wait after this many seconds (default 3600). On expiry the CLI exits 10 with a typed timeout outcome — never a rejection."),
+        ],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The human approved or amended; the payload is the review reply. Amend is not a rejection — its editedPatch carries the edited patch."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — missing --wait, no selector, both a range and --staged, or a malformed --timeout."),
+            ExitCodeSpec(code: 3, meaning: "The Switchyard app is not running. Review never launches the app."),
+            ExitCodeSpec(code: 4, meaning: "The request was superseded by a newer review for the same repository, or the app could not serve it — no decision was received."),
+            ExitCodeSpec(code: 5, meaning: "The app quit before the human decided — never reported as a decision."),
+            ExitCodeSpec(code: 7, meaning: "The human rejected the review; the payload still carries the full reply with ok:true."),
+            ExitCodeSpec(code: 10, meaning: "No decision arrived within --timeout — a typed timeout outcome, never a rejection and never an app failure."),
+        ],
+        schemaName: "review",
+        // No `payload` shape (#0055): the result is the review reply — an
+        // object whose `comments` is an array of objects — and `PayloadShape`
+        // is flat-only (#0194: "nested objects and arrays are not supported
+        // ... do not half-build nesting to fit it in here"). Same precedent
+        // as `statusSpec` (#0225) through `verifySpec` (#0348): the schema
+        // carries the self-reference form, and `ReviewWireTests` pins the
+        // encoded keys instead.
         payload: nil
     )
 

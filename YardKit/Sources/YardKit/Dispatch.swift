@@ -31,6 +31,9 @@ public func dispatch(
     connect: () async throws -> AppConnection = { try await AppConnection.connect() },
     connectHook: () async throws -> AppConnection = {
         try await AppConnection.connect(launchIfNeeded: false)
+    },
+    connectReview: () async throws -> AppConnection = {
+        try await AppConnection.connect(launchIfNeeded: false)
     }
 ) async -> (stdout: String, stderr: String, exitCode: ExitCode) {
     switch route(arguments) {
@@ -51,6 +54,20 @@ public func dispatch(
         return runYard(arguments: arguments)
 
     case .remote:
+        // The review arm (#0055) is remote but not a `perform` round-trip:
+        // it opens a request that stays open while the human decides, which
+        // the argv-in/envelope-out shape cannot carry. Its connector is a
+        // third injectable with `launchIfNeeded: false` baked in — review
+        // never launches the app; the app being down is exit 3 (the M4 exit
+        // criterion). If this interception were ever dropped, a review argv
+        // would reach the app as an ordinary `perform` request and come back
+        // "Unknown subcommand" at exit 1 — visible, not silent.
+        if arguments.first == ReviewArm.commandName {
+            return await ReviewArm.run(
+                arguments: arguments,
+                workingDirectory: workingDirectory,
+                connect: connectReview)
+        }
         do {
             let app = try await connect()
             defer { app.close() }

@@ -81,7 +81,7 @@ public struct EncodableResult: Sendable, Encodable {
 ///
 /// Every value also maps to an `ExitCode` so the same code appears both in the
 /// JSON output and as the process exit status — an agent can branch on either.
-public enum EnvelopeErrorCode: String, Sendable, CaseIterable {
+public enum EnvelopeErrorCode: String, Codable, Sendable, CaseIterable {
 
     /// A command completed successfully — paired with `ExitCode.success`.
     case ok = "ok"
@@ -115,6 +115,12 @@ public enum EnvelopeErrorCode: String, Sendable, CaseIterable {
     /// signature format mismatch.
     case signingFailed = "signing_failed"
 
+    /// The human did not answer an interactive command within its
+    /// `--timeout` (`review --wait`, #0055). A distinct code so an agent can
+    /// tell "nobody answered" apart from "the app died" (5) and "the app was
+    /// never there" (3).
+    case timedOut = "timed_out"
+
     /// Stable string value used in error envelopes and test assertions. The
     /// mapping mirrors `ExitCode.codeLabel` one-to-one so the two surfaces of
     /// failure always agree.
@@ -138,6 +144,7 @@ public enum EnvelopeErrorCode: String, Sendable, CaseIterable {
         case "human_declined": self = .humanDeclined
         case "blocked_on_conflicts": self = .blockedOnConflicts
         case "signing_failed": self = .signingFailed
+        case "timed_out": self = .timedOut
         default: throw DecodingError.dataCorrupted(
             .init(codingPath: decoder.codingPath, debugDescription: "Unknown EnvelopeErrorCode: \(raw)")
         )
@@ -165,11 +172,16 @@ public enum EnvelopeErrorCode: String, Sendable, CaseIterable {
         case .humanDeclined: return .humanDeclined
         case .blockedOnConflicts: return .blockedOnConflicts
         case .signingFailed: return .signingFailed
+        case .timedOut: return .timedOut
         }
     }
 }
 
-public struct EnvelopeError: Sendable, Encodable {
+/// The error object inside a failure envelope. Decodable as well as
+/// Encodable so the CLI can re-render a failure envelope the app produced
+/// over its own wire (`ReviewServing` refuses unservable review requests
+/// with one, #0055) — the decode keys are the encode keys.
+public struct EnvelopeError: Sendable, Codable {
     public let code: EnvelopeErrorCode
     public let message: String
 
@@ -200,11 +212,21 @@ public struct EnvelopeError: Sendable, Encodable {
         case hint = "hint"
     }
 
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: _ErrorKey.self)
+        code = try container.decode(EnvelopeErrorCode.self, forKey: .code)
+        message = try container.decode(String.self, forKey: .message)
+        hint = try container.decodeIfPresent(String.self, forKey: .hint)
+    }
+
     public func matchExitCode() -> ExitCode { code.exitCode }
 }
 
 
-public struct EnvelopeFail: Sendable, Encodable {
+/// The failure envelope. Decodable as well as Encodable — see
+/// ``EnvelopeError``'s comment for why (#0055). The synthesized decode reads
+/// the same three keys `encode` writes.
+public struct EnvelopeFail: Sendable, Codable {
     public let schemaVersion: Int
     public let ok: Bool
     public let error: EnvelopeError
@@ -226,6 +248,13 @@ public struct EnvelopeFail: Sendable, Encodable {
         case schemaVersion = "schemaVersion"
         case ok = "ok"
         case error = "error"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: _FailKey.self)
+        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        ok = try container.decode(Bool.self, forKey: .ok)
+        error = try container.decode(EnvelopeError.self, forKey: .error)
     }
 
     /// Writes a failure envelope to stdout and the human-readable line to

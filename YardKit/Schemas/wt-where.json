@@ -14,6 +14,7 @@
             "request_failed",
             "session_terminated",
             "signing_failed",
+            "timed_out",
             "usage"
           ],
           "type" : "string"

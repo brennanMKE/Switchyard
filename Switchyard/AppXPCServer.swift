@@ -56,6 +56,12 @@ final class AppXPCServer {
     /// one. Called at most once per launch, driven by `repairGate`.
     var repairHandler: (() -> Void)?
 
+    /// The app's pending reviews (#0055) — one per repository, replaceable,
+    /// each armed with its own timeout. Owned by the server so every accepted
+    /// CLI connection shares one store (a pending review is not per-connection
+    /// state) and round 2's sheet can bind to the same instance.
+    private let pendingReviews = PendingReviewStore()
+
     init() {}
 
     // MARK: - Lifecycle
@@ -67,7 +73,7 @@ final class AppXPCServer {
     /// live so its `endpoint` is a real, resumed one by the time it is
     /// handed to the broker.
     func start() {
-        let delegate = ListenerDelegate()
+        let delegate = ListenerDelegate(pendingReviews: pendingReviews)
         listenerDelegate = delegate
         listener.delegate = delegate
         listener.resume()
@@ -169,6 +175,13 @@ final class AppXPCServer {
 /// `nonisolated` because XPC invokes this on its own queues, and the app
 /// target compiles with `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`.
 private nonisolated final class ListenerDelegate: NSObject, NSXPCListenerDelegate {
+    private let pendingReviews: PendingReviewStore
+
+    init(pendingReviews: PendingReviewStore) {
+        self.pendingReviews = pendingReviews
+        super.init()
+    }
+
     func listener(
         _ listener: NSXPCListener,
         shouldAcceptNewConnection connection: NSXPCConnection
@@ -176,7 +189,7 @@ private nonisolated final class ListenerDelegate: NSObject, NSXPCListenerDelegat
         // Both must be set BEFORE resume(), or calls silently do nothing — no
         // error, no reply, no crash. Same rule as the client side.
         connection.exportedInterface = XPCInterfaces.appService
-        connection.exportedObject = AppService()
+        connection.exportedObject = AppService(pendingReviews: pendingReviews)
         connection.resume()
         return true
     }
@@ -197,6 +210,15 @@ private nonisolated final class ListenerDelegate: NSObject, NSXPCListenerDelegat
 private nonisolated final class AppService: NSObject, AppServiceProtocol {
     private static let logger = Logger(
         subsystem: ServiceNames.logSubsystem, category: "app-service")
+
+    /// The server's shared pending-review store, threaded through the
+    /// delegate. All accepted connections register into the same store.
+    private let pendingReviews: PendingReviewStore
+
+    init(pendingReviews: PendingReviewStore) {
+        self.pendingReviews = pendingReviews
+        super.init()
+    }
 
     func appPing(reply: @escaping @Sendable (String) -> Void) {
         // Bundle.main.infoDictionary is safe to read from any queue, so no
@@ -260,5 +282,25 @@ private nonisolated final class AppService: NSObject, AppServiceProtocol {
             environment: environment,
             standardInput: standardInput,
             workingDirectory: workingDirectory))
+    }
+
+    /// Forwards to `runReviewRequest` (YardCommands), the single body the
+    /// package tests exercise — same pattern as `perform` above. The reply
+    /// may take minutes: the serving body runs on its own task and the reply
+    /// block is called when the human decides, the pending review times out,
+    /// or it is superseded — long after this method returns.
+    func performReview(
+        request: Data,
+        workingDirectory: String,
+        reply: @escaping @Sendable (Data) -> Void
+    ) {
+        let store = pendingReviews
+        Task {
+            let outcomeData = await runReviewRequest(
+                requestData: request,
+                workingDirectory: workingDirectory,
+                store: store)
+            reply(outcomeData)
+        }
     }
 }

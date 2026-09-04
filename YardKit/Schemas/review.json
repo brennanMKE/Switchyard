@@ -1,0 +1,95 @@
+{
+  "command" : "review",
+  "envelope" : {
+    "failure" : {
+      "error" : {
+        "code" : {
+          "enum" : [
+            "app_unavailable",
+            "blocked_on_conflicts",
+            "broker_unreachable",
+            "human_declined",
+            "ok",
+            "repository_error",
+            "request_failed",
+            "session_terminated",
+            "signing_failed",
+            "timed_out",
+            "usage"
+          ],
+          "type" : "string"
+        },
+        "hint" : {
+          "optional" : true,
+          "type" : "string"
+        },
+        "message" : {
+          "type" : "string"
+        }
+      },
+      "ok" : false,
+      "schemaVersion" : 1
+    },
+    "success" : {
+      "ok" : true,
+      "result" : {
+        "optional" : true,
+        "schema" : "review"
+      },
+      "schemaVersion" : 1
+    }
+  },
+  "exitCodes" : [
+    {
+      "code" : 0,
+      "meaning" : "The human approved or amended; the payload is the review reply. Amend is not a rejection — its editedPatch carries the edited patch."
+    },
+    {
+      "code" : 1,
+      "meaning" : "Invalid arguments — missing --wait, no selector, both a range and --staged, or a malformed --timeout."
+    },
+    {
+      "code" : 3,
+      "meaning" : "The Switchyard app is not running. Review never launches the app."
+    },
+    {
+      "code" : 4,
+      "meaning" : "The request was superseded by a newer review for the same repository, or the app could not serve it — no decision was received."
+    },
+    {
+      "code" : 5,
+      "meaning" : "The app quit before the human decided — never reported as a decision."
+    },
+    {
+      "code" : 7,
+      "meaning" : "The human rejected the review; the payload still carries the full reply with ok:true."
+    },
+    {
+      "code" : 10,
+      "meaning" : "No decision arrived within --timeout — a typed timeout outcome, never a rejection and never an app failure."
+    }
+  ],
+  "flags" : [
+    {
+      "argument" : null,
+      "help" : "Review the staged changes (HEAD against the index) instead of a range.",
+      "long" : "staged",
+      "short" : null
+    },
+    {
+      "argument" : "seconds",
+      "help" : "Give up the wait after this many seconds (default 3600). On expiry the CLI exits 10 with a typed timeout outcome — never a rejection.",
+      "long" : "timeout",
+      "short" : null
+    },
+    {
+      "argument" : null,
+      "help" : "Block until the human decides. Required in this build; a non-blocking form does not exist yet.",
+      "long" : "wait",
+      "short" : null
+    }
+  ],
+  "schemaName" : "review",
+  "schemaVersion" : 1,
+  "summary" : "Push a diff to the app and block until the human decides, returning the decision as structured data."
+}

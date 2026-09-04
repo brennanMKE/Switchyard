@@ -107,6 +107,36 @@ import Foundation
         workingDirectory: String,
         reply: @escaping @Sendable (Int32) -> Void
     )
+
+    /// Opens a review request the human answers in the app (#0055).
+    ///
+    /// A separate method rather than a `perform` invocation because the call
+    /// does not round-trip like a command: it stays open for minutes while
+    /// the human decides, and its reply bytes are a ``ReviewOutcome`` — the
+    /// typed answer, including "nobody answered" and "a newer request
+    /// replaced this one" — not a rendered envelope. The exit-code mapping
+    /// from outcome to process exit is the review arm's own policy
+    /// (`ReviewArm.render`), the way `perform`'s mapping is the envelope's.
+    ///
+    /// - Parameters:
+    ///   - request: the JSON-encoded ``ReviewRequest``. The CLI cannot
+    ///     resolve the repository (it does not link the engine), so it sends
+    ///     the request with `commonDir` empty.
+    ///   - workingDirectory: the CLI process's working directory, explicit
+    ///     and never inferred — the same rule as `perform`. The app-side body
+    ///     (`runReviewRequest` in `YardCommands`) resolves the repository
+    ///     from it and fills the request's `commonDir` before registering.
+    ///   - reply: the JSON-encoded ``ReviewOutcome`` — decided, timedOut, or
+    ///     superseded — or a JSON-encoded `EnvelopeFail` when the request
+    ///     could not be served at all (undecodable bytes, no repository).
+    ///     `Data` because `NSXPCInterface` carries no Swift struct with
+    ///     guaranteed fidelity across the boundary; the reply block may be
+    ///     called long after this method returns — that is the point.
+    func performReview(
+        request: Data,
+        workingDirectory: String,
+        reply: @escaping @Sendable (Data) -> Void
+    )
 }
 
 /// `NSXPCInterface` values for ``BrokerProtocol`` and ``AppServiceProtocol``.

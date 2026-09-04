@@ -64,6 +64,42 @@ private final class FakeAppService: NSObject, AppServiceProtocol {
         }
         reply(0)
     }
+
+    /// What the last review request carried, for the wire round-trip test.
+    /// The fake replies a fixed decided outcome — the blocking semantics
+    /// (timeouts, supersede, app death) are the store's and the arm's, tested
+    /// in their own suites; here only the wire is under test.
+    struct CapturedReviewRequest: Equatable {
+        let requestData: Data
+        let workingDirectory: String
+    }
+
+    private let reviewLock = NSLock()
+    private var _capturedReviewRequest: CapturedReviewRequest?
+
+    var capturedReviewRequest: CapturedReviewRequest? {
+        reviewLock.withLock { _capturedReviewRequest }
+    }
+
+    func performReview(
+        request: Data,
+        workingDirectory: String,
+        reply: @escaping @Sendable (Data) -> Void
+    ) {
+        reviewLock.withLock {
+            _capturedReviewRequest = CapturedReviewRequest(
+                requestData: request,
+                workingDirectory: workingDirectory)
+        }
+        let outcome = ReviewOutcome.decided(ReviewReply(
+            decision: .approve,
+            message: "ship it",
+            comments: [],
+            editedPatch: nil))
+        let encoder = JSONEncoder()
+        encoder.outputFormatting.insert(.sortedKeys)
+        reply((try? encoder.encode(outcome)) ?? Data())
+    }
 }
 
 private final class AppListenerDelegate: NSObject, NSXPCListenerDelegate {
@@ -519,5 +555,45 @@ struct AppConnectionTests {
         #expect(captured.environment == environment)
         #expect(captured.standardInput == standardInput)
         #expect(captured.workingDirectory == "/tmp/some-repo")
+    }
+
+    // MARK: - The review request crosses the wire intact (#0055)
+
+    /// The same round-trip guarantee the hook test above gives the hook arm,
+    /// for the review exchange: the request bytes arrive at the app side
+    /// intact (with `commonDir` empty, exactly as the CLI sends it), the
+    /// working directory arrives as its own parameter, and the outcome bytes
+    /// — the human's reply as the app encoded it — come back intact.
+    @Test func performReviewRoundTripsTheRequestAndTheOutcome() async throws {
+        let fake = FakeAppListener()
+        defer { fake.listener.invalidate() }
+        let app = fake.connect()
+        defer { app.close() }
+
+        let request = ReviewRequest(
+            commonDir: "",
+            selector: .range("main..HEAD"),
+            timeoutSeconds: 3600)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting.insert(.sortedKeys)
+        let requestData = try encoder.encode(request)
+
+        let outcomeData = try await app.performReview(
+            request: requestData,
+            workingDirectory: "/tmp/some-repo",
+            timeout: testTimeout)
+
+        let captured = try #require(
+            fake.delegate.service.capturedReviewRequest,
+            "the review request must have reached the app side")
+        #expect(captured.requestData == requestData)
+        #expect(captured.workingDirectory == "/tmp/some-repo")
+
+        let expected = ReviewOutcome.decided(ReviewReply(
+            decision: .approve,
+            message: "ship it",
+            comments: [],
+            editedPatch: nil))
+        #expect(outcomeData == (try? encoder.encode(expected)))
     }
 }

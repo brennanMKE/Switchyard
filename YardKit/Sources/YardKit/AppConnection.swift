@@ -210,6 +210,24 @@ public final class AppConnection: @unchecked Sendable {
         }
     }
 
+    /// Opens one review request and waits for the app's outcome bytes
+    /// (#0055). The caller owns the deadline — the review arm passes
+    /// `--timeout` plus its backstop margin — and maps a `CLIError.timedOut`
+    /// thrown here to ``ExitCode/timedOut`` rather than this type's default
+    /// broker mapping, because "nobody answered the review" is not "the
+    /// broker was unreachable".
+    public func performReview(
+        request: Data,
+        workingDirectory: String,
+        timeout: Duration = .seconds(5)
+    ) async throws -> Data {
+        try await call(timeout: timeout) { app, complete in
+            app.performReview(request: request, workingDirectory: workingDirectory) { data in
+                complete(.success(data))
+            }
+        }
+    }
+
     private func call<T: Sendable>(
         timeout: Duration,
         _ invoke: @escaping @Sendable (any AppServiceProtocol, @escaping @Sendable (Result<T, any Error>) -> Void) -> Void

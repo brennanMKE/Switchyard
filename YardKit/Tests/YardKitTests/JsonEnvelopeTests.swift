@@ -162,7 +162,7 @@ struct JsonEnvelopeTests {
         let codes: [ExitCode] = [
             .success, .usage, .brokerUnreachable, .appUnavailable,
             .requestFailed, .sessionTerminated, .repositoryError,
-            .humanDeclined, .blockedOnConflicts, .signingFailed
+            .humanDeclined, .blockedOnConflicts, .signingFailed, .timedOut
         ]
 
         let set = Set(codes.map(\.rawValue))
@@ -187,7 +187,7 @@ struct JsonEnvelopeTests {
         let raws = [
             ExitCode.success, .usage, .brokerUnreachable, .appUnavailable,
             .requestFailed, .sessionTerminated, .repositoryError,
-            .humanDeclined, .blockedOnConflicts, .signingFailed
+            .humanDeclined, .blockedOnConflicts, .signingFailed, .timedOut
         ].map(\.rawValue)
 
         #expect(Set(raws).count == raws.count)
@@ -316,15 +316,16 @@ struct JsonEnvelopeTests {
     }
 
     @Test func allEnvelopeErrorCodesEncodeAndMatchExitCode() {
-        #expect(EnvelopeErrorCode.allCases.count == 10)
+        #expect(EnvelopeErrorCode.allCases.count == 11)
 
         let expectedStrings: [String] = [
             "ok", "usage", "broker_unreachable", "app_unavailable",
             "request_failed", "session_terminated", "repository_error",
-            "human_declined", "blocked_on_conflicts", "signing_failed"
+            "human_declined", "blocked_on_conflicts", "signing_failed",
+            "timed_out"
         ]
 
-        let expectedExitCodes: [Int32] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+        let expectedExitCodes: [Int32] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
         for (index, code) in EnvelopeErrorCode.allCases.enumerated() {
             let error = EnvelopeError(code: code, message: "test")

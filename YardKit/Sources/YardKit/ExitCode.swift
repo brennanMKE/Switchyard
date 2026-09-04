@@ -59,6 +59,18 @@ public enum ExitCode: Int, Sendable {
     /// correct the config without retrying the same thing.
     case signingFailed = 9
 
+    /// The human did not answer an interactive command within its `--timeout`
+    /// (`review --wait`, #0055). The wait ended without a decision — never
+    /// reported as a rejection (7), never as the app dying (5), never as the
+    /// app being unavailable (3): three different situations an agent must
+    /// handle differently, so three different codes.
+    ///
+    /// The planning pass named this case 8 under the belief that 0-7 were the
+    /// taken range; `blockedOnConflicts` (8) and `signingFailed` (9) predate
+    /// it, so 10 is the first free value. Renumbering the existing cases would
+    /// break the documented contract for every other command.
+    case timedOut = 10
+
     /// Maps the `Int32` exit code the app returns over XPC (`NSXPCInterface`
     /// will not carry a Swift enum, so the wire uses `Int32` — see guide §11
     /// decision 15 and ``AppServiceProtocol/perform(arguments:workingDirectory:reply:)``)
@@ -84,6 +96,7 @@ public enum ExitCode: Int, Sendable {
         case .humanDeclined: return "human_declined"
         case .blockedOnConflicts: return "blocked_on_conflicts"
         case .signingFailed: return "signing_failed"
+        case .timedOut: return "timed_out"
         }
     }
 
