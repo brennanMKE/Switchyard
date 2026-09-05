@@ -83,29 +83,43 @@ public struct ResolveCardData: Sendable, Equatable {
 
 /// Which card a porcelain kind presents. `readOnly` carries the explanation
 /// the card shows instead of choices — a kind the engine cannot resolve is
-/// never given a fake choice (the design table's rule).
+/// never given a fake choice (the design table's rule). Nothing routes there
+/// today: every porcelain kind maps to a stageable card, because a
+/// both-deleted record resolves as a `keepDeletion` card (`ResolveApply`
+/// stages the deletion and the unmerged entries clear).
 public enum ResolveCardKind: Sendable, Equatable {
     case content
     case addAdd
     case deleteModify
     case rename
+    case bothDeleted
     case readOnly(explanation: String)
 
     /// The card kind a porcelain kind renders. UU is a content conflict, AA
     /// add/add, DU/UD delete/modify, AU/UA the per-record rename cards
     /// (#0057 round 1's finding: a rename group surfaces as DD at the old
     /// path plus AU at ours' new path and UA at theirs'), and DD — both
-    /// deleted — is presented read-only.
+    /// deleted, the group's old path — is its own card: the explanation
+    /// plus one stageable choice, `keepDeletion`.
     public static func kind(for porcelain: ConflictKind) -> ResolveCardKind {
         switch porcelain {
         case .bothModified: .content
         case .bothAdded: .addAdd
         case .deletedByUs, .deletedByThem: .deleteModify
         case .addedByUs, .addedByThem: .rename
+        case .bothDeleted: .bothDeleted
+        }
+    }
+
+    /// The card's standing explanation, when it carries one — a read-only
+    /// card's reason, or the both-deleted card's rename-group note.
+    public var explanation: String? {
+        switch self {
+        case .readOnly(let text): text
         case .bothDeleted:
-            .readOnly(explanation: "Both sides deleted this path. It resolves "
-                + "with its rename group's records — take one side's rename "
-                + "and this path records as deleted with it.")
+            "Both sides deleted this path — a rename group's old record. "
+                + "Stage the deletion to record it."
+        case .content, .addAdd, .deleteModify, .rename: nil
         }
     }
 
@@ -116,6 +130,7 @@ public enum ResolveCardKind: Sendable, Equatable {
         case .addAdd: "Add/add conflict"
         case .deleteModify: "Delete/modify conflict"
         case .rename: "Rename conflict"
+        case .bothDeleted: "Both-deleted conflict"
         case .readOnly: "Not resolvable by this pane"
         }
     }
@@ -187,10 +202,19 @@ public final class ResolveCardModel: Identifiable {
             choices = [.keepDeletion, .keepModification, .editedContent]
         case .rename:
             // A rename record carries exactly one side's stage (#0057 round
-            // 1): AU is ours' new path, UA theirs'. The side without a stage
-            // is not offered — a choice the engine must refuse is a fake
-            // choice.
-            choices = data.oursText != nil ? [.renameTakeOurs] : [.renameTakeTheirs]
+            // 1): AU is ours' new path, UA theirs'. The take choice is the
+            // side the record carries; `keepDeletion` is the second choice —
+            // dropping this side's rename, how the group's other records
+            // resolve (`ResolveApply`: the old path and the rejected side's
+            // new path are each "keep the deletion" cards).
+            choices = data.oursText != nil
+                ? [.renameTakeOurs, .keepDeletion]
+                : [.renameTakeTheirs, .keepDeletion]
+        case .bothDeleted:
+            // No fake choice and no fake read-only: the engine's resolution
+            // for a both-deleted record is keepDeletion — stage the deletion,
+            // the unmerged entries clear.
+            choices = [.keepDeletion]
         case .readOnly:
             choices = []
         }
@@ -202,7 +226,7 @@ public final class ResolveCardModel: Identifiable {
             editorText = data.oursText ?? ""
         case .deleteModify:
             editorText = data.workingText ?? data.oursText ?? data.theirsText ?? ""
-        case .rename, .readOnly:
+        case .rename, .bothDeleted, .readOnly:
             editorText = ""
         }
         note = ""
@@ -746,11 +770,12 @@ public struct ResolveCardView: View {
                 }
             }
 
-            if case .readOnly(let explanation) = card.kind {
+            if let explanation = card.kind.explanation {
                 Text(explanation)
                     .font(.callout)
                     .foregroundStyle(.secondary)
-            } else {
+            }
+            if !card.choices.isEmpty {
                 sideBySide
                 HStack(spacing: 8) {
                     Picker("Resolution", selection: $card.selectedChoice) {

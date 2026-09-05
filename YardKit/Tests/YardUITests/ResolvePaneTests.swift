@@ -174,16 +174,18 @@ struct ResolvePaneTests {
         #expect(card.resolution()?.editedContent == "theirs modification")
     }
 
-    @Test func renameCardOffersOnlyTheSideItsRecordCarries() throws {
+    @Test func renameCardOffersTheSideItsRecordCarriesPlusKeepDeletion() throws {
         // AU is ours' new path — it carries ours' stage only, so "Take
-        // theirs'" would be a choice the engine must refuse. Round 1's
-        // finding: a rename group is per-record cards.
+        // theirs'" would be a choice the engine must refuse. The take choice
+        // is the side the record carries; keepDeletion is the second choice,
+        // dropping this side's rename (how the group's other records
+        // resolve).
         let ours = ResolvePaneModel(pending: pending())
         ours.attachDetails(
             originPath: "/repos/a",
             details: [ResolveCardData(path: "Renamed.swift", kind: .addedByUs, oursText: "ours")])
         let oursCard = try card(ours, path: "Renamed.swift")
-        #expect(oursCard.choices == [.renameTakeOurs])
+        #expect(oursCard.choices == [.renameTakeOurs, .keepDeletion])
         #expect(oursCard.resolution()?.choice == .renameTakeOurs)
         #expect(oursCard.resolution()?.kind == .addedByUs)
 
@@ -192,24 +194,78 @@ struct ResolvePaneTests {
             originPath: "/repos/a",
             details: [ResolveCardData(path: "Moved.swift", kind: .addedByThem, theirsText: "theirs")])
         let theirsCard = try card(theirs, path: "Moved.swift")
-        #expect(theirsCard.choices == [.renameTakeTheirs])
+        #expect(theirsCard.choices == [.renameTakeTheirs, .keepDeletion])
         #expect(theirsCard.resolution()?.choice == .renameTakeTheirs)
+
+        theirsCard.selectedChoice = .keepDeletion
+        #expect(theirsCard.resolution()?.choice == .keepDeletion)
     }
 
-    @Test func bothDeletedKindIsReadOnlyWithAnExplanation() throws {
+    @Test func bothDeletedCardOffersKeepDeletionWithAnExplanation() throws {
+        // A both-deleted record is a rename group's old path. It resolves as
+        // keepDeletion — the engine stages the deletion and the unmerged
+        // entries clear — so it is stageable, not read-only: a read-only
+        // card here would leave the group's old path unmerged forever and
+        // every rename resolution would exit 8.
         let pane = ResolvePaneModel(pending: pending())
         pane.attachDetails(
             originPath: "/repos/a",
-            details: [ResolveCardData(path: "Old.swift", kind: .bothDeleted)])
+            details: [ResolveCardData(path: "Old.swift", kind: .bothDeleted, baseText: "base line")])
         let card = try card(pane, path: "Old.swift")
-        guard case .readOnly(let explanation) = card.kind else {
-            Issue.record("a both-deleted record must present read-only")
+        #expect(card.kind == .bothDeleted)
+        let explanation = try #require(card.kind.explanation)
+        #expect(!explanation.isEmpty)
+        #expect(card.choices == [.keepDeletion], "the engine's one resolution for this record")
+        #expect(card.resolution()?.choice == .keepDeletion)
+        #expect(card.sides.map(\.label) == ["Base"], "only the stage that exists renders")
+        let log = ApplyLog()
+        pane.onApply = { try log.record($0) }
+        #expect(pane.stage(card), "the deletion stages")
+        #expect(card.staged)
+        #expect(log.count == 1)
+        #expect(log.entries.first?.choice == .keepDeletion)
+        #expect(log.entries.first?.path == "Old.swift")
+    }
+
+    @Test func aRenameGroupComposesToResolutionsTheEngineAccepts() throws {
+        // The group git surfaces for rename/rename(1to2) — DD at the old
+        // path, AU at ours' new path, UA at theirs' — resolves through the
+        // pane as per-record choices, and every composed choice maps onto an
+        // engine resolution that accepts it: renameTake on the side taken,
+        // keepDeletion on the other two.
+        let pane = ResolvePaneModel(pending: pending())
+        pane.attachDetails(
+            originPath: "/repos/a",
+            details: [
+                ResolveCardData(path: "Old.swift", kind: .bothDeleted, baseText: "base line"),
+                ResolveCardData(path: "Ours.swift", kind: .addedByUs, oursText: "ours"),
+                ResolveCardData(path: "Theirs.swift", kind: .addedByThem, theirsText: "theirs"),
+            ])
+        let oldCard = try card(pane, path: "Old.swift")
+        let oursCard = try card(pane, path: "Ours.swift")
+        let theirsCard = try card(pane, path: "Theirs.swift")
+
+        // The human takes ours' rename; the other two records drop.
+        oursCard.selectedChoice = .renameTakeOurs
+        theirsCard.selectedChoice = .keepDeletion
+        oldCard.selectedChoice = .keepDeletion
+        let log = ApplyLog()
+        pane.onApply = { try log.record($0) }
+        #expect(pane.stage(oursCard))
+        #expect(pane.stage(theirsCard))
+        #expect(pane.stage(oldCard))
+        #expect(log.count == 3, "one apply per staged card, no group propagation")
+
+        let reply = pane.composedReply()
+        guard case .resolutions(let resolutions) = reply else {
+            Issue.record("the composed reply must carry resolutions, got \(reply)")
             return
         }
-        #expect(!explanation.isEmpty)
-        #expect(card.choices.isEmpty, "a kind the engine cannot resolve gets no fake choice")
-        #expect(card.resolution() == nil)
-        #expect(!pane.stage(card), "staging a read-only card refuses")
+        #expect(resolutions.count == 3)
+        let byPath = Dictionary(uniqueKeysWithValues: resolutions.map { ($0.path, $0.choice) })
+        #expect(byPath["Ours.swift"] == .renameTakeOurs)
+        #expect(byPath["Theirs.swift"] == .keepDeletion)
+        #expect(byPath["Old.swift"] == .keepDeletion)
     }
 
     @Test func theComposedNoteRidesOnTheResolution() throws {
