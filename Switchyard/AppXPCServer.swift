@@ -68,6 +68,11 @@ final class AppXPCServer {
     /// per-connection state, and the sheet binds to the same instance.
     private let pendingAsks = PendingAskStore()
 
+    /// The app's pending resolves (#0057) — one per repository, replaceable
+    /// (the review semantics, not ask's queue), each armed with its own
+    /// timeout. Owned by the server for the same reason as `pendingReviews`.
+    private let pendingResolves = PendingResolveStore()
+
     /// #0055 round 2: the review sheet's bridge, over the same store. The
     /// app delegate hands `reviewBridge.center` to `ContentView`; the
     /// delegate threads the bridge into each `AppService` so a review
@@ -91,6 +96,10 @@ final class AppXPCServer {
     /// each `AppService`.
     var pendingAskStore: PendingAskStore { pendingAsks }
 
+    /// The store behind the resolve pane (round 2, #0057) — what
+    /// `ListenerDelegate` threads into each `AppService`.
+    var pendingResolveStore: PendingResolveStore { pendingResolves }
+
     // MARK: - Lifecycle
 
     /// Resumes the anonymous listener.
@@ -103,6 +112,7 @@ final class AppXPCServer {
         let delegate = ListenerDelegate(
             pendingReviews: pendingReviews,
             pendingAsks: pendingAsks,
+            pendingResolves: pendingResolves,
             reviewBridge: reviewBridge,
             askBridge: askBridge)
         listenerDelegate = delegate
@@ -208,17 +218,20 @@ final class AppXPCServer {
 private nonisolated final class ListenerDelegate: NSObject, NSXPCListenerDelegate {
     private let pendingReviews: PendingReviewStore
     private let pendingAsks: PendingAskStore
+    private let pendingResolves: PendingResolveStore
     private let reviewBridge: ReviewSheetBridge
     private let askBridge: AskSheetBridge
 
     init(
         pendingReviews: PendingReviewStore,
         pendingAsks: PendingAskStore,
+        pendingResolves: PendingResolveStore,
         reviewBridge: ReviewSheetBridge,
         askBridge: AskSheetBridge
     ) {
         self.pendingReviews = pendingReviews
         self.pendingAsks = pendingAsks
+        self.pendingResolves = pendingResolves
         self.reviewBridge = reviewBridge
         self.askBridge = askBridge
         super.init()
@@ -234,6 +247,7 @@ private nonisolated final class ListenerDelegate: NSObject, NSXPCListenerDelegat
         connection.exportedObject = AppService(
             pendingReviews: pendingReviews,
             pendingAsks: pendingAsks,
+            pendingResolves: pendingResolves,
             reviewBridge: reviewBridge,
             askBridge: askBridge)
         connection.resume()
@@ -264,6 +278,9 @@ private nonisolated final class AppService: NSObject, AppServiceProtocol {
     /// The server's shared pending-ask store (#0056) — same discipline.
     private let pendingAsks: PendingAskStore
 
+    /// The server's shared pending-resolve store (#0057) — same discipline.
+    private let pendingResolves: PendingResolveStore
+
     /// #0055 round 2: delivers a registered request's resolved context and
     /// diff to the review sheets.
     private let reviewBridge: ReviewSheetBridge
@@ -275,11 +292,13 @@ private nonisolated final class AppService: NSObject, AppServiceProtocol {
     init(
         pendingReviews: PendingReviewStore,
         pendingAsks: PendingAskStore,
+        pendingResolves: PendingResolveStore,
         reviewBridge: ReviewSheetBridge,
         askBridge: AskSheetBridge
     ) {
         self.pendingReviews = pendingReviews
         self.pendingAsks = pendingAsks
+        self.pendingResolves = pendingResolves
         self.reviewBridge = reviewBridge
         self.askBridge = askBridge
         super.init()
@@ -324,6 +343,14 @@ private nonisolated final class AppService: NSObject, AppServiceProtocol {
                         "XPC open refused for \(path, privacy: .public): \(detail, privacy: .public)")
                 }
             }
+        }
+        // #0057: the engine-backed commands run here first — the composition
+        // `EngineCommands.runEngineCommand` documents as the app's (`… ?? `
+        // `runYard`), and the one the resolve arm's post-reply conflicts
+        // re-check rides (`perform(arguments: ["conflicts"])`).
+        if let engine = runEngineCommand(arguments: arguments, workingDirectory: workingDirectory) {
+            reply(Data(engine.stdout.utf8), Int32(engine.exitCode.rawValue))
+            return
         }
         let result = performCommand(arguments: arguments, workingDirectory: workingDirectory)
         reply(result.stdout, result.exitCode)
@@ -402,6 +429,30 @@ private nonisolated final class AppService: NSObject, AppServiceProtocol {
                         bridge.pendingDidRegister(request: requestData, context: context)
                     }
                 })
+            reply(outcomeData)
+        }
+    }
+
+    /// Forwards to `runResolveRequest` (YardCommands), the single body the
+    /// package tests exercise — same pattern as `performReview` above. The
+    /// reply may take minutes: the serving body runs on its own task and the
+    /// reply block is called when the human answers, the request times out,
+    /// or it is superseded — long after this method returns.
+    ///
+    /// `onPending` is nil in round 1: the conflict details the serving body
+    /// computes are delivered when the resolve pane's bridge lands (#0057
+    /// round 2), the way `reviewBridge` was threaded in for #0055's sheet.
+    func performResolve(
+        request: Data,
+        workingDirectory: String,
+        reply: @escaping @Sendable (Data) -> Void
+    ) {
+        let store = pendingResolves
+        Task {
+            let outcomeData = await runResolveRequest(
+                requestData: request,
+                workingDirectory: workingDirectory,
+                store: store)
             reply(outcomeData)
         }
     }

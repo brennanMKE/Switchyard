@@ -12,7 +12,7 @@ public enum CommandRegistry {
 
     /// All known `yard` command specifications in the order they should be
     /// rendered in help output.
-    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, reviewSpec, askSpec]
+    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, reviewSpec, askSpec, resolveSpec]
 
     // MARK: - The switchyard spec — rendered by `yard --help`
 
@@ -353,6 +353,44 @@ public enum CommandRegistry {
         // `statusSpec` (#0225) through `reviewSpec` (#0055): the schema
         // carries the self-reference form, and `AskWireTests` pins the
         // encoded keys instead.
+        payload: nil
+    )
+
+    // MARK: - The resolve spec — remote over XPC, answered by `ResolveArm` (#0057)
+
+    /// The spec is named `resolve`; `dispatch` intercepts it before the
+    /// generic `perform` path for the same reason it intercepts `review` and
+    /// `ask`: the call stays open while the human resolves conflicted paths
+    /// one card at a time, which the argv-in/envelope-out shape cannot
+    /// carry. The optional positional pathspec narrows the conflicts the
+    /// sheet presents; a second resolve for the same repository SUPERSEDES
+    /// the first (the review semantics, not ask's queue), so unlike
+    /// `askSpec` there is a superseded exit code.
+    static let resolveSpec = CommandSpec(
+        name: "resolve",
+        summary: "Open the three-way merge UI for the repository's conflicts and block until the human resolves them, cancels, or the wait times out.",
+        flags: [
+            FlagSpec(long: "wait", argument: nil, help: "Block until the human resolves or cancels. Required in this build; a non-blocking form does not exist yet."),
+            FlagSpec(long: "timeout", argument: "seconds", help: "Give up the wait after this many seconds (default 3600). On expiry the CLI exits 10 with a typed timeout outcome — never a cancellation."),
+        ],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The human resolved every conflicted path; the payload is the resolve reply (per-path resolutions)."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — missing --wait, more than one pathspec, an empty pathspec, or a malformed --timeout."),
+            ExitCodeSpec(code: 3, meaning: "The Switchyard app is not running. Resolve never launches the app."),
+            ExitCodeSpec(code: 4, meaning: "The request was superseded by a newer resolve for the same repository, or the app could not serve it — no reply was received."),
+            ExitCodeSpec(code: 5, meaning: "The app quit before the human decided — never reported as a decision."),
+            ExitCodeSpec(code: 7, meaning: "The human cancelled; nothing was staged and nothing was touched; the payload still carries the cancelled reply with ok:true."),
+            ExitCodeSpec(code: 8, meaning: "Conflicts remain after the reply (blocked_on_conflicts) — some paths were left unresolved; the payload still carries the reply with ok:true."),
+            ExitCodeSpec(code: 10, meaning: "No reply arrived within --timeout — a typed timeout outcome, never a cancellation and never an app failure."),
+        ],
+        schemaName: "resolve",
+        // No `payload` shape (#0057): the result is the resolve reply — an
+        // object whose `resolutions` is an array of objects — and
+        // `PayloadShape` is flat-only (#0194: "nested objects and arrays are
+        // not supported ... do not half-build nesting to fit it in here").
+        // Same precedent as `statusSpec` (#0225) through `askSpec` (#0056):
+        // the schema carries the self-reference form, and `ResolveWireTests`
+        // pins the encoded keys instead.
         payload: nil
     )
 

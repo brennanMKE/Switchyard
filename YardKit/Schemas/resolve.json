@@ -1,0 +1,93 @@
+{
+  "command" : "resolve",
+  "envelope" : {
+    "failure" : {
+      "error" : {
+        "code" : {
+          "enum" : [
+            "app_unavailable",
+            "blocked_on_conflicts",
+            "broker_unreachable",
+            "human_declined",
+            "ok",
+            "repository_error",
+            "request_failed",
+            "session_terminated",
+            "signing_failed",
+            "timed_out",
+            "usage"
+          ],
+          "type" : "string"
+        },
+        "hint" : {
+          "optional" : true,
+          "type" : "string"
+        },
+        "message" : {
+          "type" : "string"
+        }
+      },
+      "ok" : false,
+      "schemaVersion" : 1
+    },
+    "success" : {
+      "ok" : true,
+      "result" : {
+        "optional" : true,
+        "schema" : "resolve"
+      },
+      "schemaVersion" : 1
+    }
+  },
+  "exitCodes" : [
+    {
+      "code" : 0,
+      "meaning" : "The human resolved every conflicted path; the payload is the resolve reply (per-path resolutions)."
+    },
+    {
+      "code" : 1,
+      "meaning" : "Invalid arguments — missing --wait, more than one pathspec, an empty pathspec, or a malformed --timeout."
+    },
+    {
+      "code" : 3,
+      "meaning" : "The Switchyard app is not running. Resolve never launches the app."
+    },
+    {
+      "code" : 4,
+      "meaning" : "The request was superseded by a newer resolve for the same repository, or the app could not serve it — no reply was received."
+    },
+    {
+      "code" : 5,
+      "meaning" : "The app quit before the human decided — never reported as a decision."
+    },
+    {
+      "code" : 7,
+      "meaning" : "The human cancelled; nothing was staged and nothing was touched; the payload still carries the cancelled reply with ok:true."
+    },
+    {
+      "code" : 8,
+      "meaning" : "Conflicts remain after the reply (blocked_on_conflicts) — some paths were left unresolved; the payload still carries the reply with ok:true."
+    },
+    {
+      "code" : 10,
+      "meaning" : "No reply arrived within --timeout — a typed timeout outcome, never a cancellation and never an app failure."
+    }
+  ],
+  "flags" : [
+    {
+      "argument" : "seconds",
+      "help" : "Give up the wait after this many seconds (default 3600). On expiry the CLI exits 10 with a typed timeout outcome — never a cancellation.",
+      "long" : "timeout",
+      "short" : null
+    },
+    {
+      "argument" : null,
+      "help" : "Block until the human resolves or cancels. Required in this build; a non-blocking form does not exist yet.",
+      "long" : "wait",
+      "short" : null
+    }
+  ],
+  "schemaName" : "resolve",
+  "schemaVersion" : 1,
+  "summary" : "Open the three-way merge UI for the repository's conflicts and block until the human resolves them, cancels, or the wait times out."
+}

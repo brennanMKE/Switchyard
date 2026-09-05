@@ -37,6 +37,9 @@ public func dispatch(
     },
     connectAsk: () async throws -> AppConnection = {
         try await AppConnection.connect(launchIfNeeded: false)
+    },
+    connectResolve: () async throws -> AppConnection = {
+        try await AppConnection.connect(launchIfNeeded: false)
     }
 ) async -> (stdout: String, stderr: String, exitCode: ExitCode) {
     switch route(arguments) {
@@ -82,6 +85,19 @@ public func dispatch(
                 arguments: arguments,
                 workingDirectory: workingDirectory,
                 connect: connectAsk)
+        }
+        // The resolve arm (#0057) shares review's and ask's shape — a
+        // request that stays open while the human works — and gets the same
+        // treatment: its own `launchIfNeeded: false` connector (resolve
+        // never launches the app; the app being down is exit 3). If this
+        // interception were ever dropped, a resolve argv would reach the app
+        // as an ordinary `perform` request and come back "Unknown
+        // subcommand" at exit 1.
+        if arguments.first == ResolveArm.commandName {
+            return await ResolveArm.run(
+                arguments: arguments,
+                workingDirectory: workingDirectory,
+                connect: connectResolve)
         }
         do {
             let app = try await connect()

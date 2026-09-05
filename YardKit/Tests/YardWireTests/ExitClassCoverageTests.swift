@@ -62,6 +62,7 @@ struct ExitClassCoverageTests {
             Row("CrossToolGuard.Error", CrossToolGuard.Error.repositoryChanged(divergences: []), .repositoryError),
             Row("WorktreeDisturbance.Error", WorktreeDisturbance.Error.wouldDisturb(disturbances: []), .repositoryError),
             Row("StagingError", StagingError.unknownHunkIDs(ids: ["h-nope"], area: .unstaged), .repositoryError),
+            Row("ResolveApplyError", ResolveApplyError.pathNotConflicted(path: "probe.txt"), .repositoryError),
             Row("IndexSnapshot.Error", IndexSnapshot.Error.malformedPlumbingOutput(command: "hash-object"), .repositoryError),
             // #0152: asserted in WorktreeSnapshotTests.
             Row("WorktreeSnapshot.Error", WorktreeSnapshot.Error.malformedPlumbingOutput(command: "write-tree"), .repositoryError),
@@ -384,6 +385,12 @@ struct ExitClassCoverageTests {
             "and cannot import ExitClassCarrying; maps directly to ExitCode " +
             "via its own exitCode property, exhaustively switched, same " +
             "shape as RepositoryRegistry.Error above.",
+        "ResolveArm.swift:CountFailure":
+            "#0057 — declared in YardKit, which does not depend on YardGit " +
+            "and cannot import ExitClassCarrying; the resolve arm's own " +
+            "post-reply conflicts re-check failure, surfaced by `render` as " +
+            "a `request_failed` failure envelope (exit 4) rather than a §6 " +
+            "class.",
     ]
 
     /// #0197's headline: every declared error type under

@@ -108,6 +108,14 @@ private final class AskFakeAppService: NSObject, AppServiceProtocol {
             break
         }
     }
+
+    func performResolve(
+        request: Data,
+        workingDirectory: String,
+        reply: @escaping @Sendable (Data) -> Void
+    ) {
+        reply(Data())
+    }
 }
 
 private final class AskListenerDelegate: NSObject, NSXPCListenerDelegate {

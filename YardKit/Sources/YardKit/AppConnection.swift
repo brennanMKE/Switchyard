@@ -246,6 +246,24 @@ public final class AppConnection: @unchecked Sendable {
         }
     }
 
+    /// Opens one resolve request and waits for the app's outcome bytes
+    /// (#0057). The caller owns the deadline — the resolve arm passes
+    /// `--timeout` plus its backstop margin — and maps a `CLIError.timedOut`
+    /// thrown here to ``ExitCode/timedOut`` rather than this type's default
+    /// broker mapping, because "nobody answered the resolve" is not "the
+    /// broker was unreachable".
+    public func performResolve(
+        request: Data,
+        workingDirectory: String,
+        timeout: Duration = .seconds(5)
+    ) async throws -> Data {
+        try await call(timeout: timeout) { app, complete in
+            app.performResolve(request: request, workingDirectory: workingDirectory) { data in
+                complete(.success(data))
+            }
+        }
+    }
+
     private func call<T: Sendable>(
         timeout: Duration,
         _ invoke: @escaping @Sendable (any AppServiceProtocol, @escaping @Sendable (Result<T, any Error>) -> Void) -> Void

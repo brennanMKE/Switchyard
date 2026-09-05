@@ -169,6 +169,42 @@ import Foundation
         workingDirectory: String,
         reply: @escaping @Sendable (Data) -> Void
     )
+
+    /// Opens a resolve request the human answers in the app (#0057).
+    ///
+    /// A separate method rather than a `perform` invocation for the same
+    /// reason `performReview` is: the call stays open for minutes while the
+    /// human resolves conflicted paths one card at a time, and its reply
+    /// bytes are a ``ResolveOutcome`` — the typed answer, including "nobody
+    /// answered" and "a newer request replaced this one" — not a rendered
+    /// envelope. The exit-code mapping from outcome to process exit is the
+    /// resolve arm's own policy (`ResolveArm.render`), the way `perform`'s
+    /// mapping is the envelope's. Like `performReview` (and unlike
+    /// `performAsk`), a second resolve for the same repository SUPERSEDES the
+    /// first rather than queueing behind it — the review semantics, per the
+    /// #0057 design.
+    ///
+    /// - Parameters:
+    ///   - request: the JSON-encoded ``ResolveRequest``. The CLI cannot
+    ///     resolve the repository (it does not link the engine), so it sends
+    ///     the request with `commonDir` empty.
+    ///   - workingDirectory: the CLI process's working directory, explicit
+    ///     and never inferred — the same rule as `perform`. The app-side
+    ///     body (`runResolveRequest` in `YardCommands`) resolves the
+    ///     repository from it and fills the request's `commonDir` before
+    ///     registering.
+    ///   - reply: the JSON-encoded ``ResolveOutcome`` — decided (resolutions
+    ///     or a cancellation), timedOut, or superseded — or a JSON-encoded
+    ///     `EnvelopeFail` when the request could not be served at all
+    ///     (undecodable bytes, no repository). `Data` because
+    ///     `NSXPCInterface` carries no Swift struct with guaranteed fidelity
+    ///     across the boundary; the reply block may be called long after
+    ///     this method returns — that is the point.
+    func performResolve(
+        request: Data,
+        workingDirectory: String,
+        reply: @escaping @Sendable (Data) -> Void
+    )
 }
 
 /// `NSXPCInterface` values for ``BrokerProtocol`` and ``AppServiceProtocol``.
