@@ -34,14 +34,16 @@ public func runReviewRequest(
     requestData: Data,
     workingDirectory: String,
     store: PendingReviewStore,
-    onPending: (@Sendable (ReviewRequest, WorktreeContext, [FileDiff], String?) -> Void)? = nil
+    onPending: (@Sendable (ReviewRequest, WorktreeContext, [FileDiff], String?) -> Void)? = nil,
+    owner: PendingOwner = PendingOwner()
 ) async -> Data {
     let context = try? await WorktreeContext.resolve(path: workingDirectory)
     guard let context else {
         return await ReviewServing.handle(
             requestData: requestData,
             commonDir: nil,
-            store: store)
+            store: store,
+            owner: owner)
     }
 
     // The diff is computed BEFORE registration, from the request's own
@@ -67,7 +69,8 @@ public func runReviewRequest(
     let outcomeData = await ReviewServing.handle(
         requestData: requestData,
         commonDir: context.commonDir,
-        store: store)
+        store: store,
+        owner: owner)
 
     // #0059: once the decision exists, persist it as a note on the reviewed
     // commit. The decision has already been delivered to the CLI at this

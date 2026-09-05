@@ -26,6 +26,16 @@ import Foundation
 ///   `timeoutSeconds`. The CLI also runs its own backstop (timeout + 5 s) in
 ///   case the reply is lost on the wire, but the store's typed outcome is
 ///   what normally arrives.
+/// - **The reaping policy (#0349).** An orphaned pending is one whose CLI
+///   connection is gone — the app's per-connection invalidation handler
+///   called `abandonAll(ownedBy:)` with the connection's `PendingOwner`.
+///   Abandonment is NOT a resolution: the slot stays registered, the pane
+///   banners the abandonment immediately (`.abandoned` on the change hook),
+///   and the human may still decide — a decision after abandonment resolves
+///   normally. The pending's own timer is the reaper: it stays armed through
+///   abandonment and fires `.timedOut` at `timeoutSeconds` if the human
+///   never acts. There is no background reaper and none is needed — each
+///   pending carries its own deadline, so orphans cannot accumulate.
 ///
 /// Locking, not an actor: the app exports this store to XPC service objects
 /// on XPC's own queues while the UI (round 2) reads it from the main actor.
@@ -53,6 +63,12 @@ public final class PendingResolveStore: @unchecked Sendable {
         let pending: Pending
         let continuation: CheckedContinuation<ResolveOutcome, Never>
         var timeoutTask: Task<Void, Never>?
+        /// Which CLI connection registered this pending (#0349) — what
+        /// `abandonAll(ownedBy:)` matches on.
+        let owner: PendingOwner
+        /// Set when the CLI's connection died. NOT a resolution: the slot
+        /// stays and the timer keeps running (see the reaping policy).
+        var isAbandoned = false
     }
 
     private let lock = NSLock()
@@ -85,7 +101,14 @@ public final class PendingResolveStore: @unchecked Sendable {
     /// request's own timeout fires, or a newer request for the same
     /// repository supersedes it. The app-side body awaits this on behalf of
     /// the blocked CLI; the store is the only thing that resumes it.
-    public func awaitDecision(for request: ResolveRequest) async -> ResolveOutcome {
+    ///
+    /// `owner` names the CLI connection the request arrived on (#0349); the
+    /// default mints a fresh token, i.e. a pending owned by nobody, which a
+    /// connection death can never abandon.
+    public func awaitDecision(
+        for request: ResolveRequest,
+        owner: PendingOwner = PendingOwner()
+    ) async -> ResolveOutcome {
         let id = UUID()
         let commonDir = request.commonDir
         return await withCheckedContinuation { continuation in
@@ -93,7 +116,8 @@ public final class PendingResolveStore: @unchecked Sendable {
             // The timeout is armed for THIS request: one sleep per pending,
             // cancelled when the slot resolves any other way. `try?` on the
             // sleep swallows only cancellation — a cancelled task returns
-            // without firing, because the slot is already gone.
+            // without firing, because the slot is already gone. The timer
+            // also survives abandonment: it is the reaper (#0349).
             let timeoutTask = Task { [weak self] in
                 do {
                     try await Task.sleep(for: .seconds(Double(request.timeoutSeconds)))
@@ -109,7 +133,8 @@ public final class PendingResolveStore: @unchecked Sendable {
             slots[commonDir] = Slot(
                 pending: newPending,
                 continuation: continuation,
-                timeoutTask: timeoutTask)
+                timeoutTask: timeoutTask,
+                owner: owner)
             lock.unlock()
 
             // Resumed outside the lock, so a waiter that immediately calls
@@ -121,6 +146,29 @@ public final class PendingResolveStore: @unchecked Sendable {
             }
             onPendingChange?(newPending, nil)
         }
+    }
+
+    /// Marks every pending owned by `owner` abandoned (#0349) — the
+    /// connection-death hook the app's per-connection invalidation handler
+    /// calls. Fires the change hook with `.abandoned` for each marked
+    /// pending, removes nothing, cancels nothing (the timer stays the
+    /// reaper), and returns how many pendings were marked. Idempotent.
+    @discardableResult
+    public func abandonAll(ownedBy owner: PendingOwner) -> Int {
+        var marked: [Pending] = []
+        lock.lock()
+        for key in slots.keys {
+            if var slot = slots[key], slot.owner == owner, !slot.isAbandoned {
+                slot.isAbandoned = true
+                slots[key] = slot
+                marked.append(slot.pending)
+            }
+        }
+        lock.unlock()
+        for pending in marked {
+            onPendingChange?(pending, .abandoned)
+        }
+        return marked.count
     }
 
     /// Resolves the pending resolve for `commonDir` with the human's answer —
@@ -182,7 +230,8 @@ public enum ResolveServing {
     public static func handle(
         requestData: Data,
         commonDir: String?,
-        store: PendingResolveStore
+        store: PendingResolveStore,
+        owner: PendingOwner = PendingOwner()
     ) async -> Data {
         guard let request = try? JSONDecoder().decode(ResolveRequest.self, from: requestData) else {
             return failureEnvelope(
@@ -200,7 +249,7 @@ public enum ResolveServing {
         var registered = request
         registered.commonDir = commonDir
 
-        let outcome = await store.awaitDecision(for: registered)
+        let outcome = await store.awaitDecision(for: registered, owner: owner)
         let encoder = JSONEncoder()
         encoder.outputFormatting.insert(.sortedKeys)
         return (try? encoder.encode(outcome))

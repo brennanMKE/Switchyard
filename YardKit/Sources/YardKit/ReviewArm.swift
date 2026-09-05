@@ -251,6 +251,16 @@ public enum ReviewArm {
                 .requestFailed,
                 "the review request was superseded by a newer request for the same repository; no decision was received",
                 .requestFailed)
+        case .abandoned:
+            // The asking agent's connection died (#0349). Unreachable over
+            // the wire in the current design — an abandoned pending's
+            // waiter keeps waiting, and the CLI it would reply to is gone
+            // either way — the case exists so the outcome vocabulary stays
+            // exhaustive. Exit 5: the session ended, never a decision.
+            return failureResult(
+                .sessionTerminated,
+                "the review session ended before a decision was made",
+                .sessionTerminated)
         }
     }
 

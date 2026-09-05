@@ -263,6 +263,16 @@ public enum ResolveArm {
                 .requestFailed,
                 "the resolve request was superseded by a newer request for the same repository; no reply was received",
                 .requestFailed)
+        case .abandoned:
+            // The asking agent's connection died (#0349). Unreachable over
+            // the wire in the current design — an abandoned pending's
+            // waiter keeps waiting — the case exists so the outcome
+            // vocabulary stays exhaustive. Exit 5: the session ended,
+            // never a decision.
+            return failureResult(
+                .sessionTerminated,
+                "the resolve session ended before a reply was received",
+                .sessionTerminated)
         }
     }
 

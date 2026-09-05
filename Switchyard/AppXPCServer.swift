@@ -250,6 +250,12 @@ private nonisolated final class ListenerDelegate: NSObject, NSXPCListenerDelegat
         _ listener: NSXPCListener,
         shouldAcceptNewConnection connection: NSXPCConnection
     ) -> Bool {
+        // #0349: one ownership token per accepted CLI connection. The
+        // connection's AppService registers every pending under it, and the
+        // invalidation handler below abandons exactly those pendings — a
+        // CLI dying never touches another connection's pending.
+        let owner = PendingOwner()
+
         // Both must be set BEFORE resume(), or calls silently do nothing — no
         // error, no reply, no crash. Same rule as the client side.
         connection.exportedInterface = XPCInterfaces.appService
@@ -259,7 +265,30 @@ private nonisolated final class ListenerDelegate: NSObject, NSXPCListenerDelegat
             pendingResolves: pendingResolves,
             reviewBridge: reviewBridge,
             askBridge: askBridge,
-            resolveBridge: resolveBridge)
+            resolveBridge: resolveBridge,
+            owner: owner)
+
+        // #0349: the CLI's connection dying — cleanly exited, killed, or
+        // interrupted hard enough to invalidate — is the abandonment
+        // signal. The stores mark the connection's pendings orphaned, the
+        // sheets banner immediately, the pendings stay decidable, and each
+        // pending's own timer remains the reaper (see the stores' reaping
+        // policy). Set BEFORE resume(), like everything else on a fresh
+        // connection. @Sendable for the same reason as every handler in
+        // AppXPCServer: these are plain `() -> Void` in Foundation, and
+        // without it the closure inherits main-actor isolation and traps
+        // when XPC calls it off the main queue. The stores are captured
+        // through local lets — the app-lifetime singletons, `@unchecked
+        // Sendable` — so the closure captures only Sendable values.
+        let reviewStore = pendingReviews
+        let askStore = pendingAsks
+        let resolveStore = pendingResolves
+        connection.invalidationHandler = { @Sendable in
+            reviewStore.abandonAll(ownedBy: owner)
+            askStore.abandonAll(ownedBy: owner)
+            resolveStore.abandonAll(ownedBy: owner)
+        }
+
         connection.resume()
         return true
     }
@@ -303,13 +332,20 @@ private nonisolated final class AppService: NSObject, AppServiceProtocol {
     /// per-path conflict details to the resolve panes.
     private let resolveBridge: ResolvePaneBridge
 
+    /// The ownership token for THIS connection's pendings (#0349): the
+    /// listener delegate mints one per accepted connection and shares it
+    /// with the connection's invalidation handler, so a connection death
+    /// abandons exactly the pendings this service registered.
+    private let owner: PendingOwner
+
     init(
         pendingReviews: PendingReviewStore,
         pendingAsks: PendingAskStore,
         pendingResolves: PendingResolveStore,
         reviewBridge: ReviewSheetBridge,
         askBridge: AskSheetBridge,
-        resolveBridge: ResolvePaneBridge
+        resolveBridge: ResolvePaneBridge,
+        owner: PendingOwner
     ) {
         self.pendingReviews = pendingReviews
         self.pendingAsks = pendingAsks
@@ -317,6 +353,7 @@ private nonisolated final class AppService: NSObject, AppServiceProtocol {
         self.reviewBridge = reviewBridge
         self.askBridge = askBridge
         self.resolveBridge = resolveBridge
+        self.owner = owner
         super.init()
     }
 
@@ -417,7 +454,8 @@ private nonisolated final class AppService: NSObject, AppServiceProtocol {
                             files: files,
                             errorMessage: errorMessage)
                     }
-                })
+                },
+                owner: owner)
             reply(outcomeData)
         }
     }
@@ -444,7 +482,8 @@ private nonisolated final class AppService: NSObject, AppServiceProtocol {
                     Task { @MainActor in
                         bridge.pendingDidRegister(request: requestData, context: context)
                     }
-                })
+                },
+                owner: owner)
             reply(outcomeData)
         }
     }
@@ -478,7 +517,8 @@ private nonisolated final class AppService: NSObject, AppServiceProtocol {
                             details: details,
                             errorMessage: errorMessage)
                     }
-                })
+                },
+                owner: owner)
             reply(outcomeData)
         }
     }

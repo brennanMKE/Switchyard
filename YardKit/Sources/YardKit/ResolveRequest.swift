@@ -220,10 +220,18 @@ public enum ResolveOutcome: Codable, Equatable, Sendable {
     /// the review semantics, not `ask`'s queue (#0057 design).
     case superseded
 
+    /// The asking agent's connection died while the resolve was pending
+    /// (#0349). An orphaned resolve, not an answered one: the pane banners
+    /// the abandonment immediately and the human may still decide. Per-store
+    /// `abandoned` cases, not a shared wrapper — see `AskOutcome` for the
+    /// reasoning.
+    case abandoned
+
     private enum CodingKeys: String, CodingKey {
         case decided
         case timedOut
         case superseded
+        case abandoned
     }
 
     public init(from decoder: Decoder) throws {
@@ -234,10 +242,13 @@ public enum ResolveOutcome: Codable, Equatable, Sendable {
             self = .timedOut
         } else if container.contains(.superseded) {
             self = .superseded
+        } else if container.contains(.abandoned) {
+            self = .abandoned
         } else {
             throw DecodingError.dataCorrupted(
                 .init(codingPath: decoder.codingPath,
-                      debugDescription: "expected one of \"decided\", \"timedOut\", \"superseded\""))
+                      debugDescription:
+                        "expected one of \"decided\", \"timedOut\", \"superseded\", \"abandoned\""))
         }
     }
 
@@ -250,6 +261,8 @@ public enum ResolveOutcome: Codable, Equatable, Sendable {
             try container.encode(true, forKey: .timedOut)
         case .superseded:
             try container.encode(true, forKey: .superseded)
+        case .abandoned:
+            try container.encode(true, forKey: .abandoned)
         }
     }
 }

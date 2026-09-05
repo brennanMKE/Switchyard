@@ -322,7 +322,10 @@ public enum ResolvePaneApplyError: Error, CustomStringConvertible, Sendable {
 ///   and cancel enabled;
 /// - **decided** — the centre removes the model, which dismisses the pane;
 /// - **timedOut / superseded** — the store reported a typed outcome, the
-///   banner names it, and the buttons disable.
+///   banner names it, and the buttons disable;
+/// - **abandoned (#0349)** — the asking agent's connection died: the banner
+///   says so, and the buttons STAY enabled — the pending is orphaned, not
+///   answered, and the human may still decide. The pane does not close.
 @Observable
 public final class ResolvePaneModel: Identifiable {
 
@@ -358,6 +361,12 @@ public final class ResolvePaneModel: Identifiable {
     /// human still decides. `.decided` never lands here for display: the
     /// centre dismisses decided panes instead.
     public private(set) var outcome: ResolveOutcome?
+
+    /// True once the store reported the asking agent's connection gone
+    /// (#0349). NOT a terminal outcome — `outcome` stays nil, the buttons
+    /// stay enabled, and the pending's own timer remains the reaper (a
+    /// later `.timedOut` still lands and ends the resolve).
+    public private(set) var isAbandoned = false
 
     /// The store resolution the buttons drive. Returns whether the pending
     /// was still there to receive it. The centre wires this to
@@ -414,14 +423,34 @@ public final class ResolvePaneModel: Identifiable {
     }
 
     /// The store's outcome, reflected by the pane (banner, disabled buttons)
-    /// — or dismissal, which the centre performs for `.decided`.
+    /// — or dismissal, which the centre performs for `.decided`. An
+    /// `.abandoned` outcome routes the same way as `recordAbandonment()`.
     public func recordOutcome(_ outcome: ResolveOutcome) {
         self.outcome = outcome
+        if case .abandoned = outcome {
+            isAbandoned = true
+        }
     }
 
-    /// The buttons' enabled state: any typed outcome ends the resolve — a
+    /// Marks the pane abandoned (#0349) — the centre's route for the
+    /// store's `.abandoned` hook event. Ignored once a terminal outcome has
+    /// landed; idempotent otherwise. The pane does NOT close: the human may
+    /// still decide.
+    public func recordAbandonment() {
+        guard outcome == nil else { return }
+        isAbandoned = true
+    }
+
+    /// The buttons' enabled state: a terminal outcome ends the resolve — a
     /// decided/timed-out/superseded pane must not compose a second reply.
-    public var decisionsEnabled: Bool { outcome == nil }
+    /// Abandonment is NOT terminal (#0349): an abandoned resolve is still
+    /// decidable.
+    public var decisionsEnabled: Bool {
+        outcome == nil || outcome == .abandoned
+    }
+
+    /// The banner's text for an abandoned resolve (#0349).
+    private static let abandonedBanner = "The asking agent went away — you can still decide."
 
     /// What the banner says for the current outcome, or nil while pending
     /// (and for `.decided`, which dismisses the pane rather than bannering).
@@ -431,8 +460,10 @@ public final class ResolvePaneModel: Identifiable {
             "This resolve timed out before a decision was made."
         case .superseded:
             "This resolve was superseded by a newer request for the same repository."
+        case .abandoned:
+            Self.abandonedBanner
         case .decided, nil:
-            nil
+            isAbandoned ? Self.abandonedBanner : nil
         }
     }
 
@@ -617,9 +648,15 @@ public final class ResolveCenter {
     private func storeDidChange(pending: PendingResolveStore.Pending, outcome: ResolveOutcome?) {
         if let outcome {
             guard let model = pane(withID: pending.id) else { return }
-            model.recordOutcome(outcome)
-            if case .decided = outcome {
-                dismiss(model)
+            if case .abandoned = outcome {
+                // #0349: abandonment changes the pane's state, never
+                // dismisses it — the human may still decide.
+                model.recordAbandonment()
+            } else {
+                model.recordOutcome(outcome)
+                if case .decided = outcome {
+                    dismiss(model)
+                }
             }
         } else if pane(withID: pending.id) == nil {
             let model = ResolvePaneModel(pending: pending)

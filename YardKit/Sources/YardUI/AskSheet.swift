@@ -25,7 +25,10 @@ import YardKit
 ///   enabled;
 /// - **decided** — the centre removes the model, which dismisses the sheet;
 /// - **timedOut** — the store reported the typed outcome, the banner names
-///   it, and the buttons disable.
+///   it, and the buttons disable;
+/// - **abandoned (#0349)** — the asking agent's connection died: the banner
+///   says so, and the buttons STAY enabled — the pending is orphaned, not
+///   answered, and the human may still answer. The sheet does not close.
 @Observable
 public final class AskSheetModel: Identifiable {
 
@@ -66,6 +69,12 @@ public final class AskSheetModel: Identifiable {
     /// centre dismisses decided sheets instead.
     public private(set) var outcome: AskOutcome?
 
+    /// True once the store reported the asking agent's connection gone
+    /// (#0349). NOT a terminal outcome — `outcome` stays nil, the buttons
+    /// stay enabled, and the ask's own timer remains the reaper (a later
+    /// `.timedOut` still lands and ends the ask).
+    public private(set) var isAbandoned = false
+
     /// The store resolution the option and decline buttons drive. Returns
     /// whether the pending was still there to receive it. The centre wires
     /// this to `PendingAskStore.resolve(id:answer:)`; a test can wire a
@@ -102,10 +111,16 @@ public final class AskSheetModel: Identifiable {
             || origin.hasPrefix(path + "/")
     }
 
-    /// The option and decline buttons' enabled state: a typed outcome ends
-    /// the ask — a decided or timed-out sheet must not compose a second
-    /// reply.
-    public var answersEnabled: Bool { outcome == nil }
+    /// The option and decline buttons' enabled state: a terminal outcome
+    /// ends the ask — a decided or timed-out sheet must not compose a
+    /// second reply. Abandonment is NOT terminal (#0349): an abandoned ask
+    /// is still answerable.
+    public var answersEnabled: Bool {
+        outcome == nil || outcome == .abandoned
+    }
+
+    /// The banner's text for an abandoned ask (#0349).
+    private static let abandonedBanner = "The asking agent went away — you can still answer."
 
     /// What the banner says for the current outcome, or nil while pending
     /// (and for `.decided`, which dismisses the sheet rather than
@@ -114,8 +129,10 @@ public final class AskSheetModel: Identifiable {
         switch outcome {
         case .timedOut:
             "This ask timed out before the human answered."
+        case .abandoned:
+            Self.abandonedBanner
         case .decided, nil:
-            nil
+            isAbandoned ? Self.abandonedBanner : nil
         }
     }
 
@@ -156,8 +173,21 @@ public final class AskSheetModel: Identifiable {
 
     /// The store's outcome, reflected by the sheet (banner, disabled
     /// buttons) — or dismissal, which the centre performs for `.decided`.
+    /// An `.abandoned` outcome routes the same way as `recordAbandonment()`.
     public func recordOutcome(_ outcome: AskOutcome) {
         self.outcome = outcome
+        if case .abandoned = outcome {
+            isAbandoned = true
+        }
+    }
+
+    /// Marks the sheet abandoned (#0349) — the centre's route for the
+    /// store's `.abandoned` hook event. Ignored once a terminal outcome has
+    /// landed; idempotent otherwise. The sheet does NOT close: the human
+    /// may still answer.
+    public func recordAbandonment() {
+        guard outcome == nil else { return }
+        isAbandoned = true
     }
 
     /// The banner's Close: the centre owns removal, the model only forwards.
@@ -268,9 +298,15 @@ public final class AskCenter {
     private func storeDidChange(pending: PendingAskStore.Pending, outcome: AskOutcome?) {
         if let outcome {
             guard let model = sheet(withID: pending.id) else { return }
-            model.recordOutcome(outcome)
-            if case .decided = outcome {
-                dismiss(model)
+            if case .abandoned = outcome {
+                // #0349: abandonment changes the sheet's state, never
+                // dismisses it — the human may still answer.
+                model.recordAbandonment()
+            } else {
+                model.recordOutcome(outcome)
+                if case .decided = outcome {
+                    dismiss(model)
+                }
             }
         } else if sheet(withID: pending.id) == nil {
             let model = AskSheetModel(pending: pending)

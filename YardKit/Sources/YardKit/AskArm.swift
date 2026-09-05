@@ -236,6 +236,16 @@ public enum AskArm {
                 .timedOut,
                 "no answer arrived within \(timeoutSeconds)s",
                 .timedOut)
+        case .abandoned:
+            // The asking agent's connection died (#0349). Unreachable over
+            // the wire in the current design — an abandoned pending's
+            // waiter keeps waiting — the case exists so the outcome
+            // vocabulary stays exhaustive. Exit 5: the session ended,
+            // never a decision.
+            return failureResult(
+                .sessionTerminated,
+                "the ask session ended before an answer was given",
+                .sessionTerminated)
         }
     }
 

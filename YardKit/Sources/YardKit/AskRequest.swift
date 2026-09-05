@@ -138,9 +138,18 @@ public enum AskOutcome: Codable, Equatable, Sendable {
     /// The pending ask's own timeout fired before the human decided.
     case timedOut
 
+    /// The asking agent's connection died while the ask was pending
+    /// (#0349). An orphaned ask, not an answered one: the sheet banners the
+    /// abandonment immediately and the human may still answer. Per-store
+    /// `abandoned` cases, not a shared wrapper: a wrapper would re-shape
+    /// every outcome's wire form and merge three stores' vocabularies —
+    /// each store's outcome stays a closed set this way.
+    case abandoned
+
     private enum CodingKeys: String, CodingKey {
         case decided
         case timedOut
+        case abandoned
     }
 
     public init(from decoder: Decoder) throws {
@@ -149,10 +158,12 @@ public enum AskOutcome: Codable, Equatable, Sendable {
             self = .decided(try container.decode(AskReply.self, forKey: .decided))
         } else if container.contains(.timedOut) {
             self = .timedOut
+        } else if container.contains(.abandoned) {
+            self = .abandoned
         } else {
             throw DecodingError.dataCorrupted(
                 .init(codingPath: decoder.codingPath,
-                      debugDescription: "expected one of \"decided\" or \"timedOut\""))
+                      debugDescription: "expected one of \"decided\", \"timedOut\", \"abandoned\""))
         }
     }
 
@@ -163,6 +174,8 @@ public enum AskOutcome: Codable, Equatable, Sendable {
             try container.encode(reply, forKey: .decided)
         case .timedOut:
             try container.encode(true, forKey: .timedOut)
+        case .abandoned:
+            try container.encode(true, forKey: .abandoned)
         }
     }
 }

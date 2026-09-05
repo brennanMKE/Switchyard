@@ -38,6 +38,19 @@ import Foundation
 ///   the head and ITS clock starts. The CLI also runs its own backstop
 ///   (timeout + 5 s) in case the reply is lost on the wire, but the
 ///   store's typed outcome is what normally arrives.
+/// - **The reaping policy (#0349).** An orphaned ask is one whose CLI
+///   connection is gone — the app's per-connection invalidation handler
+///   called `abandonAll(ownedBy:)` with the connection's `PendingOwner`.
+///   Abandonment is NOT a resolution: every owned ask — head or queued —
+///   is marked, the change hook fires `.abandoned` for each, and nothing
+///   is removed or cancelled. The human may still answer the head (a
+///   decision after abandonment resolves normally); the abandoned head
+///   keeps its position, so the queue order the sheet presents is
+///   unchanged. Each ask's own timer is the reaper: it stays armed (the
+///   queued ask's, from the moment it reaches the head) and fires
+///   `.timedOut` if the human never acts. There is no background reaper
+///   and none is needed — each ask carries its own deadline, so orphans
+///   cannot accumulate.
 ///
 /// Locking, not an actor: the app exports this store to XPC service objects
 /// on XPC's own queues while the UI reads it from the main actor.
@@ -67,6 +80,12 @@ public final class PendingAskStore: @unchecked Sendable {
         /// nil while the ask sits queued behind a head; armed the moment it
         /// becomes the head. See the timer rule in the type's doc comment.
         var timeoutTask: Task<Void, Never>?
+        /// Which CLI connection registered this ask (#0349) — what
+        /// `abandonAll(ownedBy:)` matches on.
+        let owner: PendingOwner
+        /// Set when the CLI's connection died. NOT a resolution: the ask
+        /// keeps its queue position and its timer (see the reaping policy).
+        var isAbandoned = false
     }
 
     private let lock = NSLock()
@@ -112,7 +131,14 @@ public final class PendingAskStore: @unchecked Sendable {
     /// fires once it is the head, or the ask is resolved from the sheet.
     /// The app-side body awaits this on behalf of the blocked CLI; the
     /// store is the only thing that resumes it.
-    public func awaitDecision(for request: AskRequest) async -> AskOutcome {
+    ///
+    /// `owner` names the CLI connection the request arrived on (#0349); the
+    /// default mints a fresh token, i.e. an ask owned by nobody, which a
+    /// connection death can never abandon.
+    public func awaitDecision(
+        for request: AskRequest,
+        owner: PendingOwner = PendingOwner()
+    ) async -> AskOutcome {
         let id = UUID()
         let commonDir = request.commonDir
         return await withCheckedContinuation { continuation in
@@ -120,7 +146,11 @@ public final class PendingAskStore: @unchecked Sendable {
 
             lock.lock()
             var queue = queues[commonDir] ?? []
-            let slot = Slot(pending: newPending, continuation: continuation, timeoutTask: nil)
+            let slot = Slot(
+                pending: newPending,
+                continuation: continuation,
+                timeoutTask: nil,
+                owner: owner)
             queue.append(slot)
             if queue.count == 1 {
                 // It IS the head: its clock starts now (see the timer rule).
@@ -131,6 +161,36 @@ public final class PendingAskStore: @unchecked Sendable {
 
             onPendingChange?(newPending, nil)
         }
+    }
+
+    /// Marks every ask owned by `owner` abandoned (#0349) — the
+    /// connection-death hook the app's per-connection invalidation handler
+    /// calls. Head and queued asks alike are marked; nothing is removed,
+    /// nothing is cancelled, and no promotion happens (the abandoned head
+    /// keeps its position until the human answers it or its timer reaps
+    /// it). Fires the change hook with `.abandoned` for each marked ask,
+    /// queue order preserved, and returns how many were marked. Idempotent.
+    @discardableResult
+    public func abandonAll(ownedBy owner: PendingOwner) -> Int {
+        var marked: [Pending] = []
+        lock.lock()
+        for key in queues.keys {
+            guard var queue = queues[key] else { continue }
+            var changed = false
+            for index in queue.indices where queue[index].owner == owner && !queue[index].isAbandoned {
+                queue[index].isAbandoned = true
+                marked.append(queue[index].pending)
+                changed = true
+            }
+            if changed {
+                queues[key] = queue
+            }
+        }
+        lock.unlock()
+        for pending in marked {
+            onPendingChange?(pending, .abandoned)
+        }
+        return marked.count
     }
 
     /// Resolves the head of `commonDir`'s queue with the human's answer.
@@ -227,7 +287,8 @@ public enum AskServing {
     public static func handle(
         requestData: Data,
         commonDir: String?,
-        store: PendingAskStore
+        store: PendingAskStore,
+        owner: PendingOwner = PendingOwner()
     ) async -> Data {
         guard let request = try? JSONDecoder().decode(AskRequest.self, from: requestData) else {
             return failureEnvelope(
@@ -245,7 +306,7 @@ public enum AskServing {
         var registered = request
         registered.commonDir = commonDir
 
-        let outcome = await store.awaitDecision(for: registered)
+        let outcome = await store.awaitDecision(for: registered, owner: owner)
         let encoder = JSONEncoder()
         encoder.outputFormatting.insert(.sortedKeys)
         return (try? encoder.encode(outcome))

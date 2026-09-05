@@ -185,10 +185,20 @@ public enum ReviewOutcome: Codable, Equatable, Sendable {
     /// A newer review request for the same repository replaced this one.
     case superseded
 
+    /// The asking agent's connection died while the review was pending
+    /// (#0349). An orphaned review, not an answered one: the sheet banners
+    /// the abandonment immediately and the human may still decide — a
+    /// decision after abandonment is still recorded (#0059's note outlives
+    /// the agent). The blocking waiter never receives this case in the
+    /// current design (its reply has nowhere to go either way); the store
+    /// publishes it on its change hook the moment the connection invalidates.
+    case abandoned
+
     private enum CodingKeys: String, CodingKey {
         case decided
         case timedOut
         case superseded
+        case abandoned
     }
 
     public init(from decoder: Decoder) throws {
@@ -199,10 +209,13 @@ public enum ReviewOutcome: Codable, Equatable, Sendable {
             self = .timedOut
         } else if container.contains(.superseded) {
             self = .superseded
+        } else if container.contains(.abandoned) {
+            self = .abandoned
         } else {
             throw DecodingError.dataCorrupted(
                 .init(codingPath: decoder.codingPath,
-                      debugDescription: "expected one of \"decided\", \"timedOut\", \"superseded\""))
+                      debugDescription:
+                        "expected one of \"decided\", \"timedOut\", \"superseded\", \"abandoned\""))
         }
     }
 
@@ -215,6 +228,8 @@ public enum ReviewOutcome: Codable, Equatable, Sendable {
             try container.encode(true, forKey: .timedOut)
         case .superseded:
             try container.encode(true, forKey: .superseded)
+        case .abandoned:
+            try container.encode(true, forKey: .abandoned)
         }
     }
 }

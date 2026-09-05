@@ -30,14 +30,16 @@ public func runAskRequest(
     requestData: Data,
     workingDirectory: String,
     store: PendingAskStore,
-    onPending: (@Sendable (AskRequest, WorktreeContext) -> Void)? = nil
+    onPending: (@Sendable (AskRequest, WorktreeContext) -> Void)? = nil,
+    owner: PendingOwner = PendingOwner()
 ) async -> Data {
     let context = try? await WorktreeContext.resolve(path: workingDirectory)
     guard let context else {
         return await AskServing.handle(
             requestData: requestData,
             commonDir: nil,
-            store: store)
+            store: store,
+            owner: owner)
     }
 
     // Deliver the resolved request BEFORE registration, the same order the
@@ -53,5 +55,6 @@ public func runAskRequest(
     return await AskServing.handle(
         requestData: requestData,
         commonDir: context.commonDir,
-        store: store)
+        store: store,
+        owner: owner)
 }

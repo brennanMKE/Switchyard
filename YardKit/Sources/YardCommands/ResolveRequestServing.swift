@@ -85,14 +85,16 @@ public func runResolveRequest(
     requestData: Data,
     workingDirectory: String,
     store: PendingResolveStore,
-    onPending: (@Sendable (ResolveRequest, WorktreeContext, [ResolveConflictDetail], String?) -> Void)? = nil
+    onPending: (@Sendable (ResolveRequest, WorktreeContext, [ResolveConflictDetail], String?) -> Void)? = nil,
+    owner: PendingOwner = PendingOwner()
 ) async -> Data {
     let context = try? await WorktreeContext.resolve(path: workingDirectory)
     guard let context else {
         return await ResolveServing.handle(
             requestData: requestData,
             commonDir: nil,
-            store: store)
+            store: store,
+            owner: owner)
     }
 
     // The conflict list is computed BEFORE registration, from the request's
@@ -116,7 +118,8 @@ public func runResolveRequest(
     return await ResolveServing.handle(
         requestData: requestData,
         commonDir: context.commonDir,
-        store: store)
+        store: store,
+        owner: owner)
 }
 
 /// The unified-logging category the app-side resolve flow logs under. Same

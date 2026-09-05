@@ -32,7 +32,11 @@ import YardKit
 ///   buttons enabled;
 /// - **decided** — the centre removes the model, which dismisses the sheet;
 /// - **timedOut / superseded** — the store reported a typed outcome, the
-///   banner names it, and the decision buttons disable.
+///   banner names it, and the decision buttons disable;
+/// - **abandoned (#0349)** — the asking agent's connection died: the banner
+///   says so, and the decision buttons STAY enabled — the pending is
+///   orphaned, not answered, and a decision after abandonment is still
+///   recorded (#0059's note outlives the agent). The sheet does not close.
 @Observable
 public final class ReviewSheetModel: Identifiable {
 
@@ -93,6 +97,12 @@ public final class ReviewSheetModel: Identifiable {
     /// centre dismisses decided sheets instead.
     public private(set) var outcome: ReviewOutcome?
 
+    /// True once the store reported the asking agent's connection gone
+    /// (#0349). NOT a terminal outcome — `outcome` stays nil, the decision
+    /// buttons stay enabled, and the pending's own timer remains the reaper
+    /// (a later `.timedOut` still lands and ends the review).
+    public private(set) var isAbandoned = false
+
     /// The store resolution the decision buttons drive. Returns whether the
     /// pending was still there to receive it. The centre wires this to
     /// `PendingReviewStore.resolve(id:decision:)`; a test can wire a double
@@ -127,10 +137,18 @@ public final class ReviewSheetModel: Identifiable {
         }
     }
 
-    /// The decision buttons' enabled state: any typed outcome ends the
+    /// The decision buttons' enabled state: a terminal outcome ends the
     /// review — a decided/timed-out/superseded sheet must not compose a
-    /// second reply.
-    public var decisionsEnabled: Bool { outcome == nil }
+    /// second reply. Abandonment is NOT terminal (#0349): an abandoned
+    /// review is still decidable, and the decision is still recorded.
+    public var decisionsEnabled: Bool {
+        outcome == nil || outcome == .abandoned
+    }
+
+    /// The banner's text for an abandoned review (#0349) — the asking
+    /// agent went away, the decision remains available and recordable.
+    private static let abandonedBanner =
+        "The asking agent went away — you can still decide; it will be recorded as a note."
 
     /// What the banner says for the current outcome, or nil while pending
     /// (and for `.decided`, which dismisses the sheet rather than bannering).
@@ -140,8 +158,10 @@ public final class ReviewSheetModel: Identifiable {
             "This review timed out before a decision was made."
         case .superseded:
             "This review was superseded by a newer request for the same repository."
+        case .abandoned:
+            Self.abandonedBanner
         case .decided, nil:
-            nil
+            isAbandoned ? Self.abandonedBanner : nil
         }
     }
 
@@ -165,8 +185,21 @@ public final class ReviewSheetModel: Identifiable {
 
     /// The store's outcome, reflected by the sheet (banner, disabled
     /// buttons) — or dismissal, which the centre performs for `.decided`.
+    /// An `.abandoned` outcome routes the same way as `recordAbandonment()`.
     public func recordOutcome(_ outcome: ReviewOutcome) {
         self.outcome = outcome
+        if case .abandoned = outcome {
+            isAbandoned = true
+        }
+    }
+
+    /// Marks the sheet abandoned (#0349) — the centre's route for the
+    /// store's `.abandoned` hook event. Ignored once a terminal outcome has
+    /// landed; idempotent otherwise. The sheet does NOT close: the human
+    /// may still decide, and the decision is still recorded.
+    public func recordAbandonment() {
+        guard outcome == nil else { return }
+        isAbandoned = true
     }
 
     /// True when `path` — the path a window's content shows — belongs to
@@ -426,9 +459,15 @@ public final class ReviewCenter {
     private func storeDidChange(pending: PendingReviewStore.Pending, outcome: ReviewOutcome?) {
         if let outcome {
             guard let model = sheet(withID: pending.id) else { return }
-            model.recordOutcome(outcome)
-            if case .decided = outcome {
-                dismiss(model)
+            if case .abandoned = outcome {
+                // #0349: abandonment changes the sheet's state, never
+                // dismisses it — the human may still decide.
+                model.recordAbandonment()
+            } else {
+                model.recordOutcome(outcome)
+                if case .decided = outcome {
+                    dismiss(model)
+                }
             }
         } else if sheet(withID: pending.id) == nil {
             let model = ReviewSheetModel(pending: pending)

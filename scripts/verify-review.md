@@ -331,3 +331,64 @@ exited early with 5 or 10.
 - **Non-repository working directory (exit 6)** — covered end-to-end shape by
   `unresolvableWorkingDirectoryIsNeverRegistered`; the envelope is the
   repository-error failure envelope, not a review outcome.
+
+## Scenario 11 — CLI killed mid-review: the abandoned banner (#0349) — UNRUN
+
+The #0349 gap-fill: the CLI's connection dying must not leave the sheet
+silently counting down its timeout. The pending is marked orphaned the
+moment the connection invalidates, the sheet banners, and the human may
+still decide — the decision is recorded as a note (#0059) even though the
+asking agent is gone.
+
+**Preconditions.** App running; a repository with a staged change.
+
+```sh
+cd /path/to/repoA
+switchyard review --staged --wait --timeout 600 > review-out.json &
+reviewPid=$!
+sleep 2
+kill -9 $reviewPid
+```
+
+**Expected** (observed by the human): the sheet does NOT close and does NOT
+wait out the timeout — within moments it banners "The asking agent went
+away — you can still decide; it will be recorded as a note." Decide (say
+approve): the decision is recorded as a git note on the reviewed commit
+(`git notes --ref=refs/notes/switchyard/reviews show HEAD` — or check the
+review history in the app), even though the CLI process is gone. **Fail**
+when: the sheet closes on the kill, the banner appears only after the full
+timeout, the decision buttons disable, or the decision errors.
+
+---
+
+## Scenario 12 — Broker restart under a pending review — UNRUN
+
+The pending store is app-side and unaffected by the broker's death; the
+app re-registers its endpoint through #0047's `interruptionHandler`. The
+in-flight review must survive a broker restart untouched.
+
+**Preconditions.** App running; the broker agent running
+(`launchctl print gui/$UID/co.sstools.Switchyard.broker` shows a pid); a
+review in flight (scenario 2's shape).
+
+```sh
+cd /path/to/repoA
+switchyard review --staged --wait --timeout 600 > review-out.json &
+reviewPid=$!
+sleep 2
+launchctl kickstart -k gui/$UID/co.sstools.Switchyard.broker
+launchctl print gui/$UID/co.sstools.Switchyard.broker | grep -E 'pid|state'
+```
+
+**Expected** (observed by the human): the broker has a NEW pid; the sheet
+is still there, still interactive, never re-registered or dismissed;
+deciding returns exit **0** with the reply in `review-out.json`. **Fail**
+when: the review errors, exits 3/5/10, the sheet vanishes, or the CLI hangs.
+
+---
+
+## App-quit paths not re-covered here
+
+- **App quits mid-review** — scenario 7 above.
+- **App quits mid-resolve (exit 5)** — `verify-resolve.md` scenario 9
+  already owns it (UNRUN there); no duplicate here.

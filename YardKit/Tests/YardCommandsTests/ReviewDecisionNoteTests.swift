@@ -110,6 +110,52 @@ struct ReviewDecisionNoteTests {
         #expect(note.body == expectedTip)
     }
 
+    /// #0349: the CLI's connection dies mid-review — the abandonment hook
+    /// fires, driven here by calling `abandonAll(ownedBy:)` directly, the
+    /// exact call the app's invalidation handler makes — and the human
+    /// decides anyway. The note still records: the note outlives the agent.
+    @Test func decisionAfterAbandonmentStillRecordsTheNote() async throws {
+        var repo = try FixtureRepository()
+        defer { repo.destroy() }
+        try repo.build([FixtureRepository.Commit("base")])
+        let repoPath = repo.url.path
+        let store = PendingReviewStore()
+        let owner = PendingOwner()
+
+        let request = ReviewRequest(commonDir: "", selector: .staged, timeoutSeconds: 600)
+        let requestData = try JSONEncoder().encode(request)
+        let reply = ReviewReply(decision: .approve, message: "late, but decided", comments: [], editedPatch: nil)
+
+        async let outcomeData = runReviewRequest(
+            requestData: requestData, workingDirectory: repoPath, store: store, owner: owner)
+
+        // 300 s: pool resumption under full-suite load reaches tens of seconds (#0351).
+        let pendings = try await AppConnection.poll(
+            timeout: .seconds(300), interval: .milliseconds(10)) {
+            store.pendingReviews.isEmpty ? nil : store.pendingReviews
+        }
+        let pending = try #require(pendings?.first, "the request must be registered")
+
+        // The connection dies; the abandonment hook fires. The pending
+        // stays registered — abandonment is not a resolution (#0349).
+        #expect(store.abandonAll(ownedBy: owner) == 1)
+        #expect(store.pendingReviews.count == 1)
+
+        #expect(store.resolve(id: pending.id, decision: reply),
+                "a decision after abandonment still resolves")
+        let outcome = try #require(
+            try? JSONDecoder().decode(ReviewOutcome.self, from: await outcomeData),
+            "the decision must reach the serving body even after abandonment")
+        #expect(outcome == .decided(reply))
+
+        let notes = try await ReviewNotes.list(at: repoPath)
+        let head = try repo.revParse("HEAD")
+        let note = try #require(notes.first(where: { $0.oid == head }),
+                                "the post-abandonment decision must be recorded on HEAD")
+        let expected = try Self.expectedBody(for: reply)
+        #expect(note.body == expected)
+    }
+
     /// `.timedOut` is a typed non-decision (#0055) — no decision, no note.
     @Test func timedOutOutcomeRecordsNoNote() async throws {
         var repo = try FixtureRepository()
