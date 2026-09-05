@@ -66,7 +66,7 @@ struct ReviewSheetTests {
     /// fetch closure may read @MainActor state. Throws when the state never
     /// arrives, rather than hanging.
     private func waitUntil(
-        timeout: Duration = .seconds(60),
+        timeout: Duration = .seconds(300),
         _ fetch: @MainActor () -> Bool
     ) async throws {
         let deadline = ContinuousClock.now + timeout

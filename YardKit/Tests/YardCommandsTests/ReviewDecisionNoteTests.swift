@@ -32,7 +32,7 @@ struct ReviewDecisionNoteTests {
         let repoPath = repo.url.path
         let store = PendingReviewStore()
 
-        let request = ReviewRequest(commonDir: "", selector: .staged, timeoutSeconds: 60)
+        let request = ReviewRequest(commonDir: "", selector: .staged, timeoutSeconds: 600)
         let requestData = try JSONEncoder().encode(request)
         let reply = ReviewReply(
             decision: .approve,
@@ -43,8 +43,9 @@ struct ReviewDecisionNoteTests {
         async let outcomeData = runReviewRequest(
             requestData: requestData, workingDirectory: repoPath, store: store)
 
+        // 300 s: pool resumption under full-suite load reaches tens of seconds (#0351).
         let pendings = try await AppConnection.poll(
-            timeout: .seconds(60), interval: .milliseconds(10)) {
+            timeout: .seconds(300), interval: .milliseconds(10)) {
             store.pendingReviews.isEmpty ? nil : store.pendingReviews
         }
         let pending = try #require(pendings?.first, "the request must be registered")
@@ -81,15 +82,16 @@ struct ReviewDecisionNoteTests {
         let store = PendingReviewStore()
 
         let request = ReviewRequest(
-            commonDir: "", selector: .range("HEAD~1..HEAD"), timeoutSeconds: 60)
+            commonDir: "", selector: .range("HEAD~1..HEAD"), timeoutSeconds: 600)
         let requestData = try JSONEncoder().encode(request)
         let reply = ReviewReply(decision: .reject, message: "no")
 
         async let outcomeData = runReviewRequest(
             requestData: requestData, workingDirectory: repoPath, store: store)
 
+        // 300 s: pool resumption under full-suite load reaches tens of seconds (#0351).
         let pendings = try await AppConnection.poll(
-            timeout: .seconds(60), interval: .milliseconds(10)) {
+            timeout: .seconds(300), interval: .milliseconds(10)) {
             store.pendingReviews.isEmpty ? nil : store.pendingReviews
         }
         let pending = try #require(pendings?.first)
@@ -138,15 +140,16 @@ struct ReviewDecisionNoteTests {
         try repo.build([FixtureRepository.Commit("base")])
         let store = PendingReviewStore()
 
-        let request = ReviewRequest(commonDir: "", selector: .staged, timeoutSeconds: 60)
+        let request = ReviewRequest(commonDir: "", selector: .staged, timeoutSeconds: 600)
         let requestData = try JSONEncoder().encode(request)
         let reply = ReviewReply(decision: .approve)
 
         async let outcomeData = runReviewRequest(
             requestData: requestData, workingDirectory: repoPath, store: store)
 
+        // 300 s: pool resumption under full-suite load reaches tens of seconds (#0351).
         let pendings = try await AppConnection.poll(
-            timeout: .seconds(60), interval: .milliseconds(10)) {
+            timeout: .seconds(300), interval: .milliseconds(10)) {
             store.pendingReviews.isEmpty ? nil : store.pendingReviews
         }
         let pending = try #require(pendings?.first)

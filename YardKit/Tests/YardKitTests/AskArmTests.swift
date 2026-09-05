@@ -170,7 +170,7 @@ struct AskArmTests {
     }
 
     private func waitUntil(
-        timeout: Duration = .seconds(60),
+        timeout: Duration = .seconds(300),
         _ fetch: @escaping @Sendable () -> Bool
     ) async throws {
         let reached = try await AppConnection.poll(timeout: timeout, interval: .milliseconds(10)) {

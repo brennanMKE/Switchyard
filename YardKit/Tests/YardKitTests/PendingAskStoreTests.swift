@@ -34,7 +34,7 @@ struct PendingAskStoreTests {
     /// `PendingReviewStoreTests` waits. Fails the test when the state never
     /// arrives, rather than hanging.
     private func waitUntil(
-        timeout: Duration = .seconds(60),
+        timeout: Duration = .seconds(300),
         _ fetch: @escaping @Sendable () -> Bool
     ) async throws {
         let reached = try await AppConnection.poll(timeout: timeout, interval: .milliseconds(10)) {
@@ -274,7 +274,7 @@ struct PendingAskStoreTests {
         async let outcome = store.awaitDecision(for: ask)
         #expect(await outcome == .timedOut)
 
-        let timedOut = try await AppConnection.poll(timeout: .seconds(60), interval: .milliseconds(10)) {
+        let timedOut = try await AppConnection.poll(timeout: .seconds(300), interval: .milliseconds(10)) {
             events.all.last { $0.1 == .timedOut }
         }
         let event = try #require(timedOut, "the typed timeout must fire the hook")
