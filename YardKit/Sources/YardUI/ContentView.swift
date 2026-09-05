@@ -87,6 +87,13 @@ public struct ContentView: View {
     /// never block another's window.
     public var asks: AskCenter?
 
+    /// #0057's resolve centre, injected by the app target. The pending
+    /// resolve for THIS repository presents as this view's sheet — one pane
+    /// per repository, the review semantics. Per-tab like reviews; a resolve
+    /// on one repository never blocks another's window. `nil` when nothing
+    /// is injected (tests, previews) and no pane is ever presented.
+    public var resolves: ResolveCenter?
+
     /// The transport pane's disclosure state. Local UI state, so `@State`
     /// is the right home; nothing else reads it.
     @State private var transportExpanded = false
@@ -98,11 +105,13 @@ public struct ContentView: View {
     public init(
         transportStatus: TransportStatusModel? = nil,
         reviews: ReviewCenter? = nil,
-        asks: AskCenter? = nil
+        asks: AskCenter? = nil,
+        resolves: ResolveCenter? = nil
     ) {
         self.transportStatus = transportStatus
         self.reviews = reviews
         self.asks = asks
+        self.resolves = resolves
     }
 
     public var body: some View {
@@ -205,6 +214,25 @@ public struct ContentView: View {
             }
         )) { sheetModel in
             AskSheet(model: sheetModel)
+        }
+        // #0057: the pending resolve for the repository this view shows,
+        // presented as a sheet. The centre removes a decided model — which
+        // clears the binding and dismisses — and a timed-out or superseded
+        // pane's banner stays until the human closes it.
+        .sheet(item: Binding<ResolvePaneModel?>(
+            get: {
+                guard let resolves, let repositoryPath else { return nil }
+                return resolves.activePane(forRepositoryPath: repositoryPath)
+            },
+            set: { newValue in
+                guard newValue == nil,
+                      let resolves, let repositoryPath,
+                      let current = resolves.activePane(forRepositoryPath: repositoryPath)
+                else { return }
+                resolves.dismiss(current)
+            }
+        )) { paneModel in
+            ResolvePane(model: paneModel)
         }
     }
 

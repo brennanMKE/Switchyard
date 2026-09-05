@@ -83,9 +83,14 @@ final class AppXPCServer {
     /// as `reviewBridge`.
     let askBridge: AskSheetBridge
 
+    /// #0057 round 2: the resolve pane's bridge, over the resolve store —
+    /// the same shape as `reviewBridge`.
+    let resolveBridge: ResolvePaneBridge
+
     init() {
         reviewBridge = ReviewSheetBridge(store: pendingReviews)
         askBridge = AskSheetBridge(store: pendingAsks)
+        resolveBridge = ResolvePaneBridge(store: pendingResolves)
     }
 
     /// The store behind `reviewBridge` — what `ListenerDelegate` threads
@@ -114,7 +119,8 @@ final class AppXPCServer {
             pendingAsks: pendingAsks,
             pendingResolves: pendingResolves,
             reviewBridge: reviewBridge,
-            askBridge: askBridge)
+            askBridge: askBridge,
+            resolveBridge: resolveBridge)
         listenerDelegate = delegate
         listener.delegate = delegate
         listener.resume()
@@ -221,19 +227,22 @@ private nonisolated final class ListenerDelegate: NSObject, NSXPCListenerDelegat
     private let pendingResolves: PendingResolveStore
     private let reviewBridge: ReviewSheetBridge
     private let askBridge: AskSheetBridge
+    private let resolveBridge: ResolvePaneBridge
 
     init(
         pendingReviews: PendingReviewStore,
         pendingAsks: PendingAskStore,
         pendingResolves: PendingResolveStore,
         reviewBridge: ReviewSheetBridge,
-        askBridge: AskSheetBridge
+        askBridge: AskSheetBridge,
+        resolveBridge: ResolvePaneBridge
     ) {
         self.pendingReviews = pendingReviews
         self.pendingAsks = pendingAsks
         self.pendingResolves = pendingResolves
         self.reviewBridge = reviewBridge
         self.askBridge = askBridge
+        self.resolveBridge = resolveBridge
         super.init()
     }
 
@@ -249,7 +258,8 @@ private nonisolated final class ListenerDelegate: NSObject, NSXPCListenerDelegat
             pendingAsks: pendingAsks,
             pendingResolves: pendingResolves,
             reviewBridge: reviewBridge,
-            askBridge: askBridge)
+            askBridge: askBridge,
+            resolveBridge: resolveBridge)
         connection.resume()
         return true
     }
@@ -289,18 +299,24 @@ private nonisolated final class AppService: NSObject, AppServiceProtocol {
     /// sheets (tab routing only — an ask has no diff).
     private let askBridge: AskSheetBridge
 
+    /// #0057 round 2: delivers a registered resolve's resolved context and
+    /// per-path conflict details to the resolve panes.
+    private let resolveBridge: ResolvePaneBridge
+
     init(
         pendingReviews: PendingReviewStore,
         pendingAsks: PendingAskStore,
         pendingResolves: PendingResolveStore,
         reviewBridge: ReviewSheetBridge,
-        askBridge: AskSheetBridge
+        askBridge: AskSheetBridge,
+        resolveBridge: ResolvePaneBridge
     ) {
         self.pendingReviews = pendingReviews
         self.pendingAsks = pendingAsks
         self.pendingResolves = pendingResolves
         self.reviewBridge = reviewBridge
         self.askBridge = askBridge
+        self.resolveBridge = resolveBridge
         super.init()
     }
 
@@ -439,20 +455,30 @@ private nonisolated final class AppService: NSObject, AppServiceProtocol {
     /// reply block is called when the human answers, the request times out,
     /// or it is superseded — long after this method returns.
     ///
-    /// `onPending` is nil in round 1: the conflict details the serving body
-    /// computes are delivered when the resolve pane's bridge lands (#0057
-    /// round 2), the way `reviewBridge` was threaded in for #0055's sheet.
+    /// `onPending` delivers the resolved context and per-path details to the
+    /// resolve pane's bridge (the #0057 round-2 wiring, the way
+    /// `reviewBridge` was threaded in for #0055's sheet).
     func performResolve(
         request: Data,
         workingDirectory: String,
         reply: @escaping @Sendable (Data) -> Void
     ) {
         let store = pendingResolves
+        let bridge = resolveBridge
         Task {
             let outcomeData = await runResolveRequest(
                 requestData: request,
                 workingDirectory: workingDirectory,
-                store: store)
+                store: store,
+                onPending: { registered, context, details, errorMessage in
+                    Task { @MainActor in
+                        bridge.pendingDidRegister(
+                            request: registered,
+                            context: context,
+                            details: details,
+                            errorMessage: errorMessage)
+                    }
+                })
             reply(outcomeData)
         }
     }

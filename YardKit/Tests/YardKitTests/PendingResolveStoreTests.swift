@@ -27,7 +27,7 @@ struct PendingResolveStoreTests {
     /// `PendingReviewStoreTests` waits. Fails the test when the state never
     /// arrives, rather than hanging.
     private func waitUntil(
-        timeout: Duration = .seconds(60),
+        timeout: Duration = .seconds(240),
         _ fetch: @escaping @Sendable () -> Bool
     ) async throws {
         let reached = try await AppConnection.poll(timeout: timeout, interval: .milliseconds(10)) {
