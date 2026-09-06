@@ -391,6 +391,11 @@ struct ExitClassCoverageTests {
             "post-reply conflicts re-check failure, surfaced by `render` as " +
             "a `request_failed` failure envelope (exit 4) rather than a §6 " +
             "class.",
+        "WatchRequest.swift:WatchWireError":
+            "#0058 — declared in YardKit, which does not depend on YardGit " +
+            "and cannot import ExitClassCarrying; the watch payload bridge's " +
+            "error, surfaced by the arm as a `request_failed` failure " +
+            "envelope (exit 4) rather than a §6 class.",
     ]
 
     /// #0197's headline: every declared error type under

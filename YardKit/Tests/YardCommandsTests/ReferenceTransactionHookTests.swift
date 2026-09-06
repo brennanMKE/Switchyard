@@ -107,3 +107,156 @@ struct ReferenceTransactionHookTests {
         #expect(exitCode == 0)
     }
 }
+
+// MARK: - The #0058 watch tap
+
+/// Gathers what one watch session's push closure received. Same shape as the
+/// collector in `WatchSessionStoreTests`, local to this target.
+private final class HookEventCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _events: [WatchEvent] = []
+
+    func append(_ data: Data) {
+        guard let event = try? JSONDecoder().decode(WatchEvent.self, from: data) else {
+            return
+        }
+        lock.withLock { _events.append(event) }
+    }
+
+    var events: [WatchEvent] { lock.withLock { _events } }
+}
+
+extension ReferenceTransactionHookTests {
+
+    private func waitUntil(
+        timeout: Duration = .seconds(120),
+        _ fetch: @escaping @Sendable () -> Bool
+    ) async throws {
+        let reached = try await AppConnection.poll(timeout: timeout, interval: .milliseconds(10)) {
+            fetch() ? true : nil
+        }
+        try #require(reached == true, "the awaited state was never reached")
+    }
+
+    /// A foreign `committed` transaction recorded WITH a watch store riding
+    /// along broadcasts one `journal_observed` event whose payload IS the
+    /// metadata's shape — the hook flow and the watch stream meet here.
+    @Test func foreignCommittedBroadcastsAJournalObservedWatchEvent() async throws {
+        var repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let store = WatchSessionStore()
+        let collector = HookEventCollector()
+
+        let sessionTask = Task {
+            await store.register(
+                request: WatchRequest(repositoryPath: nil, timeoutSeconds: nil),
+                owner: PendingOwner(),
+                push: { collector.append($0) })
+        }
+        try await waitUntil { store.activeSessions.count == 1 }
+
+        let exitCode = runReferenceTransactionHook(
+            state: "committed",
+            environment: [:],
+            standardInput: payload(newOid: repo.oids["c"]!),
+            workingDirectory: repo.url.path,
+            watchStore: store)
+
+        #expect(exitCode == 0, "the tap must not disturb the hook's totality")
+        #expect(store.endAll(reason: .detached) == 1)
+        #expect(await sessionTask.value == .detached)
+
+        let events = collector.events
+        #expect(events.count == 1, "one recorded entry, one watch event; got \(events.count)")
+        let event = try #require(events.first)
+        #expect(event.sequence == 1)
+        #expect(event.kind == .journalObserved)
+        #expect(event.payload["kind"] == .string("ref_updates"))
+        #expect(event.payload["schemaVersion"] == .int(JournalObserved.Metadata.currentSchemaVersion))
+        let updates = try #require(event.payload["updates"])
+        guard case .array(let entries) = updates, entries.count == 1 else {
+            Issue.record("updates must arrive as the metadata's one-entry array: \(updates)")
+            return
+        }
+        guard case .object(let update) = entries[0] else {
+            Issue.record("each update must be an object: \(entries[0])")
+            return
+        }
+        #expect(update["oldValue"] == .string(String(repeating: "0", count: 40)))
+        #expect(update["newValue"] == .string(repo.oids["c"]!))
+        #expect(update["refName"] == .string("refs/heads/main"))
+    }
+
+    /// Switchyard's own transaction records nothing, so the tap fires for
+    /// nothing — no event, and the store still holds exactly the session.
+    @Test func ownCommittedBroadcastsNothing() async throws {
+        var repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let store = WatchSessionStore()
+        let collector = HookEventCollector()
+
+        let sessionTask = Task {
+            await store.register(
+                request: WatchRequest(repositoryPath: nil, timeoutSeconds: nil),
+                owner: PendingOwner(),
+                push: { collector.append($0) })
+        }
+        try await waitUntil { store.activeSessions.count == 1 }
+
+        let exitCode = runReferenceTransactionHook(
+            state: "committed",
+            environment: [GitProcess.markerVariable: "1"],
+            standardInput: payload(newOid: repo.oids["c"]!),
+            workingDirectory: repo.url.path,
+            watchStore: store)
+
+        #expect(exitCode == 0)
+        #expect(collector.events.isEmpty, "nothing recorded, nothing streamed")
+        #expect(store.activeSessions.count == 1)
+        #expect(store.endAll(reason: .detached) == 1)
+        #expect(await sessionTask.value == .detached)
+    }
+
+    /// The event is scoped to the worktree the transaction happened in: a
+    /// session watching that exact path receives it (as its first event);
+    /// a session watching a different path receives nothing.
+    @Test func observedEventIsScopedToTheWorktreesPath() async throws {
+        var repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let repoPath = repo.url.path
+        let store = WatchSessionStore()
+        let watchingHere = HookEventCollector()
+        let watchingElsewhere = HookEventCollector()
+
+        let hereTask = Task {
+            await store.register(
+                request: WatchRequest(repositoryPath: repoPath, timeoutSeconds: nil),
+                owner: PendingOwner(),
+                push: { watchingHere.append($0) })
+        }
+        let elsewhereTask = Task {
+            await store.register(
+                request: WatchRequest(repositoryPath: "/repos/other", timeoutSeconds: nil),
+                owner: PendingOwner(),
+                push: { watchingElsewhere.append($0) })
+        }
+        try await waitUntil { store.activeSessions.count == 2 }
+
+        let exitCode = runReferenceTransactionHook(
+            state: "committed",
+            environment: [:],
+            standardInput: payload(newOid: repo.oids["c"]!),
+            workingDirectory: repo.url.path,
+            watchStore: store)
+
+        #expect(exitCode == 0)
+        #expect(store.endAll(reason: .detached) == 2)
+        #expect(await hereTask.value == .detached)
+        #expect(await elsewhereTask.value == .detached)
+
+        let here = watchingHere.events
+        #expect(here.count == 1, "the session watching this exact path saw the event")
+        #expect(try #require(here.first).sequence == 1)
+        #expect(watchingElsewhere.events.isEmpty, "a session on another path saw nothing")
+    }
+}

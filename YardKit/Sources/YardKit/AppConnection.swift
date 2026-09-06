@@ -44,16 +44,24 @@ public final class AppConnection: @unchecked Sendable {
     ///     no endpoint registered, this fails fast with
     ///     ``AppConnectionError/appUnavailable`` before attempting a launch,
     ///     regardless of `launchIfNeeded`.
+    ///   - exportedClient: the watch arm's CLI-exported client (#0058). When
+    ///     non-nil it is set as this connection's `exportedObject` — with
+    ///     `XPCInterfaces.watchClient` as the interface, BEFORE `resume()`,
+    ///     like everything else on a fresh connection — so the app can push
+    ///     events to it while the watch session is open. Nil (the default)
+    ///     exports nothing, exactly as every pre-watch caller expects.
     public static func connect(
         launchIfNeeded: Bool = true,
         requireApp: Bool = false,
-        launchTimeout: Duration = .seconds(10)
+        launchTimeout: Duration = .seconds(10),
+        exportedClient: (any WatchClientProtocol)? = nil
     ) async throws -> AppConnection {
         try await connect(
             broker: BrokerConnection(),
             launchIfNeeded: launchIfNeeded,
             requireApp: requireApp,
-            launchTimeout: launchTimeout)
+            launchTimeout: launchTimeout,
+            exportedClient: exportedClient)
     }
 
     /// The real body of `connect`, with the broker injectable. Not `public`:
@@ -65,7 +73,8 @@ public final class AppConnection: @unchecked Sendable {
         broker: BrokerConnection,
         launchIfNeeded: Bool,
         requireApp: Bool,
-        launchTimeout: Duration
+        launchTimeout: Duration,
+        exportedClient: (any WatchClientProtocol)? = nil
     ) async throws -> AppConnection {
         defer { broker.close() }
 
@@ -93,6 +102,15 @@ public final class AppConnection: @unchecked Sendable {
 
         let connection = NSXPCConnection(listenerEndpoint: endpoint)
         connection.remoteObjectInterface = XPCInterfaces.appService
+        if let exportedClient {
+            // The watch session's reverse direction (#0058): the app calls
+            // BACK on this object for as long as the session is open. Both
+            // properties must be set BEFORE resume(), or calls to the
+            // exported object silently do nothing — same rule as the
+            // app-side export.
+            connection.exportedInterface = XPCInterfaces.watchClient
+            connection.exportedObject = exportedClient
+        }
         connection.resume()
         return AppConnection(connection: connection)
     }
@@ -260,6 +278,44 @@ public final class AppConnection: @unchecked Sendable {
         try await call(timeout: timeout) { app, complete in
             app.performResolve(request: request, workingDirectory: workingDirectory) { data in
                 complete(.success(data))
+            }
+        }
+    }
+
+    /// Opens one watch session and awaits the app's session-end bytes
+    /// (#0058) — potentially hours later. Unlike every other call here there
+    /// is NO timeout task: the session is long-lived by design, and the watch
+    /// arm races its own deadline and signal latch against this await. The
+    /// reply block fires once, at session end; the connection's error handler
+    /// covers the app quitting mid-session — either resume wins, funnelled
+    /// through `ResumeOnce`.
+    ///
+    /// `client` is the CLI-exported object the app pushes to — the same
+    /// instance `connect(exportedClient:)` set on this connection. It travels
+    /// as the method's own `client` argument; the app receives it as its
+    /// proxy.
+    public func performWatch(
+        request: Data,
+        client: any WatchClientProtocol
+    ) async throws -> Data {
+        let once = ResumeOnce<Data>()
+        return try await withCheckedThrowingContinuation { continuation in
+            once.attach(continuation)
+
+            // @Sendable is required: Foundation types this parameter as a
+            // plain closure, and without it the closure would inherit the
+            // enclosing isolation and trap when XPC calls it off that
+            // queue.
+            let proxy = self.connection.remoteObjectProxyWithErrorHandler {
+                @Sendable error in
+                once.finish(.failure(AppConnectionError.appTerminated(error)))
+            }
+            guard let app = proxy as? any AppServiceProtocol else {
+                once.finish(.failure(CLIError.protocolMismatch("AppServiceProtocol")))
+                return
+            }
+            app.performWatch(request: request, client: client) { reasonData in
+                once.finish(.success(reasonData))
             }
         }
     }

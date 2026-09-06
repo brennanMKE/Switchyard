@@ -216,13 +216,21 @@ extension ReferenceTransaction {
     /// reads stdin; our own transactions are skipped via the marker). This
     /// adds persistence and **catches everything it can throw**, which is the
     /// whole reason it is a separate function rather than a call site.
+    ///
+    /// `onRecord` is the watch stream's tap (#0058): invoked with the
+    /// metadata of every entry this invocation recorded, once the write has
+    /// succeeded. The default does nothing, so every existing caller is
+    /// unchanged; the app-side hook body bridges the metadata into its
+    /// `WatchSessionStore`, swallowing whatever the bridge throws — a watch
+    /// delivery failure must never surface as a non-zero hook exit.
     public static func runHook(
         stateArgument: String,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         in context: WorktreeContext,
         markerVariable: String = GitProcess.markerVariable,
         git: GitProcess = GitProcess(),
-        readStandardInput: () -> Data
+        readStandardInput: () -> Data,
+        onRecord: (JournalObserved.Metadata) -> Void = { _ in }
     ) -> HookOutcome {
         let decision = decide(
             stateArgument: stateArgument,
@@ -239,7 +247,7 @@ extension ReferenceTransaction {
 
         do {
             let entry = try JournalObserved.record(
-                decision.updates, in: context, git: git)
+                decision.updates, in: context, git: git, onRecord: onRecord)
             return HookOutcome(
                 exitCode: decision.exitCode, recorded: entry,
                 recordingFailure: nil,

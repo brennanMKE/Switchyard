@@ -1,0 +1,71 @@
+{
+  "command" : "watch",
+  "envelope" : {
+    "failure" : {
+      "error" : {
+        "code" : {
+          "enum" : [
+            "app_unavailable",
+            "blocked_on_conflicts",
+            "broker_unreachable",
+            "human_declined",
+            "ok",
+            "repository_error",
+            "request_failed",
+            "session_terminated",
+            "signing_failed",
+            "timed_out",
+            "usage"
+          ],
+          "type" : "string"
+        },
+        "hint" : {
+          "optional" : true,
+          "type" : "string"
+        },
+        "message" : {
+          "type" : "string"
+        }
+      },
+      "ok" : false,
+      "schemaVersion" : 1
+    },
+    "success" : {
+      "ok" : true,
+      "result" : {
+        "optional" : true,
+        "schema" : "watch"
+      },
+      "schemaVersion" : 1
+    }
+  },
+  "exitCodes" : [
+    {
+      "code" : 0,
+      "meaning" : "The session ended cleanly — Ctrl-C, the --timeout deadline, or the app's detached\/timedOut reply."
+    },
+    {
+      "code" : 1,
+      "meaning" : "Invalid arguments — a malformed --timeout, an unknown flag, or more than one repository path."
+    },
+    {
+      "code" : 3,
+      "meaning" : "The Switchyard app is not running. Watch never launches the app."
+    },
+    {
+      "code" : 5,
+      "meaning" : "The app terminated the session (shutting down) or quit mid-stream — never reported as a detach."
+    }
+  ],
+  "flags" : [
+    {
+      "argument" : "seconds",
+      "help" : "Detach after this many seconds, exiting 0. Without it the session runs until the CLI detaches (Ctrl-C) or the app ends it.",
+      "long" : "timeout",
+      "short" : null
+    }
+  ],
+  "schemaName" : "watch",
+  "schemaVersion" : 1,
+  "summary" : "Stream repository and app events as newline-delimited JSON until detached."
+}

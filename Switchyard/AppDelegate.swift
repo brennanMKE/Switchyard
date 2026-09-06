@@ -1,6 +1,7 @@
 // AppDelegate.swift
 
 import AppKit
+import YardKit
 import YardUI
 
 /// AppKit delegate for the app.
@@ -48,5 +49,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // to volunteer one.
     func application(_ application: NSApplication, open urls: [URL]) {
         RepositoryOpener.openDelivered(urls: urls)
+    }
+
+    /// #0058: a graceful quit ends every watch session deliberately —
+    /// `endAll(.appShutdown)` resolves each serving body so its
+    /// `sessionEnded` push and reply race the process teardown, instead of
+    /// leaving every watching CLI to discover the quit through connection
+    /// death. Either path lands exit 5 (`session_terminated`); this one is
+    /// the prompt version, and #0349's teardown path 3 owns the ungraceful
+    /// one.
+    func applicationWillTerminate(_ notification: Notification) {
+        server.watchSessionStore.endAll(reason: .appShutdown)
     }
 }

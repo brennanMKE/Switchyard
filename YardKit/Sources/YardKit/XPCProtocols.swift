@@ -170,6 +170,39 @@ import Foundation
         reply: @escaping @Sendable (Data) -> Void
     )
 
+    /// Opens a watch session the app streams events into (#0058).
+    ///
+    /// A separate method rather than a `perform` invocation because the call
+    /// does not round-trip like a command: it stays open for as long as the
+    /// CLI watches — potentially hours — and its reply bytes are a
+    /// ``WatchEndReason``, not a rendered envelope. This is also the one
+    /// method whose DIRECTION reverses mid-call: the CLI exports a
+    /// `WatchClientProtocol` object on its connection (set before resume —
+    /// see `AppConnection.connect`'s `exportedClient`), this method's
+    /// `client` parameter arrives app-side as a proxy to it, and the app
+    /// PUSHES each event by calling that proxy. The reply block fires once,
+    /// at session end, with the end reason — after `client` has already
+    /// received every event and the final `sessionEnded` push.
+    ///
+    /// - Parameters:
+    ///   - request: the JSON-encoded ``WatchRequest`` — the stream's scope
+    ///     (repository path or all-repositories) and its optional timeout.
+    ///   - client: the CLI-exported object to push events to. `NSXPCInterface`
+    ///     needs this object-typed argument whitelisted explicitly —
+    ///     `XPCInterfaces.appService` does exactly that with `setTypes` —
+    ///     or the argument arrives nil and nothing can be pushed.
+    ///   - reply: the JSON-encoded ``WatchEndReason`` — detached, timedOut,
+    ///     or appShutdown — or a JSON-encoded `EnvelopeFail` when the request
+    ///     could not be served at all (undecodable bytes). `Data` because
+    ///     `NSXPCInterface` carries no Swift enum with guaranteed fidelity
+    ///     across the boundary; the reply block may be called long after
+    ///     this method returns — that is the point.
+    func performWatch(
+        request: Data,
+        client: any WatchClientProtocol,
+        reply: @escaping @Sendable (Data) -> Void
+    )
+
     /// Opens a resolve request the human answers in the app (#0057).
     ///
     /// A separate method rather than a `perform` invocation for the same
@@ -219,7 +252,27 @@ public enum XPCInterfaces {
     }
 
     public static var appService: NSXPCInterface {
-        NSXPCInterface(with: AppServiceProtocol.self)
+        let interface = NSXPCInterface(with: AppServiceProtocol.self)
+        // `performWatch`'s `client` parameter is an object the CALLER
+        // exports — the watch session's reverse direction (#0058). An
+        // argument sent as a proxy object instead of by copy must have the
+        // proxy's interface declared, or the runtime refuses to carry it and
+        // the argument arrives nil app-side, silently: no error, no push,
+        // no crash. Both sides build their interfaces through this factory,
+        // so the declaration cannot half-land on one side only.
+        interface.setInterface(
+            NSXPCInterface(with: WatchClientProtocol.self),
+            for: #selector(AppServiceProtocol.performWatch(request:client:reply:)),
+            argumentIndex: 1,
+            ofReply: false)
+        return interface
+    }
+
+    /// The interface the CLI side EXPORTS its watch client under (#0058):
+    /// `NSXPCConnection.exportedInterface` on the CLI's connection, matching
+    /// the proxy the app received through the whitelisted `client` argument.
+    public static var watchClient: NSXPCInterface {
+        NSXPCInterface(with: WatchClientProtocol.self)
     }
 }
 

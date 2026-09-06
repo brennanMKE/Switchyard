@@ -195,24 +195,34 @@ public enum JournalObserved {
     /// Writes one observed entry for a foreign `reference-transaction`.
     /// Returns the anchor so a caller can assert on it; callers in the hook
     /// path ignore it (#0191).
+    ///
+    /// `onRecord` receives the entry's metadata once the write has
+    /// succeeded — the watch stream's tap (#0058): the app-side hook body
+    /// bridges the metadata into `WatchSessionStore` there, and no earlier
+    /// caller changes shape because the default does nothing. Fired only on
+    /// success: a write that threw recorded nothing, so there is no event
+    /// to stream.
     @discardableResult
     public static func record(
         _ updates: [ReferenceTransaction.RefUpdate],
         in context: WorktreeContext,
         now: Date = Date(),
-        git: GitProcess = GitProcess()
+        git: GitProcess = GitProcess(),
+        onRecord: (Metadata) -> Void = { _ in }
     ) throws -> JournalAnchor.Entry {
         let base = context.topLevel ?? context.gitDir
         let metadata = Metadata(
             updates: updates,
             timestamp: now,
             worktree: .init(name: context.worktreeName, path: base))
-        return try JournalAnchor.write(
+        let entry = try JournalAnchor.write(
             JournalAnchor.Contents(metadataJSON: try metadata.serialized()),
             id: JournalEntryID.generate(now: now, after: try list(in: context, git: git).last?.id),
             in: context,
             namespace: refPrefix,
             git: git)
+        onRecord(metadata)
+        return entry
     }
 
     /// **Mid-rebase dedup, shared by both the foreign and own paths

@@ -122,6 +122,17 @@ private final class FakeAppService: NSObject, AppServiceProtocol {
         encoder.outputFormatting.insert(.sortedKeys)
         reply((try? encoder.encode(outcome)) ?? Data())
     }
+
+    /// Not under test in this fake's suites — the watch session semantics
+    /// have their own fakes in `WatchArmTests`. This stub only keeps the
+    /// conformance total as `AppServiceProtocol` grows (#0058).
+    func performWatch(
+        request: Data,
+        client: any WatchClientProtocol,
+        reply: @escaping @Sendable (Data) -> Void
+    ) {
+        reply(Data())
+    }
 }
 
 private final class AppListenerDelegate: NSObject, NSXPCListenerDelegate {

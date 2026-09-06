@@ -73,6 +73,11 @@ final class AppXPCServer {
     /// timeout. Owned by the server for the same reason as `pendingReviews`.
     private let pendingResolves = PendingResolveStore()
 
+    /// The app's active watch sessions (#0058) — push-based, no event
+    /// history (see `WatchSessionStore`). Owned by the server for the same
+    /// reason as the pending stores: a session is not per-connection state.
+    private let watchSessions = WatchSessionStore()
+
     /// #0055 round 2: the review sheet's bridge, over the same store. The
     /// app delegate hands `reviewBridge.center` to `ContentView`; the
     /// delegate threads the bridge into each `AppService` so a review
@@ -105,6 +110,11 @@ final class AppXPCServer {
     /// `ListenerDelegate` threads into each `AppService`.
     var pendingResolveStore: PendingResolveStore { pendingResolves }
 
+    /// The store behind the watch sessions (#0058) — what
+    /// `ListenerDelegate` threads into each `AppService`. The app's quit
+    /// path (round 2) calls `endAll(reason: .appShutdown)` on this.
+    var watchSessionStore: WatchSessionStore { watchSessions }
+
     // MARK: - Lifecycle
 
     /// Resumes the anonymous listener.
@@ -120,7 +130,8 @@ final class AppXPCServer {
             pendingResolves: pendingResolves,
             reviewBridge: reviewBridge,
             askBridge: askBridge,
-            resolveBridge: resolveBridge)
+            resolveBridge: resolveBridge,
+            watchSessions: watchSessions)
         listenerDelegate = delegate
         listener.delegate = delegate
         listener.resume()
@@ -228,6 +239,7 @@ private nonisolated final class ListenerDelegate: NSObject, NSXPCListenerDelegat
     private let reviewBridge: ReviewSheetBridge
     private let askBridge: AskSheetBridge
     private let resolveBridge: ResolvePaneBridge
+    private let watchSessions: WatchSessionStore
 
     init(
         pendingReviews: PendingReviewStore,
@@ -235,7 +247,8 @@ private nonisolated final class ListenerDelegate: NSObject, NSXPCListenerDelegat
         pendingResolves: PendingResolveStore,
         reviewBridge: ReviewSheetBridge,
         askBridge: AskSheetBridge,
-        resolveBridge: ResolvePaneBridge
+        resolveBridge: ResolvePaneBridge,
+        watchSessions: WatchSessionStore
     ) {
         self.pendingReviews = pendingReviews
         self.pendingAsks = pendingAsks
@@ -243,6 +256,7 @@ private nonisolated final class ListenerDelegate: NSObject, NSXPCListenerDelegat
         self.reviewBridge = reviewBridge
         self.askBridge = askBridge
         self.resolveBridge = resolveBridge
+        self.watchSessions = watchSessions
         super.init()
     }
 
@@ -266,6 +280,7 @@ private nonisolated final class ListenerDelegate: NSObject, NSXPCListenerDelegat
             reviewBridge: reviewBridge,
             askBridge: askBridge,
             resolveBridge: resolveBridge,
+            watchSessions: watchSessions,
             owner: owner)
 
         // #0349: the CLI's connection dying — cleanly exited, killed, or
@@ -283,10 +298,15 @@ private nonisolated final class ListenerDelegate: NSObject, NSXPCListenerDelegat
         let reviewStore = pendingReviews
         let askStore = pendingAsks
         let resolveStore = pendingResolves
+        let watchStore = watchSessions
         connection.invalidationHandler = { @Sendable in
             reviewStore.abandonAll(ownedBy: owner)
             askStore.abandonAll(ownedBy: owner)
             resolveStore.abandonAll(ownedBy: owner)
+            // A watch session whose CLI died is dropped, not pushed to —
+            // the peer is gone (#0058). The store resolves the serving
+            // body's await with `.detached` so nothing leaks.
+            watchStore.dropAll(ownedBy: owner)
         }
 
         connection.resume()
@@ -332,6 +352,11 @@ private nonisolated final class AppService: NSObject, AppServiceProtocol {
     /// per-path conflict details to the resolve panes.
     private let resolveBridge: ResolvePaneBridge
 
+    /// The server's shared watch-session store (#0058) — same discipline as
+    /// the pending stores: all accepted connections register into the same
+    /// store, and the push-based session shape lives there.
+    private let watchSessions: WatchSessionStore
+
     /// The ownership token for THIS connection's pendings (#0349): the
     /// listener delegate mints one per accepted connection and shares it
     /// with the connection's invalidation handler, so a connection death
@@ -345,6 +370,7 @@ private nonisolated final class AppService: NSObject, AppServiceProtocol {
         reviewBridge: ReviewSheetBridge,
         askBridge: AskSheetBridge,
         resolveBridge: ResolvePaneBridge,
+        watchSessions: WatchSessionStore,
         owner: PendingOwner
     ) {
         self.pendingReviews = pendingReviews
@@ -353,6 +379,7 @@ private nonisolated final class AppService: NSObject, AppServiceProtocol {
         self.reviewBridge = reviewBridge
         self.askBridge = askBridge
         self.resolveBridge = resolveBridge
+        self.watchSessions = watchSessions
         self.owner = owner
         super.init()
     }
@@ -415,6 +442,9 @@ private nonisolated final class AppService: NSObject, AppServiceProtocol {
     /// only ever runs for an app that was already up, and the reply is the
     /// decision's exit code — 0 by #0042's totality invariant; the arm
     /// exits 0 regardless.
+    ///
+    /// The server's watch-session store rides along as the #0058 tap: every
+    /// entry the hook records is bridged to the watching CLIs here.
     func performReferenceTransactionHook(
         state: String,
         environment: [String: String],
@@ -426,7 +456,8 @@ private nonisolated final class AppService: NSObject, AppServiceProtocol {
             state: state,
             environment: environment,
             standardInput: standardInput,
-            workingDirectory: workingDirectory))
+            workingDirectory: workingDirectory,
+            watchStore: watchSessions))
     }
 
     /// Forwards to `runReviewRequest` (YardCommands), the single body the
@@ -520,6 +551,35 @@ private nonisolated final class AppService: NSObject, AppServiceProtocol {
                 },
                 owner: owner)
             reply(outcomeData)
+        }
+    }
+
+    /// Forwards to `WatchServing.handle` (YardKit), the single body the
+    /// package tests exercise — same pattern as `performAsk` above. The
+    /// reply may take hours: the serving body runs on its own task, pushes
+    /// every event through the CLI-exported client proxy as the store
+    /// broadcasts it, and replies once at session end — long after this
+    /// method returns.
+    func performWatch(
+        request: Data,
+        client: any WatchClientProtocol,
+        reply: @escaping @Sendable (Data) -> Void
+    ) {
+        // The client is an XPC remote proxy — safe to call from any queue,
+        // but typed as a non-`Sendable` existential, which `@Sendable`
+        // closures refuse to capture. `Transferred` confines that fact to
+        // the one named type, the way `NSXPCListenerEndpoint` is carried.
+        let clientBox = Transferred(client)
+        let store = watchSessions
+        let owner = self.owner
+        Task {
+            let reasonData = await WatchServing.handle(
+                requestData: request,
+                store: store,
+                push: { data in clientBox.value.event(data) },
+                sessionEnder: { data in clientBox.value.sessionEnded(reason: data) },
+                owner: owner)
+            reply(reasonData)
         }
     }
 }

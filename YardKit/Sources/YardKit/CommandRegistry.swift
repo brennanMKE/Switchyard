@@ -12,7 +12,7 @@ public enum CommandRegistry {
 
     /// All known `yard` command specifications in the order they should be
     /// rendered in help output.
-    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, reviewSpec, askSpec, resolveSpec]
+    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, reviewSpec, askSpec, resolveSpec, watchSpec]
 
     // MARK: - The switchyard spec — rendered by `yard --help`
 
@@ -391,6 +391,32 @@ public enum CommandRegistry {
         // Same precedent as `statusSpec` (#0225) through `askSpec` (#0056):
         // the schema carries the self-reference form, and `ResolveWireTests`
         // pins the encoded keys instead.
+        payload: nil
+    )
+
+    // MARK: - The watch spec — remote over XPC, streamed by `WatchArm` (#0058)
+
+    /// The spec is named `watch`; `dispatch` intercepts it before the
+    /// generic `perform` path for the same reason it intercepts `review`,
+    /// `ask`, and `resolve` — and here the call also reverses direction
+    /// mid-flight: the CLI exports a client the app pushes to, which the
+    /// argv-in/envelope-out shape cannot carry. The events ARE the output —
+    /// newline-delimited JSON on stdout as each arrives — so unlike every
+    /// other command there is no payload shape and no final result envelope
+    /// on a clean end; the exit code is the whole end-of-session contract.
+    static let watchSpec = CommandSpec(
+        name: "watch",
+        summary: "Stream repository and app events as newline-delimited JSON until detached.",
+        flags: [
+            FlagSpec(long: "timeout", argument: "seconds", help: "Detach after this many seconds, exiting 0. Without it the session runs until the CLI detaches (Ctrl-C) or the app ends it."),
+        ],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The session ended cleanly — Ctrl-C, the --timeout deadline, or the app's detached/timedOut reply."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — a malformed --timeout, an unknown flag, or more than one repository path."),
+            ExitCodeSpec(code: 3, meaning: "The Switchyard app is not running. Watch never launches the app."),
+            ExitCodeSpec(code: 5, meaning: "The app terminated the session (shutting down) or quit mid-stream — never reported as a detach."),
+        ],
+        schemaName: "watch",
         payload: nil
     )
 

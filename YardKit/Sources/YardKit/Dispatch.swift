@@ -40,7 +40,11 @@ public func dispatch(
     },
     connectResolve: () async throws -> AppConnection = {
         try await AppConnection.connect(launchIfNeeded: false)
-    }
+    },
+    connectWatch: (any WatchClientProtocol) async throws -> AppConnection = {
+        try await AppConnection.connect(launchIfNeeded: false, exportedClient: $0)
+    },
+    emitWatch: (@Sendable (String) -> Void)? = WatchArm.standardOutputSink
 ) async -> (stdout: String, stderr: String, exitCode: ExitCode) {
     switch route(arguments) {
     case .local, .unknown:
@@ -98,6 +102,23 @@ public func dispatch(
                 arguments: arguments,
                 workingDirectory: workingDirectory,
                 connect: connectResolve)
+        }
+        // The watch arm (#0058) shares their shape AND reverses direction
+        // mid-call: it exports a client the app pushes events to for as
+        // long as the session is open. Its connector therefore RECEIVES the
+        // exported client (production sets it on the connection before
+        // resume) and is a fourth injectable with `launchIfNeeded: false`
+        // baked in — watch never launches the app; the app being down is
+        // exit 3. `emitWatch` makes each event line hit stdout the moment
+        // it arrives, the stream contract. If this interception were ever
+        // dropped, a watch argv would reach the app as an ordinary
+        // `perform` request and come back "Unknown subcommand" at exit 1.
+        if arguments.first == WatchArm.commandName {
+            return await WatchArm.run(
+                arguments: arguments,
+                workingDirectory: workingDirectory,
+                connect: connectWatch,
+                emit: emitWatch)
         }
         do {
             let app = try await connect()

@@ -123,7 +123,12 @@ struct XPCSendableTests {
             guard isCode(trimmed) else { continue }
 
             let isClosureTrigger = Self.closureTriggers.contains { trimmed.contains($0) }
-            if isClosureTrigger || trimmed.contains("reply:") {
+            // A `#selector(...)` mention carries "reply:" as part of the
+            // method's NAME — a method reference, not a closure literal
+            // (#0058's `setInterface` whitelist for `performWatch`). The
+            // reference cannot inherit closure isolation; exempt it.
+            let isReplyLiteral = trimmed.contains("reply:") && !trimmed.contains("#selector(")
+            if isClosureTrigger || isReplyLiteral {
                 var window = trimmed
                 if offset + 1 < lines.count {
                     window += " " + lines[offset + 1]
@@ -293,8 +298,16 @@ struct XPCSendableTests {
                     }
                 }
                 """,
+            "a #selector reference in a setInterface whitelist (#0058)":
+                """
+                interface.setInterface(
+                    NSXPCInterface(with: WatchClientProtocol.self),
+                    for: #selector(AppServiceProtocol.performWatch(request:client:reply:)),
+                    argumentIndex: 1,
+                    ofReply: false)
+                """,
         ]
-        #expect(snippets.count == 5, "the accepted-shape set changed — add the missing snippet here")
+        #expect(snippets.count == 6, "the accepted-shape set changed — add the missing snippet here")
 
         for (name, snippet) in snippets {
             let violations = isolationViolations(

@@ -112,6 +112,17 @@ private final class ResolveServingFakeAppService: NSObject, AppServiceProtocol {
             reply(outcomeData)
         }
     }
+
+    /// Not under test here — watch session semantics have their own fakes
+    /// in `WatchArmTests` (#0058). This stub only keeps the conformance
+    /// total as `AppServiceProtocol` grows.
+    func performWatch(
+        request: Data,
+        client: any WatchClientProtocol,
+        reply: @escaping @Sendable (Data) -> Void
+    ) {
+        reply(Data())
+    }
 }
 
 private final class ResolveServingListenerDelegate: NSObject, NSXPCListenerDelegate {

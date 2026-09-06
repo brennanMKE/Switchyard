@@ -188,13 +188,16 @@ final class ResumeOnce<T: Sendable>: @unchecked Sendable {
 
 /// Carries a non-`Sendable` value out of an XPC reply block.
 ///
-/// `NSXPCListenerEndpoint` is not `Sendable`, but it has to cross from the XPC
-/// reply queue to the awaiting task. Confining the unchecked-ness to one named
-/// type keeps it auditable.
-struct Transferred<Value>: @unchecked Sendable {
-    let value: Value
+/// `NSXPCListenerEndpoint` is not `Sendable`, but it has to cross from the
+/// XPC reply queue to the awaiting task. Confining the unchecked-ness to one
+/// named type keeps it auditable. Public since #0058: the app target needs
+/// the same confinement for the watch session's client proxy — an XPC
+/// remote proxy, safe to call from any queue, but typed as a non-`Sendable`
+/// protocol existential that `@Sendable` closures refuse to capture.
+public struct Transferred<Value>: @unchecked Sendable {
+    public let value: Value
 
-    init(_ value: Value) {
+    public init(_ value: Value) {
         self.value = value
     }
 }
