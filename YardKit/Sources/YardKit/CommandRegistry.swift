@@ -12,7 +12,7 @@ public enum CommandRegistry {
 
     /// All known `yard` command specifications in the order they should be
     /// rendered in help output.
-    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, reviewSpec, askSpec, resolveSpec, watchSpec]
+    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, reviewSpec, askSpec, resolveSpec, watchSpec]
 
     // MARK: - The switchyard spec — rendered by `yard --help`
 
@@ -304,6 +304,34 @@ public enum CommandRegistry {
         // half-build nesting to fit it in here"). Same precedent as
         // `statusSpec` (#0225) through `verifySpec` (#0348): the schema
         // carries the self-reference form, and `AbsorbTests` pins the
+        // encoded keys instead.
+        payload: nil
+    )
+
+    // MARK: - The split spec — engine-backed, resolved by `YardCommands` (#0062)
+
+    static let splitSpec = CommandSpec(
+        name: "split",
+        summary: "Split one commit into two commits along a hunk boundary.",
+        flags: [
+            FlagSpec(long: "first", argument: "message", help: "The first half's commit message (default: the original commit's)."),
+            FlagSpec(long: "second", argument: "message", help: "The second half's commit message (default: the original commit's)."),
+            FlagSpec(long: "sign", argument: nil, help: "Sign both halves and the replayed descendants, even when commit.gpgsign is false."),
+            FlagSpec(long: "no-sign", argument: nil, help: "Never sign, even when commit.gpgsign is true."),
+        ],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The split completed; the payload carries both new commit oids. The second half's tree equals the original commit's tree, and any descendants were replayed onto the new pair."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — split requires exactly two positional arguments <commit> <hunkID>; an unknown, duplicated, or value-missing flag; or both --sign and --no-sign."),
+            ExitCodeSpec(code: 4, meaning: "The split could not be completed for a reason the other codes do not name — an unknown hunk id, a commit with fewer than two hunks, a commit not on the caller's branch, or a signing failure among them."),
+            ExitCodeSpec(code: 8, meaning: "Blocked on conflicts (blocked_on_conflicts) — the index already held unmerged entries, or the descendant cherry-pick could not apply cleanly and is left in progress, resumable."),
+        ],
+        schemaName: "split",
+        // No `payload` shape (#0062): the result is a single object whose
+        // fields are the two new oids, and `PayloadShape` is flat-only
+        // (#0194: "nested objects and arrays are not supported ... do not
+        // half-build nesting to fit it in here"). Same precedent as
+        // `statusSpec` (#0225) through `absorbSpec` (#0061): the schema
+        // carries the self-reference form, and the wire tests pin the
         // encoded keys instead.
         payload: nil
     )

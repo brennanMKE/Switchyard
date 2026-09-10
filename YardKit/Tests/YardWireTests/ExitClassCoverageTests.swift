@@ -115,6 +115,13 @@ struct ExitClassCoverageTests {
             // AbsorbTests.conflictingReplayLeavesTheRebaseResumable and
             // AbsorbTests.unmergedIndexIsRefusedBeforeAnythingIsTouched.
             Row("AbsorbError", AbsorbError.nothingStaged, .repositoryError),
+            // #0062: SplitError has the same three-class shape as AbsorbError
+            // (unknownHunkID/nothingToDo/commitNotOnRef/treeMismatch → 6,
+            // blockedOnConflicts → 8, signingFailed → 9); this row exercises
+            // the repositoryError case. The conflicts class is asserted in
+            // SplitTests.conflictingReplayLeavesThePickResumable and
+            // SplitTests.unmergedIndexIsRefusedBeforeTheSplitTouchesAnything.
+            Row("SplitError", SplitError.nothingToDo, .repositoryError),
             // #0242: JournalObserved.Metadata gained a production
             // serialization path; its error carries the same class as
             // JournalEntryMetadata.SerializationError above.

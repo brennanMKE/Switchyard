@@ -54,6 +54,14 @@ public func runEngineCommand(
         // unknown or duplicated flag is a usage envelope with exit 1 — never
         // a default guess and never a silent ignore (#0061).
         return runAbsorb(arguments: arguments, workingDirectory: workingDirectory)
+    case "split":
+        // Two required positionals and up to four flags: `switchyard split
+        // HEAD <hunkID> --first "msg"` arrives as
+        // `["split", "HEAD", "<hunkID>", "--first", "msg"]`. The arm parses
+        // the tail itself so an unknown or duplicated flag, a missing flag
+        // value, or a wrong positional count is a usage envelope with
+        // exit 1 — never a default guess and never a silent ignore (#0062).
+        return runSplit(arguments: arguments, workingDirectory: workingDirectory)
     case "wt":
         // A two-token command: `switchyard wt list` arrives as
         // `["wt", "list"]`. Dispatch on the second token so #0228's

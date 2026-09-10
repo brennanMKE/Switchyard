@@ -1,0 +1,89 @@
+{
+  "command" : "split",
+  "envelope" : {
+    "failure" : {
+      "error" : {
+        "code" : {
+          "enum" : [
+            "app_unavailable",
+            "blocked_on_conflicts",
+            "broker_unreachable",
+            "human_declined",
+            "ok",
+            "repository_error",
+            "request_failed",
+            "session_terminated",
+            "signing_failed",
+            "timed_out",
+            "usage"
+          ],
+          "type" : "string"
+        },
+        "hint" : {
+          "optional" : true,
+          "type" : "string"
+        },
+        "message" : {
+          "type" : "string"
+        }
+      },
+      "ok" : false,
+      "schemaVersion" : 1
+    },
+    "success" : {
+      "ok" : true,
+      "result" : {
+        "optional" : true,
+        "schema" : "split"
+      },
+      "schemaVersion" : 1
+    }
+  },
+  "exitCodes" : [
+    {
+      "code" : 0,
+      "meaning" : "The split completed; the payload carries both new commit oids. The second half's tree equals the original commit's tree, and any descendants were replayed onto the new pair."
+    },
+    {
+      "code" : 1,
+      "meaning" : "Invalid arguments — split requires exactly two positional arguments <commit> <hunkID>; an unknown, duplicated, or value-missing flag; or both --sign and --no-sign."
+    },
+    {
+      "code" : 4,
+      "meaning" : "The split could not be completed for a reason the other codes do not name — an unknown hunk id, a commit with fewer than two hunks, a commit not on the caller's branch, or a signing failure among them."
+    },
+    {
+      "code" : 8,
+      "meaning" : "Blocked on conflicts (blocked_on_conflicts) — the index already held unmerged entries, or the descendant cherry-pick could not apply cleanly and is left in progress, resumable."
+    }
+  ],
+  "flags" : [
+    {
+      "argument" : "message",
+      "help" : "The first half's commit message (default: the original commit's).",
+      "long" : "first",
+      "short" : null
+    },
+    {
+      "argument" : null,
+      "help" : "Never sign, even when commit.gpgsign is true.",
+      "long" : "no-sign",
+      "short" : null
+    },
+    {
+      "argument" : "message",
+      "help" : "The second half's commit message (default: the original commit's).",
+      "long" : "second",
+      "short" : null
+    },
+    {
+      "argument" : null,
+      "help" : "Sign both halves and the replayed descendants, even when commit.gpgsign is false.",
+      "long" : "sign",
+      "short" : null
+    }
+  ],
+  "schemaName" : "split",
+  "schemaVersion" : 1,
+  "summary" : "Split one commit into two commits along a hunk boundary."
+}
