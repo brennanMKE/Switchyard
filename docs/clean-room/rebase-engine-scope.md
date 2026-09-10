@@ -68,3 +68,16 @@ justify more machinery.
 `#0060` evaluates this against the M5 command list and records a decision. Its own done-criteria
 require enumerating the minimum primitive set — this note is the starting hypothesis, not the answer,
 and the answer must come from trying it.
+
+---
+
+**Addendum — 2026-09-09, #0060 round 1.** This note was the hypothesis; the decision is now
+recorded in **[rebase-engine-decision.md](../rebase-engine-decision.md)**: **do not write a rebase
+engine** — M5 builds on a rewrite pipeline over `commit-tree` + `cherry-pick` +
+`update-ref --stdin`, wrapped in `JournalCheckpoint.around`. Both load-bearing claims were measured
+before deciding (cherry-pick's conflict reporting against the exit-8 contract; commit-tree's signing
+behavior — which corrects the signing sentence above: `commit-tree` ignores `commit.gpgsign` and
+only signs with explicit `-S`, and a failed `-S` writes no object, so a signed source commit whose
+signature cannot be reproduced fails the rewrite loudly rather than silently going unsigned). The
+revisit trigger is unchanged: a specific M5 command demonstrably failing under the pipeline, the
+recorded candidate being rerere replay (#0065).

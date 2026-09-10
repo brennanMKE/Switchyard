@@ -1417,8 +1417,13 @@ direct analogue of what #0316 did for clauses (a) and (c).
 
 Decide these with Brennan, do not decide them in code.
 
-1. **Rebase engine scope.** GitUp wrote its own. How much of one does M5 actually require, and
-   can `absorb` and `split` be built on narrower primitives?
+1. ~~**Rebase engine scope.** GitUp wrote its own. How much of one does M5 actually require, and
+   can `absorb` and `split` be built on narrower primitives?~~ **Answered — settled 2026-09-09, no
+   rebase engine: M5 history rewriting is a pipeline over `commit-tree`, `cherry-pick` and
+   `update-ref --stdin`, wrapped in `JournalCheckpoint.around`.** Original text kept for context.
+   Decision, measured ground and per-command costs in
+   [rebase-engine-decision.md](rebase-engine-decision.md). Filed as **#0060**; built on by
+   #0061–#0063.
 2. **Domain and App Store name.** Not checked. The App Store name no longer
    matters given the distribution decision above; the domain still does, for the docs site.
 3. ~~**Does M1 criterion 4 cover payload shapes, or only the envelope frame?**~~ **Answered
