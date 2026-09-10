@@ -130,7 +130,14 @@ struct ExitClassCoverageTests {
             // RewriteTests.conflictingDropLeavesThePickResumable and
             // RewriteTests.conflictingReorderLeavesThePickResumable, and the
             // signing class in RewriteTests.aSigningFailureIsTypedAndTouchesNothing.
-            Row("RewriteError", RewriteError.nothingToDo, .repositoryError),
+                        Row("RewriteError", RewriteError.nothingToDo, .repositoryError),
+            // #0064: RewriteDiffError carries one class across all three
+            // cases (unknownEntry/noRewriteMapping/unparseableOutput → 6);
+            // this row exercises it — the command is read-only, so no
+            // conflict class exists on its surface.
+            Row("RewriteDiffError", RewriteDiffError.unknownEntry(id: try #require(
+                    JournalEntryID("01ARZ3NDEKTSV4RRFFQ69G5FAV"))),
+                .repositoryError),
             // #0242: JournalObserved.Metadata gained a production
             // serialization path; its error carries the same class as
             // JournalEntryMetadata.SerializationError above.

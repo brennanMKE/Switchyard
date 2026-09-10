@@ -72,6 +72,14 @@ public func runEngineCommand(
         // usage envelope with exit 1, never a default guess and never a
         // silent ignore (#0063).
         return runRewrite(arguments: arguments, workingDirectory: workingDirectory)
+    case "rewrite-diff":
+        // One required positional, no flags: `switchyard rewrite-diff
+        // <journal-entry-id>` arrives as `["rewrite-diff", "<id>"]`. The arm
+        // parses the tail itself so an unknown flag or a wrong positional
+        // count is a usage envelope with exit 1 — never a default guess and
+        // never a silent ignore (#0064). Read-only: no conflict class
+        // exists on its surface, so the outcomes map 0/1/4.
+        return runRewriteDiff(arguments: arguments, workingDirectory: workingDirectory)
     case "wt":
         // A two-token command: `switchyard wt list` arrives as
         // `["wt", "list"]`. Dispatch on the second token so #0228's

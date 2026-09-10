@@ -1,0 +1,62 @@
+{
+  "command" : "rewrite-diff",
+  "envelope" : {
+    "failure" : {
+      "error" : {
+        "code" : {
+          "enum" : [
+            "app_unavailable",
+            "blocked_on_conflicts",
+            "broker_unreachable",
+            "human_declined",
+            "ok",
+            "repository_error",
+            "request_failed",
+            "session_terminated",
+            "signing_failed",
+            "timed_out",
+            "usage"
+          ],
+          "type" : "string"
+        },
+        "hint" : {
+          "optional" : true,
+          "type" : "string"
+        },
+        "message" : {
+          "type" : "string"
+        }
+      },
+      "ok" : false,
+      "schemaVersion" : 1
+    },
+    "success" : {
+      "ok" : true,
+      "result" : {
+        "optional" : true,
+        "schema" : "rewrite-diff"
+      },
+      "schemaVersion" : 1
+    }
+  },
+  "exitCodes" : [
+    {
+      "code" : 0,
+      "meaning" : "The diff computed; the payload carries the entry id, which storage shape served the mapping, the ranges compared, and the parsed pair rows (identical, modified, dropped, added). Read-only: nothing was touched."
+    },
+    {
+      "code" : 1,
+      "meaning" : "Invalid arguments — rewrite-diff requires exactly one positional argument <journal-entry-id>, a 26-character journal entry id, and takes no flags."
+    },
+    {
+      "code" : 4,
+      "meaning" : "The diff could not be served — the id names no journal or observed entry, the entry stores no rewrite mapping, git range-diff failed or its output did not parse, or the working directory is not a repository."
+    }
+  ],
+  "flags" : [
+
+  ],
+  "schemaName" : "rewrite-diff",
+  "schemaVersion" : 1,
+  "summary" : "Compare one journal entry's rewritten commits against their originals with git range-diff."
+}

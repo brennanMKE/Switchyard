@@ -12,7 +12,7 @@ public enum CommandRegistry {
 
     /// All known `yard` command specifications in the order they should be
     /// rendered in help output.
-    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, reviewSpec, askSpec, resolveSpec, watchSpec]
+    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, rewriteDiffSpec, reviewSpec, askSpec, resolveSpec, watchSpec]
 
     // MARK: - The switchyard spec — rendered by `yard --help`
 
@@ -399,6 +399,28 @@ public enum CommandRegistry {
             ExitCodeSpec(code: 8, meaning: "Blocked on conflicts (blocked_on_conflicts) — the index already held unmerged entries, or the replay could not apply cleanly and is left in progress, resumable."),
         ],
         schemaName: "reorder",
+        payload: nil
+    )
+
+    // MARK: - The rewrite-diff spec — engine-backed, resolved by `YardCommands` (#0064)
+
+    static let rewriteDiffSpec = CommandSpec(
+        name: "rewrite-diff",
+        summary: "Compare one journal entry's rewritten commits against their originals with git range-diff.",
+        flags: [],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The diff computed; the payload carries the entry id, which storage shape served the mapping, the ranges compared, and the parsed pair rows (identical, modified, dropped, added). Read-only: nothing was touched."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — rewrite-diff requires exactly one positional argument <journal-entry-id>, a 26-character journal entry id, and takes no flags."),
+            ExitCodeSpec(code: 4, meaning: "The diff could not be served — the id names no journal or observed entry, the entry stores no rewrite mapping, git range-diff failed or its output did not parse, or the working directory is not a repository."),
+        ],
+        schemaName: "rewrite-diff",
+        // No `payload` shape (#0064): the result carries a nested `ranges`
+        // object and a `rows` array of objects with absent-when-nil sides,
+        // and `PayloadShape` is flat-only (#0194: "nested objects and arrays
+        // are not supported ... do not half-build nesting to fit it in
+        // here"). Same precedent as `statusSpec` (#0225) through
+        // `reorderSpec` (#0063): the schema carries the self-reference form,
+        // and `RewriteDiffTests` pins the encoded keys instead.
         payload: nil
     )
 
