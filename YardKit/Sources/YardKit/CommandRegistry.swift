@@ -12,7 +12,7 @@ public enum CommandRegistry {
 
     /// All known `yard` command specifications in the order they should be
     /// rendered in help output.
-    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, reviewSpec, askSpec, resolveSpec, watchSpec]
+    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, reviewSpec, askSpec, resolveSpec, watchSpec]
 
     // MARK: - The switchyard spec — rendered by `yard --help`
 
@@ -333,6 +333,72 @@ public enum CommandRegistry {
         // `statusSpec` (#0225) through `absorbSpec` (#0061): the schema
         // carries the self-reference form, and the wire tests pin the
         // encoded keys instead.
+        payload: nil
+    )
+
+    // MARK: - The reword spec — engine-backed, resolved by `YardCommands` (#0063)
+
+    static let rewordSpec = CommandSpec(
+        name: "reword",
+        summary: "Rewrite one commit's message without invoking an editor.",
+        flags: [
+            FlagSpec(long: "message", argument: "message", help: "The commit's new message, passed as a flag — GIT_EDITOR is never invoked."),
+            FlagSpec(long: "sign", argument: nil, help: "Sign the rebuilt commit and the replayed descendants, even when commit.gpgsign is false."),
+            FlagSpec(long: "no-sign", argument: nil, help: "Never sign, even when commit.gpgsign is true."),
+        ],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The reword completed; the payload carries the branch's new head oid. The commit was rebuilt with its original tree and parents, and any descendants were replayed onto it."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — reword requires exactly one positional argument <commit> and one --message <message>; an unknown, duplicated, or value-missing flag; or both --sign and --no-sign."),
+            ExitCodeSpec(code: 4, meaning: "The reword could not be completed for a reason the other codes do not name — an unknown commit, a commit not on the caller's branch, an already-matching message, or a signing failure among them."),
+            ExitCodeSpec(code: 8, meaning: "Blocked on conflicts (blocked_on_conflicts) — the index already held unmerged entries, or the descendant cherry-pick could not apply cleanly and is left in progress, resumable."),
+        ],
+        schemaName: "reword",
+        // No `payload` shape (#0063): the result is a single object whose
+        // only field is the branch's new head oid — flat and expressible,
+        // but the engine commands' established precedent (`statusSpec`
+        // #0225 through `splitSpec` #0062) is `payload: nil` with the
+        // schema's self-reference form, and the wire tests pin the encoded
+        // keys instead.
+        payload: nil
+    )
+
+    // MARK: - The drop spec — engine-backed, resolved by `YardCommands` (#0063)
+
+    static let dropSpec = CommandSpec(
+        name: "drop",
+        summary: "Remove one commit from the branch, its changes and all.",
+        flags: [
+            FlagSpec(long: "sign", argument: nil, help: "Sign the replayed descendants, even when commit.gpgsign is false."),
+            FlagSpec(long: "no-sign", argument: nil, help: "Never sign, even when commit.gpgsign is true."),
+        ],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The drop completed; the payload carries the branch's new head oid. The commit's changes are gone, and its descendants were replayed onto its parent."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — drop requires exactly one positional argument <commit>; an unknown, duplicated, or value-missing flag (drop takes no --message or --before/--after); or both --sign and --no-sign."),
+            ExitCodeSpec(code: 4, meaning: "The drop could not be completed for a reason the other codes do not name — an unknown commit, a commit not on the caller's branch, a merge commit (dropping one would silently lose its second parent), the chain's root, or a signing failure among them."),
+            ExitCodeSpec(code: 8, meaning: "Blocked on conflicts (blocked_on_conflicts) — the index already held unmerged entries, or the descendant cherry-pick could not apply cleanly and is left in progress, resumable."),
+        ],
+        schemaName: "drop",
+        payload: nil
+    )
+
+    // MARK: - The reorder spec — engine-backed, resolved by `YardCommands` (#0063)
+
+    static let reorderSpec = CommandSpec(
+        name: "reorder",
+        summary: "Move one commit to immediately before or after another commit on the branch.",
+        flags: [
+            FlagSpec(long: "before", argument: "ref", help: "Move the commit to immediately before this reference commit."),
+            FlagSpec(long: "after", argument: "ref", help: "Move the commit to immediately after this reference commit."),
+            FlagSpec(long: "sign", argument: nil, help: "Sign the replayed commits, even when commit.gpgsign is false."),
+            FlagSpec(long: "no-sign", argument: nil, help: "Never sign, even when commit.gpgsign is true."),
+        ],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The reorder completed; the payload carries the branch's new head oid. The commit now sits immediately before or after the reference, and the commits between were replayed in the new order. The branch's final tree is unchanged."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — reorder requires exactly one positional argument <commit> and exactly one of --before <ref> or --after <ref>; an unknown, duplicated, or value-missing flag (reorder takes no --message); or both --sign and --no-sign."),
+            ExitCodeSpec(code: 4, meaning: "The reorder could not be completed for a reason the other codes do not name — an unknown commit or reference, a target off the branch's first-parent chain (a cross-branch reorder is a rebase, not a reorder), the chain's root, a commit already at the requested position, or a signing failure among them."),
+            ExitCodeSpec(code: 8, meaning: "Blocked on conflicts (blocked_on_conflicts) — the index already held unmerged entries, or the replay could not apply cleanly and is left in progress, resumable."),
+        ],
+        schemaName: "reorder",
         payload: nil
     )
 

@@ -1,0 +1,89 @@
+{
+  "command" : "reorder",
+  "envelope" : {
+    "failure" : {
+      "error" : {
+        "code" : {
+          "enum" : [
+            "app_unavailable",
+            "blocked_on_conflicts",
+            "broker_unreachable",
+            "human_declined",
+            "ok",
+            "repository_error",
+            "request_failed",
+            "session_terminated",
+            "signing_failed",
+            "timed_out",
+            "usage"
+          ],
+          "type" : "string"
+        },
+        "hint" : {
+          "optional" : true,
+          "type" : "string"
+        },
+        "message" : {
+          "type" : "string"
+        }
+      },
+      "ok" : false,
+      "schemaVersion" : 1
+    },
+    "success" : {
+      "ok" : true,
+      "result" : {
+        "optional" : true,
+        "schema" : "reorder"
+      },
+      "schemaVersion" : 1
+    }
+  },
+  "exitCodes" : [
+    {
+      "code" : 0,
+      "meaning" : "The reorder completed; the payload carries the branch's new head oid. The commit now sits immediately before or after the reference, and the commits between were replayed in the new order. The branch's final tree is unchanged."
+    },
+    {
+      "code" : 1,
+      "meaning" : "Invalid arguments — reorder requires exactly one positional argument <commit> and exactly one of --before <ref> or --after <ref>; an unknown, duplicated, or value-missing flag (reorder takes no --message); or both --sign and --no-sign."
+    },
+    {
+      "code" : 4,
+      "meaning" : "The reorder could not be completed for a reason the other codes do not name — an unknown commit or reference, a target off the branch's first-parent chain (a cross-branch reorder is a rebase, not a reorder), the chain's root, a commit already at the requested position, or a signing failure among them."
+    },
+    {
+      "code" : 8,
+      "meaning" : "Blocked on conflicts (blocked_on_conflicts) — the index already held unmerged entries, or the replay could not apply cleanly and is left in progress, resumable."
+    }
+  ],
+  "flags" : [
+    {
+      "argument" : "ref",
+      "help" : "Move the commit to immediately after this reference commit.",
+      "long" : "after",
+      "short" : null
+    },
+    {
+      "argument" : "ref",
+      "help" : "Move the commit to immediately before this reference commit.",
+      "long" : "before",
+      "short" : null
+    },
+    {
+      "argument" : null,
+      "help" : "Never sign, even when commit.gpgsign is true.",
+      "long" : "no-sign",
+      "short" : null
+    },
+    {
+      "argument" : null,
+      "help" : "Sign the replayed commits, even when commit.gpgsign is false.",
+      "long" : "sign",
+      "short" : null
+    }
+  ],
+  "schemaName" : "reorder",
+  "schemaVersion" : 1,
+  "summary" : "Move one commit to immediately before or after another commit on the branch."
+}

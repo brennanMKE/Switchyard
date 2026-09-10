@@ -1,0 +1,83 @@
+{
+  "command" : "reword",
+  "envelope" : {
+    "failure" : {
+      "error" : {
+        "code" : {
+          "enum" : [
+            "app_unavailable",
+            "blocked_on_conflicts",
+            "broker_unreachable",
+            "human_declined",
+            "ok",
+            "repository_error",
+            "request_failed",
+            "session_terminated",
+            "signing_failed",
+            "timed_out",
+            "usage"
+          ],
+          "type" : "string"
+        },
+        "hint" : {
+          "optional" : true,
+          "type" : "string"
+        },
+        "message" : {
+          "type" : "string"
+        }
+      },
+      "ok" : false,
+      "schemaVersion" : 1
+    },
+    "success" : {
+      "ok" : true,
+      "result" : {
+        "optional" : true,
+        "schema" : "reword"
+      },
+      "schemaVersion" : 1
+    }
+  },
+  "exitCodes" : [
+    {
+      "code" : 0,
+      "meaning" : "The reword completed; the payload carries the branch's new head oid. The commit was rebuilt with its original tree and parents, and any descendants were replayed onto it."
+    },
+    {
+      "code" : 1,
+      "meaning" : "Invalid arguments — reword requires exactly one positional argument <commit> and one --message <message>; an unknown, duplicated, or value-missing flag; or both --sign and --no-sign."
+    },
+    {
+      "code" : 4,
+      "meaning" : "The reword could not be completed for a reason the other codes do not name — an unknown commit, a commit not on the caller's branch, an already-matching message, or a signing failure among them."
+    },
+    {
+      "code" : 8,
+      "meaning" : "Blocked on conflicts (blocked_on_conflicts) — the index already held unmerged entries, or the descendant cherry-pick could not apply cleanly and is left in progress, resumable."
+    }
+  ],
+  "flags" : [
+    {
+      "argument" : "message",
+      "help" : "The commit's new message, passed as a flag — GIT_EDITOR is never invoked.",
+      "long" : "message",
+      "short" : null
+    },
+    {
+      "argument" : null,
+      "help" : "Never sign, even when commit.gpgsign is true.",
+      "long" : "no-sign",
+      "short" : null
+    },
+    {
+      "argument" : null,
+      "help" : "Sign the rebuilt commit and the replayed descendants, even when commit.gpgsign is false.",
+      "long" : "sign",
+      "short" : null
+    }
+  ],
+  "schemaName" : "reword",
+  "schemaVersion" : 1,
+  "summary" : "Rewrite one commit's message without invoking an editor."
+}

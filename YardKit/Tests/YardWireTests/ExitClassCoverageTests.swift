@@ -122,6 +122,15 @@ struct ExitClassCoverageTests {
             // SplitTests.conflictingReplayLeavesThePickResumable and
             // SplitTests.unmergedIndexIsRefusedBeforeTheSplitTouchesAnything.
             Row("SplitError", SplitError.nothingToDo, .repositoryError),
+            // #0063: RewriteError has the same three-class shape as
+            // SplitError (unknownCommit/commitNotOnRef/dropMergeRefused/
+            // reorderTargetNotOnBranch/rootRewriteRefused/nothingToDo → 6,
+            // blockedOnConflicts → 8, signingFailed → 9); this row exercises
+            // the repositoryError case. The conflicts class is asserted in
+            // RewriteTests.conflictingDropLeavesThePickResumable and
+            // RewriteTests.conflictingReorderLeavesThePickResumable, and the
+            // signing class in RewriteTests.aSigningFailureIsTypedAndTouchesNothing.
+            Row("RewriteError", RewriteError.nothingToDo, .repositoryError),
             // #0242: JournalObserved.Metadata gained a production
             // serialization path; its error carries the same class as
             // JournalEntryMetadata.SerializationError above.

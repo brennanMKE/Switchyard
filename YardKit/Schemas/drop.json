@@ -1,0 +1,77 @@
+{
+  "command" : "drop",
+  "envelope" : {
+    "failure" : {
+      "error" : {
+        "code" : {
+          "enum" : [
+            "app_unavailable",
+            "blocked_on_conflicts",
+            "broker_unreachable",
+            "human_declined",
+            "ok",
+            "repository_error",
+            "request_failed",
+            "session_terminated",
+            "signing_failed",
+            "timed_out",
+            "usage"
+          ],
+          "type" : "string"
+        },
+        "hint" : {
+          "optional" : true,
+          "type" : "string"
+        },
+        "message" : {
+          "type" : "string"
+        }
+      },
+      "ok" : false,
+      "schemaVersion" : 1
+    },
+    "success" : {
+      "ok" : true,
+      "result" : {
+        "optional" : true,
+        "schema" : "drop"
+      },
+      "schemaVersion" : 1
+    }
+  },
+  "exitCodes" : [
+    {
+      "code" : 0,
+      "meaning" : "The drop completed; the payload carries the branch's new head oid. The commit's changes are gone, and its descendants were replayed onto its parent."
+    },
+    {
+      "code" : 1,
+      "meaning" : "Invalid arguments — drop requires exactly one positional argument <commit>; an unknown, duplicated, or value-missing flag (drop takes no --message or --before\/--after); or both --sign and --no-sign."
+    },
+    {
+      "code" : 4,
+      "meaning" : "The drop could not be completed for a reason the other codes do not name — an unknown commit, a commit not on the caller's branch, a merge commit (dropping one would silently lose its second parent), the chain's root, or a signing failure among them."
+    },
+    {
+      "code" : 8,
+      "meaning" : "Blocked on conflicts (blocked_on_conflicts) — the index already held unmerged entries, or the descendant cherry-pick could not apply cleanly and is left in progress, resumable."
+    }
+  ],
+  "flags" : [
+    {
+      "argument" : null,
+      "help" : "Never sign, even when commit.gpgsign is true.",
+      "long" : "no-sign",
+      "short" : null
+    },
+    {
+      "argument" : null,
+      "help" : "Sign the replayed descendants, even when commit.gpgsign is false.",
+      "long" : "sign",
+      "short" : null
+    }
+  ],
+  "schemaName" : "drop",
+  "schemaVersion" : 1,
+  "summary" : "Remove one commit from the branch, its changes and all."
+}

@@ -62,6 +62,16 @@ public func runEngineCommand(
         // value, or a wrong positional count is a usage envelope with
         // exit 1 — never a default guess and never a silent ignore (#0062).
         return runSplit(arguments: arguments, workingDirectory: workingDirectory)
+    case "reword", "drop", "reorder":
+        // Three history rewrites, one arm: `switchyard reword <commit>
+        // --message "msg"`, `switchyard drop <commit>`, and
+        // `switchyard reorder <commit> --after <ref>` each arrive with the
+        // subcommand first. The arm parses the tail itself per subcommand —
+        // reword requires --message, reorder requires exactly one of
+        // --before/--after, drop takes neither — so a malformed tail is a
+        // usage envelope with exit 1, never a default guess and never a
+        // silent ignore (#0063).
+        return runRewrite(arguments: arguments, workingDirectory: workingDirectory)
     case "wt":
         // A two-token command: `switchyard wt list` arrives as
         // `["wt", "list"]`. Dispatch on the second token so #0228's
