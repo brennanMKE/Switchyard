@@ -80,6 +80,14 @@ public func runEngineCommand(
         // never a silent ignore (#0064). Read-only: no conflict class
         // exists on its surface, so the outcomes map 0/1/4.
         return runRewriteDiff(arguments: arguments, workingDirectory: workingDirectory)
+    case "rerere":
+        // One required subcommand, `status`, plus at most its `--json` flag:
+        // `switchyard rerere status` arrives as `["rerere", "status"]`. The
+        // arm parses the tail itself so an unknown subcommand or flag is a
+        // usage envelope with exit 1 — never a default guess and never a
+        // silent ignore (#0065). Read-only — no `git rerere` subcommand is
+        // invoked — so the outcomes map 0/1/4.
+        return runRerere(arguments: arguments, workingDirectory: workingDirectory)
     case "wt":
         // A two-token command: `switchyard wt list` arrives as
         // `["wt", "list"]`. Dispatch on the second token so #0228's
@@ -156,15 +164,21 @@ private func runStatus(
 }
 
 /// `switchyard conflicts` — resolves `WorktreeContext` for the **caller's**
-/// working directory first, before calling `conflictedFiles`. The passed path
-/// is the caller's, never `FileManager.default.currentDirectoryPath`, which
-/// is the app's.
+/// working directory first, before calling `conflictsSurface`. The passed
+/// path is the caller's, never `FileManager.default.currentDirectoryPath`,
+/// which is the app's.
+///
+/// The result is the conflicts surface (#0065): the conflicted paths plus
+/// `rerereReplayed` — the paths where a recorded rerere resolution has been
+/// replayed into the working file during the live conflict. Reported, never
+/// silent: those paths still read as unmerged in the index while their text
+/// carries no conflict markers, and the field is the only record of why.
 private func runConflicts(
     workingDirectory: String
 ) -> (stdout: String, stderr: String, exitCode: ExitCode) {
     do {
         _ = try WorktreeContext.resolve(path: workingDirectory)
-        let result = try conflictedFiles(at: workingDirectory)
+        let result = try conflictsSurface(at: workingDirectory)
         let envelope = Envelope(result: EncodableResult(result))
         return (stdout: encodeJSON(envelope), stderr: "", exitCode: .success)
     } catch {

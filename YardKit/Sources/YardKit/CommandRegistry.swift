@@ -12,7 +12,7 @@ public enum CommandRegistry {
 
     /// All known `yard` command specifications in the order they should be
     /// rendered in help output.
-    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, rewriteDiffSpec, reviewSpec, askSpec, resolveSpec, watchSpec]
+    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, rewriteDiffSpec, rerereSpec, reviewSpec, askSpec, resolveSpec, watchSpec]
 
     // MARK: - The switchyard spec — rendered by `yard --help`
 
@@ -116,16 +116,19 @@ public enum CommandRegistry {
         summary: "Report every conflicted path in the index, with the blob id and mode of each stage.",
         flags: [],
         exitCodes: [
-            ExitCodeSpec(code: 0, meaning: "The command completed and returned the conflicted paths."),
+            ExitCodeSpec(code: 0, meaning: "The command completed and returned the conflicts surface: the conflicted paths, plus rerereReplayed — the paths where a recorded rerere resolution has been replayed into the working file during the live conflict (#0065)."),
             ExitCodeSpec(code: 6, meaning: "The working directory is not inside a git repository."),
         ],
         schemaName: "conflicts",
-        // No `payload` shape (#0226): the result is an array of objects, each
-        // carrying nested stage entries (`oid`/`mode`), and `PayloadShape` is
-        // flat-only (#0194: "nested objects and arrays are not supported ...
-        // do not half-build nesting to fit it in here"). Same precedent as
-        // `statusSpec` (#0225): the schema carries the self-reference form
-        // until array support is its own issue.
+        // No `payload` shape (#0226): the result is an object whose `files`
+        // is an array of objects, each carrying nested stage entries
+        // (`oid`/`mode`), and `PayloadShape` is flat-only (#0194: "nested
+        // objects and arrays are not supported ... do not half-build nesting
+        // to fit it in here"). Same precedent as `statusSpec` (#0225): the
+        // schema carries the self-reference form until array support is its
+        // own issue. #0065 changed the result from the bare array to the
+        // object — an object can gain sibling fields additively, a bare
+        // array cannot (the reason `statusSpec` got its `entries` object).
         payload: nil
     )
 
@@ -421,6 +424,28 @@ public enum CommandRegistry {
         // here"). Same precedent as `statusSpec` (#0225) through
         // `reorderSpec` (#0063): the schema carries the self-reference form,
         // and `RewriteDiffTests` pins the encoded keys instead.
+        payload: nil
+    )
+
+    // MARK: - The rerere spec — engine-backed, resolved by `YardCommands` (#0065)
+
+    static let rerereSpec = CommandSpec(
+        name: "rerere",
+        summary: "Report what git rerere has recorded: the repository's recorded conflict resolutions and whether rerere is enabled.",
+        flags: [
+            FlagSpec(long: "json", argument: nil, help: "Accepted for command-line consistency; the default output is already the JSON envelope payload, so this changes nothing."),
+        ],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The status computed; the payload carries whether rerere is enabled and one entry per recorded or known resolution — its conflict id, the live paths attributed to it, and which of them currently carry the replay. Read-only: no git rerere subcommand is invoked, nothing was touched."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — rerere requires exactly one subcommand, status, and takes at most the --json flag; an unknown subcommand or flag, a bare rerere, or a duplicated --json."),
+            ExitCodeSpec(code: 4, meaning: "The status could not be served — the working directory is not a repository, or the rerere state (rr-cache, MERGE_RR) could not be read or parsed."),
+        ],
+        schemaName: "rerere-status",
+        // No `payload` shape (#0065): the result carries an `entries` array
+        // of objects with `paths`/`replayedPaths` arrays, and `PayloadShape`
+        // is flat-only (#0194). Same precedent as `statusSpec` (#0225)
+        // through `rewriteDiffSpec` (#0064): the schema carries the
+        // self-reference form, and `RerereTests` pins the encoded keys.
         payload: nil
     )
 

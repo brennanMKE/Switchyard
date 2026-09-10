@@ -115,24 +115,27 @@ struct StatusConflictsWireTests {
     /// The M1 exit-criterion sentence for both payloads: each wraps in the
     /// real `Envelope` through `EncodableResult` — the compile itself proves
     /// the `Encodable & Sendable` bound — and each full response is
-    /// byte-pinned with the v1 frame keys. The conflicts payload is a JSON
-    /// array in `result`, matching `conflictedFiles(at:)`'s `[ConflictedFile]`.
+    /// byte-pinned with the v1 frame keys. The conflicts payload is the
+    /// conflicts surface object (#0065): `files` plus `rerereReplayed`, the
+    /// additive shape a bare array could not carry.
     @Test func envelopeWrapsStatusAndConflictsPayloads() throws {
         var entry = WorktreeStatusEntry(path: "a.txt")
         entry.staged = .added
         let status = WorktreeStatus(entries: [entry])
         #expect(try wireJSON(Envelope(result: EncodableResult(status))) == #"{"ok":true,"result":{"entries":[{"path":"a.txt","staged":"A","worktree":"."}]},"schemaVersion":1}"#)
 
-        let conflicts = [ConflictedFile(
-            path: "file.txt",
-            pathBytes: Array("file.txt".utf8),
-            kind: .bothDeleted,
-            base: ConflictedFile.StageEntry(
-                oid: "df967b96a579e45a18b8251732d16804b2e56a55", mode: "100644"),
-            ours: nil,
-            theirs: nil)]
+        let conflicts = ConflictsSurface(
+            files: [ConflictedFile(
+                path: "file.txt",
+                pathBytes: Array("file.txt".utf8),
+                kind: .bothDeleted,
+                base: ConflictedFile.StageEntry(
+                    oid: "df967b96a579e45a18b8251732d16804b2e56a55", mode: "100644"),
+                ours: nil,
+                theirs: nil)],
+            rerereReplayed: ["file.txt"])
         let json = try wireJSON(Envelope(result: EncodableResult(conflicts)))
-        #expect(json == #"{"ok":true,"result":[{"base":{"mode":"100644","oid":"df967b96a579e45a18b8251732d16804b2e56a55"},"kind":"DD","path":"file.txt"}],"schemaVersion":1}"#)
+        #expect(json == #"{"ok":true,"result":{"files":[{"base":{"mode":"100644","oid":"df967b96a579e45a18b8251732d16804b2e56a55"},"kind":"DD","path":"file.txt"}],"rerereReplayed":["file.txt"]},"schemaVersion":1}"#)
 
         // Structural read-back of one envelope frame, so a failure here
         // distinguishes "envelope broke" from "payload byte drift".
@@ -140,7 +143,9 @@ struct StatusConflictsWireTests {
             try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
         #expect(object["schemaVersion"] as? Int == 1)
         #expect(object["ok"] as? Bool == true)
-        let result = try #require(object["result"] as? [[String: Any]])
-        #expect(result.first?["kind"] as? String == "DD")
+        let result = try #require(object["result"] as? [String: Any])
+        let files = try #require(result["files"] as? [[String: Any]])
+        #expect(files.first?["kind"] as? String == "DD")
+        #expect(result["rerereReplayed"] as? [String] == ["file.txt"])
     }
 }

@@ -42,7 +42,7 @@
   "exitCodes" : [
     {
       "code" : 0,
-      "meaning" : "The command completed and returned the conflicted paths."
+      "meaning" : "The command completed and returned the conflicts surface: the conflicted paths, plus rerereReplayed — the paths where a recorded rerere resolution has been replayed into the working file during the live conflict (#0065)."
     },
     {
       "code" : 6,

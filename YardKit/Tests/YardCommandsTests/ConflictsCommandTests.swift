@@ -48,6 +48,8 @@ struct ConflictsCommandTests {
     /// merges `--no-commit`: exactly one conflicted path, kind `UU`, and all
     /// three stages present (base, ours, theirs) because neither side is an
     /// add or a delete. The values asserted are what the fixture determines.
+    /// Rerere has recorded nothing in this fixture, so `rerereReplayed` is
+    /// empty — the replayed field's disabled shape (#0065).
     @Test func conflictedFixtureReportsOneUUPathWithAllThreeStages() throws {
         let repo = try FixtureRepository.conflicted()
         defer { repo.destroy() }
@@ -62,9 +64,13 @@ struct ConflictsCommandTests {
         #expect(object["ok"] as? Bool == true)
         #expect(object["schemaVersion"] as? Int == 1)
 
-        let files = try #require(object["result"] as? [[String: Any]],
-                                 "result must be the conflicts array itself")
+        let surface = try #require(object["result"] as? [String: Any],
+                                   "result must be the conflicts surface object")
+        let files = try #require(surface["files"] as? [[String: Any]],
+                                 "files must carry the conflicted paths")
         #expect(files.count == 1, "the fixture conflicts exactly one path; got \(files.count)")
+        #expect(surface["rerereReplayed"] as? [String] == [],
+                "nothing was recorded, so nothing was replayed")
 
         let file = try #require(files.first, "the array must be non-empty")
         #expect(file["path"] as? String == "f.txt")
@@ -99,10 +105,11 @@ struct ConflictsCommandTests {
     /// Binds the generated schema to the type, the way
     /// `WhereAmIWireTests.schemaFieldNamesMatchTheEncodedKeysExactly` does —
     /// adapted the way #0225 did for its array-valued result: the payload is
-    /// an array of objects with nested stage entries, which the flat-only
-    /// `PayloadShape` cannot express, so the schema carries the self-reference
-    /// form naming `conflicts` — not a field list. A fully-populated
-    /// `ConflictedFile` then pins its own wire keys to exactly
+    /// an object whose `files` is an array of objects with nested stage
+    /// entries, which the flat-only `PayloadShape` cannot express, so the
+    /// schema carries the self-reference form naming `conflicts` — not a
+    /// field list. A fully-populated `ConflictsSurface` then pins its own
+    /// wire keys to exactly `files, rerereReplayed` (#0065), the file to
     /// `path, kind, base, ours, theirs` (`pathBytes` never rides the wire,
     /// #0129 Decision 6), and each stage to exactly `oid, mode`.
     @Test func schemaResultIsTheSelfReferenceAndTheTypeEncodesOnlyItsFiveKeys() throws {
@@ -133,15 +140,21 @@ struct ConflictsCommandTests {
                 oid: "89abcdef0123456789abcdef0123456789abcdef", mode: "100644"),
             theirs: ConflictedFile.StageEntry(
                 oid: "fedcba9876543210fedcba9876543210fedcba98", mode: "100755"))
+        let surface = ConflictsSurface(files: [file], rerereReplayed: ["f.txt"])
 
         let encoder = JSONEncoder()
         encoder.outputFormatting.insert(.sortedKeys)
-        let json = String(decoding: try encoder.encode(Envelope(result: EncodableResult([file]))),
+        let json = String(decoding: try encoder.encode(Envelope(result: EncodableResult(surface))),
                           as: UTF8.self)
         let encoded = try #require(
             try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
-        let files = try #require(encoded["result"] as? [[String: Any]],
-                                 "an array result encodes as a JSON array")
+        let surfaceObject = try #require(encoded["result"] as? [String: Any],
+                                         "an object result encodes as a JSON object")
+        #expect(Set(surfaceObject.keys) == ["files", "rerereReplayed"],
+                "the conflicts surface encodes exactly its two wire keys; got \(surfaceObject.keys.sorted())")
+        let files = try #require(surfaceObject["files"] as? [[String: Any]],
+                                 "files encodes as a JSON array")
+        #expect(surfaceObject["rerereReplayed"] as? [String] == ["f.txt"])
         let encodedFile = try #require(files.first, "the encoded array must be non-empty")
         #expect(Set(encodedFile.keys) == ["path", "kind", "base", "ours", "theirs"],
                 "a fully-populated ConflictedFile encodes exactly its five wire keys; got \(encodedFile.keys.sorted())")

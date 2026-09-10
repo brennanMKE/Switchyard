@@ -184,6 +184,56 @@ public func conflictedFiles(
     return try ConflictParser().parse(output.standardOutput)
 }
 
+// MARK: - The conflicts surface with rerere replay reporting (#0065)
+
+/// The conflicts command's result: the conflicted paths plus the paths where
+/// git rerere has already replayed a recorded resolution into the working
+/// file during the live conflict.
+///
+/// The replay matters because the index hides it: a replayed path still
+/// carries its unmerged stages — `git status` still calls it "both modified"
+/// — while its working file already holds the recorded resolution, not
+/// conflict markers. An agent that lists conflicts and finds a path whose
+/// text has no markers must be told why, or the resolution reads as a bug.
+/// A replayed resolution is therefore REPORTED here, never silent — the
+/// detection is `Rerere.replayedPaths(files:at:)`'s measured content match
+/// against the rr-cache postimages.
+public struct ConflictsSurface: Sendable, Equatable {
+
+    /// Every conflicted path, in git's order — `conflictedFiles(at:)`'s
+    /// array, unchanged in content.
+    public let files: [ConflictedFile]
+
+    /// The conflicted paths whose working file currently carries a recorded
+    /// rerere resolution, sorted. Empty when rerere has recorded nothing or
+    /// no conflict is live.
+    public let rerereReplayed: [String]
+
+    public init(files: [ConflictedFile], rerereReplayed: [String]) {
+        self.files = files
+        self.rerereReplayed = rerereReplayed
+    }
+
+    /// Stable wire keys, identical to the member names on purpose.
+    private enum CodingKeys: String, CodingKey {
+        case files, rerereReplayed
+    }
+}
+
+extension ConflictsSurface: Encodable {}
+
+/// Reports the conflicts surface at `path`: the conflicted paths plus the
+/// paths where a recorded rerere resolution has been replayed into the
+/// working file during the live conflict.
+public func conflictsSurface(
+    at path: String,
+    git: GitProcess = GitProcess()
+) throws -> ConflictsSurface {
+    let files = try conflictedFiles(at: path, git: git)
+    let replayed = try Rerere.replayedPaths(files: files, at: path, git: git)
+    return ConflictsSurface(files: files, rerereReplayed: replayed)
+}
+
 // MARK: - Wire encoding (#0131)
 
 /// `ConflictedFile` is a `schemaVersion: 1` payload: it encodes through

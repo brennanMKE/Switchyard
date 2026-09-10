@@ -138,6 +138,12 @@ struct ExitClassCoverageTests {
             Row("RewriteDiffError", RewriteDiffError.unknownEntry(id: try #require(
                     JournalEntryID("01ARZ3NDEKTSV4RRFFQ69G5FAV"))),
                 .repositoryError),
+            // #0065: RerereError carries one class across all three cases
+            // (malformedMergeRR/unexpectedCacheEntry/unreadableStateFile → 6);
+            // this row exercises it — the surface is read-only, so no
+            // conflict class exists on it.
+            Row("RerereError", RerereError.unexpectedCacheEntry(name: "probe-not-an-id"),
+                .repositoryError),
             // #0242: JournalObserved.Metadata gained a production
             // serialization path; its error carries the same class as
             // JournalEntryMetadata.SerializationError above.

@@ -78,11 +78,12 @@ private final class ResolveFakeAppService: NSObject, AppServiceProtocol {
             reply(Data(#"{"schemaVersion":1,"ok":true}"#.utf8), 0)
             return
         }
-        // A canned `conflicts` envelope: the real command's result is an
-        // array of conflicted-path objects, and the arm counts the array —
-        // so the fake synthesizes exactly that many one-key entries.
+        // A canned `conflicts` envelope: the real command's result is the
+        // conflicts surface object — `files` plus `rerereReplayed` (#0065) —
+        // and the arm counts `files`, so the fake synthesizes exactly that
+        // many one-key entries.
         let entries = Array(repeating: #"{"path":"f.txt","kind":"UU"}"#, count: conflictCount)
-        let envelope = #"{"schemaVersion":1,"ok":true,"result":[\#(entries.joined(separator: ","))]}"#
+        let envelope = #"{"schemaVersion":1,"ok":true,"result":{"files":[\#(entries.joined(separator: ","))],"rerereReplayed":[]}}"#
         reply(Data(envelope.utf8), 0)
     }
 

@@ -298,7 +298,8 @@ public enum ResolveArm {
         }
         let object = try JSONSerialization.jsonObject(with: stdout)
         guard let dictionary = object as? [String: Any],
-              let entries = dictionary["result"] as? [[String: Any]] else {
+              let result = dictionary["result"] as? [String: Any],
+              let entries = result["files"] as? [[String: Any]] else {
             throw CountFailure.malformedEnvelope
         }
         return entries.count
@@ -313,7 +314,7 @@ public enum ResolveArm {
             case let .commandFailed(exitCode):
                 "the app's conflicts command exited \(exitCode)"
             case .malformedEnvelope:
-                "the app's conflicts command replied without a result array"
+                "the app's conflicts command replied without a result object"
             }
         }
     }
