@@ -1,0 +1,71 @@
+{
+  "command" : "absorb",
+  "envelope" : {
+    "failure" : {
+      "error" : {
+        "code" : {
+          "enum" : [
+            "app_unavailable",
+            "blocked_on_conflicts",
+            "broker_unreachable",
+            "human_declined",
+            "ok",
+            "repository_error",
+            "request_failed",
+            "session_terminated",
+            "signing_failed",
+            "timed_out",
+            "usage"
+          ],
+          "type" : "string"
+        },
+        "hint" : {
+          "optional" : true,
+          "type" : "string"
+        },
+        "message" : {
+          "type" : "string"
+        }
+      },
+      "ok" : false,
+      "schemaVersion" : 1
+    },
+    "success" : {
+      "ok" : true,
+      "result" : {
+        "optional" : true,
+        "schema" : "absorb"
+      },
+      "schemaVersion" : 1
+    }
+  },
+  "exitCodes" : [
+    {
+      "code" : 0,
+      "meaning" : "The command completed — hunks were absorbed, or there was nothing to do (nothing staged, no confident hunk, or a --dry-run plan). The payload reports the distribution either way; hunks with no confident target stay staged and are reported, never guessed."
+    },
+    {
+      "code" : 1,
+      "meaning" : "Invalid arguments — an unknown or duplicated flag. The only accepted form is an optional --dry-run."
+    },
+    {
+      "code" : 4,
+      "meaning" : "The absorb could not be completed for a reason the other codes do not name — a signing failure among them."
+    },
+    {
+      "code" : 8,
+      "meaning" : "Blocked on conflicts (blocked_on_conflicts) — the index already held unmerged entries, or the autosquash rebase could not apply cleanly and is left in progress, resumable."
+    }
+  ],
+  "flags" : [
+    {
+      "argument" : null,
+      "help" : "Report the planned distribution without touching anything.",
+      "long" : "dry-run",
+      "short" : null
+    }
+  ],
+  "schemaName" : "absorb",
+  "schemaVersion" : 1,
+  "summary" : "Distribute the staged hunks into the commits that last touched their lines."
+}

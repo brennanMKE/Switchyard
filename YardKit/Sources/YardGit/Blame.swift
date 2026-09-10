@@ -239,15 +239,27 @@ public struct BlameParser {
 /// surfaces as `GitProcess.Failure.exited`. Line numbers are 1-based;
 /// `-c core.quotepath=false` keeps non-ASCII filenames unquoted, matching
 /// `listHunks`.
+///
+/// - Parameter revision: when given, blames the file **as of that revision**
+///     instead of the worktree — the final line numbers are then that
+///     revision's, and no line is ever uncommitted. `nil` (the default) is
+///     the historical behavior: the worktree content, with lines not in any
+///     commit attributed to `BlameLine.uncommittedOID`. `Absorb` passes
+///     `"HEAD"` to attribute a staged hunk's old-side lines to the commit
+///     that last touched them in `HEAD` itself (#0061).
 public func blameFile(
     at path: String,
     file: String,
     lines: ClosedRange<Int>? = nil,
+    revision: String? = nil,
     git: GitProcess = GitProcess()
 ) throws -> [BlameLine] {
     var arguments = ["-c", "core.quotepath=false", "blame", "--porcelain"]
     if let lines {
         arguments += ["-L", "\(lines.lowerBound),\(lines.upperBound)"]
+    }
+    if let revision {
+        arguments.append(revision)
     }
     arguments += ["--", file]
     let output = try git.run(arguments, workingDirectory: path)

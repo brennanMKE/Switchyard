@@ -12,7 +12,7 @@ public enum CommandRegistry {
 
     /// All known `yard` command specifications in the order they should be
     /// rendered in help output.
-    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, reviewSpec, askSpec, resolveSpec, watchSpec]
+    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, reviewSpec, askSpec, resolveSpec, watchSpec]
 
     // MARK: - The switchyard spec — rendered by `yard --help`
 
@@ -280,6 +280,31 @@ public enum CommandRegistry {
         // (#0228), `hunksSpec` (#0345), `logSpec` (#0346), and `graphSpec`
         // (#0347): the schema carries the self-reference form, and the wire
         // tests pin the encoded keys instead.
+        payload: nil
+    )
+
+    // MARK: - The absorb spec — engine-backed, resolved by `YardCommands` (#0061)
+
+    static let absorbSpec = CommandSpec(
+        name: "absorb",
+        summary: "Distribute the staged hunks into the commits that last touched their lines.",
+        flags: [
+            FlagSpec(long: "dry-run", argument: nil, help: "Report the planned distribution without touching anything."),
+        ],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The command completed — hunks were absorbed, or there was nothing to do (nothing staged, no confident hunk, or a --dry-run plan). The payload reports the distribution either way; hunks with no confident target stay staged and are reported, never guessed."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — an unknown or duplicated flag. The only accepted form is an optional --dry-run."),
+            ExitCodeSpec(code: 4, meaning: "The absorb could not be completed for a reason the other codes do not name — a signing failure among them."),
+            ExitCodeSpec(code: 8, meaning: "Blocked on conflicts (blocked_on_conflicts) — the index already held unmerged entries, or the autosquash rebase could not apply cleanly and is left in progress, resumable."),
+        ],
+        schemaName: "absorb",
+        // No `payload` shape (#0061): the result is per-hunk outcome objects
+        // with absent-when-nil optionals, and `PayloadShape` is flat-only
+        // (#0194: "nested objects and arrays are not supported ... do not
+        // half-build nesting to fit it in here"). Same precedent as
+        // `statusSpec` (#0225) through `verifySpec` (#0348): the schema
+        // carries the self-reference form, and `AbsorbTests` pins the
+        // encoded keys instead.
         payload: nil
     )
 

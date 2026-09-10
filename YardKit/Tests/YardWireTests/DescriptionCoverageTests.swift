@@ -74,6 +74,13 @@ struct DescriptionCoverageTests {
         let oid3 = String(repeating: "3", count: 40)
         let trailer = try #require(Trailer.parse("Reviewed-by: Probe Reviewer <probe@example.invalid>"))
         return [
+            Row("Absorb.swift", "AbsorbError",
+                AbsorbError.blockedOnConflicts(files: [
+                    ConflictedFile(path: "probe/conflicted.txt",
+                                   pathBytes: Array("probe/conflicted.txt".utf8),
+                                   kind: .bothModified, base: nil, ours: nil, theirs: nil),
+                ]),
+                .carries(["absorb blocked on conflicts", "probe/conflicted.txt"])),
             Row("Blame.swift", "BlameParser.Failure",
                 BlameParser.Failure.truncatedEntry(oid: oid1),
                 .carries([oid1])),
