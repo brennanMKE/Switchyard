@@ -1454,6 +1454,16 @@ Decide these with Brennan, do not decide them in code.
    decision 18, option 2, and #0163 is merged.** ~~**#0163**, still needing a pick among
    its three options.~~ The termination semantics it depends on were measured 2026-08-17 and are recorded
    in the issue, so whichever option is chosen is now cheap to author.
+7. **Does `RefSnapshot` grow a delta application — `apply(from:to:)` — alongside whole-snapshot
+   restore, or stay snapshot-only?** Raised 2026-08-17: four M2 issues (#0231, #0232, #0248,
+   #0251) each papered over one seam of "apply this whole snapshot" being restore's primitive
+   (see [clean-room/snapshot-and-undo.md](clean-room/snapshot-and-undo.md)'s addendum). **Decision
+   pending Brennan.** Prepared with measured evidence in
+   [restore-delta-decision.md](restore-delta-decision.md) (filed as **#0258**, M5): the
+   recommendation is to stay snapshot-only — of the three rules a delta was expected to dissolve,
+   #0248's skip genuinely does, #0232's third-value discriminator and #0251's leave-alone survive
+   unchanged, and #0231's non-deletion becomes the delta's own defining constraint — reversible,
+   with a named reversal trigger, and cheapest to settle next to the M5 rewrite-pipeline work.
 
 ---
 
