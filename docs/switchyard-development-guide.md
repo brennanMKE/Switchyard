@@ -1464,6 +1464,15 @@ Decide these with Brennan, do not decide them in code.
    #0248's skip genuinely does, #0232's third-value discriminator and #0251's leave-alone survive
    unchanged, and #0231's non-deletion becomes the delta's own defining constraint — reversible,
    with a named reversal trigger, and cheapest to settle next to the M5 rewrite-pipeline work.
+8. **Are SHA-256 repositories supported?** Raised by the M1 milestone review's eleventh pass
+   (2026-08-18), prepared by **#0308**. Measured on git 2.50.1 with a real `--object-format=sha256`
+   fixture: `graph` throws (`RevListParser` requires a 40-character oid) and `absorb --dry-run`
+   throws (the blame parser has the same check) while ten other engine commands — including the
+   mutating core — work untouched, and `BlameLine.uncommittedOID`'s 40-zero sentinel can never
+   match SHA-256's 64-zero uncommitted oid. **Decision-pending-Brennan** — the three defensible
+   answers with their measured costs, the full 29-hit `grep "40"` audit, and the recommendation
+   (out of scope, refuse cleanly) are in
+   [sha256-decision.md](sha256-decision.md). Until Brennan decides, the half-supported state stands.
 
 ---
 
