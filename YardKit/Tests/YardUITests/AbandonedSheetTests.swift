@@ -7,7 +7,11 @@
 // centres exactly as the app target wires them.
 //
 // No test reads a clock (Rule 7c): every wait is a bounded poll that
-// returns the moment the state arrives.
+// returns the moment the state arrives. The bound is generous (180 s) —
+// measured 2026-09-09: under the full 129-suite parallel run, the stores'
+// own 1 s reaper timers have starved past 60 s (the #0351 class), so the
+// deadline must be wide enough that lateness is not failure; the poll
+// still returns in ~1 s in the common case.
 
 import Foundation
 import Testing
@@ -21,7 +25,7 @@ struct AbandonedSheetTests {
     private struct WaitTimeout: Error {}
 
     private func waitUntil(
-        timeout: Duration = .seconds(60),
+        timeout: Duration = .seconds(180),
         _ fetch: @MainActor () -> Bool
     ) async throws {
         let deadline = ContinuousClock.now + timeout
