@@ -138,11 +138,17 @@ struct ExitClassCoverageTests {
             Row("RewriteDiffError", RewriteDiffError.unknownEntry(id: try #require(
                     JournalEntryID("01ARZ3NDEKTSV4RRFFQ69G5FAV"))),
                 .repositoryError),
-            // #0065: RerereError carries one class across all three cases
-            // (malformedMergeRR/unexpectedCacheEntry/unreadableStateFile → 6);
-            // this row exercises it — the surface is read-only, so no
-            // conflict class exists on it.
+            // #0065: RerereError carries one class across all four cases
+            // (malformedMergeRR/unexpectedCacheEntry/unreadableStateFile/
+            // noRecordedResolution → 6); this row exercises it — the
+            // surface is read-only, so no conflict class exists on it.
             Row("RerereError", RerereError.unexpectedCacheEntry(name: "probe-not-an-id"),
+                .repositoryError),
+            // #0065 round 2: RerereForgetError carries the same class across
+            // all three cases (emptyPaths/nothingRecorded/gitRefused → 6) —
+            // a forget that names no resolution (or that git refuses) is
+            // repository state, not a usage error.
+            Row("RerereForgetError", RerereForgetError.nothingRecorded(paths: ["probe/f.txt"]),
                 .repositoryError),
             // #0242: JournalObserved.Metadata gained a production
             // serialization path; its error carries the same class as

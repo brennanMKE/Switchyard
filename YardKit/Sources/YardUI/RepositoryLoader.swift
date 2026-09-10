@@ -132,24 +132,40 @@ public nonisolated struct RepositorySidebarSummary: Sendable {
     public let worktrees: [WorktreeEntry]
     public let currentWorktreePath: String?
 
-    public init(refs: RefSnapshot, worktrees: [WorktreeEntry], currentWorktreePath: String?) {
+    /// #0065: what git's rerere has recorded — whether `rerere.enabled` is
+    /// set and one entry per rr-cache conflict id. Defaults to the empty,
+    /// disabled shape so existing callers (and previews) still compile.
+    public var rerere: Rerere.Status
+
+    public init(
+        refs: RefSnapshot, worktrees: [WorktreeEntry], currentWorktreePath: String?,
+        rerere: Rerere.Status = Rerere.Status(enabled: false, entries: [])
+    ) {
         self.refs = refs
         self.worktrees = worktrees
         self.currentWorktreePath = currentWorktreePath
+        self.rerere = rerere
     }
 }
 
-/// Loads the ref snapshot and worktree list for the repository at `path`, for
-/// the Sidebar pane (#0081).
+/// Loads the ref snapshot, worktree list, and rerere record for the
+/// repository at `path`, for the Sidebar pane (#0081, #0065).
 ///
 /// `YardUI` sets `.defaultIsolation(MainActor.self)` (`Package.swift`), so
 /// this needs `@concurrent` for the same reason `loadRepositorySummary`,
 /// `loadCommitHistory` and `loadCommitDiff` above do: `WorktreeContext.resolve`,
-/// `RefSnapshot.capture` and `worktreeList` all shell out to `git` through
-/// the non-blocking async `GitProcess` path (#0344), and `@concurrent` keeps
-/// the calls — and their parsing — off the main actor regardless of the
-/// caller's isolation; callers `await` it from the main actor and get
+/// `RefSnapshot.capture`, `worktreeList` and `Rerere.status` all shell out to
+/// `git` — the last through the engine's synchronous read — and `@concurrent`
+/// keeps the calls — and their parsing — off the main actor regardless of
+/// the caller's isolation; callers `await` it from the main actor and get
 /// control back there once it returns.
+///
+/// `Rerere.status` throws on damaged rerere state (a malformed MERGE_RR, a
+/// foreign rr-cache directory) rather than reading it as empty, and that
+/// throw propagates: the Sidebar pane is one load, and a section that
+/// silently vanished would hide exactly the repository damage the typed
+/// error reports — the same all-or-nothing the other sections' reads
+/// already have.
 ///
 /// `RefSnapshot.capture` already excludes `refs/switchyard/*`
 /// (`RefSnapshot.switchyardNamespace`, `RefSnapshot.swift:166`) -- the
@@ -161,5 +177,39 @@ public func loadRepositorySidebar(at path: String) async throws -> RepositorySid
     let context = try await WorktreeContext.resolve(path: path)
     let refs = try await RefSnapshot.capture(in: context)
     let worktrees = try await worktreeList(path: path)
-    return RepositorySidebarSummary(refs: refs, worktrees: worktrees, currentWorktreePath: context.topLevel)
+    let rerere = try Rerere.status(at: path)
+    return RepositorySidebarSummary(
+        refs: refs, worktrees: worktrees, currentWorktreePath: context.topLevel, rerere: rerere)
+}
+
+/// Loads one recorded rerere resolution — the cached conflict preimage, the
+/// resolved postimage, and the unified diff between them — for the Detail
+/// pane's rerere view (#0065). `Rerere.resolution(for:)` is file reads only;
+/// `@concurrent` keeps them and the diff computation off the main actor,
+/// the same reason every loader above carries it.
+///
+/// - Throws: `RerereError.noRecordedResolution` when `conflictID` names no
+///   recorded resolution (the sidebar only offers recorded entries, so a
+///   throw here means the repository changed under the selection).
+@concurrent
+public func loadRerereResolution(
+    at path: String, conflictID: String
+) async throws -> Rerere.Resolution {
+    try Rerere.resolution(for: conflictID, at: path)
+}
+
+/// Forgets the recorded resolution(s) for `paths` — `git rerere forget
+/// <path>…` (#0065), the one mutating rerere call the app surface has. The
+/// engine call is synchronous (two `Rerere.status` reads bracket the
+/// subprocess); `@concurrent` keeps all of it off the main actor while the
+/// UI awaits.
+///
+/// - Throws: `RerereForgetError.nothingRecorded` when no named path had a
+///   recorded resolution — git's silent no-op, refused.
+@concurrent
+@discardableResult
+public func forgetRerereResolution(
+    at path: String, _ paths: [String]
+) async throws -> RerereForgetOutcome {
+    try rerereForget(at: path, paths)
 }

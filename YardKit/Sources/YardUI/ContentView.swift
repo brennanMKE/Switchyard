@@ -54,6 +54,25 @@ public struct ContentView: View {
     /// observes it to show the selected commit.
     @State private var selectedCommit: String?
 
+    /// #0065: the Sidebar pane's selected recorded resolution, keyed on
+    /// conflict id. Selecting one clears the commit selection and the other
+    /// way round — the Detail pane shows whichever was picked last — which
+    /// the two selection bindings below do in their `set` closures.
+    @State private var selectedResolution: String?
+
+    /// The selected resolution's entry, resolved from `sidebar` at
+    /// selection time and held as a value: after a forget the sidebar
+    /// reloads, the entry leaves the recorded set, and this pane keeps
+    /// showing what was selected until a new selection replaces it.
+    @State private var selectedResolutionEntry: Rerere.Entry?
+
+    /// `loadRerereResolution`'s result for `selectedResolution`, loaded by
+    /// the `.task(id: selectedResolution)` below. `nil` while loading.
+    @State private var selectedResolutionDiff: Rerere.Resolution?
+
+    /// Set when `loadRerereResolution` throws.
+    @State private var selectedResolutionDiffError: String?
+
     /// `loadCommitDiff`'s result for `selectedCommit`, loaded by the
     /// `.task(id: selectedCommit)` below. `nil` while loading or when
     /// nothing is selected; `[]` for a genuinely empty diff once loaded.
@@ -177,6 +196,9 @@ public struct ContentView: View {
         .task(id: selectedCommit) {
             await reloadSelectedCommitDiff()
         }
+        .task(id: selectedResolution) {
+            await reloadSelectedResolution()
+        }
         // #0055: the pending review for the repository this view shows,
         // presented as a sheet. The centre removes a decided model — which
         // clears the binding and dismisses — and a timed-out or superseded
@@ -252,15 +274,26 @@ public struct ContentView: View {
         }
     }
 
-    /// #0081's real Sidebar content: branches, remotes, tags, worktrees, and
-    /// a stash count. `sidebar` loads alongside `summary` but off its own
-    /// `@concurrent` call, so it can still be `nil` for a moment after
-    /// `summary` first resolves -- a spinner covers that window rather than
-    /// showing an empty list.
+    /// #0081's real Sidebar content: branches, remotes, tags, worktrees,
+    /// the stash count, and #0065's recorded rerere resolutions.
+    /// `sidebar` loads alongside `summary` but off its own `@concurrent`
+    /// call, so it can still be `nil` for a moment after `summary` first
+    /// resolves -- a spinner covers that window rather than showing an
+    /// empty list.
     private func sidebarPane(summary: RepositorySummary) -> some View {
         Group {
             if let sidebar {
-                RepositorySidebarView(summary: sidebar, stashCount: summary.whereAmI.stashCount)
+                RepositorySidebarView(
+                    summary: sidebar, stashCount: summary.whereAmI.stashCount,
+                    selectedResolution: Binding(
+                        get: { selectedResolution },
+                        set: { newValue in
+                            selectedResolution = newValue
+                            // Picking a resolution last is what the Detail
+                            // pane shows; a stale commit selection would
+                            // only keep the pane's commit branch alive.
+                            if newValue != nil { selectedCommit = nil }
+                        }))
             } else {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -268,17 +301,39 @@ public struct ContentView: View {
         }
     }
 
-    /// #0340's commit list with #0052's lane gutter beside it.
+    /// #0340's commit list with #0052's lane gutter beside it. The
+    /// selection binding mirrors `selectedResolution`'s: picking a commit
+    /// clears the rerere selection, so the Detail pane always shows
+    /// whichever selection was made last.
     private var historyPane: some View {
-        CommitHistoryView(entries: history, graphRows: graphRows, selection: $selectedCommit)
+        CommitHistoryView(
+            entries: history, graphRows: graphRows,
+            selection: Binding(
+                get: { selectedCommit },
+                set: { newValue in
+                    selectedCommit = newValue
+                    if newValue != nil { selectedResolution = nil }
+                }))
     }
 
-    /// #0082: shows the selected commit when `selectedCommit` names one
-    /// found in `history`. With nothing selected -- the #0339 behaviour --
-    /// it keeps showing today's working-tree status list unchanged.
+    /// #0082 shows the selected commit when `selectedCommit` names one
+    /// found in `history`; #0065 adds the selected recorded resolution —
+    /// checked first, because a rerere selection is held as a value and
+    /// survives the sidebar reload a forget triggers. With nothing
+    /// selected -- the #0339 behaviour -- it keeps showing today's
+    /// working-tree status list unchanged.
     private func detailPane(summary: RepositorySummary) -> some View {
         Group {
-            if let selectedCommit, let entry = history.first(where: { $0.oid == selectedCommit }) {
+            if let selectedResolutionEntry {
+                RerereDetailView(
+                    repositoryPath: repositoryPath ?? "",
+                    entry: selectedResolutionEntry,
+                    resolution: selectedResolutionDiff,
+                    resolutionError: selectedResolutionDiffError,
+                    onForgotten: {
+                        Task { await reloadSidebarAfterForget() }
+                    })
+            } else if let selectedCommit, let entry = history.first(where: { $0.oid == selectedCommit }) {
                 CommitDetailView(
                     entry: entry,
                     files: selectedCommitDiff,
@@ -362,6 +417,12 @@ public struct ContentView: View {
         graphRows = []
         sidebar = nil
         selectedCommit = nil
+        selectedResolution = nil
+        selectedResolutionEntry = nil
+        selectedResolutionDiff = nil
+        selectedResolutionDiffError = nil
+        selectedCommitDiff = nil
+        selectedCommitDiffError = nil
         do {
             summary = try await loadRepositorySummary(at: repositoryPath)
             // Separate from the summary load on purpose: a repository whose
@@ -391,6 +452,40 @@ public struct ContentView: View {
         } catch {
             selectedCommitDiffError = String(describing: error)
         }
+    }
+
+    /// #0065: resolves the selected resolution's entry from the loaded
+    /// sidebar and loads its recorded diff, keyed by `.task(id:)` the same
+    /// way `reloadSelectedCommitDiff` is. The entry is held as a value (see
+    /// `selectedResolutionEntry`) so a forget's sidebar reload — which
+    /// removes the entry from the recorded set — does not blank the pane
+    /// the user is looking at.
+    private func reloadSelectedResolution() async {
+        selectedResolutionDiffError = nil
+        selectedResolutionDiff = nil
+        guard let selectedResolution else {
+            selectedResolutionEntry = nil
+            return
+        }
+        selectedResolutionEntry = sidebar?.rerere.entries.first {
+            $0.conflictID == selectedResolution
+        }
+        guard let repositoryPath else { return }
+        do {
+            selectedResolutionDiff = try await loadRerereResolution(
+                at: repositoryPath, conflictID: selectedResolution)
+        } catch {
+            selectedResolutionDiffError = String(describing: error)
+        }
+    }
+
+    /// #0065: after a successful forget, reload the sidebar so the
+    /// forgotten entry leaves the Rerere section. The full reload is not
+    /// needed — a forget touches the rr-cache only — and the detail pane
+    /// keeps showing the forgotten resolution from its held entry.
+    private func reloadSidebarAfterForget() async {
+        guard let repositoryPath else { return }
+        sidebar = try? await loadRepositorySidebar(at: repositoryPath)
     }
 }
 

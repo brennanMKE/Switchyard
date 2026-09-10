@@ -144,6 +144,11 @@ public enum RerereError: Error, Equatable, Sendable, CustomStringConvertible {
     case unexpectedCacheEntry(name: String)
     /// A rerere state file exists but could not be read.
     case unreadableStateFile(name: String, detail: String)
+    /// No recorded resolution exists for a conflict id — the id names no
+    /// rr-cache directory, or the directory holds no `postimage` (merely
+    /// known, never resolved). Refused rather than read as empty, so a
+    /// caller asking for a resolution that does not exist sees why.
+    case noRecordedResolution(conflictID: String)
 
     public var description: String {
         switch self {
@@ -153,6 +158,8 @@ public enum RerereError: Error, Equatable, Sendable, CustomStringConvertible {
             "rr-cache holds a directory that is not a conflict id: \(name)"
         case let .unreadableStateFile(name, detail):
             "rerere state file \(name) could not be read: \(detail)"
+        case let .noRecordedResolution(conflictID):
+            "no recorded resolution for conflict id \(conflictID)"
         }
     }
 }
@@ -203,8 +210,12 @@ extension Rerere {
 
     /// Whether a string can be a conflict id: lowercase hex, at least the
     /// 40 characters a SHA-1 repository prints. 64 (SHA-256) also passes;
-    /// anything shorter or non-hex is not git's layout.
-    private static func isConflictID(_ name: String) -> Bool {
+    /// anything shorter or non-hex is not git's layout. Internal, not
+    /// private: `Rerere.resolution(for:)` (`RerereResolution.swift`) guards
+    /// the id with it before the id ever becomes a path component — a
+    /// non-hex string (or anything shaped like a traversal) can never name
+    /// a cache directory.
+    static func isConflictID(_ name: String) -> Bool {
         !name.isEmpty && name.count >= 40 && name.allSatisfy { character in
             (character >= "a" && character <= "f") || (character >= "0" && character <= "9")
         }

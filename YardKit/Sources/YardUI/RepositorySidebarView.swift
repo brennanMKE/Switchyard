@@ -23,9 +23,19 @@ public struct RepositorySidebarView: View {
     private let summary: RepositorySidebarSummary
     private let stashCount: Int
 
-    public init(summary: RepositorySidebarSummary, stashCount: Int) {
+    /// #0065: the selected recorded resolution's conflict id, routed to the
+    /// Detail pane. `nil` when nothing is selected; the Detail pane's
+    /// rerere branch observes it the way it observes the History pane's
+    /// commit selection.
+    @Binding private var selectedResolution: String?
+
+    public init(
+        summary: RepositorySidebarSummary, stashCount: Int,
+        selectedResolution: Binding<String?>
+    ) {
         self.summary = summary
         self.stashCount = stashCount
+        self._selectedResolution = selectedResolution
     }
 
     private static let headsPrefix = "refs/heads/"
@@ -64,6 +74,15 @@ public struct RepositorySidebarView: View {
             .sorted { $0.name < $1.name }
     }
 
+    /// The rerere resolutions the Detail pane can show and forget: the
+    /// entries with a recorded postimage, in `Rerere.status`'s id order.
+    /// Merely-known entries (a live conflict git is tracking, preimage
+    /// only) are not recorded resolutions and stay out of the section —
+    /// the conflicts surface owns live-conflict reporting (#0065 round 1).
+    private var recordedResolutions: [Rerere.Entry] {
+        summary.rerere.entries.filter { $0.state == .recorded }
+    }
+
     public var body: some View {
         List {
             if isDetached {
@@ -99,6 +118,13 @@ public struct RepositorySidebarView: View {
                 Section("Worktrees") {
                     ForEach(Array(summary.worktrees.enumerated()), id: \.offset) { _, entry in
                         worktreeRow(entry)
+                    }
+                }
+            }
+            if !recordedResolutions.isEmpty {
+                Section("Rerere") {
+                    ForEach(recordedResolutions, id: \.conflictID) { entry in
+                        rerereRow(entry)
                     }
                 }
             }
@@ -148,9 +174,39 @@ public struct RepositorySidebarView: View {
             }
         }
     }
+
+    /// A recorded rerere resolution row (#0065): the attributed path when
+    /// one is live, else "Recorded resolution", with the short conflict id
+    /// beneath — the worktree row's two-line shape. Tapping routes the
+    /// conflict id to `selectedResolution` through a plain
+    /// `.buttonStyle(.plain)` button (the review sheet's comment-remove
+    /// affordance) rather than a `List(selection:)` binding: the sidebar's
+    /// other sections are plain rows, and a list-wide selection binding
+    /// would make every `ForEach` row selectable. The selected row marks
+    /// itself semibold — the same marking `branchRow` uses for the current
+    /// branch.
+    private func rerereRow(_ entry: Rerere.Entry) -> some View {
+        let isSelected = selectedResolution == entry.conflictID
+        let displayName = entry.paths.isEmpty
+            ? "Recorded resolution"
+            : entry.paths.joined(separator: ", ")
+        return Button {
+            selectedResolution = entry.conflictID
+        } label: {
+            VStack(alignment: .leading, spacing: 2) {
+                Label(displayName, systemImage: "arrow.triangle.merge")
+                    .fontWeight(isSelected ? .semibold : .regular)
+                Text(String(entry.conflictID.prefix(12)))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .buttonStyle(.plain)
+    }
 }
 
 #Preview {
+    @Previewable @State var selectedResolution: String?
     RepositorySidebarView(
         summary: RepositorySidebarSummary(
             refs: RefSnapshot(
@@ -166,8 +222,19 @@ public struct RepositorySidebarView: View {
                 WorktreeEntry(path: "/tmp/repo", head: "a1b2c3d", branch: "main", isMainWorktree: true),
                 WorktreeEntry(path: "/tmp/repo-wt", head: "b2c3d4e", branch: "feature"),
             ],
-            currentWorktreePath: "/tmp/repo"
+            currentWorktreePath: "/tmp/repo",
+            rerere: Rerere.Status(
+                enabled: true,
+                entries: [
+                    Rerere.Entry(
+                        conflictID: "650b3bb115602e8f349398d8d6c560baaef932e3",
+                        state: .recorded,
+                        paths: ["f.txt"],
+                        replayedPaths: [])
+                ]
+            )
         ),
-        stashCount: 2
+        stashCount: 2,
+        selectedResolution: $selectedResolution
     )
 }
