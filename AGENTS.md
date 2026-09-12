@@ -630,7 +630,7 @@ cd YardKit && swift build && swift test
 xcodebuild build -project Switchyard.xcodeproj -scheme Switchyard \
   -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO -quiet
 
-# Unit tests only — UI tests cannot run headless here
+# Unit tests only
 xcodebuild -project Switchyard.xcodeproj -scheme Switchyard \
   -destination 'platform=macOS' -only-testing:SwitchyardTests test
 ```

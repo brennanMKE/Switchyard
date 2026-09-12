@@ -609,8 +609,7 @@ menu paths, not shell.
 xcodebuild build -project Switchyard.xcodeproj -scheme Switchyard \
   -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO -quiet
 
-# Unit tests. UI tests cannot run under CLI-driven xcodebuild here — the runner times out
-# enabling automation mode without Accessibility rights. Always scope to SwitchyardTests.
+# Unit tests. Always scope to SwitchyardTests.
 xcodebuild -project Switchyard.xcodeproj -scheme Switchyard \
   -destination 'platform=macOS' -only-testing:SwitchyardTests test
 
