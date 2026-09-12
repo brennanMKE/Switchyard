@@ -214,3 +214,67 @@ relaunch or reboot. That path contains neither `/DerivedData/` nor
 4. Recovery: quit the app, drag `Switchyard.app` to `/Applications`, relaunch it
    from there, and install (scenario 1).
    - **Expected:** the install proceeds normally.
+
+## Scenario 11 — The Settings screen shows CLI install state, broker status, and version in one place (#0352) — UNRUN
+
+Needs a human with the app installed in `/Applications` (scenario 1's preconditions).
+The Settings window opens with Cmd-, (or **Switchyard ▸ Settings…**). The File-menu
+items (#0222) remain; this surface is the primary one. Backed by
+`Switchyard/SettingsView.swift`, YardUI's `SettingsPresentation`, and the same
+`TransportStatusModel` the transport pane binds — one source of truth, so the
+state read here must agree with the menu enablement (scenario 7) and the transport
+pane (scenario 9).
+
+1. Launch `/Applications/Switchyard.app` and press Cmd-,.
+   - **Expected:** the Settings window opens with three sections: **Command Line
+     Tool**, **Broker**, and **About**.
+2. Read the Command Line Tool section with nothing installed.
+   - **Expected:** the status line reads `Not installed` with an **Install…**
+     control, and the caption `Installing creates /usr/local/bin/switchyard as a
+     link into this app.` No stale-target or refusal text.
+3. Click **Install…** in Settings and approve the administrator dialog.
+   - **Expected:** the same branded dialog as scenario 1 — prompt
+     `Switchyard needs administrator access to create a symlink in /usr/local/bin.` —
+     then the informational alert `Command line tool installed.` whose text is
+     `/usr/local/bin/switchyard` now points into this app.
+4. `ls -l /usr/local/bin/switchyard`, then in a new terminal:
+   `switchyard --version`
+   - **Expected:** the scenario 1, step 4 root-owned symlink into the app bundle;
+     `switchyard --version` prints the CLI's version (the authentication dialog +
+     working command is this scenario's core claim).
+5. Close and reopen the Settings window so the row re-inspects.
+   - **Expected:** the Command Line Tool section now reads `Installed` with
+     `/usr/local/bin/switchyard points into this app.`, a green checkmark, and
+     the **Uninstall** control. A stale state read self-corrects on reopen — the
+     row re-inspects the filesystem every time it appears.
+6. Stage a stale link and read the section again:
+   ```sh
+   sudo ln -sfn /nonexistent/Switchyard.app/Contents/Resources/bin/switchyard /usr/local/bin/switchyard
+   ```
+   - **Expected:** the section reads `Installed elsewhere` in orange, names the
+     stale target (`A stale link points to /nonexistent/Switchyard.app/…`), and
+     carries the self-healing note: `Installing will replace it with a link into
+     this app.` Clicking **Install…** repairs it (scenario 1's step 4 symlink
+     results). Clean up afterwards if scenario 6's uninstall runs next.
+7. Run the app from Xcode (scenario 4's shape) and read the section.
+   - **Expected:** the refusal renders inline before any click —
+     `Switchyard.app is running from a build directory.` (or `…from a temporary
+     location.` for scenario 10's translocation) with the destination path and
+     the named remedy, in the warning colour. No authentication dialog appears.
+8. Read the Broker section.
+   - **Expected:** the registration state with its guidance — `Requires approval`
+     shows `Approve in System Settings → General → Login Items & Extensions` and
+     an **Open System Settings > Login Items** button; `Not registered` with a
+     captured error shows the error text and a **Repair** button. Beside the
+     state, reachability reads `Not probed yet`, `Not reachable`, or `Reachable`
+     — and only a completed broker round-trip ever produces `Reachable`
+     (#0354). The same values the transport pane shows (scenario 9), from the
+     same model.
+9. Read the About section.
+   - **Expected:** `Version <CFBundleShortVersionString> (<CFBundleVersion>)`
+     from the running bundle's info dictionary.
+10. With the tool installed, open the **File** menu.
+    - **Expected:** the #0222 items are still present and track the same state
+      as the Settings row: **Install Command Line Tool…** disabled (the link
+      already points here), **Uninstall Command Line Tool** enabled. One
+      inspection, two surfaces.

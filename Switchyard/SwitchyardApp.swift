@@ -56,5 +56,19 @@ struct SwitchyardApp: App {
         .commands {
             SwitchyardCommands()
         }
+
+        // #0352: the Settings scene (Cmd-,). The CLI install section and the
+        // broker section both funnel into the existing machinery —
+        // `CLIInstallActions` (#0222) and the transport bridge's model, the
+        // SAME `TransportStatusModel` instance the transport pane binds, so
+        // there is one source of truth and no duplicated state. The
+        // refresh closure re-reads the registrar when the window appears:
+        // the user may have just approved the login item, and there is no
+        // notification for that.
+        Settings {
+            SettingsView(
+                transport: appDelegate.transportBridge.model,
+                refreshOnAppear: { appDelegate.transportBridge.refresh() })
+        }
     }
 }
