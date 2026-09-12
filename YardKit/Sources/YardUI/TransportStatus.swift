@@ -11,8 +11,9 @@
 // touched from YardUI (ServiceManagement is app-target; a package test must
 // be able to construct every pane state without the system ever being asked
 // about the real agent, and no test may call `register()` — the model has
-// no such method at all). The app target feeds the model from
-// `AgentRegistrar.status` through a small adapter; see
+// no such method at all). The app target feeds the model from the broker
+// agent controller's state through a small adapter, and writes a reachability
+// value only from a real broker ping round-trip (#0354); see
 // `Switchyard/TransportStatusBridge.swift`.
 
 import SwiftUI
@@ -21,8 +22,8 @@ import YardKit
 /// YardUI's own vocabulary for the login-item status, mirroring the four
 /// cases of `SMAppService.Status` so no test — and no view — ever needs the
 /// real type. `label` carries the exact wording the app target's
-/// `SMAppService.Status.label` extension produces (#0049's vocabulary), so
-/// the pane reads the same in both places.
+/// `BrokerAgentRegistrationState.label` produces (#0049's vocabulary,
+/// #0354's mapping), so the pane reads the same in both places.
 ///
 /// `nonisolated` on purpose: this is stateless value vocabulary, and the
 /// target's MainActor-by-default isolation would otherwise fence its
@@ -33,8 +34,8 @@ nonisolated public enum AgentStatus: String, CaseIterable, Sendable {
     case enabled
     case notFound
 
-    /// Exact `SMAppService.Status.label` wording (see the extension at the
-    /// bottom of the app target's `AgentRegistrar.swift`).
+    /// Exact wording the app target's `BrokerAgentRegistrationState.label`
+    /// produces (#0049's vocabulary, #0354's mapping).
     public var label: String {
         switch self {
         case .notRegistered: "Not registered"
@@ -86,6 +87,28 @@ public final class TransportStatusModel {
     /// wiring point.
     public var clientCount: Int
 
+    /// The captured text of the last failed agent register/unregister call,
+    /// if any (#0354). `nil` means no failed call has been observed — the
+    /// pane renders the error row only when this is set. The app target
+    /// writes it from `AgentRegistrar.lastErrorDescription`; nothing here
+    /// guesses it.
+    public var lastErrorDescription: String?
+
+    /// The result of a real `brokerPing` round-trip against the broker, or
+    /// `nil` when no round-trip has completed yet (#0354). THIS is the
+    /// pane's only source for any reachability claim. It is deliberately a
+    /// separate value from `agentStatus`: `SMAppService.status` can report
+    /// `.enabled` while launchd has no such service (observed directly
+    /// after a `launchctl bootout`), so registration belief never gets to
+    /// say "Reachable" — only a completed round-trip does.
+    public var brokerPingSucceeded: Bool?
+
+    /// The action behind the Repair button (#0354). `@ObservationIgnored`:
+    /// an action closure is not renderable state. The model never touches
+    /// `SMAppService` itself — the app target supplies the closure that
+    /// re-registers the agent (unregister, then register) and re-pings.
+    @ObservationIgnored public var repair: (() -> Void)?
+
     /// The action behind the approval button. `@ObservationIgnored`: an
     /// action closure is not renderable state, and the app sets it once.
     /// The model never touches `SMAppService` itself — the app target
@@ -96,12 +119,45 @@ public final class TransportStatusModel {
         machServiceName: String = ServiceNames.machServiceName,
         agentStatus: AgentStatus = .notRegistered,
         endpointRegistered: Bool = false,
-        clientCount: Int = 0
+        clientCount: Int = 0,
+        lastErrorDescription: String? = nil,
+        brokerPingSucceeded: Bool? = nil
     ) {
         self.machServiceName = machServiceName
         self.agentStatus = agentStatus
         self.endpointRegistered = endpointRegistered
         self.clientCount = clientCount
+        self.lastErrorDescription = lastErrorDescription
+        self.brokerPingSucceeded = brokerPingSucceeded
+    }
+
+    /// The approval instruction, shown ONLY in `requiresApproval` — the
+    /// exact menu path a user action can resolve (#0354's wording).
+    public var approvalInstruction: String {
+        "Approve in System Settings → General → Login Items & Extensions"
+    }
+
+    /// Whether the error row renders: exactly when a last error is set.
+    public var showsErrorRow: Bool {
+        lastErrorDescription != nil
+    }
+
+    /// Whether the Repair button renders (#0354): a not-registered agent
+    /// WITH a captured error is the repairable shape. Every other state is
+    /// either already healthy, awaiting a user approval, or merely unknown.
+    public var showsRepairButton: Bool {
+        agentStatus == .notRegistered && lastErrorDescription != nil
+    }
+
+    /// The broker row's wording. Registration belief — however healthy it
+    /// looks — never produces "Reachable": only a completed ping
+    /// round-trip does, and a failed one un-claims it.
+    public var reachabilityLabel: String {
+        switch brokerPingSucceeded {
+        case true: "Reachable"
+        case false: "Not reachable"
+        case nil: "Not probed yet"
+        }
     }
 
     /// Endpoint wording. "Not registered" is the reading that pairs with
@@ -147,13 +203,35 @@ public struct TransportStatusPane: View {
                 }
             }
             if model.agentStatus.showsApprovalButton {
+                Text(model.approvalInstruction)
+                    .foregroundStyle(.secondary)
                 Button("Open System Settings > Login Items") {
                     model.openLoginItems?()
+                }
+            }
+            if let error = model.lastErrorDescription {
+                row("Last error") {
+                    Text(error)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
+                        .textSelection(.enabled)
+                }
+            }
+            if model.showsRepairButton {
+                Button("Repair") {
+                    model.repair?()
                 }
             }
             row("Endpoint") {
                 Text(model.endpointLabel)
                     .foregroundStyle(model.endpointRegistered ? Color.primary : Color.secondary)
+            }
+            row("Broker") {
+                // Reachability is a round-trip fact only (#0354): this row
+                // reads "Not probed yet" until a real ping completes, no
+                // matter how healthy the registration state above looks.
+                Text(model.reachabilityLabel)
+                    .foregroundStyle(model.brokerPingSucceeded == true ? Color.primary : Color.secondary)
             }
             row("CLI clients") {
                 Text(model.clientCountLabel)

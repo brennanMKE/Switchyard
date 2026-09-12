@@ -192,6 +192,41 @@ final class AppXPCServer {
         Self.logger.info("endpoint handed to broker")
     }
 
+    // MARK: - Broker ping
+
+    /// Probes the broker with a real `brokerPing` round-trip (#0354) and
+    /// reports the outcome exactly once — either the reply arrives, or the
+    /// connection-level error handler fires. This round-trip is the pane's
+    /// only source for any reachability claim: `SMAppService.status` has
+    /// been observed reporting `.enabled` while launchd held no service, so
+    /// registration belief never gets to say "reachable".
+    ///
+    /// The completion is delivered on the main actor. A failed ping does
+    /// NOT drive repair: repair stays owned by `registerWithBroker()`'s
+    /// error handler, which observes the failed calls that actually need
+    /// it, at most once per launch through `repairGate`.
+    func pingBroker(_ completion: @escaping @MainActor @Sendable (_ reachable: Bool, _ detail: String?) -> Void) {
+        let connection = brokerConnection ?? makeBrokerConnection()
+
+        // @Sendable for the same reason as every handler above: these are
+        // plain closure types in Foundation, and without it the closure
+        // inherits main-actor isolation and traps when XPC calls it on its
+        // own queue.
+        let proxy = connection.remoteObjectProxyWithErrorHandler { @Sendable error in
+            let message = error.localizedDescription
+            Task { @MainActor in completion(false, message) }
+        }
+
+        guard let broker = proxy as? BrokerProtocol else {
+            completion(false, "broker proxy does not conform to BrokerProtocol")
+            return
+        }
+
+        broker.brokerPing { @Sendable version in
+            Task { @MainActor in completion(true, version) }
+        }
+    }
+
     private func makeBrokerConnection() -> NSXPCConnection {
         let connection = NSXPCConnection(machServiceName: ServiceNames.machServiceName)
         // Set before resume(), or calls silently do nothing.

@@ -36,8 +36,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.agentRegistrar.repair()
         }
 
+        // #0354: the pane's ping source is the app target's XPC machinery.
+        // The bridge writes the round-trip's outcome into the model, which
+        // is the pane's only source for a reachability claim.
+        transportBridge.ping = { [weak self] in
+            guard let self else { return }
+            self.server.pingBroker { [weak self] reachable, detail in
+                self?.transportBridge.setPingOutcome(reachable: reachable, detail: detail)
+            }
+        }
+
         server.start()
         server.registerWithBroker()
+        transportBridge.ping?()
     }
 
     // #0084: everything the OS delivers — document drops on the Dock icon

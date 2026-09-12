@@ -4,6 +4,11 @@
 // same author — see CLAUDE.md and issue #0049's planning update). Copyright
 // the original author; substantial portions retained here under the same
 // MIT terms as this project.
+//
+// #0354: all `SMAppService` work routes through `BrokerAgentController`,
+// which captures every failure's text and publishes the four-state
+// registration mapping — surfaced to the transport pane through the
+// `TransportStatusBridge`, never again only logged.
 
 import Foundation
 import ServiceManagement
@@ -23,14 +28,25 @@ import os
 final class AgentRegistrar {
     private static let logger = Logger(subsystem: ServiceNames.logSubsystem, category: "agent")
 
-    /// `plistName` is resolved relative to `Contents/Library/LaunchAgents/`, so
-    /// this is a bare filename, not a path.
-    private let service = SMAppService.agent(plistName: ServiceNames.agentPlistName)
+    /// The controller owns the service handle, the state mapping, and the
+    /// captured error text. Injectable for tests; the default resolves the
+    /// embedded agent's plist from `ServiceNames`.
+    private let controller: BrokerAgentController
 
-    private(set) var status: SMAppService.Status
+    /// The registration state to surface — the controller's published
+    /// value, refreshed on every call below.
+    var state: BrokerAgentRegistrationState { controller.state }
 
-    init() {
-        status = service.status
+    /// The captured text of the last failed register/unregister, if any —
+    /// the pane's error row, not just a log line.
+    var lastErrorDescription: String? { controller.lastErrorDescription }
+
+    convenience init() {
+        self.init(controller: BrokerAgentController())
+    }
+
+    init(controller: BrokerAgentController) {
+        self.controller = controller
     }
 
     /// Re-reads the status from the system.
@@ -38,10 +54,10 @@ final class AgentRegistrar {
     /// Worth calling on every activation: the user may have just flipped the
     /// switch in System Settings, and there is no notification for that.
     func refreshStatus() {
-        let previous = status
-        status = service.status
-        if previous != status {
-            Self.logger.info("status \(previous.label, privacy: .public) → \(self.status.label, privacy: .public)")
+        let previous = state
+        controller.refresh()
+        if previous != state {
+            Self.logger.info("status \(previous.label, privacy: .public) → \(self.state.label, privacy: .public)")
         }
     }
 
@@ -49,33 +65,24 @@ final class AgentRegistrar {
     func registerIfNeeded() {
         refreshStatus()
 
-        guard status != .enabled else {
+        guard state != .enabled else {
             Self.logger.info("already enabled — launchd owns \(ServiceNames.machServiceName, privacy: .public)")
             return
         }
 
-        do {
-            try service.register()
-            refreshStatus()
-            switch status {
-            case .enabled:
-                Self.logger.info("registered — launchd owns \(ServiceNames.machServiceName, privacy: .public)")
-            case .requiresApproval:
-                Self.logger.notice(
-                    "registered but awaiting approval — enable \"\(ServiceNames.appName, privacy: .public)\" under System Settings → General → Login Items & Extensions"
-                )
-            default:
-                Self.logger.notice("registered but status is \(self.status.label, privacy: .public)")
-            }
-        } catch {
-            // Registering an already-registered service throws rather than
-            // succeeding quietly, so this is not necessarily a real failure.
-            refreshStatus()
-            let message = error.localizedDescription
-            if status == .enabled {
-                Self.logger.info("already registered (register() threw: \(message, privacy: .public))")
+        controller.register()
+        switch state {
+        case .enabled:
+            Self.logger.info("registered — launchd owns \(ServiceNames.machServiceName, privacy: .public)")
+        case .requiresApproval:
+            Self.logger.notice(
+                "registered but awaiting approval — enable \"\(ServiceNames.appName, privacy: .public)\" under System Settings → General → Login Items & Extensions"
+            )
+        case .notRegistered, .unknown:
+            if let message = controller.lastErrorDescription {
+                Self.logger.error("register() did not take effect: \(message, privacy: .public) [status \(self.state.label, privacy: .public)]")
             } else {
-                Self.logger.error("register() failed: \(message, privacy: .public) [status \(self.status.label, privacy: .public)]")
+                Self.logger.notice("registered but status is \(self.state.label, privacy: .public)")
             }
         }
     }
@@ -91,44 +98,21 @@ final class AgentRegistrar {
     func repair() {
         Self.logger.notice("re-registering agent (unregister, then register)")
 
-        do {
-            try service.unregister()
-        } catch {
-            // Expected when launchd has already lost the job. Not fatal — the
-            // point of this call is to clear whatever state does exist.
-            Self.logger.info("unregister during repair: \(error.localizedDescription, privacy: .public)")
+        controller.unregister()
+        // Expected when launchd has already lost the job. Not fatal — the
+        // point of this call is to clear whatever state does exist. The
+        // captured text (if any) is logged here; the re-register below
+        // either clears it on success or replaces it with its own.
+        if let message = controller.lastErrorDescription {
+            Self.logger.info("unregister during repair: \(message, privacy: .public)")
         }
-        refreshStatus()
 
-        do {
-            try service.register()
-            refreshStatus()
-            Self.logger.info("re-registered — status \(self.status.label, privacy: .public)")
-        } catch {
-            refreshStatus()
-            Self.logger.error("re-registration failed: \(error.localizedDescription, privacy: .public) [status \(self.status.label, privacy: .public)]")
-        }
+        controller.register()
+        Self.logger.info("re-registered — status \(self.state.label, privacy: .public)")
     }
 
     func openLoginItemsSettings() {
         SMAppService.openSystemSettingsLoginItems()
         Self.logger.info("opened System Settings → Login Items & Extensions")
-    }
-}
-
-extension SMAppService.Status {
-    var label: String {
-        switch self {
-        case .notRegistered: "Not registered"
-        case .enabled: "Enabled"
-        case .requiresApproval: "Requires approval"
-        case .notFound: "Not found"
-        @unknown default: "Unknown (\(rawValue))"
-        }
-    }
-
-    /// Whether the CLI has any chance of reaching the broker in this state.
-    var isOperational: Bool {
-        self == .enabled
     }
 }

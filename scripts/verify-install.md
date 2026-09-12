@@ -140,3 +140,44 @@ The flows under test: **File ▸ Install Command Line Tool…** and
    **Cancel** in the dialog.
    - **Expected: nothing.** No alert; the link survives
      (`ls -l /usr/local/bin/switchyard` still shows the symlink).
+
+## Scenario 9 — Broker agent registration surfaces in the transport pane (#0354) — UNRUN
+
+The 2026-09-11 demo failure this scenario pins down: the app ran, the bundle shipped the
+agent plist and binary, and launchd still had no `co.sstools.Switchyard.broker` service —
+`launchctl print gui/$(id -u)/co.sstools.Switchyard.broker` printed
+`could not find service`, every CLI command exited 3 (`app_unavailable`), and the UI said
+nothing about why. Needs a human with the app running (Xcode Debug build or
+/Applications).
+
+1. Launch the app and look at the transport pane.
+   - **Expected:** the **Login item** row names the real registration state — one of
+     "Requires approval" (plus the instruction *Approve in System Settings → General →
+     Login Items & Extensions* and the Open System Settings button), "Not registered"
+     (plus a **Last error** row carrying the captured error text and a **Repair** button),
+     or "Enabled". A pane that stays silent about the state is the bug — fail this
+     scenario on it.
+   - **Expected:** the **Broker** row reads "Not probed yet" (or "Not reachable" after a
+     failed round-trip) even while the Login item row says "Enabled". `SMAppService
+     .status` has been observed reporting `.enabled` while launchd held no service, so
+     only the completed `brokerPing` round-trip may ever flip this row to "Reachable".
+2. If the state is "Requires approval": approve the item under System Settings → General →
+   Login Items & Extensions, return to the app, and let the pane refresh.
+   - **Expected:** the Login item row reads "Enabled", and no Repair button appears for
+     this state.
+3. If the state is "Not registered" with an error: click **Repair**.
+   - **Expected:** the app unregisters and re-registers the agent and re-probes the
+     broker; the pane updates to the new state. If the error text names signing or
+     provisioning, that is a **Rule 2 hard stop**: paste the exact error text into the
+     issue and change no signing setting.
+4. `launchctl print gui/$(id -u)/co.sstools.Switchyard.broker`
+   - **Expected:** the service's launchd printout (program path, plist, state). The
+     pre-fix failure printed `could not find service: …`.
+5. Prove the broker end to end from a terminal: `switchyard whereami` inside any git
+   repository (an installed CLI per scenario 1; `swift run switchyard whereami` for a
+   build-tree binary).
+   - **Expected:** exit 0 with the whereami payload — the app answered through the
+     broker. The pre-fix failure was exit 3 (`app_unavailable`) with no broker to ask.
+     Note: a dedicated `switchyard ping` subcommand does not exist yet — the pane's
+     **Broker** row ("Reachable") is the app-side round-trip proof, and
+     `verify-xpc.md` scenario 2 records the CLI-ping gap.
