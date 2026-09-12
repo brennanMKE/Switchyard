@@ -278,3 +278,44 @@ pane (scenario 9).
       as the Settings row: **Install Command Line Tool…** disabled (the link
       already points here), **Uninstall Command Line Tool** enabled. One
       inspection, two surfaces.
+
+## Scenario 12 — A release build installs and serves end to end (#0356) — UNRUN
+
+The entry point is `scripts/make-release.sh`: it produces
+`build/Switchyard-<sha>.app` from a Release configuration, unsigned-local mode,
+with the embedded CLI, the broker agent plist and binary all inside the bundle.
+Every derived scenario above (1, 9, 11) ran only against Xcode/Debug products
+or was blocked by the #0353 durability gate; this is the release-artifact path.
+
+1. `./scripts/make-release.sh`
+   - **Expected:** prints `mode: unsigned-local`, then archive/export progress,
+     then the seven `verify: ok` lines (bundle layout + `otool -L` showing
+     system libraries only — no `/opt/homebrew`, no `/Users/` build-machine
+     paths), and ends with `artifact: build/Switchyard-<sha>.app`.
+2. `cp -R build/Switchyard-<sha>.app /Applications/Switchyard.app`
+   - **Expected:** copies without error. (A direct copy carries no quarantine
+     attribute, so Gatekeeper does not block it — Developer ID and notarization
+     are out of scope for this flow.)
+3. Launch `/Applications/Switchyard.app` and press Cmd-, (scenario 11's
+   Settings surface).
+   - **Expected:** the **Broker** section shows the live registration state
+     ("Requires approval" / "Not registered" / "Enabled") with its guidance,
+     and reachability reads `Not probed yet` until a broker round-trip
+     completes — the same model the transport pane binds (scenario 9). A
+     release build must surface this, not stay silent.
+4. In Settings, click **Install…** under Command Line Tool and approve the
+   administrator dialog (scenario 1's steps 2–3, now from the release build).
+   - **Expected:** the branded admin dialog, then
+     `Command line tool installed.` — the #0353 durability gate must NOT
+     refuse: the app is in `/Applications`, not a build directory.
+5. `ls -l /usr/local/bin/switchyard`, then in a new terminal:
+   `switchyard --version`
+   - **Expected:** the root-owned symlink
+     `/usr/local/bin/switchyard -> /Applications/Switchyard.app/Contents/Resources/bin/switchyard`;
+     `switchyard --version` prints the CLI's version. The working
+     version query from an installed release build is this scenario's
+     core claim.
+6. `switchyard whereami` inside any git repository.
+   - **Expected:** exit 0 with the whereami payload — the broker answered
+     through launchd (scenario 9, step 5), proving the release build's
+     registered agent and the installed CLI work together.

@@ -630,6 +630,9 @@ cd YardKit && swift build && swift test
 xcodebuild build -project Switchyard.xcodeproj -scheme Switchyard \
   -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO -quiet
 
+# Deployable Release app (unsigned local) — build/Switchyard-<sha>.app
+./scripts/make-release.sh
+
 # Unit tests only
 xcodebuild -project Switchyard.xcodeproj -scheme Switchyard \
   -destination 'platform=macOS' -only-testing:SwitchyardTests test

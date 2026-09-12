@@ -615,6 +615,9 @@ xcodebuild -project Switchyard.xcodeproj -scheme Switchyard \
 
 # The Swift package (engine, XPC protocols, CLI). Touches no signing assets — prefer it.
 cd YardKit && swift build && swift test
+
+# Deployable Release app (unsigned local) — build/Switchyard-<sha>.app
+./scripts/make-release.sh
 ```
 
 `YardKit/` exists with four targets — `YardGit`, `YardKit`, `YardUI` and the `switchyard`
