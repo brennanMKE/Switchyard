@@ -84,9 +84,10 @@ The flows under test: **File ▸ Install Command Line Tool…** and
 1. Launch the app from Xcode (or any DerivedData / `Build/Products` copy).
 2. Choose **File ▸ Install Command Line Tool…**.
    - **Expected:** immediately a warning alert titled
-     `This copy of Switchyard is running from a build directory.` explaining that the
-     destination would be linked into a path deleted on the next clean, and to move the app
-     to the Applications folder. **No authentication dialog appears** and no command runs —
+     `Switchyard.app is running from a build directory.` explaining that the
+     destination would be linked into a path deleted on the next clean, and
+     naming the remedy: `Move Switchyard.app to /Applications, relaunch, then
+     install.` **No authentication dialog appears** and no command runs —
      the refusal precedes the prompt.
 3. `ls -l /usr/local/bin/switchyard`
    - **Expected:** unchanged from before step 2 (no link created).
@@ -178,6 +179,38 @@ nothing about why. Needs a human with the app running (Xcode Debug build or
    build-tree binary).
    - **Expected:** exit 0 with the whereami payload — the app answered through the
      broker. The pre-fix failure was exit 3 (`app_unavailable`) with no broker to ask.
-     Note: a dedicated `switchyard ping` subcommand does not exist yet — the pane's
+      Note: a dedicated `switchyard ping` subcommand does not exist yet — the pane's
      **Broker** row ("Reachable") is the app-side round-trip proof, and
      `verify-xpc.md` scenario 2 records the CLI-ping gap.
+
+## Scenario 10 — Refusal from a Gatekeeper App Translocation mount (#0353) — UNRUN
+
+The download-DMG shape: the app is launched straight from `~/Downloads` (or from the
+mounted DMG) without ever being dragged to `/Applications`, so Gatekeeper
+translocates it — macOS runs the bundle from a read-only
+`/private/var/folders/…/AppTranslocation/<uuid>/d/` mount that disappears on
+relaunch or reboot. That path contains neither `/DerivedData/` nor
+`/Build/Products/`, so this is distinct from scenario 4's refusal.
+
+1. Download a Switchyard release DMG, open it, and launch `Switchyard.app` from
+   the mounted volume or from `~/Downloads` — do NOT drag it to `/Applications`.
+   While it runs, confirm the translocation:
+   ```sh
+   find /private/var/folders -path '*AppTranslocation*' -name Switchyard.app 2>/dev/null
+   ```
+   - **Expected:** one hit under `AppTranslocation/<uuid>/d/`.
+2. Choose **File ▸ Install Command Line Tool…**.
+   - **Expected:** immediately a warning alert titled
+     `Switchyard.app is running from a temporary location.` explaining that the
+     install would link into that read-only mount, and naming the remedy:
+     `Drag Switchyard.app to /Applications, then relaunch it before installing` —
+     with the reason spelled out: a translocated copy stays translocated until it
+     is relaunched from its new location. The remedy must say **relaunch**, not
+     only move: a user who moves the app and retries from the still-running
+     translocated instance would land in this same refusal. **No authentication
+     dialog appears** and no command runs.
+3. `ls -l /usr/local/bin/switchyard`
+   - **Expected:** unchanged from before step 2 (no link created).
+4. Recovery: quit the app, drag `Switchyard.app` to `/Applications`, relaunch it
+   from there, and install (scenario 1).
+   - **Expected:** the install proceeds normally.

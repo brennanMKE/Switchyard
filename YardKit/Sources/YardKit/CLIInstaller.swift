@@ -4,6 +4,13 @@
 // (MIT, same author — see CLAUDE.md and issue #0051). Copyright the original
 // author; substantial portions retained here under the same MIT terms as
 // this project.
+//
+// The durability refusals (`CLIInstallerError` and the two report shapes
+// built from it) are adapted from Batty's
+// BattyKit/Sources/BattyKit/Settings/CLIInstaller.swift (MIT, Copyright
+// 2026 Brennan Stehling — Batty #0275 translocation, #0279 the derived
+// app name; ported for issue #0353). This notice is retained for those
+// adapted portions.
 
 import Foundation
 
@@ -114,29 +121,64 @@ public enum CLIInstaller {
     ///
     /// A build-directory bundle is the case that matters: launching from Xcode
     /// runs the DerivedData copy, and a symlink into it breaks on the next
-    /// clean build. Creating that link silently is worse than declining,
-    /// because the failure surfaces much later as `switchyard: command not
-    /// found`. The install action must REFUSE when this is false — not warn
-    /// and continue.
+    /// clean build. So is a Gatekeeper-translocated bundle (#0353): an app run
+    /// straight from `~/Downloads` is mounted read-only under
+    /// `/AppTranslocation/`, and that mount disappears on relaunch — Batty
+    /// #0275 refuses it for the same reason. Creating either link silently is
+    /// worse than declining, because the failure surfaces much later as
+    /// `switchyard: command not found`. The install action must REFUSE when
+    /// this is false — not warn and continue.
     public static func isBundleDurable(_ bundle: URL) -> Bool {
         let path = bundle.path
-        return !path.contains("/DerivedData/") && !path.contains("/Build/Products/")
+        return !path.contains("/DerivedData/")
+            && !path.contains("/Build/Products/")
+            && !path.contains("/AppTranslocation/")
+    }
+
+    /// Whether Gatekeeper translocated this bundle: a quarantined app
+    /// launched without first being moved to `/Applications` runs from a
+    /// read-only `/private/var/folders/…/AppTranslocation/<uuid>/d/` mount
+    /// that macOS reclaims on relaunch or reboot. Separate from
+    /// ``isBundleDurable`` because the two refusals carry different advice —
+    /// only a translocated instance stays broken after the app is moved; it
+    /// must also be relaunched (see ``CLIInstallerError``).
+    public static func isBundleTranslocated(_ bundle: URL) -> Bool {
+        bundle.path.contains("/AppTranslocation/")
     }
 
     /// The report the install action returns when ``isBundleDurable`` is
-    /// false: a refusal, so a doomed link is never created.
+    /// false for a build directory: a refusal, so a doomed link is never
+    /// created. The remedy names the app — derived from the bundle path,
+    /// never hardcoded — and includes the relaunch, so a user acting on it
+    /// is not left running the stale copy the refusal was about.
     public static func buildDirectoryRefusalReport(bundle: URL, destination: URL) -> Report {
+        refusalReport(.bundleNotDurable(bundle.path), destination: destination)
+    }
+
+    /// The translocation sibling of ``buildDirectoryRefusalReport`` — a
+    /// distinct refusal because the advice differs: moving the app is not
+    /// enough, because a translocated instance stays translocated until it
+    /// is relaunched from its new location, and a user told only to move it
+    /// would retry inside the same refusal (issue #0353; Batty #0275).
+    public static func translocationRefusalReport(bundle: URL, destination: URL) -> Report {
+        refusalReport(.bundleTranslocated(bundle.path), destination: destination)
+    }
+
+    /// Assembles either durability refusal: the destination context the
+    /// alert needs, then the error case's own message.
+    private static func refusalReport(
+        _ error: CLIInstallerError,
+        destination: URL
+    ) -> Report {
         Report(
             severity: .warning,
-            title: "This copy of Switchyard is running from a build directory.",
+            title: error.title,
             detail: """
                 Installing would link \(destination.path) into:
 
-                \(bundle.path)
+                \(error.bundlePath)
 
-                That path is deleted whenever the build folder is cleaned, which \
-                would leave a broken command. Move Switchyard to your \
-                Applications folder and launch it from there, then install.
+                \(error.whyDoomed) \(error.remedy)
                 """
         )
     }
@@ -232,13 +274,17 @@ public enum CLIInstaller {
 
     /// The install action's precondition: the report to present — the reason
     /// no command is ever built — when this bundle would not produce a
-    /// durable link. `nil` clears the install to proceed.
+    /// durable link. `nil` clears the install to proceed. A translocated
+    /// bundle gets ``translocationRefusalReport``, whose remedy differs from
+    /// ``buildDirectoryRefusalReport``'s.
     public static func installPreconditionReport(
         bundle: URL,
         destination: URL
     ) -> Report? {
         guard isBundleDurable(bundle) else {
-            return buildDirectoryRefusalReport(bundle: bundle, destination: destination)
+            return isBundleTranslocated(bundle)
+                ? translocationRefusalReport(bundle: bundle, destination: destination)
+                : buildDirectoryRefusalReport(bundle: bundle, destination: destination)
         }
         return nil
     }
@@ -335,5 +381,80 @@ public enum CLIInstaller {
               (attributes[.type] as? FileAttributeType) != .typeDirectory
         else { return false }
         return fm.isExecutableFile(atPath: url.path)
+    }
+}
+
+/// Why the install action refuses a bundle whose link would not be durable.
+/// Two cases, because the advice differs: a bundle in a build directory must
+/// be moved and the running copy relaunched, while a Gatekeeper-translocated
+/// bundle must be moved AND relaunched — a translocated instance stays
+/// translocated until relaunch, so the build-directory wording alone would
+/// send that user back into the same refusal (issue #0353).
+///
+/// Adapted from Batty's `CLIInstallerError`
+/// (`BattyKit/Sources/BattyKit/Settings/CLIInstaller.swift`, MIT,
+/// Copyright 2026 Brennan Stehling — Batty #0275 translocation, #0279 the
+/// derived app name); this notice is retained for the adapted portions.
+public enum CLIInstallerError: Error, LocalizedError, Equatable, Sendable {
+    /// The bundle sits in Xcode's DerivedData or a `Build/Products`
+    /// folder: a symlink into it dies on the next clean build.
+    case bundleNotDurable(String)
+    /// Gatekeeper translocated the bundle to a read-only
+    /// `/AppTranslocation/` mount — it was launched from somewhere like
+    /// `~/Downloads` without first being moved to `/Applications`.
+    case bundleTranslocated(String)
+
+    /// The bundle path the case carries.
+    public var bundlePath: String {
+        switch self {
+        case .bundleNotDurable(let path), .bundleTranslocated(let path): path
+        }
+    }
+
+    /// The app name the remedy addresses — the bundle path's last path
+    /// component, never hardcoded (#0279's rule in Batty).
+    public var appName: String {
+        (bundlePath as NSString).lastPathComponent
+    }
+
+    /// The alert's headline: what is wrong, with the app named.
+    public var title: String {
+        switch self {
+        case .bundleNotDurable:
+            "\(appName) is running from a build directory."
+        case .bundleTranslocated:
+            "\(appName) is running from a temporary location."
+        }
+    }
+
+    /// Why a symlink into this bundle is doomed.
+    public var whyDoomed: String {
+        switch self {
+        case .bundleNotDurable:
+            "That path is deleted whenever the build folder is cleaned, which would leave a broken command."
+        case .bundleTranslocated:
+            "That mount is read-only and disappears when the app relaunches, which would leave a broken command."
+        }
+    }
+
+    /// The remedy. Distinct per case because the advice differs: a
+    /// translocated instance stays translocated until it is relaunched, so
+    /// "move the app" alone would land the next attempt in the same
+    /// refusal.
+    public var remedy: String {
+        switch self {
+        case .bundleNotDurable:
+            "Move \(appName) to /Applications, relaunch, then install."
+        case .bundleTranslocated:
+            """
+            Drag \(appName) to /Applications, then relaunch it before \
+            installing — a translocated copy stays translocated until it \
+            is relaunched from its new location.
+            """
+        }
+    }
+
+    public var errorDescription: String? {
+        "\(title) \(whyDoomed) \(remedy)"
     }
 }

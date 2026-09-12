@@ -174,6 +174,148 @@ struct CLIInstallerStateTests {
         #expect(report.detail.contains(ServiceNames.cliInstallPath))
     }
 
+    /// The translocated path is staged as a string, never a real mount: the
+    /// gate is a substring check, so a path-shaped stand-in is exactly what
+    /// it sees (#0353).
+    @Test func aTranslocatedBundlePathIsNotDurable() {
+        let translocated = URL(filePath: [
+            "/private/var/folders/xx/yy/C", "AppTranslocation",
+            "1A2B3C4D-5E6F-4711-8A9B-0C1D2E3F4A5B", "d", "Switchyard.app",
+        ].joined(separator: "/"))
+        #expect(!CLIInstaller.isBundleDurable(translocated))
+        #expect(CLIInstaller.isBundleTranslocated(translocated))
+    }
+
+    @Test func anApplicationsBundleIsNotTranslocated() {
+        let bundle = URL(filePath: "/Applications/Switchyard.app")
+        #expect(CLIInstaller.isBundleDurable(bundle))
+        #expect(!CLIInstaller.isBundleTranslocated(bundle))
+    }
+
+    /// The refusal must say the way out — the demo user read the old wording
+    /// as "the app is broken" (#0353). The whole remedy sentence is pinned,
+    /// not a property of it.
+    @Test func theBuildDirectoryRefusalNamesTheRemedy() {
+        let bundle = URL(filePath: "/Users/dev/DerivedData/Switchyard-diamonds/Switchyard.app")
+        let report = CLIInstaller.buildDirectoryRefusalReport(
+            bundle: bundle, destination: URL(filePath: ServiceNames.cliInstallPath)
+        )
+        #expect(
+            report.detail.contains(
+                "Move Switchyard.app to /Applications, relaunch, then install."
+            )
+        )
+    }
+
+    /// The translocated refusal is its own case, and its remedy says to move
+    /// the app AND relaunch it: a translocated instance stays translocated
+    /// until relaunch, so "move it" alone would retry into the same refusal.
+    @Test func aTranslocatedBundleRefusesWithTheDistinctRelaunchReport() throws {
+        let translocated = URL(filePath: [
+            "/private/var/folders/xx/yy/C", "AppTranslocation",
+            "1A2B3C4D-5E6F-4711-8A9B-0C1D2E3F4A5B", "d", "Switchyard.app",
+        ].joined(separator: "/"))
+        let destination = URL(filePath: ServiceNames.cliInstallPath, directoryHint: .notDirectory)
+        let report = try #require(
+            CLIInstaller.installPreconditionReport(bundle: translocated, destination: destination)
+        )
+        #expect(report.severity == .warning)
+        #expect(
+            report == CLIInstaller.translocationRefusalReport(
+                bundle: translocated, destination: destination
+            )
+        )
+        // Distinct from the build-directory refusal — the separate case
+        // exists precisely because the advice differs.
+        #expect(
+            report != CLIInstaller.buildDirectoryRefusalReport(
+                bundle: translocated, destination: destination
+            )
+        )
+        #expect(report.title == "Switchyard.app is running from a temporary location.")
+        #expect(report.detail.contains(translocated.path))
+        #expect(
+            report.detail.contains(
+                "Drag Switchyard.app to /Applications, then relaunch it before "
+                    + "installing — a translocated copy stays translocated until "
+                    + "it is relaunched from its new location."
+            )
+        )
+    }
+
+    /// #0279's rule (via Batty): the app name is derived from the bundle
+    /// path's last component, never hardcoded — a bundle that is not named
+    /// `Switchyard.app` is addressed by its own name.
+    @Test func theRefusalAddressesTheBundleByItsOwnDerivedName() throws {
+        let translocated = URL(filePath: [
+            "/private/var/folders/xx/yy/C", "AppTranslocation",
+            "1A2B3C4D-5E6F-4711-8A9B-0C1D2E3F4A5B", "d", "Switchyard 2.app",
+        ].joined(separator: "/"))
+        let report = CLIInstaller.translocationRefusalReport(
+            bundle: translocated, destination: URL(filePath: ServiceNames.cliInstallPath)
+        )
+        #expect(report.title.hasPrefix("Switchyard 2.app "))
+        #expect(report.detail.contains("Drag Switchyard 2.app to /Applications"))
+        // The hardcoded name would leak in through the title or the remedy.
+        #expect(!report.title.contains("Switchyard.app"))
+        #expect(!report.detail.contains("Switchyard.app"))
+    }
+
+    /// The error cases carry the messages at the source, so the whole
+    /// composed description is pinned, not just a fragment the wrong answer
+    /// might also satisfy.
+    @Test func theErrorCasesComposeTheFullMessageWithTheDerivedAppName() {
+        let notDurable = CLIInstallerError.bundleNotDurable(
+            "/Users/dev/DerivedData/Switchyard-diamonds/Switchyard.app"
+        )
+        #expect(
+            notDurable.errorDescription
+                == "Switchyard.app is running from a build directory. "
+                    + "That path is deleted whenever the build folder is cleaned, "
+                    + "which would leave a broken command. "
+                    + "Move Switchyard.app to /Applications, relaunch, then install."
+        )
+        let translocated = CLIInstallerError.bundleTranslocated(
+            "/private/var/folders/xx/yy/C/AppTranslocation"
+                + "/1A2B3C4D-5E6F-4711-8A9B-0C1D2E3F4A5B/d/Switchyard.app"
+        )
+        #expect(
+            translocated.errorDescription
+                == "Switchyard.app is running from a temporary location. "
+                    + "That mount is read-only and disappears when the app relaunches, "
+                    + "which would leave a broken command. "
+                    + "Drag Switchyard.app to /Applications, then relaunch it before "
+                    + "installing — a translocated copy stays translocated until it "
+                    + "is relaunched from its new location."
+        )
+    }
+
+    /// The gate refuses the INSTALL; it must not reclassify the four-state
+    /// INSPECTION, which stays a pure link/destination comparison (#0353).
+    @Test func theFourStateInspectionIsUnchangedByTheTranslocationGate() throws {
+        let fixture = try InstallerFixture()
+        let translocated = fixture.root
+            .appending(path: "AppTranslocation/uuid/d/Switchyard.app", directoryHint: .isDirectory)
+        let translocatedCLI = translocated
+            .appending(path: "Contents/Resources/bin/switchyard", directoryHint: .notDirectory)
+        try FileManager.default.createDirectory(
+            at: translocatedCLI.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        try Data("#!/bin/sh\n".utf8).write(to: translocatedCLI)
+        try FileManager.default.createSymbolicLink(
+            at: fixture.destination, withDestinationURL: translocatedCLI
+        )
+
+        // The staged path is translocation-shaped, so the gate refuses it…
+        #expect(CLIInstaller.isBundleTranslocated(translocated))
+        #expect(!CLIInstaller.isBundleDurable(translocated))
+        // …while the inspection still reads the link for what it is.
+        #expect(
+            CLIInstaller.inspect(fixture.destination, expecting: translocatedCLI)
+                == .installedHere
+        )
+    }
+
     // MARK: - Privilege
 
     @Test func writableDestinationNeedsNoAuthentication() throws {

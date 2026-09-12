@@ -83,8 +83,10 @@ enum CLIInstallActions {
             filePath: ServiceNames.cliInstallPath, directoryHint: .notDirectory
         )
 
-        // Refuse first: a link into a build directory is doomed on the next
-        // clean, and the state machine declines before any dialog appears.
+        // Refuse first: a link into a build directory dies on the next
+        // clean, and a translocated bundle's mount disappears on relaunch
+        // (#0353) — the state machine declines before any dialog appears,
+        // with the remedy named in the report it returns.
         if let refusal = CLIInstaller.installPreconditionReport(
             bundle: bundle, destination: destination
         ) {

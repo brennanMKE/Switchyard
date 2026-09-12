@@ -438,6 +438,12 @@ struct ExitClassCoverageTests {
             "and cannot import ExitClassCarrying; the watch payload bridge's " +
             "error, surfaced by the arm as a `request_failed` failure " +
             "envelope (exit 4) rather than a §6 class.",
+        "CLIInstaller.swift:CLIInstallerError":
+            "#0353 — declared in YardKit, which does not depend on YardGit " +
+            "and cannot import ExitClassCarrying; the installer is a state " +
+            "machine that returns refusal Reports the app presents as " +
+            "alerts — it throws nothing, so no §6 exit class applies. Same " +
+            "shape as RepositoryRegistry.Error above.",
     ]
 
     /// #0197's headline: every declared error type under
