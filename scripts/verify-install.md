@@ -319,3 +319,51 @@ or was blocked by the #0353 durability gate; this is the release-artifact path.
    - **Expected:** exit 0 with the whereami payload — the broker answered
      through launchd (scenario 9, step 5), proving the release build's
      registered agent and the installed CLI work together.
+
+## Scenario 13 — The release DMG installs by drag (#0357) — UNRUN
+
+The second-machine acceptance path. The entry point is now
+`./scripts/make-release.sh package`: it runs the full #0356 build, then
+packages `build/Switchyard-<sha>.app` into `build/Switchyard-<sha>.dmg`
+(`hdiutil create -volname Switchyard -srcfolder <staging> -ov -format UDZO`,
+staging = the app beside a symlink to /Applications). Unsigned-local — a DMG
+copied machine-to-machine carries no quarantine attribute, so Gatekeeper
+accepts the dragged app on first launch (the translocation trap this avoids
+is scenario 10). create-dmg was measured absent, so the window is hdiutil's
+plain layout; polish is a follow-up.
+
+Needs a human on a second machine (or the same one, after trashing
+`/Applications/Switchyard.app`).
+
+1. `./scripts/make-release.sh package`
+   - **Expected:** everything scenario 12 prints, then
+     `step: hdiutil create ok (UDZO)`, the script's own read-only mount check
+     (`verify: ok      Switchyard.app + Applications link in the mounted
+     volume`), and ends with `dmg: build/Switchyard-<sha>.dmg`.
+2. Copy `build/Switchyard-<sha>.dmg` to the second machine (scp, AirDrop,
+   shared folder) and double-click it.
+   - **Expected:** a volume named **Switchyard** mounts and its window shows
+     `Switchyard.app` beside an **Applications** link — the drag-to-Applications
+     layout in one window.
+3. Drag `Switchyard.app` onto the Applications link.
+   - **Expected:** the copy completes; `ls -d /Applications/Switchyard.app`
+     prints the directory. Eject the volume (`hdiutil detach /Volumes/Switchyard`).
+4. Launch `/Applications/Switchyard.app` and press Cmd-, (scenario 11's
+   Settings surface).
+   - **Expected:** the **Broker** section shows the live registration state
+     ("Requires approval" / "Not registered" / "Enabled") with its guidance —
+     the #0354 state is visible from a drag-installed release build, not
+     silent.
+5. Click **Install…** under Command Line Tool and approve the administrator
+   dialog (scenario 1's steps 2–3).
+   - **Expected:** the branded admin dialog, then
+     `Command line tool installed.`
+6. `ls -l /usr/local/bin/switchyard`, then in a new terminal:
+   `switchyard --version`
+   - **Expected:** the root-owned symlink
+     `/usr/local/bin/switchyard -> /Applications/Switchyard.app/Contents/Resources/bin/switchyard`;
+     `switchyard --version` prints the CLI's version. The version query from a
+     drag-installed release build is this scenario's core claim.
+7. `switchyard whereami` inside any git repository.
+   - **Expected:** exit 0 with the whereami payload — broker round trip
+     through launchd (scenario 12, step 6), end to end from a DMG.

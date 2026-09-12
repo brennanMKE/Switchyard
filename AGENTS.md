@@ -633,6 +633,9 @@ xcodebuild build -project Switchyard.xcodeproj -scheme Switchyard \
 # Deployable Release app (unsigned local) — build/Switchyard-<sha>.app
 ./scripts/make-release.sh
 
+# Same, plus the drag-to-Applications DMG — build/Switchyard-<sha>.dmg
+./scripts/make-release.sh package
+
 # Unit tests only
 xcodebuild -project Switchyard.xcodeproj -scheme Switchyard \
   -destination 'platform=macOS' -only-testing:SwitchyardTests test

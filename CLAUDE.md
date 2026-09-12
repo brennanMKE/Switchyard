@@ -618,6 +618,9 @@ cd YardKit && swift build && swift test
 
 # Deployable Release app (unsigned local) — build/Switchyard-<sha>.app
 ./scripts/make-release.sh
+
+# Same, plus the drag-to-Applications DMG — build/Switchyard-<sha>.dmg
+./scripts/make-release.sh package
 ```
 
 `YardKit/` exists with four targets — `YardGit`, `YardKit`, `YardUI` and the `switchyard`

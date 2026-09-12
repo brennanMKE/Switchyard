@@ -1,6 +1,10 @@
 #!/usr/bin/env zsh
 #
 # make-release.sh — produce a deployable Release build of Switchyard (#0356)
+# and, with `package` (#0357), a drag-to-Applications .dmg beside it.
+#
+# Actions:  release (default) — build/Switchyard-<shortsha>.app
+#           package           — the app, then build/Switchyard-<shortsha>.dmg
 #
 # Produces build/Switchyard-<shortsha>.app from a Release configuration via
 # `xcodebuild archive` + `xcodebuild -exportArchive`. The default and only
@@ -46,8 +50,15 @@ SIGNING_STOP_WORDS=(
   "allowProvisioningUpdates"
 )
 
-if [[ $# -gt 0 ]]; then
-  die "takes no arguments. Developer ID signing is out of scope (Rule 2: a human action, never scripted)."
+ACTION="release"
+if [[ $# -gt 1 ]]; then
+  die "usage: make-release.sh [release|package]. Developer ID signing is out of scope (Rule 2: a human action, never scripted)."
+fi
+if [[ $# -eq 1 ]]; then
+  case "$1" in
+    release|package) ACTION="$1" ;;
+    *) die "unknown action '$1' — usage: make-release.sh [release|package]" ;;
+  esac
 fi
 
 # --- Preflight --------------------------------------------------------------
@@ -56,6 +67,9 @@ fi
 command -v xcodebuild >/dev/null || die "xcodebuild not found on PATH — install Xcode command line tools."
 [[ -d "$PROJECT" ]] || die "$PROJECT not found in $REPO_ROOT."
 [[ -f YardKit/Package.swift ]] || die "YardKit/Package.swift not found — the app target embeds the CLI from this package."
+if [[ $ACTION == package ]]; then
+  command -v hdiutil >/dev/null || die "hdiutil not found on PATH — the package action builds the .dmg with it."
+fi
 
 SCHEMES="$(xcodebuild -list -project "$PROJECT" 2>/dev/null)" \
   || die "could not list schemes from $PROJECT — is the project readable?"
@@ -204,8 +218,74 @@ if [[ $fail -ne 0 ]]; then
   die "bundle verification failed — $ARTIFACT is not deployable"
 fi
 
+if [[ $ACTION == release ]]; then
+  print ""
+  print "done: mode=$MODE"
+  print "artifact: $ARTIFACT"
+  print "sha: $SHA"
+  print "copy it somewhere useful: cp -R $ARTIFACT /Applications/Switchyard.app"
+  exit 0
+fi
+
+# --- Package (#0357): the drag-to-Applications .dmg --------------------------
+#
+# Measured 2026-09-12: create-dmg is not installed on this machine
+# (command -v create-dmg → nothing), so the layout is hdiutil's own: a staged
+# volume holding Switchyard.app beside an /Applications symlink — the standard
+# drag-to-Applications window. Window positioning/background polish is
+# optional per the issue and deferred; the criterion is the gesture working.
+
+print "step: packaging $ARTIFACT into build/Switchyard-$SHA.dmg"
+STAGING="$BUILD_DIR/dmg-staging"
+DMG_PATH="$BUILD_DIR/Switchyard-$SHA.dmg"
+rm -rf "$STAGING"
+rm -f "$DMG_PATH"
+mkdir -p "$STAGING"
+cp -R "$ARTIFACT" "$STAGING/Switchyard.app"
+ln -s /Applications "$STAGING/Applications"
+
+DMG_LOG="$BUILD_DIR/dmg-create.log"
+set +e
+hdiutil create -volname Switchyard -srcfolder "$STAGING" -ov -format UDZO "$DMG_PATH" \
+  >"$DMG_LOG" 2>&1
+DMG_STATUS=$?
+set -e
+if [[ $DMG_STATUS -ne 0 ]]; then
+  print -u2 "make-release: hdiutil create failed (exit $DMG_STATUS). Last output:"
+  tail -20 "$DMG_LOG" >&2 || true
+  exit 1
+fi
+print "step: hdiutil create ok (UDZO)"
+
+# Self-check: attach read-only, confirm the layout, detach. Nothing is left
+# mounted and the staging tree is removed either way on success.
+MOUNT="$REPO_ROOT/$BUILD_DIR/dmg-mount"
+rm -rf "$MOUNT"
+mkdir -p "$MOUNT"
+set +e
+hdiutil attach -readonly -nobrowse -mountpoint "$MOUNT" "$DMG_PATH" >/dev/null 2>&1
+ATTACH_STATUS=$?
+set -e
+if [[ $ATTACH_STATUS -ne 0 ]]; then
+  die "package: could not attach $DMG_PATH read-only for the layout check."
+fi
+if [[ ! -d "$MOUNT/Switchyard.app" || ! -L "$MOUNT/Applications" ]]; then
+  hdiutil detach "$MOUNT" >/dev/null 2>&1 || true
+  die "package: layout check failed — Switchyard.app or the Applications link is missing from $DMG_PATH."
+fi
+print "verify: ok      Switchyard.app + Applications link in the mounted volume"
+set +e
+hdiutil detach "$MOUNT" >/dev/null 2>&1
+DETACH_STATUS=$?
+set -e
+if [[ $DETACH_STATUS -ne 0 ]]; then
+  die "package: could not detach $MOUNT — detach it by hand before rebuilding."
+fi
+rm -rf "$STAGING"
+
 print ""
-print "done: mode=$MODE"
+print "done: mode=$MODE action=$ACTION"
 print "artifact: $ARTIFACT"
+print "dmg: $DMG_PATH"
 print "sha: $SHA"
-print "copy it somewhere useful: cp -R $ARTIFACT /Applications/Switchyard.app"
+print "install gesture: open $DMG_PATH and drag Switchyard.app onto Applications"
