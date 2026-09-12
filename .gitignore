@@ -10,3 +10,7 @@ default.profraw
 
 # OpenCode — retired 2026-08-16, directory left in place
 .opencode/
+
+# Secrets. .env holds the OpenRouter API key; .env.example is the tracked template.
+.env
+.env.local
