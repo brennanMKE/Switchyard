@@ -1454,25 +1454,29 @@ Decide these with Brennan, do not decide them in code.
    decision 18, option 2, and #0163 is merged.** ~~**#0163**, still needing a pick among
    its three options.~~ The termination semantics it depends on were measured 2026-08-17 and are recorded
    in the issue, so whichever option is chosen is now cheap to author.
-7. **Does `RefSnapshot` grow a delta application — `apply(from:to:)` — alongside whole-snapshot
-   restore, or stay snapshot-only?** Raised 2026-08-17: four M2 issues (#0231, #0232, #0248,
+7. ~~**Does `RefSnapshot` grow a delta application — `apply(from:to:)` — alongside whole-snapshot
+   restore, or stay snapshot-only?**~~ **Answered 2026-09-09 — Brennan: stay snapshot-only.** Raised
+   2026-08-17: four M2 issues (#0231, #0232, #0248,
    #0251) each papered over one seam of "apply this whole snapshot" being restore's primitive
-   (see [clean-room/snapshot-and-undo.md](clean-room/snapshot-and-undo.md)'s addendum). **Decision
-   pending Brennan.** Prepared with measured evidence in
-   [restore-delta-decision.md](restore-delta-decision.md) (filed as **#0258**, M5): the
-   recommendation is to stay snapshot-only — of the three rules a delta was expected to dissolve,
+   (see [clean-room/snapshot-and-undo.md](clean-room/snapshot-and-undo.md)'s addendum). Prepared with measured evidence in
+   [restore-delta-decision.md](restore-delta-decision.md) (filed as **#0258**, M5): of the three
+   rules a delta was expected to dissolve,
    #0248's skip genuinely does, #0232's third-value discriminator and #0251's leave-alone survive
-   unchanged, and #0231's non-deletion becomes the delta's own defining constraint — reversible,
-   with a named reversal trigger, and cheapest to settle next to the M5 rewrite-pipeline work.
-8. **Are SHA-256 repositories supported?** Raised by the M1 milestone review's eleventh pass
+   unchanged, and #0231's non-deletion becomes the delta's own defining constraint. The decision:
+   **stay snapshot-only**; a delta may be grown additively only on the named reversal trigger
+   (a fifth seam instance needing a new scope rule, or the no-op-write refusal becoming a real
+   two-agent cost), and it would be non-deleting, traversal-only. Original text kept for context.
+8. ~~**Are SHA-256 repositories supported?**~~ **Answered 2026-09-09 — Brennan: out of scope,
+   refuse cleanly.** Raised by the M1 milestone review's eleventh pass
    (2026-08-18), prepared by **#0308**. Measured on git 2.50.1 with a real `--object-format=sha256`
    fixture: `graph` throws (`RevListParser` requires a 40-character oid) and `absorb --dry-run`
    throws (the blame parser has the same check) while ten other engine commands — including the
    mutating core — work untouched, and `BlameLine.uncommittedOID`'s 40-zero sentinel can never
-   match SHA-256's 64-zero uncommitted oid. **Decision-pending-Brennan** — the three defensible
-   answers with their measured costs, the full 29-hit `grep "40"` audit, and the recommendation
-   (out of scope, refuse cleanly) are in
-   [sha256-decision.md](sha256-decision.md). Until Brennan decides, the half-supported state stands.
+   match SHA-256's 64-zero uncommitted oid. The decision: **out of scope** — the follow-up change
+   is one `rev-parse --show-object-format` detection at the `graphRows` and absorb blame entries,
+   one typed refusal naming the algorithm, and two 64-hex test rows (enumerated in
+   [sha256-decision.md](sha256-decision.md)); it ships as its own issue rather than inside #0308.
+   Original text kept for context.
 
 ---
 

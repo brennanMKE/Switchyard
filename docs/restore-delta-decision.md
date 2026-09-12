@@ -168,3 +168,13 @@ recorded there. Absent a trigger, this is settled as *answered, no* — the guid
 so, so the fifth instance's finder starts from the reasoning rather than rediscovering it.
 
 The decision is Brennan's; this document only prepares it.
+
+---
+
+## Decision — 2026-09-09, Brennan: stay snapshot-only
+
+The recommendation is accepted as the decision. `RefSnapshot` stays whole-snapshot-only. A delta
+application may be grown **additively** only on the named reversal trigger — a fifth seam instance
+needing a new scope rule, or the no-op-write refusal becoming a real two-agent cost — and any such
+delta is non-deleting and traversal-only, with #0231's non-deletion as its defining constraint.
+#0258 closes with this decision; no code changes.

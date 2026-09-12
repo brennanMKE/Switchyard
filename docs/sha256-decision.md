@@ -150,3 +150,14 @@ than the deferral's cost of carrying the lie.
 - A feature in flight turns out to require SHA-256 before the refusal would ship.
 - The refusal change grows past one detection point, two failure cases, and two test rows — that
   would mean the small change this recommendation rests on was mis-sized.
+
+---
+
+## Decision — 2026-09-09, Brennan: out of scope, refuse cleanly
+
+The recommendation is accepted as the decision. SHA-256 repositories are out of scope. The
+structured refusal (one `rev-parse --show-object-format` detection at the `graphRows` and absorb
+blame entries, one typed refusal naming the algorithm, two 64-hex test rows) ships as its **own
+follow-up issue** rather than inside #0308 — #0308 is the decision record and closes with it. Until
+that follow-up lands, the current behavior (graph/absorb throw malformed-line errors on a SHA-256
+repository) stands, documented here.
