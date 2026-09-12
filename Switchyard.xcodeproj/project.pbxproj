@@ -7,12 +7,14 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		09E01719DA7A35F18DF2878D /* co.sstools.Switchyard.broker.plist in Embed Broker Agent Plist */ = {isa = PBXBuildFile; fileRef = 48178BDA2A706B46B93DF235 /* co.sstools.Switchyard.broker.plist */; };
 		26BA44853026752800DDB2E9 /* YardGit in Frameworks */ = {isa = PBXBuildFile; productRef = 26BA44843026752800DDB2E9 /* YardGit */; };
 		26BA44873026752800DDB2E9 /* YardKit in Frameworks */ = {isa = PBXBuildFile; productRef = 26BA44863026752800DDB2E9 /* YardKit */; };
-		E398814DF31922FD00FDEBAD /* BrokerAgent in Embed Broker Agent Executable */ = {isa = PBXBuildFile; fileRef = 297AF29631C6CF47EA378EF1 /* BrokerAgent */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
-		09E01719DA7A35F18DF2878D /* co.sstools.Switchyard.broker.plist in Embed Broker Agent Plist */ = {isa = PBXBuildFile; fileRef = 48178BDA2A706B46B93DF235 /* co.sstools.Switchyard.broker.plist */; };
-		A1B2C3D4E5F60001 /* YardUI in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D4E5F60000 /* YardUI */; };
+		26F2FB363055149700DC9B0B /* YardCommands in Frameworks */ = {isa = PBXBuildFile; productRef = CCCCCCCCCCCCCCCCCCCCCCCC /* YardCommands */; };
+		26F2FB373055149700DC9B0B /* SlidingTabs in Frameworks */ = {isa = PBXBuildFile; productRef = F9E8D7C6B5A4938271605F4E /* SlidingTabs */; };
 		2CA217801CFCB04B9FF511A2 /* YardKit in Frameworks */ = {isa = PBXBuildFile; productRef = A81B5573CF0B3AD6AD1C5675 /* YardKit */; };
+		A1B2C3D4E5F60001 /* YardUI in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D4E5F60000 /* YardUI */; };
+		E398814DF31922FD00FDEBAD /* BrokerAgent in Embed Broker Agent Executable */ = {isa = PBXBuildFile; fileRef = 297AF29631C6CF47EA378EF1 /* BrokerAgent */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -40,17 +42,6 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
-		6B48FF2E294F42D830A8AC7C /* Embed Broker Agent Executable */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 2147483647;
-			dstPath = "";
-			dstSubfolderSpec = 6;
-			files = (
-				E398814DF31922FD00FDEBAD /* BrokerAgent in Embed Broker Agent Executable */,
-			);
-			name = "Embed Broker Agent Executable";
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		59893A6AA309E3A9BC46E7F4 /* Embed Broker Agent Plist */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 2147483647;
@@ -60,6 +51,17 @@
 				09E01719DA7A35F18DF2878D /* co.sstools.Switchyard.broker.plist in Embed Broker Agent Plist */,
 			);
 			name = "Embed Broker Agent Plist";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		6B48FF2E294F42D830A8AC7C /* Embed Broker Agent Executable */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 6;
+			files = (
+				E398814DF31922FD00FDEBAD /* BrokerAgent in Embed Broker Agent Executable */,
+			);
+			name = "Embed Broker Agent Executable";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
@@ -113,6 +115,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				26F2FB373055149700DC9B0B /* SlidingTabs in Frameworks */,
+				26F2FB363055149700DC9B0B /* YardCommands in Frameworks */,
 				26BA44853026752800DDB2E9 /* YardGit in Frameworks */,
 				26BA44873026752800DDB2E9 /* YardKit in Frameworks */,
 				A1B2C3D4E5F60001 /* YardUI in Frameworks */,
@@ -379,6 +383,13 @@
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		1013DD15CD1B4A56CA859BAA /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		26B64D3030251BCE00EB4FD0 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -394,13 +405,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		26B64D4730251BCF00EB4FD0 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		1013DD15CD1B4A56CA859BAA /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -428,6 +432,29 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		1307C59B1CFE801708408370 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				COPY_PHASE_STRIP = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = XV8BAAVZ6V;
+				ENABLE_HARDENED_RUNTIME = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.5;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = co.sstools.Switchyard.broker;
+				PRODUCT_NAME = BrokerAgent;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = macosx;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
 		26B64D5330251BCF00EB4FD0 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -762,29 +789,6 @@
 			};
 			name = Debug;
 		};
-		1307C59B1CFE801708408370 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_STYLE = Automatic;
-				COPY_PHASE_STRIP = YES;
-				CURRENT_PROJECT_VERSION = 1;
-				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = XV8BAAVZ6V;
-				ENABLE_HARDENED_RUNTIME = YES;
-				MACOSX_DEPLOYMENT_TARGET = 26.5;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = co.sstools.Switchyard.broker;
-				PRODUCT_NAME = BrokerAgent;
-				SDKROOT = macosx;
-				SKIP_INSTALL = YES;
-				SUPPORTED_PLATFORMS = macosx;
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_DEFAULT_ACTOR_ISOLATION = nonisolated;
-				SWIFT_STRICT_CONCURRENCY = complete;
-				SWIFT_VERSION = 6.0;
-			};
-			name = Release;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -835,6 +839,13 @@
 		};
 /* End XCConfigurationList section */
 
+/* Begin XCLocalSwiftPackageReference section */
+		26BA44803025CBFE00DDB2E9 /* XCLocalSwiftPackageReference "YardKit" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = YardKit;
+		};
+/* End XCLocalSwiftPackageReference section */
+
 /* Begin XCRemoteSwiftPackageReference section */
 		A1B2C3D4E5F6789012ABCDEF /* XCRemoteSwiftPackageReference "SlidingTabs" */ = {
 			isa = XCRemoteSwiftPackageReference;
@@ -845,13 +856,6 @@
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
-
-/* Begin XCLocalSwiftPackageReference section */
-		26BA44803025CBFE00DDB2E9 /* XCLocalSwiftPackageReference "YardKit" */ = {
-			isa = XCLocalSwiftPackageReference;
-			relativePath = YardKit;
-		};
-/* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
 		26BA44843026752800DDB2E9 /* YardGit */ = {
