@@ -54,15 +54,18 @@ public struct CommitHistoryView: View {
         List(entries, id: \.oid, selection: $selection) { entry in
             CommitHistoryRow(
                 entry: entry, graphRow: rowsByOid[entry.oid], segments: segmentsByOid[entry.oid],
-                isHead: entry.oid == headOid, owners: owners, gutterWidth: gutterWidth)
+                isHead: entry.oid == headOid, owners: owners, gutterWidth: gutterWidth,
+                chips: refs.map { RefChips.make(oid: entry.oid, refs: $0, decoration: entry.refs) } ?? [])
                 .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 8))
                 .listRowSeparator(.hidden)
         }
     }
 }
 
-/// One row: a lane gutter, then subject, short OID, author, and refs when
-/// non-empty.
+/// One row: a lane gutter, then ref chips and the subject, short OID, author.
+/// The chips (#0358, #0367) are the row's ref labels -- branches and remotes
+/// from the sidebar's snapshot, tags and a detached `HEAD` from `%D` -- and
+/// the whole row is one VoiceOver element speaking `CommitRowAccessibility.label`.
 private struct CommitHistoryRow: View {
     let entry: CommitLogEntry
     let graphRow: GraphRow?
@@ -70,15 +73,21 @@ private struct CommitHistoryRow: View {
     let isHead: Bool
     let owners: [String: BranchTip]
     let gutterWidth: CGFloat
+    let chips: [RefChip]
 
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
             LaneGutterView(row: graphRow, segments: segments, isHead: isHead, width: gutterWidth, owners: owners)
             VStack(alignment: .leading, spacing: 2) {
-                Text(entry.subject)
-                    .fontWeight(isHead ? .semibold : .regular)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                HStack(spacing: 4) {
+                    ForEach(chips, id: \.self) { chip in
+                        RefChipView(chip: chip, tint: BranchColor.color(for: chip))
+                    }
+                    Text(entry.subject)
+                        .fontWeight(isHead ? .semibold : .regular)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
                 HStack(spacing: 8) {
                     Text(entry.shortOid)
                         .font(.system(.caption, design: .monospaced))
@@ -86,14 +95,59 @@ private struct CommitHistoryRow: View {
                     Text(entry.author)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    if !entry.refs.isEmpty {
-                        Text(entry.refs)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
                 }
             }
             .padding(.vertical, 4)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(CommitRowAccessibility.label(entry: entry, chips: chips))
+    }
+}
+
+/// One ref chip: a capsule before the subject, tinted by #0366's colours and
+/// marked with the same symbols the sidebar uses, so the two panes read as
+/// one vocabulary.
+struct RefChipView: View {
+    let chip: RefChip
+    let tint: Color
+
+    var body: some View {
+        Label(chip.name, systemImage: symbol)
+            .labelStyle(.titleAndIcon)
+            .font(.caption.weight(chip.isHead ? .semibold : .regular))
+            .lineLimit(1)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1)
+            .background {
+                switch chip.kind {
+                case .localBranch:
+                    Capsule().fill(tint.opacity(chip.isHead ? 0.35 : 0.18))
+                case .remoteBranch:
+                    Capsule().strokeBorder(tint, style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
+                case .tag:
+                    Capsule().fill(.quaternary)
+                case .detachedHead:
+                    Capsule().strokeBorder(.orange, lineWidth: 1.5)
+                }
+            }
+            .help(helpText)
+    }
+
+    private var symbol: String {
+        switch chip.kind {
+        case .localBranch: chip.isHead ? "checkmark.circle.fill" : "arrow.triangle.branch"
+        case .remoteBranch: "network"
+        case .tag: "tag"
+        case .detachedHead: "exclamationmark.triangle"
+        }
+    }
+
+    private var helpText: String {
+        switch chip.kind {
+        case .localBranch: chip.isHead ? "Current branch \(chip.name)" : "Branch \(chip.name)"
+        case .remoteBranch: "Remote-tracking branch \(chip.name)"
+        case .tag: "Tag \(chip.name)"
+        case .detachedHead: "HEAD is detached at this commit"
         }
     }
 }
