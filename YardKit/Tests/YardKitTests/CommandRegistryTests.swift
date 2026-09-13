@@ -32,12 +32,12 @@ func registryHasAtLeastTwoEntries() {
     }
 }
 
-@Test("registry reports exactly twenty-seven entries")
-func registryHasExactlyTwentySevenEntries() {
-    #expect(CommandRegistry.all.count == 27)
+@Test("registry reports exactly twenty-nine entries")
+func registryHasExactlyTwentyNineEntries() {
+    #expect(CommandRegistry.all.count == 29)
 
     let names: [String] = CommandRegistry.all.map(\.name)
-    #expect(Set(names).count == 27, "Names must be distinct so lookup returns the right spec.")
+    #expect(Set(names).count == 29, "Names must be distinct so lookup returns the right spec.")
     // The three #0063 rewrites are registered beside their split sibling.
     #expect(names.contains("reword"))
     #expect(names.contains("drop"))
@@ -47,6 +47,9 @@ func registryHasExactlyTwentySevenEntries() {
     #expect(names.contains("cherry-pick"))
     // The #0361 merge arm is registered in the same engine family.
     #expect(names.contains("merge"))
+    // The #0362 branch-position operations join them.
+    #expect(names.contains("rebase-onto"))
+    #expect(names.contains("set-tip"))
     // The #0363 ref management joins them.
     #expect(names.contains("tag"))
     #expect(names.contains("branch"))

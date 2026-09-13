@@ -1,0 +1,77 @@
+{
+  "command" : "rebase-onto",
+  "envelope" : {
+    "failure" : {
+      "error" : {
+        "code" : {
+          "enum" : [
+            "app_unavailable",
+            "blocked_on_conflicts",
+            "broker_unreachable",
+            "human_declined",
+            "ok",
+            "repository_error",
+            "request_failed",
+            "session_terminated",
+            "signing_failed",
+            "timed_out",
+            "usage"
+          ],
+          "type" : "string"
+        },
+        "hint" : {
+          "optional" : true,
+          "type" : "string"
+        },
+        "message" : {
+          "type" : "string"
+        }
+      },
+      "ok" : false,
+      "schemaVersion" : 1
+    },
+    "success" : {
+      "ok" : true,
+      "result" : {
+        "optional" : true,
+        "schema" : "rebase-onto"
+      },
+      "schemaVersion" : 1
+    }
+  },
+  "exitCodes" : [
+    {
+      "code" : 0,
+      "meaning" : "The rebase completed; the payload carries the branch's new head oid. The branch's commits after the merge-base with the base were replayed onto the base, and the branch ref moved once at the end. The commits the two lines share keep their original oids."
+    },
+    {
+      "code" : 1,
+      "meaning" : "Invalid arguments — rebase-onto requires exactly one positional argument <commit>; an unknown, duplicated, or value-missing flag (rebase-onto takes no --message or --before\/--after); or both --sign and --no-sign."
+    },
+    {
+      "code" : 4,
+      "meaning" : "The rebase could not be completed for a reason the other codes do not name — an unknown base, a detached HEAD, a base that already contains the branch or that the branch is already based on, a base with no common history, or a signing failure among them."
+    },
+    {
+      "code" : 8,
+      "meaning" : "Blocked on conflicts (blocked_on_conflicts) — the replay could not apply cleanly and is left in progress, resumable."
+    }
+  ],
+  "flags" : [
+    {
+      "argument" : null,
+      "help" : "Never sign, even when commit.gpgsign is true.",
+      "long" : "no-sign",
+      "short" : null
+    },
+    {
+      "argument" : null,
+      "help" : "Sign the replayed commits, even when commit.gpgsign is false.",
+      "long" : "sign",
+      "short" : null
+    }
+  ],
+  "schemaName" : "rebase-onto",
+  "schemaVersion" : 1,
+  "summary" : "Replay the current branch's commits onto the named base commit."
+}

@@ -1,4 +1,6 @@
-// Rewrite.swift — reorder, drop, and reword one commit on the branch (#0063)
+// Rewrite.swift — reorder, drop, and reword one commit on the branch
+// (#0063), generalized in #0362 to rebasing the branch onto a node and to
+// setting the branch tip without replaying.
 
 import Foundation
 
@@ -42,6 +44,14 @@ import Foundation
 /// `yard undo` reverses it as a single step. `GIT_EDITOR` is pinned `false`
 /// by `GitProcess` and is never invoked: every message rides stdin or a
 /// flag.
+///
+/// #0362 generalizes the same core in the other direction — a different
+/// base instead of a different edit to the list. `rebaseOnto(base:...)`
+/// keeps the branch's commit list whole and takes the pick list from the
+/// other side of the merge-base with the named base, replaying it onto that
+/// base; `setTip(commit:...)` skips the replay entirely and moves the
+/// branch ref alone, the one operation that takes commits off a branch and
+/// therefore the most guarded in the engine.
 public struct Rewrite: Equatable, Sendable {
 
     /// Where a reordered commit lands relative to the reference commit.
@@ -149,6 +159,73 @@ public struct Rewrite: Equatable, Sendable {
         try run(.reorder(commit: commit, position: position, reference: reference),
                 signing: signing, at: path, git: git, extraEnvironment: extraEnvironment)
     }
+
+    /// Replays the current branch onto an arbitrary base commit (#0362).
+    ///
+    /// The branch's commits after the merge-base with `base` are the pick
+    /// list — the same walk `reword` runs, with the commit list taken from
+    /// the other side of the base — replayed onto `base` with
+    /// `git cherry-pick`, oldest first, and the branch ref moves once at
+    /// the end. The commits the branch and the base share keep their
+    /// original oids.
+    ///
+    /// - Throws: `RewriteError.unknownCommit` when `base` does not resolve;
+    ///   `.detachedHeadRefused` when HEAD is detached (there is no branch
+    ///   to move); `.nothingToDo` when the base already contains the branch
+    ///   (merge it instead) or the branch is already based on it;
+    ///   `.blockedOnConflicts` as in `reword`; `.signingFailed` as in
+    ///   `reword`; `GitProcess.Failure` for every other non-zero exit — a
+    ///   base with no common history with the branch among them.
+    public static func rebaseOnto(
+        base: String,
+        signing: CommitCreate.Signing = .config,
+        at path: String,
+        git: GitProcess = GitProcess(),
+        extraEnvironment: [String: String] = [:]
+    ) throws -> Result {
+        try run(.rebaseOnto(base: base), signing: signing,
+                at: path, git: git, extraEnvironment: extraEnvironment)
+    }
+
+    /// Moves the current branch's tip to `commit` without replaying
+    /// anything (#0362) — the deliberate history-loss operation.
+    ///
+    /// The ref moves transactionally (`update-ref --stdin`, old value
+    /// pinned) inside one journal checkpoint; the index and working tree
+    /// are not touched, so the commits that leave the branch reappear as
+    /// the branch's uncommitted diff and `yard undo` restores the pre-state
+    /// exactly. Every refusal — a detached HEAD, a target no local branch
+    /// names, a tip that already names the target — is raised before the
+    /// checkpoint is written.
+    ///
+    /// - Throws: `RewriteError.unknownCommit` when `commit` does not
+    ///   resolve; `.detachedHeadRefused` when HEAD is detached (there is no
+    ///   branch tip to move); `.nothingToDo` when the tip already names the
+    ///   target; `.setTipTargetNotOnBranch` when no local branch contains
+    ///   the target; `GitProcess.Failure` for every other non-zero exit.
+    public static func setTip(
+        commit: String,
+        at path: String,
+        git: GitProcess = GitProcess(),
+        extraEnvironment: [String: String] = [:]
+    ) throws -> Result {
+        let targetOid = try resolve(commit, at: path, git: git,
+                                    extraEnvironment: extraEnvironment)
+        let head = try resolveHead(at: path, git: git, extraEnvironment: extraEnvironment)
+        guard head.attached else {
+            throw RewriteError.detachedHeadRefused(operation: "set-tip")
+        }
+        if targetOid == head.tip {
+            throw RewriteError.nothingToDo
+        }
+        try refuseTipTargetOffAnyBranch(targetOid, at: path, git: git,
+                                        extraEnvironment: extraEnvironment)
+        return try JournalCheckpoint.around(operation: "set-tip", at: path, git: git) { scoped in
+            try moveRef(refName: head.refName, from: head.tip, to: targetOid,
+                        at: path, git: scoped, extraEnvironment: extraEnvironment)
+            return Result(head: targetOid)
+        }
+    }
 }
 
 // MARK: - The walk
@@ -160,6 +237,7 @@ private extension Rewrite {
         case reword(commit: String, message: String)
         case drop(commit: String)
         case reorder(commit: String, position: Position, reference: String)
+        case rebaseOnto(base: String)
     }
 
     /// A replacement commit built with `git commit-tree`: tree and parents
@@ -290,6 +368,36 @@ private extension Rewrite {
                 operation: "reorder", rebuild: nil, detachAt: chain[first - 1],
                 picks: Array(moved[first...]),
                 refName: head.refName, oldTip: head.tip, attached: head.attached)
+
+        case let .rebaseOnto(base):
+            let baseOid = try resolve(base, at: path, git: git,
+                                      extraEnvironment: extraEnvironment)
+            let head = try resolveHead(at: path, git: git, extraEnvironment: extraEnvironment)
+            guard head.attached else {
+                throw RewriteError.detachedHeadRefused(operation: "rebase-onto")
+            }
+            try refuseUnmergedIndex(at: path, git: git, extraEnvironment: extraEnvironment)
+            // The branch's side of the fork point: commits reachable from
+            // the tip but not from the base. `merge-base` failing means the
+            // two lines share no history at all — git's own refusal, raised
+            // here before anything is touched.
+            let fork = try git.run(
+                ["merge-base", head.tip, baseOid],
+                workingDirectory: path, extraEnvironment: extraEnvironment
+            ).lines.first ?? ""
+            if fork == head.tip || fork == baseOid {
+                // The base contains the branch (merge it instead), or the
+                // branch is already based on it: the replay would rewrite
+                // every descendant oid and change nothing.
+                throw RewriteError.nothingToDo
+            }
+            let picks = try git.run(
+                ["rev-list", "--reverse", "\(baseOid)..\(head.tip)"],
+                workingDirectory: path, extraEnvironment: extraEnvironment
+            ).lines
+            return Plan(
+                operation: "rebase-onto", rebuild: nil, detachAt: baseOid, picks: picks,
+                refName: head.refName, oldTip: head.tip, attached: head.attached)
         }
     }
 
@@ -390,6 +498,32 @@ private extension Rewrite {
         guard conflicts.isEmpty else {
             throw RewriteError.blockedOnConflicts(files: conflicts)
         }
+    }
+
+    /// A set-tip target must sit on some local branch — a tip names a
+    /// commit a ref holds, and a target no branch holds would leave the
+    /// moved branch pointing at a commit nothing else names (#0362).
+    /// Reachability is asked per branch (`merge-base --is-ancestor`,
+    /// equality included), the same probe `refuseOffRef` uses.
+    static func refuseTipTargetOffAnyBranch(
+        _ targetOid: String,
+        at path: String,
+        git: GitProcess,
+        extraEnvironment: [String: String]
+    ) throws {
+        let branches = try git.run(
+            ["for-each-ref", "--format=%(refname)", "refs/heads/"],
+            workingDirectory: path, extraEnvironment: extraEnvironment
+        ).lines
+        for branch in branches {
+            let probe = try git.capture(
+                ["merge-base", "--is-ancestor", targetOid, branch],
+                workingDirectory: path,
+                extraEnvironment: extraEnvironment
+            )
+            if probe.exitCode == 0 { return }
+        }
+        throw RewriteError.setTipTargetNotOnBranch(target: targetOid)
     }
 }
 
@@ -688,7 +822,8 @@ private extension Rewrite {
 
 // MARK: - Errors
 
-/// Why `Rewrite.reword`/`.drop`/`.reorder` refused, or could not finish.
+/// Why `Rewrite.reword`/`.drop`/`.reorder`/`.rebaseOnto`/`.setTip` refused,
+/// or could not finish.
 public enum RewriteError: Error, Equatable, Sendable, CustomStringConvertible {
     /// A named revision — the commit, or a reorder's reference — does not
     /// resolve to a commit. Raised before anything is touched.
@@ -712,6 +847,15 @@ public enum RewriteError: Error, Equatable, Sendable, CustomStringConvertible {
     /// The reword's message already matches, or the reordered commit
     /// already sits at the requested position.
     case nothingToDo
+    /// The operation needs a branch to move — a rebase replays onto a base
+    /// and moves the branch `HEAD` names, and a set-tip moves that branch's
+    /// tip — and HEAD is detached, so there is no branch. Raised before
+    /// anything is touched.
+    case detachedHeadRefused(operation: String)
+    /// A set-tip target no local branch names — not the current branch, not
+    /// any other. Moving the tip to it would leave the branch naming a
+    /// commit nothing else holds. Raised before anything is touched.
+    case setTipTargetNotOnBranch(target: String)
     /// Either the index already held unmerged entries (refused before
     /// anything was touched), or the replay conflicted — in the replay case
     /// the pick is left in progress, resumable, and `files` names the
@@ -736,8 +880,14 @@ public enum RewriteError: Error, Equatable, Sendable, CustomStringConvertible {
             "\(operation) cannot rewrite the first-parent chain's root (\(commit)) — "
                 + "the replay would have to create a new root commit, which cherry-pick cannot do"
         case .nothingToDo:
-            "nothing to do — the message already matches, or the commit already sits at "
-                + "the requested position"
+            "nothing to do — the message already matches, the commit already sits at "
+                + "the requested position, the branch already sits on (or is contained in) "
+                + "the rebase base, or the tip already names the set-tip target"
+        case let .detachedHeadRefused(operation):
+            "\(operation) is refused: HEAD is detached — check out a branch first"
+        case let .setTipTargetNotOnBranch(target):
+            "cannot set the tip to \(target): it is not on any local branch — "
+                + "only a commit a local branch names can become the tip"
         case let .blockedOnConflicts(files):
             "rewrite blocked on conflicts in "
                 + files.map(\.path).joined(separator: ", ")
@@ -753,7 +903,7 @@ extension RewriteError: ExitClassCarrying {
     public var exitClass: ExitClass {
         switch self {
         case .unknownCommit, .commitNotOnRef, .dropMergeRefused, .reorderTargetNotOnBranch,
-             .rootRewriteRefused, .nothingToDo:
+             .rootRewriteRefused, .nothingToDo, .detachedHeadRefused, .setTipTargetNotOnBranch:
             .repositoryError
         case .blockedOnConflicts: .blockedOnConflicts
         case .signingFailed: .signingFailed

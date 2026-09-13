@@ -1,12 +1,14 @@
 // RewriteServing.swift — the `reword`/`drop`/`reorder` arms in
-// `runEngineCommand` (#0063)
+// `runEngineCommand` (#0063), extended in #0362 with `rebase-onto` and
+// `set-tip`
 
 import Foundation
 import YardGit
 import YardKit
 
-/// `switchyard reword`, `switchyard drop`, and `switchyard reorder` — parses
-/// the subcommand's positionals and flags, then resolves `WorktreeContext`
+/// `switchyard reword`, `switchyard drop`, `switchyard reorder`,
+/// `switchyard rebase-onto`, and `switchyard set-tip` — parses the
+/// subcommand's positionals and flags, then resolves `WorktreeContext`
 /// for the **caller's** working directory before calling `Rewrite`. The
 /// passed path is the caller's, never
 /// `FileManager.default.currentDirectoryPath`, which is the app's.
@@ -19,23 +21,29 @@ import YardKit
 /// - `reorder <commit> (--before|--after) <ref>` — one positional and
 ///   exactly one of `--before`/`--after`, whose value names the reference
 ///   commit the move is measured against.
+/// - `rebase-onto <commit>` — one positional naming the base the branch is
+///   replayed onto, no other flag but signing (#0362).
+/// - `set-tip <commit>` — one positional naming the commit that becomes the
+///   branch's tip, no flags at all: the ref move signs nothing (#0362).
 ///
-/// All three accept at most one of `--sign` / `--no-sign`, which are
-/// contradictory together. An unknown flag, a duplicated flag, a flag
-/// missing its value, a flag that belongs to another subcommand (e.g.
-/// `--message` on `drop`), a wrong positional count — any tail that is not
-/// exactly one well-formed invocation — is refused the way `runYard`'s
-/// unknown-subcommand path refuses (`EnvelopeFail(code: .usage, …)`, the
-/// human-readable line on stderr, exit 1), before any repository access, so
-/// the refusal does not depend on where the command was run.
+/// reword, drop, reorder, and rebase-onto accept at most one of
+/// `--sign` / `--no-sign`, which are contradictory together. An unknown
+/// flag, a duplicated flag, a flag missing its value, a flag that belongs
+/// to another subcommand (e.g. `--message` on `drop`), a wrong positional
+/// count — any tail that is not exactly one well-formed invocation — is
+/// refused the way `runYard`'s unknown-subcommand path refuses
+/// (`EnvelopeFail(code: .usage, …)`, the human-readable line on stderr,
+/// exit 1), before any repository access, so the refusal does not depend on
+/// where the command was run.
 ///
 /// The exit code is the issue's contract, four values: **0** — the rewrite
 /// completed; the payload carries the branch's new head oid. **1** — usage.
 /// **4** — request-failed: every failure the issue's table does not name —
-/// an unknown commit, a dropped merge, a cross-branch reorder, a signing
-/// failure among them. **8** — blocked on conflicts, with the conflicted
-/// paths named in the envelope and the cherry-pick replay left in progress,
-/// resumable.
+/// an unknown commit, a dropped merge, a cross-branch reorder, a detached
+/// HEAD, a target no local branch names, a signing failure among them.
+/// **8** — blocked on conflicts, with the conflicted paths named in the
+/// envelope and the cherry-pick replay left in progress, resumable. Set-tip
+/// runs no replay, so its surface documents no 8.
 func runRewrite(
     arguments: [String],
     workingDirectory: String
@@ -89,8 +97,8 @@ func runRewrite(
             }
         default:
             if token.hasPrefix("-") {
-                usageMessage = "\(subcommand) takes \(positionalGrammar(subcommand)) and the "
-                    + "flags \(flagGrammar(subcommand)); got the unknown flag '\(token)'."
+                usageMessage = "\(subcommand) takes \(positionalGrammar(subcommand)) and "
+                    + "\(flagGrammar(subcommand)); got the unknown flag '\(token)'."
             } else {
                 positionals.append(token)
             }
@@ -103,6 +111,9 @@ func runRewrite(
     }
     if usageMessage == nil, subcommand != "reword", message != nil {
         usageMessage = "\(subcommand) takes no --message flag; only reword does."
+    }
+    if usageMessage == nil, subcommand == "set-tip", !signChoices.isEmpty {
+        usageMessage = "set-tip takes no --sign/--no-sign flag; it moves the ref and signs nothing."
     }
     if usageMessage == nil, subcommand != "reorder", before != nil || after != nil {
         usageMessage = "\(subcommand) takes no --before/--after flag; only reorder does."
@@ -150,6 +161,11 @@ func runRewrite(
         case "drop":
             result = try Rewrite.drop(
                 commit: positionals[0], signing: signing, at: workingDirectory)
+        case "rebase-onto":
+            result = try Rewrite.rebaseOnto(
+                base: positionals[0], signing: signing, at: workingDirectory)
+        case "set-tip":
+            result = try Rewrite.setTip(commit: positionals[0], at: workingDirectory)
         default:
             guard let reference = before ?? after else {
                 return finishUsage(
@@ -195,9 +211,10 @@ private func positionalGrammar(_ subcommand: String) -> String {
 /// The flag grammar each subcommand documents in its unknown-flag refusals.
 private func flagGrammar(_ subcommand: String) -> String {
     switch subcommand {
-    case "reword": "--message <message>, --sign, --no-sign"
-    case "drop": "--sign, --no-sign"
-    default: "--before <ref>, --after <ref>, --sign, --no-sign"
+    case "reword": "the flags --message <message>, --sign, --no-sign"
+    case "drop", "rebase-onto": "the flags --sign, --no-sign"
+    case "set-tip": "no flags"
+    default: "the flags --before <ref>, --after <ref>, --sign, --no-sign"
     }
 }
 

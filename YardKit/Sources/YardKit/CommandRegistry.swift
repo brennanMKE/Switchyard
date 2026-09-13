@@ -12,7 +12,7 @@ public enum CommandRegistry {
 
     /// All known `yard` command specifications in the order they should be
     /// rendered in help output.
-    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, revertSpec, cherryPickSpec, mergeSpec, rewriteDiffSpec, rerereSpec, reviewSpec, askSpec, resolveSpec, watchSpec, tagSpec, branchSpec]
+    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, revertSpec, cherryPickSpec, mergeSpec, rewriteDiffSpec, rerereSpec, reviewSpec, askSpec, resolveSpec, watchSpec, tagSpec, branchSpec, rebaseOntoSpec, setTipSpec]
 
     // MARK: - The switchyard spec — rendered by `yard --help`
 
@@ -512,6 +512,46 @@ public enum CommandRegistry {
             ExitCodeSpec(code: 4, meaning: "The operation could not be completed for a reason the other codes do not name — an invalid name, an existing name, a `/`-boundary clash, an unknown revision or branch or upstream, deleting the checked-out branch or one a linked worktree holds, or an unmerged branch without --force among them."),
         ],
         schemaName: "branch",
+    )
+
+    // MARK: - The rebase-onto spec — engine-backed, resolved by `YardCommands` (#0362)
+
+    static let rebaseOntoSpec = CommandSpec(
+        name: "rebase-onto",
+        summary: "Replay the current branch's commits onto the named base commit.",
+        flags: [
+            FlagSpec(long: "sign", argument: nil, help: "Sign the replayed commits, even when commit.gpgsign is false."),
+            FlagSpec(long: "no-sign", argument: nil, help: "Never sign, even when commit.gpgsign is true."),
+        ],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The rebase completed; the payload carries the branch's new head oid. The branch's commits after the merge-base with the base were replayed onto the base, and the branch ref moved once at the end. The commits the two lines share keep their original oids."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — rebase-onto requires exactly one positional argument <commit>; an unknown, duplicated, or value-missing flag (rebase-onto takes no --message or --before/--after); or both --sign and --no-sign."),
+            ExitCodeSpec(code: 4, meaning: "The rebase could not be completed for a reason the other codes do not name — an unknown base, a detached HEAD, a base that already contains the branch or that the branch is already based on, a base with no common history, or a signing failure among them."),
+            ExitCodeSpec(code: 8, meaning: "Blocked on conflicts (blocked_on_conflicts) — the replay could not apply cleanly and is left in progress, resumable."),
+        ],
+        schemaName: "rebase-onto",
+        // No `payload` shape (#0362): the result is a single object whose
+        // only field is the branch's new head oid — the same shape as
+        // reword/drop/reorder, whose established precedent (#0063) is
+        // `payload: nil` with the schema's self-reference form, and the
+        // wire tests pin the encoded keys instead.
+        payload: nil
+    )
+
+    // MARK: - The set-tip spec — engine-backed, resolved by `YardCommands` (#0362)
+
+    static let setTipSpec = CommandSpec(
+        name: "set-tip",
+        summary: "Move the current branch's tip to the named commit without replaying anything.",
+        flags: [],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The tip was set; the payload carries the branch's new head oid. The branch ref moved transactionally inside one journal checkpoint; the index and working tree were not touched, and yard undo restores the pre-state exactly."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — set-tip requires exactly one positional argument <commit> and takes no flags."),
+            ExitCodeSpec(code: 4, meaning: "The tip could not be set for a reason the other codes do not name — an unknown commit, a detached HEAD, a tip that already names the target, or a target no local branch names among them."),
+        ],
+        schemaName: "set-tip",
+        // No `payload` shape (#0362): the result is the same single-oid
+        // object the other rewrites produce, and the same precedent applies.
         payload: nil
     )
 

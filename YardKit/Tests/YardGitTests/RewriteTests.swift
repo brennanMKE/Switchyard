@@ -600,6 +600,12 @@ _ = try Rewrite.drop(commit: repo.revParse("main~1"), at: repo.url.path,
                                                     reference: "no-such-revision",
                                                     at: repo.url.path,
                                                     extraEnvironment: hermetic) }),
+        ("rebase-onto base", { try Rewrite.rebaseOnto(base: "no-such-revision",
+                                                      at: repo.url.path,
+                                                      extraEnvironment: hermetic) }),
+        ("set-tip target", { try Rewrite.setTip(commit: "no-such-revision",
+                                                at: repo.url.path,
+                                                extraEnvironment: hermetic) }),
     ]
     for (name, run) in cases {
         let before = try fullSnapshot(repo)
@@ -733,4 +739,354 @@ private extension RewriteError {
     #expect(Set(object.keys) == ["head"],
             "Rewrite.Result encodes exactly its one wire key; got \(object.keys.sorted())")
     #expect(object["head"] as? String == result.head)
+}
+
+// MARK: - Rebase onto a node (#0362)
+
+/// `main` = `c1 → c2 → c3` plus a parallel line `b1 → b2` off `c1` — the
+/// shapes a rebase onto a parallel node must replay. The two lines' changes
+/// are disjoint (the parallel line rewrites line 1 of f.txt and adds h.txt;
+/// the branch's own commits add g.txt and rewrite line 5), so the replay is
+/// clean.
+private func rebaseParallelFixture() throws -> (repo: FixtureRepository, c1: String, c2: String, c3: String, b2: String) {
+    var repo = try FixtureRepository()
+    try repo.build([
+        .init("c1", files: ["f.txt": "a1\na2\na3\na4\na5\n"]),
+        .init("b1", parents: ["c1"], files: ["f.txt": "B1\na2\na3\na4\na5\n"]),
+        .init("b2", parents: ["b1"], files: [
+            "f.txt": "B1\na2\na3\na4\na5\n", "h.txt": "h1\nh2\n",
+        ]),
+        .init("c2", parents: ["c1"], files: [
+            "f.txt": "a1\na2\na3\na4\na5\n", "g.txt": "g1\ng2\n",
+        ]),
+        .init("c3", parents: ["c2"], files: [
+            "f.txt": "a1\na2\na3\na4\nA5\n", "g.txt": "g1\ng2\n",
+        ]),
+    ])
+    try repo.branch("main", at: "c3")
+    try repo.checkout("main")
+    return (repo, try #require(repo.oids["c1"]), try #require(repo.oids["c2"]),
+            try #require(repo.oids["c3"]), try #require(repo.oids["b2"]))
+}
+
+/// `main` = `c1 → c2 → c3` and a base `p` off `c1`, both having rewritten
+/// line 3 of f.txt — rebasing `main` onto `p` makes the first pick (c2,
+/// line 3 → T3) disagree with the base's tree (line 3 = P3) on the very
+/// line it changes: a conflict.
+private func rebaseConflictFixture() throws -> (repo: FixtureRepository, base: String) {
+    var repo = try FixtureRepository()
+    try repo.build([
+        .init("c1", files: ["f.txt": "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\n"]),
+        .init("p", parents: ["c1"], files: [
+            "f.txt": "l1\nl2\nP3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\n",
+        ]),
+        .init("c2", parents: ["c1"], files: [
+            "f.txt": "l1\nl2\nT3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\n",
+        ]),
+        .init("c3", parents: ["c2"], files: [
+            "f.txt": "l1\nl2\nZ3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\n",
+        ]),
+    ])
+    try repo.branch("main", at: "c3")
+    try repo.checkout("main")
+    return (repo, try #require(repo.oids["p"]))
+}
+
+private func indexStamp(_ repo: FixtureRepository) throws -> String {
+    let indexBytes = try Data(contentsOf: repo.url.appendingPathComponent(".git/index"))
+    let hash = try git.run(
+        ["hash-object", "--stdin"], workingDirectory: "", standardInput: indexBytes
+    ).lines.first ?? ""
+    return "\(indexBytes.count):\(hash)"
+}
+
+@Test func rebaseOntoReplaysTheBranchOntoTheBase() throws {
+    let (repo, c1, c2, c3, b2) = try rebaseParallelFixture()
+    defer { repo.destroy() }
+
+    let result = try Rewrite.rebaseOnto(base: b2, at: repo.url.path, extraEnvironment: hermetic)
+
+    // main now reads c1 → b1 → b2 → c2' → c3': the branch's picks sit on
+    // the base, the shared side of the fork point keeps its oids.
+    let list = try subjects(in: repo)
+    #expect(list.count == 5, "c1, the base's two commits, and the two replayed picks")
+    #expect(try #require(list.first) == "c3", "the replay keeps the tip's message")
+    #expect(try #require(list.dropFirst().first) == "c2")
+    #expect(try #require(list.dropFirst(2).first) == "b2", "the base sits under the picks")
+    #expect(try #require(list.dropFirst(3).first) == "b1")
+    #expect(try #require(list.last) == "c1")
+    #expect(try repo.revParse("main~2") == b2, "the base itself keeps its oid")
+    #expect(try repo.revParse("main~4") == c1, "the shared prefix keeps its oids")
+    #expect(try repo.revParse("main~1") != c3, "the tip was replayed")
+    #expect(try repo.revParse("main~2") != c2, "the pick was replayed")
+    #expect(try fileAt("main", path: "f.txt", in: repo) == "B1\na2\na3\na4\nA5\n",
+            "the replay re-derived the branch's change onto the base's tree")
+    #expect(try fileAt("main", path: "g.txt", in: repo) == "g1\ng2\n",
+            "the branch's own change survives")
+    #expect(try fileAt("main", path: "h.txt", in: repo) == "h1\nh2\n",
+            "the base's change survives under the replayed picks")
+    #expect(try repo.revParse("refs/heads/main") == result.head)
+    #expect(try repo.revParse("HEAD") == result.head, "the attached HEAD follows the branch")
+}
+
+@Test func rebaseOntoUndoRestoresThePreStateExactly() throws {
+    let (repo, _, c2, c3, b2) = try rebaseParallelFixture()
+    defer { repo.destroy() }
+    let before = try repo.revParse("refs/heads/main")
+
+    _ = try Rewrite.rebaseOnto(base: b2, at: repo.url.path, extraEnvironment: hermetic)
+
+    #expect(try repo.revParse("refs/heads/main") != before, "the rebase must move the branch")
+    #expect(try #require(subjects(in: repo).first) == "c3", "the replayed tip is the new head")
+
+    let context = try WorktreeContext.resolve(path: repo.url.path)
+    _ = try JournalUndo.undo(in: context)
+
+    #expect(try repo.revParse("HEAD") == before)
+    #expect(try repo.revParse("refs/heads/main") == before)
+    #expect(try #require(subjects(in: repo).first) == "c3", "the original history is back")
+    #expect(try repo.revParse("main~1") == c2, "the original pick's oid is back")
+    _ = c3
+}
+
+@Test func aConflictingRebaseOntoLeavesThePickResumable() throws {
+    let (repo, base) = try rebaseConflictFixture()
+    defer { repo.destroy() }
+    let mainBefore = try repo.revParse("refs/heads/main")
+
+    let thrown = #expect(throws: RewriteError.self) {
+        _ = try Rewrite.rebaseOnto(base: base, at: repo.url.path, extraEnvironment: hermetic)
+    }
+    guard case let .blockedOnConflicts(files) = try #require(thrown) else {
+        Issue.record("expected .blockedOnConflicts, got \(String(describing: thrown))")
+        return
+    }
+    #expect(files.map(\.path) == ["f.txt"], "the conflicted path is named")
+    #expect(pickInProgress(in: repo), "the pick must be left in progress, not aborted")
+    #expect(repo.hasConflicts, "the conflicted pick leaves unmerged entries to resolve")
+    #expect(try repo.revParse("refs/heads/main") == mainBefore,
+            "the branch has not moved — history is untouched until the replay finishes")
+    #expect(try repo.revParse("HEAD") == base, "HEAD is detached on the rebase's base")
+
+    _ = try? git.run(
+        ["cherry-pick", "--abort"], workingDirectory: repo.url.path, extraEnvironment: hermetic)
+}
+
+@Test func rebaseOntoRefusesTheNoOpsAndTouchesNothing() throws {
+    let (repo, c1, _, c3) = try linearFixture()
+    defer { repo.destroy() }
+    let before = try fullSnapshot(repo)
+
+    // The base is an ancestor of the branch: it is already based on it.
+    let behind = #expect(throws: RewriteError.self) {
+        _ = try Rewrite.rebaseOnto(base: c1, at: repo.url.path, extraEnvironment: hermetic)
+    }
+    #expect(try #require(behind) == .nothingToDo,
+            "rebasing onto the branch's own history rewrites every oid for nothing")
+
+    // The base contains the branch: merge it instead.
+    let ahead = #expect(throws: RewriteError.self) {
+        _ = try Rewrite.rebaseOnto(base: c3, at: repo.url.path, extraEnvironment: hermetic)
+    }
+    #expect(try #require(ahead) == .nothingToDo)
+
+    #expect(try fullSnapshot(repo) == before, "the no-ops touched nothing")
+}
+
+@Test func rebaseOntoOnADetachedHeadRefusesAndTouchesNothing() throws {
+    let (repo, _, _, _) = try linearFixture()
+    defer { repo.destroy() }
+    try repo.checkoutDetached(try repo.revParse("main"))
+    let before = try fullSnapshot(repo)
+
+    let thrown = #expect(throws: RewriteError.self) {
+        _ = try Rewrite.rebaseOnto(base: "main", at: repo.url.path, extraEnvironment: hermetic)
+    }
+    guard case let .detachedHeadRefused(operation) = try #require(thrown) else {
+        Issue.record("expected .detachedHeadRefused, got \(String(describing: thrown))")
+        return
+    }
+    #expect(operation == "rebase-onto", "the refusal names the operation it refused")
+    #expect(try fullSnapshot(repo) == before, "the refusal touched nothing")
+}
+
+@Test func anUnmergedIndexRefusesARebaseOntoBeforeAnythingIsTouched() throws {
+    var repo = try FixtureRepository()
+    try repo.build([
+        .init("c1", files: ["f.txt": "original\n"]),
+        .init("ours", parents: ["c1"], files: ["f.txt": "ours\n"]),
+        .init("side", parents: ["c1"], files: ["f.txt": "theirs\n"]),
+    ])
+    defer { repo.destroy() }
+    try repo.branch("main", at: "ours")
+    try repo.checkout("main")
+    _ = try? git.run(
+        ["merge", "--no-commit", try #require(repo.oids["side"])],
+        workingDirectory: repo.url.path)
+    #expect(repo.hasConflicts, "precondition: the index holds unmerged entries")
+    let before = try fullSnapshot(repo)
+
+    let thrown = #expect(throws: RewriteError.self) {
+        _ = try Rewrite.rebaseOnto(base: try #require(repo.oids["c1"]),
+                                   at: repo.url.path, extraEnvironment: hermetic)
+    }
+    guard case let .blockedOnConflicts(files) = try #require(thrown) else {
+        Issue.record("expected .blockedOnConflicts, got \(String(describing: thrown))")
+        return
+    }
+    #expect(!files.isEmpty, "the refusal names the unmerged paths")
+    #expect(try fullSnapshot(repo) == before, "nothing was created or moved")
+    #expect(!pickInProgress(in: repo), "the refusal precedes any replay")
+}
+
+@Test func signedCommitsStaySignedThroughARebaseOnto() throws {
+    let (repo, _, _, _, b2) = try rebaseParallelFixture()
+    defer { repo.destroy() }
+    try set("commit.gpgsign", "true", in: repo)
+    try set("gpg.format", "openpgp", in: repo)
+    try installFakeGpg(succeedingGpgScript, in: repo)
+
+    // The replay is porcelain and gets the explicit flag, so both replayed
+    // picks are signed even though the originals were not.
+    let result = try Rewrite.rebaseOnto(base: b2, at: repo.url.path, extraEnvironment: hermetic)
+
+    #expect(try hasSignatureHeader(try repo.revParse("main~1"), in: repo),
+            "the replayed pick must be signed")
+    #expect(try hasSignatureHeader(result.head, in: repo),
+            "the replayed tip must be signed")
+}
+
+// MARK: - Set tip (#0362)
+
+@Test func setTipMovesTheRefWithoutTouchingTheTreeOrIndex() throws {
+    let (repo, c1, _, _) = try linearFixture()
+    defer { repo.destroy() }
+    // Unrelated staged work rides through: the ref move never consumes it.
+    try repo.writeUntracked(["h.txt": "staged\n"])
+    try git.run(["add", "h.txt"], workingDirectory: repo.url.path)
+    let indexBefore = try indexStamp(repo)
+    let worktreeBefore = try String(
+        contentsOf: repo.url.appendingPathComponent("f.txt"), encoding: .utf8)
+
+    let result = try Rewrite.setTip(commit: c1, at: repo.url.path, extraEnvironment: hermetic)
+
+    #expect(result.head == c1, "the payload names the branch's new head")
+    #expect(try repo.revParse("refs/heads/main") == c1)
+    #expect(try repo.revParse("HEAD") == c1, "the attached HEAD follows the moved branch")
+    #expect(try indexStamp(repo) == indexBefore, "the index bytes are untouched")
+    #expect(try String(contentsOf: repo.url.appendingPathComponent("f.txt"), encoding: .utf8)
+        == worktreeBefore, "the working tree is untouched")
+    #expect(try stagedPaths(in: repo).contains("h.txt"),
+            "the staged work stays staged across the move")
+}
+
+@Test func setTipToACommitOnAnotherLocalBranchMovesTheRef() throws {
+    var (repo, c1, _, _) = try linearFixture()
+    defer { repo.destroy() }
+    // A side commit off c1, held by another branch — reachability must be
+    // checked against every local branch, not only the current one.
+    try repo.checkoutDetached(c1)
+    try repo.writeUntracked(["s.txt": "s\n"])
+    try git.run(["add", "-A"], workingDirectory: repo.url.path)
+    try git.run(["commit", "-q", "-m", "side"], workingDirectory: repo.url.path)
+    let side = try repo.revParse("HEAD")
+    try repo.branch("topic")
+    try repo.checkout("main")
+    let indexBefore = try indexStamp(repo)
+
+    let result = try Rewrite.setTip(commit: side, at: repo.url.path, extraEnvironment: hermetic)
+
+    #expect(result.head == side)
+    #expect(try repo.revParse("refs/heads/main") == side, "main moved sideways onto the side commit")
+    #expect(try repo.revParse("refs/heads/topic") == side, "the other branch is untouched")
+    #expect(try indexStamp(repo) == indexBefore, "the index bytes are untouched")
+}
+
+@Test func setTipUndoRestoresThePreStateExactly() throws {
+    let (repo, c1, _, _) = try linearFixture()
+    defer { repo.destroy() }
+    let before = try repo.revParse("refs/heads/main")
+    try repo.writeUntracked(["h.txt": "staged\n"])
+    try git.run(["add", "h.txt"], workingDirectory: repo.url.path)
+
+    _ = try Rewrite.setTip(commit: c1, at: repo.url.path, extraEnvironment: hermetic)
+
+    #expect(try repo.revParse("refs/heads/main") == c1, "the tip must actually move")
+
+    let context = try WorktreeContext.resolve(path: repo.url.path)
+    _ = try JournalUndo.undo(in: context)
+
+    #expect(try repo.revParse("HEAD") == before)
+    #expect(try repo.revParse("refs/heads/main") == before)
+    #expect(try stagedPaths(in: repo) == ["h.txt"],
+            "the staged work comes back staged, from the checkpoint's index capture")
+    #expect(try stagedFileBytes("h.txt", in: repo) == "staged\n")
+}
+
+@Test func setTipRefusalsTouchNothing() throws {
+    let (repo, c1, _, _) = try linearFixture()
+    defer { repo.destroy() }
+
+    // The tip already names the target.
+    let noOpBefore = try fullSnapshot(repo)
+    let noOp = #expect(throws: RewriteError.self) {
+        _ = try Rewrite.setTip(commit: "main", at: repo.url.path, extraEnvironment: hermetic)
+    }
+    #expect(try #require(noOp) == .nothingToDo)
+    #expect(try fullSnapshot(repo) == noOpBefore, "the no-op touched nothing")
+
+    // Detached HEAD: there is no branch tip to move.
+    try repo.checkoutDetached(c1)
+    let detachedBefore = try fullSnapshot(repo)
+    let detached = #expect(throws: RewriteError.self) {
+        _ = try Rewrite.setTip(commit: "main", at: repo.url.path, extraEnvironment: hermetic)
+    }
+    guard case let .detachedHeadRefused(operation) = try #require(detached) else {
+        Issue.record("expected .detachedHeadRefused, got \(String(describing: detached))")
+        return
+    }
+    #expect(operation == "set-tip", "the refusal names the operation it refused")
+    #expect(try fullSnapshot(repo) == detachedBefore, "the refusal touched nothing")
+}
+
+@Test func setTipToACommitNoBranchNamesRefusesAndTouchesNothing() throws {
+    let (repo, c1, _, _) = try linearFixture()
+    defer { repo.destroy() }
+    // An orphan commit no branch names: detached at c1, commit, back to main.
+    try repo.checkoutDetached(c1)
+    try repo.writeUntracked(["orphan.txt": "orphan\n"])
+    try git.run(["add", "-A"], workingDirectory: repo.url.path)
+    try git.run(["commit", "-q", "-m", "orphan"], workingDirectory: repo.url.path)
+    let orphan = try repo.revParse("HEAD")
+    try repo.checkout("main")
+    let before = try fullSnapshot(repo)
+
+    let thrown = #expect(throws: RewriteError.self) {
+        _ = try Rewrite.setTip(commit: orphan, at: repo.url.path, extraEnvironment: hermetic)
+    }
+    guard case let .setTipTargetNotOnBranch(target) = try #require(thrown) else {
+        Issue.record("expected .setTipTargetNotOnBranch, got \(String(describing: thrown))")
+        return
+    }
+    #expect(target == orphan, "the refusal names the target it refused")
+    #expect(try fullSnapshot(repo) == before,
+            "the refusal leaves HEAD, the branch, the index bytes, and every ref byte-identical")
+}
+
+@Test func setTipOnADetachedHeadRefusesAndTouchesNothing() throws {
+    let (repo, c1, _, _) = try linearFixture()
+    defer { repo.destroy() }
+    try repo.checkoutDetached(c1)
+    let before = try fullSnapshot(repo)
+
+    let thrown = #expect(throws: RewriteError.self) {
+        _ = try Rewrite.setTip(commit: "main", at: repo.url.path, extraEnvironment: hermetic)
+    }
+    guard case let .detachedHeadRefused(operation) = try #require(thrown) else {
+        Issue.record("expected .detachedHeadRefused, got \(String(describing: thrown))")
+        return
+    }
+    #expect(operation == "set-tip", "the refusal names the operation it refused")
+    #expect(try fullSnapshot(repo) == before,
+            "the refusal leaves HEAD, the branch, the index bytes, and every ref byte-identical")
 }

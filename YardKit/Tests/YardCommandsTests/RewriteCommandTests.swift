@@ -55,7 +55,9 @@ struct RewriteCommandTests {
 
         for arguments in [["reword", "HEAD", "--message", "m"],
                           ["drop", "HEAD"],
-                          ["reorder", "HEAD", "--after", "HEAD~1"]] {
+                          ["reorder", "HEAD", "--after", "HEAD~1"],
+                          ["rebase-onto", "HEAD"],
+                          ["set-tip", "HEAD"]] {
             let result = try #require(
                 runEngineCommand(arguments: arguments, workingDirectory: empty),
                 "the arm must claim \(arguments)")
@@ -102,6 +104,19 @@ struct RewriteCommandTests {
             ["reorder", "HEAD", "--after"],                            // value missing
             ["reorder", "HEAD", "--before", "a", "--before", "b"],     // duplicated --before
             ["reorder", "HEAD", "--before", "r", "--message", "m"],    // reword's flag
+            ["rebase-onto", "--bogus"],                                // unknown flag
+            ["rebase-onto"],                                           // no positional
+            ["rebase-onto", "HEAD", "extra"],                          // two positionals
+            ["rebase-onto", "HEAD", "--message", "m"],                 // reword's flag
+            ["rebase-onto", "HEAD", "--before", "x"],                  // reorder's flag
+            ["rebase-onto", "HEAD", "--sign", "--no-sign"],            // contradictory
+            ["set-tip", "--bogus"],                                    // unknown flag
+            ["set-tip"],                                               // no positional
+            ["set-tip", "HEAD", "extra"],                              // two positionals
+            ["set-tip", "HEAD", "--sign"],                             // set-tip takes no flags
+            ["set-tip", "HEAD", "--no-sign"],                          // set-tip takes no flags
+            ["set-tip", "HEAD", "--before", "x"],                      // reorder's flag
+            ["set-tip", "HEAD", "--message", "m"],                     // reword's flag
         ]
         for arguments in cases {
             let result = try #require(
@@ -181,6 +196,55 @@ struct RewriteCommandTests {
         #expect(subjects.dropFirst().first == "c3", "the moved commit sits before it")
     }
 
+    /// `main` = `c1 → c2` plus a parallel line `b1` off `c1` — the base a
+    /// rebase-onto replays the branch onto.
+    private func rebaseFixture() throws -> (repo: FixtureRepository, base: String) {
+        var repo = try FixtureRepository()
+        try repo.build([
+            .init("c1", files: ["f.txt": "a1\na2\na3\na4\na5\n"]),
+            .init("b1", parents: ["c1"], files: ["f.txt": "B1\na2\na3\na4\na5\n"]),
+            .init("c2", parents: ["c1"], files: [
+                "f.txt": "a1\na2\na3\na4\na5\n", "g.txt": "g1\ng2\n",
+            ]),
+        ])
+        try repo.branch("main", at: "c2")
+        try repo.checkout("main")
+        return (repo, try #require(repo.oids["b1"]))
+    }
+
+    @Test func rebaseOntoThroughTheArmExitsZeroWithTheNewHead() throws {
+        let (repo, base) = try rebaseFixture()
+
+        let result = try #require(
+            runEngineCommand(arguments: ["rebase-onto", base],
+                             workingDirectory: repo.url.path))
+
+        #expect(result.exitCode == .success)
+        let summary = try #require(try payloadLines(result.stdout).first?["result"] as? [String: Any])
+        let head = try #require(summary["head"] as? String)
+        #expect(try repo.revParse("refs/heads/main") == head)
+        let subjects = try GitProcess().run(
+            ["log", "--format=%s"], workingDirectory: repo.url.path).lines
+        #expect(subjects.count == 3, "c1, the base's pick, and the replayed c2")
+        #expect(subjects.first == "c2", "the replayed tip is the new head")
+        #expect(try repo.revParse("main~1") == base, "the pick sits on the base")
+    }
+
+    @Test func setTipThroughTheArmExitsZeroWithTheNewHead() throws {
+        let (repo, c1, _, _) = try linearFixture()
+        defer { repo.destroy() }
+
+        let result = try #require(
+            runEngineCommand(arguments: ["set-tip", c1], workingDirectory: repo.url.path))
+
+        #expect(result.exitCode == .success)
+        let summary = try #require(try payloadLines(result.stdout).first?["result"] as? [String: Any])
+        let head = try #require(summary["head"] as? String)
+        #expect(head == c1)
+        #expect(try repo.revParse("refs/heads/main") == c1)
+        #expect(try repo.revParse("HEAD") == c1, "the attached HEAD follows the moved branch")
+    }
+
     // MARK: - Refusals through the arm exit 4
 
     @Test func unknownCommitExitsFourWithRequestFailed() throws {
@@ -227,19 +291,21 @@ struct RewriteCommandTests {
     // MARK: - The registry spec
 
     @Test func rewriteSpecsAreRegisteredWithRequiredMetadata() throws {
-        let expected: [(name: String, schema: String, flags: [String])] = [
-            ("reword", "reword", ["message", "sign", "no-sign"]),
-            ("drop", "drop", ["sign", "no-sign"]),
-            ("reorder", "reorder", ["before", "after", "sign", "no-sign"]),
+        let expected: [(name: String, schema: String, flags: [String], codes: Set<Int32>)] = [
+            ("reword", "reword", ["message", "sign", "no-sign"], [0, 1, 4, 8]),
+            ("drop", "drop", ["sign", "no-sign"], [0, 1, 4, 8]),
+            ("reorder", "reorder", ["before", "after", "sign", "no-sign"], [0, 1, 4, 8]),
+            ("rebase-onto", "rebase-onto", ["sign", "no-sign"], [0, 1, 4, 8]),
+            ("set-tip", "set-tip", [], [0, 1, 4]),
         ]
-        for (name, schema, flags) in expected {
+        for (name, schema, flags, codes) in expected {
             let spec = try #require(CommandRegistry.lookup(name: name),
                                     "\(name) must be in CommandRegistry.all")
             #expect(!spec.summary.isEmpty, "\(name) must carry a summary")
             #expect(spec.schemaName == schema)
-            let codes = Set(spec.exitCodes.map(\.code))
-            #expect(codes == Set([0, 1, 4, 8]),
-                    "\(name)'s documented exit codes are exactly 0, 1, 4, and 8; got \(codes.sorted())")
+            let documented = Set(spec.exitCodes.map(\.code))
+            #expect(documented == codes,
+                    "\(name)'s documented exit codes are exactly \(codes.sorted()); got \(documented.sorted())")
             #expect(spec.flags.map(\.long) == flags,
                     "\(name)'s flags must be \(flags); got \(spec.flags.map(\.long))")
         }
@@ -258,7 +324,7 @@ struct RewriteCommandTests {
             .deletingLastPathComponent()   // YardKit (package root)
             .appendingPathComponent("Schemas", isDirectory: true)
 
-        for schemaName in ["reword", "drop", "reorder"] {
+        for schemaName in ["reword", "drop", "reorder", "rebase-onto", "set-tip"] {
             let data = try Data(contentsOf: schemasDirectory
                 .appendingPathComponent("\(schemaName).json"))
             let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
