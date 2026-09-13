@@ -32,16 +32,19 @@ func registryHasAtLeastTwoEntries() {
     }
 }
 
-@Test("registry reports exactly twenty-two entries")
-func registryHasExactlyTwentyTwoEntries() {
-    #expect(CommandRegistry.all.count == 22)
+@Test("registry reports exactly twenty-four entries")
+func registryHasExactlyTwentyFourEntries() {
+    #expect(CommandRegistry.all.count == 24)
 
     let names: [String] = CommandRegistry.all.map(\.name)
-    #expect(Set(names).count == 22, "Names must be distinct so lookup returns the right spec.")
+    #expect(Set(names).count == 24, "Names must be distinct so lookup returns the right spec.")
     // The three #0063 rewrites are registered beside their split sibling.
     #expect(names.contains("reword"))
     #expect(names.contains("drop"))
     #expect(names.contains("reorder"))
+    // The #0360 single-commit replays join them.
+    #expect(names.contains("revert"))
+    #expect(names.contains("cherry-pick"))
     // The #0064 range-diff arm is registered in the same family.
     #expect(names.contains("rewrite-diff"))
     // The #0065 rerere surface joins them.

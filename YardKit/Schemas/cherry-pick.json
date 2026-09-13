@@ -1,0 +1,77 @@
+{
+  "command" : "cherry-pick",
+  "envelope" : {
+    "failure" : {
+      "error" : {
+        "code" : {
+          "enum" : [
+            "app_unavailable",
+            "blocked_on_conflicts",
+            "broker_unreachable",
+            "human_declined",
+            "ok",
+            "repository_error",
+            "request_failed",
+            "session_terminated",
+            "signing_failed",
+            "timed_out",
+            "usage"
+          ],
+          "type" : "string"
+        },
+        "hint" : {
+          "optional" : true,
+          "type" : "string"
+        },
+        "message" : {
+          "type" : "string"
+        }
+      },
+      "ok" : false,
+      "schemaVersion" : 1
+    },
+    "success" : {
+      "ok" : true,
+      "result" : {
+        "optional" : true,
+        "schema" : "cherry-pick"
+      },
+      "schemaVersion" : 1
+    }
+  },
+  "exitCodes" : [
+    {
+      "code" : 0,
+      "meaning" : "The pick completed; the payload carries the branch's new head oid — the replayed commit git created, with the picked commit's own message."
+    },
+    {
+      "code" : 1,
+      "meaning" : "Invalid arguments — cherry-pick requires exactly one positional argument <commit>; an unknown or duplicated flag (cherry-pick takes no --message or --before\/--after); or both --sign and --no-sign."
+    },
+    {
+      "code" : 4,
+      "meaning" : "The pick could not be completed for a reason the other codes do not name — an unknown commit, a commit already reachable from the current branch, a merge commit (picking one needs git's -m parent selection, not offered here), or a signing failure among them."
+    },
+    {
+      "code" : 8,
+      "meaning" : "Blocked on conflicts (blocked_on_conflicts) — the index already held unmerged entries, or the commit could not apply cleanly and the pick is left in progress, resumable (CHERRY_PICK_HEAD and the conflicted stages left in place)."
+    }
+  ],
+  "flags" : [
+    {
+      "argument" : null,
+      "help" : "Never sign, even when commit.gpgsign is true.",
+      "long" : "no-sign",
+      "short" : null
+    },
+    {
+      "argument" : null,
+      "help" : "Sign the replayed commit, even when commit.gpgsign is false.",
+      "long" : "sign",
+      "short" : null
+    }
+  ],
+  "schemaName" : "cherry-pick",
+  "schemaVersion" : 1,
+  "summary" : "Replay one commit from elsewhere onto the current branch as a new commit."
+}

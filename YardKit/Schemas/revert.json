@@ -1,0 +1,77 @@
+{
+  "command" : "revert",
+  "envelope" : {
+    "failure" : {
+      "error" : {
+        "code" : {
+          "enum" : [
+            "app_unavailable",
+            "blocked_on_conflicts",
+            "broker_unreachable",
+            "human_declined",
+            "ok",
+            "repository_error",
+            "request_failed",
+            "session_terminated",
+            "signing_failed",
+            "timed_out",
+            "usage"
+          ],
+          "type" : "string"
+        },
+        "hint" : {
+          "optional" : true,
+          "type" : "string"
+        },
+        "message" : {
+          "type" : "string"
+        }
+      },
+      "ok" : false,
+      "schemaVersion" : 1
+    },
+    "success" : {
+      "ok" : true,
+      "result" : {
+        "optional" : true,
+        "schema" : "revert"
+      },
+      "schemaVersion" : 1
+    }
+  },
+  "exitCodes" : [
+    {
+      "code" : 0,
+      "meaning" : "The revert completed; the payload carries the branch's new head oid — the inverse commit git created, with git's default Revert \"<subject>\" message."
+    },
+    {
+      "code" : 1,
+      "meaning" : "Invalid arguments — revert requires exactly one positional argument <commit>; an unknown or duplicated flag (revert takes no --message or --before\/--after); or both --sign and --no-sign."
+    },
+    {
+      "code" : 4,
+      "meaning" : "The revert could not be completed for a reason the other codes do not name — an unknown commit, a merge commit (reverting one needs git's -m parent selection, not offered here), or a signing failure among them."
+    },
+    {
+      "code" : 8,
+      "meaning" : "Blocked on conflicts (blocked_on_conflicts) — the index already held unmerged entries, or the inverse change could not apply cleanly and the revert is left in progress, resumable (REVERT_HEAD and the conflicted stages left in place)."
+    }
+  ],
+  "flags" : [
+    {
+      "argument" : null,
+      "help" : "Never sign, even when commit.gpgsign is true.",
+      "long" : "no-sign",
+      "short" : null
+    },
+    {
+      "argument" : null,
+      "help" : "Sign the inverse commit, even when commit.gpgsign is false.",
+      "long" : "sign",
+      "short" : null
+    }
+  ],
+  "schemaName" : "revert",
+  "schemaVersion" : 1,
+  "summary" : "Apply the inverse of one commit to the current branch as a new commit."
+}

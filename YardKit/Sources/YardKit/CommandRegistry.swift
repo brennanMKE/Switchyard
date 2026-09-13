@@ -12,7 +12,7 @@ public enum CommandRegistry {
 
     /// All known `yard` command specifications in the order they should be
     /// rendered in help output.
-    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, rewriteDiffSpec, rerereSpec, reviewSpec, askSpec, resolveSpec, watchSpec]
+    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, revertSpec, cherryPickSpec, rewriteDiffSpec, rerereSpec, reviewSpec, askSpec, resolveSpec, watchSpec]
 
     // MARK: - The switchyard spec — rendered by `yard --help`
 
@@ -402,6 +402,44 @@ public enum CommandRegistry {
             ExitCodeSpec(code: 8, meaning: "Blocked on conflicts (blocked_on_conflicts) — the index already held unmerged entries, or the replay could not apply cleanly and is left in progress, resumable."),
         ],
         schemaName: "reorder",
+        payload: nil
+    )
+
+    // MARK: - The revert spec — engine-backed, resolved by `YardCommands` (#0360)
+
+    static let revertSpec = CommandSpec(
+        name: "revert",
+        summary: "Apply the inverse of one commit to the current branch as a new commit.",
+        flags: [
+            FlagSpec(long: "sign", argument: nil, help: "Sign the inverse commit, even when commit.gpgsign is false."),
+            FlagSpec(long: "no-sign", argument: nil, help: "Never sign, even when commit.gpgsign is true."),
+        ],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The revert completed; the payload carries the branch's new head oid — the inverse commit git created, with git's default Revert \"<subject>\" message."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — revert requires exactly one positional argument <commit>; an unknown or duplicated flag (revert takes no --message or --before/--after); or both --sign and --no-sign."),
+            ExitCodeSpec(code: 4, meaning: "The revert could not be completed for a reason the other codes do not name — an unknown commit, a merge commit (reverting one needs git's -m parent selection, not offered here), or a signing failure among them."),
+            ExitCodeSpec(code: 8, meaning: "Blocked on conflicts (blocked_on_conflicts) — the index already held unmerged entries, or the inverse change could not apply cleanly and the revert is left in progress, resumable (REVERT_HEAD and the conflicted stages left in place)."),
+        ],
+        schemaName: "revert",
+        payload: nil
+    )
+
+    // MARK: - The cherry-pick spec — engine-backed, resolved by `YardCommands` (#0360)
+
+    static let cherryPickSpec = CommandSpec(
+        name: "cherry-pick",
+        summary: "Replay one commit from elsewhere onto the current branch as a new commit.",
+        flags: [
+            FlagSpec(long: "sign", argument: nil, help: "Sign the replayed commit, even when commit.gpgsign is false."),
+            FlagSpec(long: "no-sign", argument: nil, help: "Never sign, even when commit.gpgsign is true."),
+        ],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The pick completed; the payload carries the branch's new head oid — the replayed commit git created, with the picked commit's own message."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — cherry-pick requires exactly one positional argument <commit>; an unknown or duplicated flag (cherry-pick takes no --message or --before/--after); or both --sign and --no-sign."),
+            ExitCodeSpec(code: 4, meaning: "The pick could not be completed for a reason the other codes do not name — an unknown commit, a commit already reachable from the current branch, a merge commit (picking one needs git's -m parent selection, not offered here), or a signing failure among them."),
+            ExitCodeSpec(code: 8, meaning: "Blocked on conflicts (blocked_on_conflicts) — the index already held unmerged entries, or the commit could not apply cleanly and the pick is left in progress, resumable (CHERRY_PICK_HEAD and the conflicted stages left in place)."),
+        ],
+        schemaName: "cherry-pick",
         payload: nil
     )
 

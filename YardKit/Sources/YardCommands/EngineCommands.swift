@@ -72,6 +72,14 @@ public func runEngineCommand(
         // usage envelope with exit 1, never a default guess and never a
         // silent ignore (#0063).
         return runRewrite(arguments: arguments, workingDirectory: workingDirectory)
+    case "revert", "cherry-pick":
+        // Two single-commit replays, one arm: `switchyard revert <commit>`
+        // and `switchyard cherry-pick <commit>` each arrive with the
+        // subcommand first. The arm parses the tail itself — exactly one
+        // positional and at most one signing flag — so a malformed tail is
+        // a usage envelope with exit 1, never a default guess and never a
+        // silent ignore (#0360).
+        return runReplay(arguments: arguments, workingDirectory: workingDirectory)
     case "rewrite-diff":
         // One required positional, no flags: `switchyard rewrite-diff
         // <journal-entry-id>` arrives as `["rewrite-diff", "<id>"]`. The arm
