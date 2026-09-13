@@ -266,7 +266,7 @@ public struct ContentView: View {
             HSplitView {
                 sidebarPane(summary: summary)
                     .frame(minWidth: PaneLayout.sidebarMinWidth, maxWidth: .infinity, maxHeight: .infinity)
-                historyPane
+                historyPane(summary: summary)
                     .frame(minWidth: PaneLayout.historyMinWidth, maxWidth: .infinity, maxHeight: .infinity)
                 detailPane(summary: summary)
                     .frame(minWidth: PaneLayout.detailMinWidth, maxWidth: .infinity, maxHeight: .infinity)
@@ -305,9 +305,10 @@ public struct ContentView: View {
     /// selection binding mirrors `selectedResolution`'s: picking a commit
     /// clears the rerere selection, so the Detail pane always shows
     /// whichever selection was made last.
-    private var historyPane: some View {
+    private func historyPane(summary: RepositorySummary) -> some View {
         CommitHistoryView(
             entries: history, graphRows: graphRows,
+            headOid: summary.whereAmI.rawHead.isEmpty ? nil : summary.whereAmI.rawHead,
             selection: Binding(
                 get: { selectedCommit },
                 set: { newValue in

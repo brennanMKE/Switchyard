@@ -24,20 +24,32 @@ import YardGit
 public struct CommitHistoryView: View {
     private let entries: [CommitLogEntry]
     private let graphRows: [GraphRow]
+    private let headOid: String?
     @Binding private var selection: String?
 
-    public init(entries: [CommitLogEntry], graphRows: [GraphRow] = [], selection: Binding<String?>) {
+    public init(
+        entries: [CommitLogEntry], graphRows: [GraphRow] = [], headOid: String? = nil,
+        selection: Binding<String?>
+    ) {
         self.entries = entries
         self.graphRows = graphRows
+        self.headOid = headOid
         self._selection = selection
     }
 
     public var body: some View {
         let rowsByOid = Dictionary(graphRows.map { ($0.oid, $0) }, uniquingKeysWith: { first, _ in first })
+        let segmentsByOid = Dictionary(
+            zip(graphRows.map(\.oid), LaneSegments.make(graphRows)),
+            uniquingKeysWith: { first, _ in first })
         let gutterWidth = LaneGeometry.laneGutterWidth(maxLane: LaneGeometry.maxLane(in: graphRows))
 
         List(entries, id: \.oid, selection: $selection) { entry in
-            CommitHistoryRow(entry: entry, graphRow: rowsByOid[entry.oid], gutterWidth: gutterWidth)
+            CommitHistoryRow(
+                entry: entry, graphRow: rowsByOid[entry.oid], segments: segmentsByOid[entry.oid],
+                isHead: entry.oid == headOid, gutterWidth: gutterWidth)
+                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 8))
+                .listRowSeparator(.hidden)
         }
     }
 }
@@ -47,13 +59,18 @@ public struct CommitHistoryView: View {
 private struct CommitHistoryRow: View {
     let entry: CommitLogEntry
     let graphRow: GraphRow?
+    let segments: LaneRowSegments?
+    let isHead: Bool
     let gutterWidth: CGFloat
 
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
-            LaneGutterView(row: graphRow, width: gutterWidth)
+            LaneGutterView(row: graphRow, segments: segments, isHead: isHead, width: gutterWidth)
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.subject)
+                    .fontWeight(isHead ? .semibold : .regular)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 HStack(spacing: 8) {
                     Text(entry.shortOid)
                         .font(.system(.caption, design: .monospaced))
@@ -68,6 +85,7 @@ private struct CommitHistoryRow: View {
                     }
                 }
             }
+            .padding(.vertical, 4)
         }
     }
 }
