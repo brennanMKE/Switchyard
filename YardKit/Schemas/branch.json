@@ -1,0 +1,67 @@
+{
+  "command" : "branch",
+  "envelope" : {
+    "failure" : {
+      "error" : {
+        "code" : {
+          "enum" : [
+            "app_unavailable",
+            "blocked_on_conflicts",
+            "broker_unreachable",
+            "human_declined",
+            "ok",
+            "repository_error",
+            "request_failed",
+            "session_terminated",
+            "signing_failed",
+            "timed_out",
+            "usage"
+          ],
+          "type" : "string"
+        },
+        "hint" : {
+          "optional" : true,
+          "type" : "string"
+        },
+        "message" : {
+          "type" : "string"
+        }
+      },
+      "ok" : false,
+      "schemaVersion" : 1
+    },
+    "success" : {
+      "ok" : true,
+      "result" : {
+        "optional" : true,
+        "schema" : "branch"
+      },
+      "schemaVersion" : 1
+    }
+  },
+  "exitCodes" : [
+    {
+      "code" : 0,
+      "meaning" : "The operation completed; the payload carries the ref, the branch's tip (for delete, the tip the deleted ref held), and for rename whether HEAD's symref followed, for upstream the upstream's full ref name."
+    },
+    {
+      "code" : 1,
+      "meaning" : "Invalid arguments — branch requires create, rename, delete, or upstream with its own positional grammar (create <name> [<start>], rename <old> <new>, delete <name> [--force], upstream <name> <upstream>); an unknown flag is refused too (only delete takes --force)."
+    },
+    {
+      "code" : 4,
+      "meaning" : "The operation could not be completed for a reason the other codes do not name — an invalid name, an existing name, a `\/`-boundary clash, an unknown revision or branch or upstream, deleting the checked-out branch or one a linked worktree holds, or an unmerged branch without --force among them."
+    }
+  ],
+  "flags" : [
+    {
+      "argument" : null,
+      "help" : "With delete: delete an unmerged branch, whose commits would otherwise be lost (the journal records the deletion).",
+      "long" : "force",
+      "short" : null
+    }
+  ],
+  "schemaName" : "branch",
+  "schemaVersion" : 1,
+  "summary" : "Create, rename, or delete a local branch, or set its upstream."
+}

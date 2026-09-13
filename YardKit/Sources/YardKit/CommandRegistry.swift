@@ -12,7 +12,7 @@ public enum CommandRegistry {
 
     /// All known `yard` command specifications in the order they should be
     /// rendered in help output.
-    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, revertSpec, cherryPickSpec, mergeSpec, rewriteDiffSpec, rerereSpec, reviewSpec, askSpec, resolveSpec, watchSpec]
+    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, revertSpec, cherryPickSpec, mergeSpec, rewriteDiffSpec, rerereSpec, reviewSpec, askSpec, resolveSpec, watchSpec, tagSpec, branchSpec]
 
     // MARK: - The switchyard spec — rendered by `yard --help`
 
@@ -468,6 +468,50 @@ public enum CommandRegistry {
         // (`statusSpec` #0225 through `reorderSpec` #0063) is `payload: nil`
         // with the schema's self-reference form, and the wire tests pin the
         // encoded keys instead.
+    )
+
+    // MARK: - The tag spec — engine-backed, resolved by `YardCommands` (#0363)
+
+    static let tagSpec = CommandSpec(
+        name: "tag",
+        summary: "Create a lightweight or annotated tag at a commit.",
+        flags: [
+            FlagSpec(long: "annotate", argument: nil, help: "Create an annotated tag (implied by --message). Requires a message."),
+            FlagSpec(long: "message", argument: "message", help: "The tag's message, passed as a flag — implies an annotated tag; GIT_EDITOR is never invoked."),
+            FlagSpec(long: "sign", argument: nil, help: "Sign the annotated tag, even when tag.gpgsign is false."),
+            FlagSpec(long: "no-sign", argument: nil, help: "Never sign, even when tag.gpgsign is true."),
+        ],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The tag was created; the payload carries the ref, the object it names (the tag object when annotated, the commit when lightweight), and whether it is annotated."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — tag requires exactly two positional arguments <name> <commit>; an unknown, duplicated, or value-missing flag; or both --sign and --no-sign."),
+            ExitCodeSpec(code: 4, meaning: "The tag could not be created for a reason the other codes do not name — an invalid name, an existing tag name, a `/`-boundary clash with an existing tag, an unknown commit, a missing message on an annotated tag, a signing intent on a lightweight tag, or a signing failure among them."),
+        ],
+        schemaName: "tag",
+        // No `payload` shape (#0363): the result is a single object whose
+        // fields are flat strings and a bool, and the engine commands'
+        // established precedent (`statusSpec` #0225 through `reorderSpec`
+        // #0063) is `payload: nil` with the schema's self-reference form,
+        // and the wire tests pin the encoded keys instead.
+        payload: nil
+    )
+
+    // MARK: - The branch spec — engine-backed, resolved by `YardCommands` (#0363)
+
+    /// The spec is named `branch`, covering the whole `branch` group: the
+    /// engine arm dispatches on the second token (`create`, `rename`,
+    /// `delete`, `upstream`), the way `wt` dispatches on `list`/`where`.
+    static let branchSpec = CommandSpec(
+        name: "branch",
+        summary: "Create, rename, or delete a local branch, or set its upstream.",
+        flags: [
+            FlagSpec(long: "force", argument: nil, help: "With delete: delete an unmerged branch, whose commits would otherwise be lost (the journal records the deletion)."),
+        ],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The operation completed; the payload carries the ref, the branch's tip (for delete, the tip the deleted ref held), and for rename whether HEAD's symref followed, for upstream the upstream's full ref name."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — branch requires create, rename, delete, or upstream with its own positional grammar (create <name> [<start>], rename <old> <new>, delete <name> [--force], upstream <name> <upstream>); an unknown flag is refused too (only delete takes --force)."),
+            ExitCodeSpec(code: 4, meaning: "The operation could not be completed for a reason the other codes do not name — an invalid name, an existing name, a `/`-boundary clash, an unknown revision or branch or upstream, deleting the checked-out branch or one a linked worktree holds, or an unmerged branch without --force among them."),
+        ],
+        schemaName: "branch",
         payload: nil
     )
 

@@ -89,6 +89,15 @@ public func runEngineCommand(
         // usage envelope with exit 1, never a default guess and never a
         // silent ignore (#0361).
         return runMerge(arguments: arguments, workingDirectory: workingDirectory)
+    case "tag", "branch":
+        // Tag and branch management, one arm: `switchyard tag <name>
+        // <commit> [--annotate] [--message <m>]` and `switchyard branch
+        // create|rename|delete|upstream …` arrive with the command first.
+        // The arm parses the tail itself per subcommand — branch requires
+        // one of create/rename/delete/upstream with its own positional
+        // grammar — so a malformed tail is a usage envelope with exit 1,
+        // never a default guess and never a silent ignore (#0363).
+        return runRefManage(arguments: arguments, workingDirectory: workingDirectory)
     case "rewrite-diff":
         // One required positional, no flags: `switchyard rewrite-diff
         // <journal-entry-id>` arrives as `["rewrite-diff", "<id>"]`. The arm

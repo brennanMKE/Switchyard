@@ -167,6 +167,15 @@ struct ExitClassCoverageTests {
             // repository state, not a usage error.
             Row("RerereForgetError", RerereForgetError.nothingRecorded(paths: ["probe/f.txt"]),
                 .repositoryError),
+            // #0363: RefManageError carries .repositoryError for every
+            // pre-check refusal (unknownRevision/unknownBranch/unknownUpstream/
+            // alreadyExists/nameClash/invalidName/deletingCheckedOutBranch/
+            // branchHeldByWorktree/unmergedBranch/messageRequired/
+            // signingRequiresAnnotated) and .signingFailed for a failed tag
+            // signature; this row exercises the repositoryError case. The
+            // signing class is asserted in
+            // RefManageTests.aSigningFailureIsTypedAndCreatesNothing.
+            Row("RefManageError", RefManageError.messageRequired, .repositoryError),
             // #0242: JournalObserved.Metadata gained a production
             // serialization path; its error carries the same class as
             // JournalEntryMetadata.SerializationError above.
