@@ -139,6 +139,15 @@ struct ExitClassCoverageTests {
             // ReplayTests.conflictingCherryPickLeavesGitsResumableState, and
             // the signing class in ReplayTests.aSigningFailureIsTypedAndCleansUp.
             Row("ReplayError", ReplayError.unknownCommit("probe-revision"), .repositoryError),
+            // #0361: MergeError has the same three-class shape as
+            // RewriteError (unknownBranch/alreadyUpToDate/unrelatedHistories
+            // → 6, blockedOnConflicts → 8, signingFailed → 9); this row
+            // exercises the repositoryError case. The conflicts class is
+            // asserted in
+            // MergeTests.conflictingMergeIsTypedExitClassEightAndLeavesTheMergeResumable,
+            // and the signing class in
+            // MergeTests.aSigningFailureAbortsTheMergeAndIsTyped.
+            Row("MergeError", MergeError.unknownBranch("probe-branch"), .repositoryError),
             // #0064: RewriteDiffError carries one class across all three
             // cases (unknownEntry/noRewriteMapping/unparseableOutput → 6);
             // this row exercises it — the command is read-only, so no

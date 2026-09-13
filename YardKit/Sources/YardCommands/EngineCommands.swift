@@ -80,6 +80,15 @@ public func runEngineCommand(
         // a usage envelope with exit 1, never a default guess and never a
         // silent ignore (#0360).
         return runReplay(arguments: arguments, workingDirectory: workingDirectory)
+    case "merge":
+        // One required positional and one required intent flag:
+        // `switchyard merge feature --no-ff` arrives as
+        // `["merge", "feature", "--no-ff"]`. The arm parses the tail itself
+        // and requires exactly one of --ff-only/--no-ff — git's silent
+        // fast-forward guess is never a default — so a malformed tail is a
+        // usage envelope with exit 1, never a default guess and never a
+        // silent ignore (#0361).
+        return runMerge(arguments: arguments, workingDirectory: workingDirectory)
     case "rewrite-diff":
         // One required positional, no flags: `switchyard rewrite-diff
         // <journal-entry-id>` arrives as `["rewrite-diff", "<id>"]`. The arm

@@ -1,0 +1,101 @@
+{
+  "command" : "merge",
+  "envelope" : {
+    "failure" : {
+      "error" : {
+        "code" : {
+          "enum" : [
+            "app_unavailable",
+            "blocked_on_conflicts",
+            "broker_unreachable",
+            "human_declined",
+            "ok",
+            "repository_error",
+            "request_failed",
+            "session_terminated",
+            "signing_failed",
+            "timed_out",
+            "usage"
+          ],
+          "type" : "string"
+        },
+        "hint" : {
+          "optional" : true,
+          "type" : "string"
+        },
+        "message" : {
+          "type" : "string"
+        }
+      },
+      "ok" : false,
+      "schemaVersion" : 1
+    },
+    "success" : {
+      "ok" : true,
+      "result" : {
+        "optional" : true,
+        "schema" : "merge"
+      },
+      "schemaVersion" : 1
+    }
+  },
+  "exitCodes" : [
+    {
+      "code" : 0,
+      "meaning" : "The merge completed; the payload carries the new head oid and whether the merge fast-forwarded. A fast-forward moved the branch straight to the target commit; --no-ff created a merge commit with two parents."
+    },
+    {
+      "code" : 1,
+      "meaning" : "Invalid arguments — merge requires exactly one positional argument <branch> and exactly one of --ff-only or --no-ff (git's fast-forward guess is never a default); an unknown, duplicated, or value-missing flag; or both --sign and --no-sign."
+    },
+    {
+      "code" : 4,
+      "meaning" : "The merge could not be completed for a reason the other codes do not name — an unknown branch, an already-up-to-date target, unrelated histories without --allow-unrelated, a target --ff-only cannot reach, or a signing failure among them."
+    },
+    {
+      "code" : 8,
+      "meaning" : "Blocked on conflicts (blocked_on_conflicts) — the index already held unmerged entries (refused, nothing touched), or the merge itself conflicted and is left in progress, resumable with MERGE_HEAD present."
+    }
+  ],
+  "flags" : [
+    {
+      "argument" : null,
+      "help" : "Allow merging histories that share no common ancestor.",
+      "long" : "allow-unrelated",
+      "short" : null
+    },
+    {
+      "argument" : null,
+      "help" : "Refuse unless the target can be reached by fast-forward; never creates a merge commit.",
+      "long" : "ff-only",
+      "short" : null
+    },
+    {
+      "argument" : "message",
+      "help" : "The merge commit's message, passed as a flag — GIT_EDITOR is never invoked. A fast-forward creates no commit and ignores it.",
+      "long" : "message",
+      "short" : null
+    },
+    {
+      "argument" : null,
+      "help" : "Always create a merge commit, even when a fast-forward is possible.",
+      "long" : "no-ff",
+      "short" : null
+    },
+    {
+      "argument" : null,
+      "help" : "Never sign, even when commit.gpgsign is true.",
+      "long" : "no-sign",
+      "short" : null
+    },
+    {
+      "argument" : null,
+      "help" : "Sign the merge commit, even when commit.gpgsign is false.",
+      "long" : "sign",
+      "short" : null
+    }
+  ],
+  "schemaName" : "merge",
+  "schemaVersion" : 1,
+  "summary" : "Merge a branch into the current branch, stating the fast-forward intent explicitly."
+}

@@ -13,6 +13,7 @@ public enum CommandRegistry {
     /// All known `yard` command specifications in the order they should be
     /// rendered in help output.
     public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, revertSpec, cherryPickSpec, rewriteDiffSpec, rerereSpec, reviewSpec, askSpec, resolveSpec, watchSpec]
+    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, mergeSpec, rewriteDiffSpec, rerereSpec, reviewSpec, askSpec, resolveSpec, watchSpec]
 
     // MARK: - The switchyard spec — rendered by `yard --help`
 
@@ -440,6 +441,32 @@ public enum CommandRegistry {
             ExitCodeSpec(code: 8, meaning: "Blocked on conflicts (blocked_on_conflicts) — the index already held unmerged entries, or the commit could not apply cleanly and the pick is left in progress, resumable (CHERRY_PICK_HEAD and the conflicted stages left in place)."),
         ],
         schemaName: "cherry-pick",
+    // MARK: - The merge spec — engine-backed, resolved by `YardCommands` (#0361)
+
+    static let mergeSpec = CommandSpec(
+        name: "merge",
+        summary: "Merge a branch into the current branch, stating the fast-forward intent explicitly.",
+        flags: [
+            FlagSpec(long: "ff-only", argument: nil, help: "Refuse unless the target can be reached by fast-forward; never creates a merge commit."),
+            FlagSpec(long: "no-ff", argument: nil, help: "Always create a merge commit, even when a fast-forward is possible."),
+            FlagSpec(long: "message", argument: "message", help: "The merge commit's message, passed as a flag — GIT_EDITOR is never invoked. A fast-forward creates no commit and ignores it."),
+            FlagSpec(long: "allow-unrelated", argument: nil, help: "Allow merging histories that share no common ancestor."),
+            FlagSpec(long: "sign", argument: nil, help: "Sign the merge commit, even when commit.gpgsign is false."),
+            FlagSpec(long: "no-sign", argument: nil, help: "Never sign, even when commit.gpgsign is true."),
+        ],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The merge completed; the payload carries the new head oid and whether the merge fast-forwarded. A fast-forward moved the branch straight to the target commit; --no-ff created a merge commit with two parents."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — merge requires exactly one positional argument <branch> and exactly one of --ff-only or --no-ff (git's fast-forward guess is never a default); an unknown, duplicated, or value-missing flag; or both --sign and --no-sign."),
+            ExitCodeSpec(code: 4, meaning: "The merge could not be completed for a reason the other codes do not name — an unknown branch, an already-up-to-date target, unrelated histories without --allow-unrelated, a target --ff-only cannot reach, or a signing failure among them."),
+            ExitCodeSpec(code: 8, meaning: "Blocked on conflicts (blocked_on_conflicts) — the index already held unmerged entries (refused, nothing touched), or the merge itself conflicted and is left in progress, resumable with MERGE_HEAD present."),
+        ],
+        schemaName: "merge",
+        // No `payload` shape (#0361): the result is a single object whose
+        // fields are the new head oid and a fast-forward flag — flat and
+        // expressible, but the engine commands' established precedent
+        // (`statusSpec` #0225 through `reorderSpec` #0063) is `payload: nil`
+        // with the schema's self-reference form, and the wire tests pin the
+        // encoded keys instead.
         payload: nil
     )
 
