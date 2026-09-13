@@ -40,6 +40,11 @@ struct LaneGutterView: View {
     /// one row uses.
     let width: CGFloat
 
+    /// oid -> owning branch tip (#0366), derived once by `CommitHistoryView`
+    /// from the whole loaded row list. Edges stroke and nodes fill in the
+    /// owning branch's colour; unowned history draws `.secondary`.
+    let owners: [String: BranchTip]
+
     var body: some View {
         Canvas { context, size in
             guard let row, let segments else { return }
@@ -47,7 +52,8 @@ struct LaneGutterView: View {
             let node = CGPoint(x: LaneGeometry.xOffset(forLane: row.lane), y: midY)
 
             func stroke(_ path: Path, for edge: LaneEdge) {
-                context.stroke(path, with: .color(.secondary), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                let color = BranchColor.color(for: BranchOwnership.owner(of: edge, in: owners))
+                context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 2, lineCap: .round))
             }
             func edge(from start: CGPoint, to end: CGPoint) -> Path {
                 var path = Path()
@@ -78,13 +84,14 @@ struct LaneGutterView: View {
             let radius = LaneGeometry.nodeRadius + 1
             let dot = Path(ellipseIn: CGRect(x: node.x - radius, y: node.y - radius,
                                              width: radius * 2, height: radius * 2))
+            let nodeColor = BranchColor.color(for: owners[row.oid])
             if row.parents.count > 1 {
                 var clearing = context
                 clearing.blendMode = .clear
                 clearing.fill(dot, with: .color(.black))
-                context.stroke(dot, with: .color(.primary), lineWidth: 2)
+                context.stroke(dot, with: .color(nodeColor), lineWidth: 2)
             } else {
-                context.fill(dot, with: .color(.primary))
+                context.fill(dot, with: .color(nodeColor))
             }
             if isHead {
                 let ring = radius + 3
@@ -109,7 +116,8 @@ struct LaneGutterView: View {
                 GraphRow(oid: "a", parents: [], lane: 0, parentLanes: []),
             ]).first,
             isHead: true,
-            width: LaneGeometry.laneGutterWidth(maxLane: 1)
+            width: LaneGeometry.laneGutterWidth(maxLane: 1),
+            owners: [:]
         )
         LaneGutterView(
             row: GraphRow(oid: "b", parents: ["a"], lane: 0, parentLanes: [0]),
@@ -118,7 +126,8 @@ struct LaneGutterView: View {
                 GraphRow(oid: "a", parents: [], lane: 0, parentLanes: []),
             ]).first,
             isHead: false,
-            width: LaneGeometry.laneGutterWidth(maxLane: 1)
+            width: LaneGeometry.laneGutterWidth(maxLane: 1),
+            owners: [:]
         )
         LaneGutterView(
             row: GraphRow(oid: "a", parents: [], lane: 0, parentLanes: []),
@@ -126,7 +135,8 @@ struct LaneGutterView: View {
                 GraphRow(oid: "a", parents: [], lane: 0, parentLanes: []),
             ]).first,
             isHead: false,
-            width: LaneGeometry.laneGutterWidth(maxLane: 1)
+            width: LaneGeometry.laneGutterWidth(maxLane: 1),
+            owners: [:]
         )
     }
     .frame(height: 120)

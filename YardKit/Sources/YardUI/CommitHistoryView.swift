@@ -25,15 +25,21 @@ public struct CommitHistoryView: View {
     private let entries: [CommitLogEntry]
     private let graphRows: [GraphRow]
     private let headOid: String?
+    /// The repository's refs (#0366): tips derived from this claim history,
+    /// colouring each row's gutter by the owning branch. `nil` -- previews
+    /// and callers that have not loaded the sidebar yet -- leaves every node
+    /// and edge unowned, drawing `.secondary` as before.
+    private let refs: RefSnapshot?
     @Binding private var selection: String?
 
     public init(
         entries: [CommitLogEntry], graphRows: [GraphRow] = [], headOid: String? = nil,
-        selection: Binding<String?>
+        refs: RefSnapshot? = nil, selection: Binding<String?>
     ) {
         self.entries = entries
         self.graphRows = graphRows
         self.headOid = headOid
+        self.refs = refs
         self._selection = selection
     }
 
@@ -43,11 +49,12 @@ public struct CommitHistoryView: View {
             zip(graphRows.map(\.oid), LaneSegments.make(graphRows)),
             uniquingKeysWith: { first, _ in first })
         let gutterWidth = LaneGeometry.laneGutterWidth(maxLane: LaneGeometry.maxLane(in: graphRows))
+        let owners = refs.map { BranchOwnership.owners(in: graphRows, tips: BranchOwnership.tips(from: $0)) } ?? [:]
 
         List(entries, id: \.oid, selection: $selection) { entry in
             CommitHistoryRow(
                 entry: entry, graphRow: rowsByOid[entry.oid], segments: segmentsByOid[entry.oid],
-                isHead: entry.oid == headOid, gutterWidth: gutterWidth)
+                isHead: entry.oid == headOid, owners: owners, gutterWidth: gutterWidth)
                 .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 8))
                 .listRowSeparator(.hidden)
         }
@@ -61,11 +68,12 @@ private struct CommitHistoryRow: View {
     let graphRow: GraphRow?
     let segments: LaneRowSegments?
     let isHead: Bool
+    let owners: [String: BranchTip]
     let gutterWidth: CGFloat
 
     var body: some View {
         HStack(alignment: .center, spacing: 8) {
-            LaneGutterView(row: graphRow, segments: segments, isHead: isHead, width: gutterWidth)
+            LaneGutterView(row: graphRow, segments: segments, isHead: isHead, width: gutterWidth, owners: owners)
             VStack(alignment: .leading, spacing: 2) {
                 Text(entry.subject)
                     .fontWeight(isHead ? .semibold : .regular)

@@ -309,6 +309,7 @@ public struct ContentView: View {
         CommitHistoryView(
             entries: history, graphRows: graphRows,
             headOid: summary.whereAmI.rawHead.isEmpty ? nil : summary.whereAmI.rawHead,
+            refs: sidebar?.refs,
             selection: Binding(
                 get: { selectedCommit },
                 set: { newValue in
