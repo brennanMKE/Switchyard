@@ -230,7 +230,10 @@ public struct Rewrite: Equatable, Sendable {
 
 // MARK: - The walk
 
-private extension Rewrite {
+// The read-only helpers here — `Head`/`resolveHead`, `parentOids` — are
+// internal so Squash (#0374) reuses them instead of duplicating them; the
+// rest of this block stays Rewrite's own walk machinery.
+extension Rewrite {
 
     /// Which subcommand is being run — the one input `walk` needs.
     enum Request {
@@ -529,7 +532,10 @@ private extension Rewrite {
 
 // MARK: - Execution
 
-private extension Rewrite {
+// `moveRef`, `commitTree`, `commitTreeArguments`, and the signing-failure
+// classification are internal so Squash (#0374) reuses the same plumbing —
+// one pinned ref move, one commit-tree with the explicit signing flag.
+extension Rewrite {
 
     /// Builds the replacement commit (a reword), replays the picks, and
     /// moves the ref once. Assumes every guard passed and the checkpoint is

@@ -148,6 +148,14 @@ struct ExitClassCoverageTests {
             // and the signing class in
             // MergeTests.aSigningFailureAbortsTheMergeAndIsTyped.
             Row("MergeError", MergeError.unknownBranch("probe-branch"), .repositoryError),
+            // #0374: SquashError has the same three-class shape as
+            // RewriteError (headIsRoot/parentIsRoot/mergeRefused/emptyMessage
+            // → 6, blockedOnConflicts → 8, signingFailed → 9); this row
+            // exercises the repositoryError case. The conflicts class is
+            // asserted in SquashTests.anUnmergedIndexRefusesBeforeAnythingIsTouched,
+            // and the signing class in
+            // SquashTests.aSquashSigningFailureIsTypedAndTouchesNothing.
+            Row("SquashError", SquashError.emptyMessage, .repositoryError),
             // #0064: RewriteDiffError carries one class across all three
             // cases (unknownEntry/noRewriteMapping/unparseableOutput → 6);
             // this row exercises it — the command is read-only, so no
