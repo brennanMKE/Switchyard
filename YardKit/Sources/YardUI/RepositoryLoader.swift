@@ -42,12 +42,19 @@ public func loadRepositorySummary(at path: String) async throws -> RepositorySum
     return RepositorySummary(whereAmI: info, status: status)
 }
 
-/// Loads the most recent commits reachable from `HEAD` at `path`, for the
-/// History pane (#0340).
+/// Loads the most recent commits reachable from `HEAD`, every local branch,
+/// and every remote-tracking branch at `path`, in topological order, for the
+/// History pane (#0340, #0364).
 ///
-/// `["-100", "HEAD"]` is a placeholder bound for paging, not a decision: an
-/// unbounded `git log` on a large repository is the first thing that would
-/// make this window feel broken.
+/// `["--topo-order", "-100", "HEAD", "--branches", "--remotes"]`: `-100` is a
+/// placeholder bound for paging, not a decision — an unbounded `git log` on a
+/// large repository is the first thing that would make this window feel
+/// broken. `--branches --remotes` widen the walk past `HEAD` (#0364: on a
+/// squash-merge workflow a `HEAD`-only walk is a straight line no matter how
+/// the gutter draws), and `--topo-order` matches `loadCommitGraph` below so
+/// the two collections the History pane joins by oid agree row for row
+/// (#0364 measured the mismatch the default order produced). Tags are
+/// deliberately not walked: `--tags` would open lanes for old release tags.
 ///
 /// `YardUI` sets `.defaultIsolation(MainActor.self)` (`Package.swift`), so
 /// this needs `@concurrent` for the same reason `loadRepositorySummary`
@@ -58,18 +65,23 @@ public func loadRepositorySummary(at path: String) async throws -> RepositorySum
 /// it returns.
 @concurrent
 public func loadCommitHistory(at path: String) async throws -> [CommitLogEntry] {
-    try await CommitLog.run(path: path, rangeArguments: ["-100", "HEAD"])
+    try await CommitLog.run(
+        path: path,
+        rangeArguments: ["--topo-order", "-100", "HEAD", "--branches", "--remotes"])
 }
 
 /// Loads the lane-assigned commit graph for the History pane's lane gutter
 /// (#0052).
 ///
 /// Bounded to `limit: 100` -- the same bound `loadCommitHistory` above
-/// applies via `["-100", "HEAD"]` -- so the two collections cover the same
-/// commits. `CommitHistoryView` joins them by `oid`; a commit with no
-/// matching `GraphRow` renders without a gutter rather than crashing or
-/// shifting the row, since the two calls are independent reads and are not
-/// guaranteed to agree to the commit.
+/// applies via its `-100` -- and started from `["HEAD", "--branches",
+/// "--remotes"]`, the same refs `loadCommitHistory` walks, in the same
+/// `--topo-order` `graphRowsArguments` pins (#0364), so the two collections
+/// cover the same commits in the same order. Tags are deliberately not
+/// walked: `--tags` would open lanes for old release tags.
+/// `CommitHistoryView` joins them by `oid`; a commit with no matching
+/// `GraphRow` renders without a gutter rather than crashing or shifting the
+/// row, since the two calls are independent reads.
 ///
 /// `YardUI` sets `.defaultIsolation(MainActor.self)` (`Package.swift`), so
 /// this needs `@concurrent` for the same reason `loadRepositorySummary`,
@@ -85,7 +97,7 @@ public func loadCommitHistory(at path: String) async throws -> [CommitLogEntry] 
 /// above for `FileDiff`/`Hunk`.
 @concurrent
 public func loadCommitGraph(at path: String) async throws -> [GraphRow] {
-    try await graphRows(at: path, limit: 100)
+    try await graphRows(at: path, limit: 100, revisions: ["HEAD", "--branches", "--remotes"])
 }
 
 /// Loads the diff `revision` introduced, for the Detail pane's commit view
