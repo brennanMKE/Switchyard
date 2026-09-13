@@ -445,7 +445,7 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-08-18 | #0052 | Round 1 (S, measured) | 106,845 | $0.32 |
 | 2026-08-18 | #0272 | Round 1 (S, measured) | 113,855 | $0.34 |
 | 2026-09-12 | #0358-#0363 | M7 UX planning pass (O, measured) | 298,955 | $2.39 |
-| | | **Total measured** | **44,119,715** | **$426.29** |
+| | | **Total measured** | **44,418,670** | **$428.68** |
 
 ## What this total does and does not cover
 
