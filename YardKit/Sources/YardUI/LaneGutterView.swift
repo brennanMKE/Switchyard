@@ -16,7 +16,9 @@
 // Node shape carries meaning (Differentiate Without Color): a filled dot is
 // a commit, a hollow ring is a merge (the dot cleared underneath so the
 // selection highlight shows through), and an extra ring marks `HEAD`. A tip
-// draws no line above its node because no incoming edge reaches it.
+// draws no line above its node because no incoming edge reaches it. An edge
+// whose child is not locally reachable (#0368) draws dashed: the dash, not
+// colour, is what marks remote-only history.
 
 import SwiftUI
 import YardGit
@@ -30,6 +32,14 @@ struct LaneGutterView: View {
     /// row list, or `nil` alongside `row`.
     let segments: LaneRowSegments?
 
+    /// oid -> owning branch tip (#0366), derived once by `CommitHistoryView`
+    /// from the whole loaded row list. Edges stroke and nodes fill in the
+    /// owning branch's colour; unowned history draws `.secondary`.
+    let owners: [String: BranchTip]
+
+    /// #0368: `LocalReachability.oids(in:from:)`; `nil` draws every edge solid.
+    let localOids: Set<String>?
+
     /// Whether this row's commit is the repository's `HEAD`; adds an extra
     /// ring around the node.
     let isHead: Bool
@@ -40,11 +50,6 @@ struct LaneGutterView: View {
     /// one row uses.
     let width: CGFloat
 
-    /// oid -> owning branch tip (#0366), derived once by `CommitHistoryView`
-    /// from the whole loaded row list. Edges stroke and nodes fill in the
-    /// owning branch's colour; unowned history draws `.secondary`.
-    let owners: [String: BranchTip]
-
     var body: some View {
         Canvas { context, size in
             guard let row, let segments else { return }
@@ -52,8 +57,10 @@ struct LaneGutterView: View {
             let node = CGPoint(x: LaneGeometry.xOffset(forLane: row.lane), y: midY)
 
             func stroke(_ path: Path, for edge: LaneEdge) {
-                let color = BranchColor.color(for: BranchOwnership.owner(of: edge, in: owners))
-                context.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                let dashed = localOids.map { !$0.contains(edge.child) } ?? false
+                context.stroke(
+                    path, with: .color(BranchColor.color(for: BranchOwnership.owner(of: edge, in: owners))),
+                    style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: dashed ? [4, 3] : []))
             }
             func edge(from start: CGPoint, to end: CGPoint) -> Path {
                 var path = Path()
@@ -84,14 +91,14 @@ struct LaneGutterView: View {
             let radius = LaneGeometry.nodeRadius + 1
             let dot = Path(ellipseIn: CGRect(x: node.x - radius, y: node.y - radius,
                                              width: radius * 2, height: radius * 2))
-            let nodeColor = BranchColor.color(for: owners[row.oid])
+            let color = BranchColor.color(for: owners[row.oid])
             if row.parents.count > 1 {
                 var clearing = context
                 clearing.blendMode = .clear
                 clearing.fill(dot, with: .color(.black))
-                context.stroke(dot, with: .color(nodeColor), lineWidth: 2)
+                context.stroke(dot, with: .color(color), lineWidth: 2)
             } else {
-                context.fill(dot, with: .color(nodeColor))
+                context.fill(dot, with: .color(color))
             }
             if isHead {
                 let ring = radius + 3
@@ -115,9 +122,10 @@ struct LaneGutterView: View {
                 GraphRow(oid: "b", parents: ["a"], lane: 0, parentLanes: [0]),
                 GraphRow(oid: "a", parents: [], lane: 0, parentLanes: []),
             ]).first,
+            owners: [:],
+            localOids: nil,
             isHead: true,
-            width: LaneGeometry.laneGutterWidth(maxLane: 1),
-            owners: [:]
+            width: LaneGeometry.laneGutterWidth(maxLane: 1)
         )
         LaneGutterView(
             row: GraphRow(oid: "b", parents: ["a"], lane: 0, parentLanes: [0]),
@@ -125,18 +133,20 @@ struct LaneGutterView: View {
                 GraphRow(oid: "b", parents: ["a"], lane: 0, parentLanes: [0]),
                 GraphRow(oid: "a", parents: [], lane: 0, parentLanes: []),
             ]).first,
+            owners: [:],
+            localOids: nil,
             isHead: false,
-            width: LaneGeometry.laneGutterWidth(maxLane: 1),
-            owners: [:]
+            width: LaneGeometry.laneGutterWidth(maxLane: 1)
         )
         LaneGutterView(
             row: GraphRow(oid: "a", parents: [], lane: 0, parentLanes: []),
             segments: LaneSegments.make([
                 GraphRow(oid: "a", parents: [], lane: 0, parentLanes: []),
             ]).first,
+            owners: [:],
+            localOids: nil,
             isHead: false,
-            width: LaneGeometry.laneGutterWidth(maxLane: 1),
-            owners: [:]
+            width: LaneGeometry.laneGutterWidth(maxLane: 1)
         )
     }
     .frame(height: 120)

@@ -26,9 +26,11 @@ public struct CommitHistoryView: View {
     private let graphRows: [GraphRow]
     private let headOid: String?
     /// The repository's refs (#0366): tips derived from this claim history,
-    /// colouring each row's gutter by the owning branch. `nil` -- previews
-    /// and callers that have not loaded the sidebar yet -- leaves every node
-    /// and edge unowned, drawing `.secondary` as before.
+    /// colouring each row's gutter by the owning branch, and (#0368) the
+    /// local tips whose reachability dims and dashes remote-only history.
+    /// `nil` -- previews and callers that have not loaded the sidebar yet --
+    /// leaves every node and edge unowned, drawing `.secondary` as before,
+    /// every edge solid and every row at full opacity.
     private let refs: RefSnapshot?
     @Binding private var selection: String?
 
@@ -48,14 +50,22 @@ public struct CommitHistoryView: View {
         let segmentsByOid = Dictionary(
             zip(graphRows.map(\.oid), LaneSegments.make(graphRows)),
             uniquingKeysWith: { first, _ in first })
-        let gutterWidth = LaneGeometry.laneGutterWidth(maxLane: LaneGeometry.maxLane(in: graphRows))
         let owners = refs.map { BranchOwnership.owners(in: graphRows, tips: BranchOwnership.tips(from: $0)) } ?? [:]
+        let localOids = refs.map {
+            LocalReachability.oids(in: graphRows, from: LocalReachability.localTips(refs: $0, headOid: headOid))
+        }
+        let gutterWidth = LaneGeometry.laneGutterWidth(maxLane: LaneGeometry.maxLane(in: graphRows))
 
         List(entries, id: \.oid, selection: $selection) { entry in
             CommitHistoryRow(
-                entry: entry, graphRow: rowsByOid[entry.oid], segments: segmentsByOid[entry.oid],
-                isHead: entry.oid == headOid, owners: owners, gutterWidth: gutterWidth,
-                chips: refs.map { RefChips.make(oid: entry.oid, refs: $0, decoration: entry.refs) } ?? [])
+                entry: entry,
+                graphRow: rowsByOid[entry.oid],
+                segments: segmentsByOid[entry.oid],
+                owners: owners,
+                localOids: localOids,
+                isHead: entry.oid == headOid,
+                chips: refs.map { RefChips.make(oid: entry.oid, refs: $0, decoration: entry.refs) } ?? [],
+                gutterWidth: gutterWidth)
                 .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 8))
                 .listRowSeparator(.hidden)
         }
@@ -66,18 +76,25 @@ public struct CommitHistoryView: View {
 /// The chips (#0358, #0367) are the row's ref labels -- branches and remotes
 /// from the sidebar's snapshot, tags and a detached `HEAD` from `%D` -- and
 /// the whole row is one VoiceOver element speaking `CommitRowAccessibility.label`.
+/// A commit no local tip reaches (#0368) draws its text at 0.6 opacity: its
+/// history is reachable only from remote-tracking branches.
 private struct CommitHistoryRow: View {
     let entry: CommitLogEntry
     let graphRow: GraphRow?
     let segments: LaneRowSegments?
-    let isHead: Bool
     let owners: [String: BranchTip]
-    let gutterWidth: CGFloat
+    /// #0368: `LocalReachability.oids(in:from:)`; `nil` draws every row at
+    /// full opacity.
+    let localOids: Set<String>?
+    let isHead: Bool
     let chips: [RefChip]
+    let gutterWidth: CGFloat
 
     var body: some View {
+        let isRemoteOnly = localOids.map { !$0.contains(entry.oid) } ?? false
         HStack(alignment: .center, spacing: 8) {
-            LaneGutterView(row: graphRow, segments: segments, isHead: isHead, width: gutterWidth, owners: owners)
+            LaneGutterView(row: graphRow, segments: segments, owners: owners, localOids: localOids,
+                           isHead: isHead, width: gutterWidth)
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
                     ForEach(chips, id: \.self) { chip in
@@ -91,13 +108,13 @@ private struct CommitHistoryRow: View {
                 HStack(spacing: 8) {
                     Text(entry.shortOid)
                         .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
                     Text(entry.author)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
+                .foregroundStyle(.secondary)
             }
             .padding(.vertical, 4)
+            .opacity(isRemoteOnly ? 0.6 : 1)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(CommitRowAccessibility.label(entry: entry, chips: chips))
