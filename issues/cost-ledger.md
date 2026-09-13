@@ -446,7 +446,8 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-08-18 | #0272 | Round 1 (S, measured) | 113,855 | $0.34 |
 | 2026-09-12 | #0358-#0363 | M7 UX planning pass (O, measured) | 298,955 | $2.39 |
 | 2026-09-12 | #0358-#0386 | M7 follow-up planning pass, resumed agent (O, measured; figure as reported, may be cumulative with the row above) | 484,189 | $3.87 |
-| | | **Total measured** | **44,902,859** | **$432.55** |
+| 2026-09-12 | #0387-#0394 | M8 filing pass, resumed agent (O, measured; figure as reported, may be cumulative) | 586,624 | $4.69 |
+| | | **Total measured** | **45,489,483** | **$437.24** |
 
 ## What this total does and does not cover
 
