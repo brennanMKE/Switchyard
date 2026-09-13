@@ -800,6 +800,14 @@ and are the highest-effort, so they come after the thing that makes the project 
       mapping for each.
 - [ ] `swift test` is green and every command has a test that exercises the binary.
 
+**M8 — Engine operations behind the M7 UI, and in-app undo and conflict hand-off.** The typed
+engine wrappers the M7 context-menu items call (#0360–#0363), Edit ▸ Undo/Redo over the journal,
+and the path from an in-app conflict into the resolve pane. M6 and M7 are tracked in `issues/` only.
+
+**Exit criteria:**
+
+- [ ] #0387, #0388, #0389, #0390, #0391, #0392, #0393 and #0394 are resolved.
+
 **The `switchyard` skill ships continuously from M1**, regenerated whenever the command surface changes.
 It is not a milestone of its own. See [Section 8](#8-the-agent-skill-and-why-there-is-no-mcp-server).
 
