@@ -49,10 +49,16 @@ public struct CommitDetailView: View {
                 .font(.headline)
                 .textSelection(.enabled)
 
-            Text(entry.message)
-                .font(.system(.body, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .textSelection(.enabled)
+            // The body WITHOUT the subject line (it is the headline above —
+            // rendering `message` verbatim shows the subject twice) and
+            // WITHOUT the trailer block (surfaced separately below — the raw
+            // message's trailer paragraph would duplicate it).
+            if !bodyText.isEmpty {
+                Text(bodyText)
+                    .font(.system(.body, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
 
             HStack(spacing: 8) {
                 Text(entry.shortOid)
@@ -92,6 +98,32 @@ public struct CommitDetailView: View {
                     .textSelection(.enabled)
             }
         }
+    }
+
+    /// The commit body minus the subject line and minus the trailer block:
+    /// the subject is the headline above and the trailers are surfaced as
+    /// data below — rendering either twice is the noise a reviewer reads
+    /// past. The trailer block is the message's final paragraph when every
+    /// line of it also appears in `entry.trailers`.
+    private var bodyText: String {
+        var text = entry.message
+        if text.hasPrefix(entry.subject) {
+            text = String(text.dropFirst(entry.subject.count))
+        }
+        text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !entry.trailers.isEmpty,
+              let trailerStart = text.range(of: "\n\n", options: .backwards) else {
+            return text
+        }
+        let tail = String(text[trailerStart.upperBound...])
+        let tailLines = tail.split(separator: "\n")
+        let trailerLines = entry.trailers.map { $0.description }
+        if !tailLines.isEmpty && tailLines.allSatisfy({ line in
+            trailerLines.contains { $0.contains(String(line)) }
+        }) {
+            text = String(text[..<(trailerStart.lowerBound)])
+        }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var signatureLabel: String {

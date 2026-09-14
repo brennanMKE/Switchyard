@@ -17,14 +17,16 @@ import CoreGraphics
 import YardGit
 
 public nonisolated enum LaneGeometry {
-    /// Horizontal distance between adjacent lane centers, in points.
-    public static let laneSpacing: CGFloat = 14
+    /// Horizontal distance between adjacent lane centers, in points. Wide
+    /// enough that a branch's curve is readable at a glance — the GitUp
+    /// comparison (#0358) showed 14pt squeezed every lane into a sliver.
+    public static let laneSpacing: CGFloat = 36
 
     /// Radius of a commit's node marker, in points.
-    public static let nodeRadius: CGFloat = 3
+    public static let nodeRadius: CGFloat = 4.5
 
     /// Leading inset before lane 0's center, in points.
-    public static let leadingInset: CGFloat = 8
+    public static let leadingInset: CGFloat = 20
 
     /// Trailing inset after the widest touched lane's center, in points.
     public static let trailingInset: CGFloat = 8
