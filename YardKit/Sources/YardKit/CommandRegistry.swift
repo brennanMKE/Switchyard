@@ -71,6 +71,8 @@ public enum CommandRegistry {
                          description: "True when a merge is in progress."),
             PayloadField(name: "isMidCherryPick", type: .bool,
                          description: "True when a cherry-pick is in progress."),
+            PayloadField(name: "isMidRevert", type: .bool,
+                         description: "True when a revert is in progress."),
             PayloadField(name: "stashCount", type: .int,
                          description: "Number of stash entries."),
             PayloadField(name: "untrackedCount", type: .int,

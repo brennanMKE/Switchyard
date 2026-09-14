@@ -23,6 +23,7 @@ struct WhereAmITests {
         #expect(!r.isMidRebase, "no rebase in progress")
         #expect(!r.isMidMerge)
         #expect(!r.isMidCherryPick)
+        #expect(!r.isMidRevert)
         #expect(r.stashCount == 0, "no stashes in empty repo")
         #expect(r.untrackedCount == 0)
         #expect(r.unstagedCount == 0)
@@ -256,9 +257,73 @@ struct WhereAmITests {
         #expect(r.isMidCherryPick == true, "isMidCherryPick reports a real in-progress cherry-pick")
         #expect(!r.isMidMerge, "a mid-cherry-pick must not also report mid-merge")
         #expect(!r.isMidRebase, "a mid-cherry-pick must not also report mid-rebase")
+        #expect(!r.isMidRevert, "a mid-cherry-pick must not also report mid-revert")
 
         // Abort the cherry-pick to leave the fixture clean.
         _ = try? git.run(["cherry-pick", "--abort"], workingDirectory: repo.url.path)
+    }
+
+    // MARK: - Issue 0376 Required Test — isMidRevert
+
+    /// A conflicted revert leaves `REVERT_HEAD` behind — measured git 2.50.1
+    /// (#0376): a three-commit history editing one file (a → b → c), then
+    /// `git revert --no-edit HEAD~1` exits 1, `REVERT_HEAD` exists,
+    /// `CHERRY_PICK_HEAD` does not, and there is no `sequencer` directory.
+    /// `WhereAmI` only probed `MERGE_HEAD` and `CHERRY_PICK_HEAD`, so a
+    /// conflicted revert reported no operation in progress. Proves both the
+    /// synchronous and the asynchronous `whereAmI` against the same fixture.
+    @Test func midRevertReportsFlagWhenRevertHeadPresent() async throws {
+        var repo = try FixtureRepository(refFormat: .files)
+        defer { repo.destroy() }
+
+        // The measured fixture: three commits editing one file, a → b → c.
+        try repo.build([
+            FixtureRepository.Commit("a", files: ["f.txt": "a\n"]),
+            FixtureRepository.Commit("b", parents: ["a"], files: ["f.txt": "b\n"]),
+            FixtureRepository.Commit("c", parents: ["b"], files: ["f.txt": "c\n"]),
+        ])
+
+        // Reverting "b" (f.txt = "b") onto "c" (f.txt = "c") conflicts.
+        let revertResult = try await git.capture(
+            ["revert", "--no-edit", "HEAD~1"], workingDirectory: repo.url.path)
+        #expect(revertResult.exitCode != 0, "the revert should conflict")
+
+        // Confirm the fixture actually reached the measured state before
+        // trusting whereAmI's report of it, resolved through
+        // `WorktreeContext.path(for:)` -- never by concatenating onto `.git/`.
+        // A non-async nested call resolves to the sync overload, the same
+        // trick GitProcessAsyncTests uses -- written directly in this async
+        // body, `WorktreeContext.resolve` would pick its async twin.
+        func syncResolve(path: String) throws -> WorktreeContext {
+            try WorktreeContext.resolve(path: path)
+        }
+        let context = try syncResolve(path: repo.url.path)
+        let revertHead = try context.path(for: "REVERT_HEAD")
+        #expect(FileManager.default.fileExists(atPath: revertHead),
+                "the fixture must actually leave REVERT_HEAD behind, or this test pins nothing")
+        let cherryPickHead = try context.path(for: "CHERRY_PICK_HEAD")
+        #expect(!FileManager.default.fileExists(atPath: cherryPickHead),
+                "CHERRY_PICK_HEAD must be absent -- a revert is not a cherry-pick")
+
+        // The synchronous path. A non-async nested call resolves to the sync
+        // overload -- written directly in an async test body the call would
+        // pick the async twin and prove nothing about the sync one.
+        func syncWhereAmI(path: String) throws -> WhereAmI {
+            try whereAmI(path: path, git: git)
+        }
+        let r = try syncWhereAmI(path: repo.url.path)
+        #expect(r.isMidRevert == true, "isMidRevert reports a real in-progress revert")
+        #expect(!r.isMidCherryPick, "a mid-revert must not report mid-cherry-pick")
+        #expect(!r.isMidMerge, "a mid-revert must not also report mid-merge")
+        #expect(!r.isMidRebase, "a mid-revert must not also report mid-rebase")
+
+        // The asynchronous path, same fixture, same assertions.
+        let rAsync = try await whereAmI(path: repo.url.path, git: git)
+        #expect(rAsync.isMidRevert == true, "the async whereAmI also reports the in-progress revert")
+        #expect(!rAsync.isMidCherryPick, "async: a mid-revert must not report mid-cherry-pick")
+
+        // Abort the revert to leave the fixture clean.
+        _ = try? await git.run(["revert", "--abort"], workingDirectory: repo.url.path)
     }
 
     @Test func worktreeBranchMatchesMainCheckout() throws {

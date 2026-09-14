@@ -49,6 +49,7 @@ struct RepositoryHeaderView: View {
         isMidRebase: false,
         isMidMerge: false,
         isMidCherryPick: false,
+        isMidRevert: false,
         stashCount: 0,
         untrackedCount: 2,
         unstagedCount: 1,

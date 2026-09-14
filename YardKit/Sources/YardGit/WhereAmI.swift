@@ -32,6 +32,10 @@ public struct WhereAmI: Sendable, Equatable {
     /// True when a cherry-pick is in progress.
     public let isMidCherryPick: Bool
 
+    /// True when a revert is in progress: `REVERT_HEAD` exists. Tested via
+    /// `git rev-parse --git-path` so it is correct in a linked worktree.
+    public let isMidRevert: Bool
+
     /// Number of stash entries, as returned by `git stash list`.
     public let stashCount: Int
 
@@ -78,6 +82,7 @@ public struct WhereAmI: Sendable, Equatable {
         isMidRebase: Bool,
         isMidMerge: Bool,
         isMidCherryPick: Bool,
+        isMidRevert: Bool,
         stashCount: Int,
         untrackedCount: Int,
         unstagedCount: Int,
@@ -94,6 +99,7 @@ public struct WhereAmI: Sendable, Equatable {
         self.isMidRebase = isMidRebase
         self.isMidMerge = isMidMerge
         self.isMidCherryPick = isMidCherryPick
+        self.isMidRevert = isMidRevert
         self.stashCount = stashCount
         self.untrackedCount = untrackedCount
         self.unstagedCount = unstagedCount
@@ -119,7 +125,7 @@ extension WhereAmI: Encodable {
     /// the wire key, and `WhereAmIWireTests` pins the encoded bytes.
     private enum CodingKeys: String, CodingKey {
         case branch, upstream, ahead, behind
-        case isMidRebase, isMidMerge, isMidCherryPick
+        case isMidRebase, isMidMerge, isMidCherryPick, isMidRevert
         case stashCount, untrackedCount, unstagedCount, stagedCount
         case hasConflicts, conflictCount, headOID, rawHead
     }
@@ -199,7 +205,7 @@ public func whereAmI(
         }
     }
 
-    // Rebase / merge / cherry-pick state. Use `git rev-parse --git-path`
+    // Rebase / merge / cherry-pick / revert state. Use `git rev-parse --git-path`
     // so this is correct in a linked worktree (where state lives under
     // $GIT_DIR) and on reftable repositories (where refs/ does not exist).
     let isMidRebase = {
@@ -223,6 +229,13 @@ public func whereAmI(
     let cherryPath: Bool = {
         guard let out = try? git.run(
             ["rev-parse", "--path-format=absolute", "--git-path", "CHERRY_PICK_HEAD"],
+            workingDirectory: path), let p = out.lines.first, !p.isEmpty else { return false }
+        return FileManager.default.fileExists(atPath: p)
+    }()
+
+    let revertPath: Bool = {
+        guard let out = try? git.run(
+            ["rev-parse", "--path-format=absolute", "--git-path", "REVERT_HEAD"],
             workingDirectory: path), let p = out.lines.first, !p.isEmpty else { return false }
         return FileManager.default.fileExists(atPath: p)
     }()
@@ -315,6 +328,7 @@ public func whereAmI(
         isMidRebase: isMidRebase,
         isMidMerge: mergePath,
         isMidCherryPick: cherryPath,
+        isMidRevert: revertPath,
         stashCount: stashCount,
         untrackedCount: untrackedCount,
         unstagedCount: unstagedCount,
@@ -401,7 +415,7 @@ public func whereAmI(
         }
     }
 
-    // Rebase / merge / cherry-pick state via `git rev-parse --git-path`, so
+    // Rebase / merge / cherry-pick / revert state via `git rev-parse --git-path`, so
     // this is correct in a linked worktree and on reftable repositories.
     var isMidRebase = false
     for name in ["rebase-merge", "rebase-apply"] {
@@ -427,6 +441,13 @@ public func whereAmI(
         ["rev-parse", "--path-format=absolute", "--git-path", "CHERRY_PICK_HEAD"],
         workingDirectory: path), let p = out.lines.first, !p.isEmpty {
         cherryPath = FileManager.default.fileExists(atPath: p)
+    }
+
+    var revertPath = false
+    if let out = try? await git.run(
+        ["rev-parse", "--path-format=absolute", "--git-path", "REVERT_HEAD"],
+        workingDirectory: path), let p = out.lines.first, !p.isEmpty {
+        revertPath = FileManager.default.fileExists(atPath: p)
     }
 
     // Stash count via `git stash list`; empty output (or a non-zero exit on
@@ -490,6 +511,7 @@ public func whereAmI(
         isMidRebase: isMidRebase,
         isMidMerge: mergePath,
         isMidCherryPick: cherryPath,
+        isMidRevert: revertPath,
         stashCount: stashCount,
         untrackedCount: untrackedCount,
         unstagedCount: unstagedCount,

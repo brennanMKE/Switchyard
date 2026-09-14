@@ -24,12 +24,12 @@ struct WhereAmIWireTests {
     @Test func fullValueEncodesToTheLiteralWireShape() throws {
         let value = WhereAmI(
             branch: "main", upstream: "origin/main", ahead: 2, behind: 1,
-            isMidRebase: false, isMidMerge: true, isMidCherryPick: false,
+            isMidRebase: false, isMidMerge: true, isMidCherryPick: false, isMidRevert: false,
             stashCount: 3, untrackedCount: 4, unstagedCount: 5, stagedCount: 6,
             hasConflicts: true, conflictCount: 7,
             headOID: "a1b2c3d",
             rawHead: "a1b2c3d4e5f6a7b8c9d0a1b2c3d4e5f6a7b8c9d0")
-        #expect(try wireJSON(value) == #"{"ahead":2,"behind":1,"branch":"main","conflictCount":7,"hasConflicts":true,"headOID":"a1b2c3d","isMidCherryPick":false,"isMidMerge":true,"isMidRebase":false,"rawHead":"a1b2c3d4e5f6a7b8c9d0a1b2c3d4e5f6a7b8c9d0","stagedCount":6,"stashCount":3,"unstagedCount":5,"untrackedCount":4,"upstream":"origin\/main"}"#)
+        #expect(try wireJSON(value) == #"{"ahead":2,"behind":1,"branch":"main","conflictCount":7,"hasConflicts":true,"headOID":"a1b2c3d","isMidCherryPick":false,"isMidMerge":true,"isMidRebase":false,"isMidRevert":false,"rawHead":"a1b2c3d4e5f6a7b8c9d0a1b2c3d4e5f6a7b8c9d0","stagedCount":6,"stashCount":3,"unstagedCount":5,"untrackedCount":4,"upstream":"origin\/main"}"#)
     }
 
     /// A detached HEAD with no upstream: every nil optional is OMITTED from
@@ -38,13 +38,13 @@ struct WhereAmIWireTests {
     @Test func nilOptionalsAreOmittedFromTheWire() throws {
         let value = WhereAmI(
             branch: nil, upstream: nil, ahead: nil, behind: nil,
-            isMidRebase: false, isMidMerge: false, isMidCherryPick: false,
+            isMidRebase: false, isMidMerge: false, isMidCherryPick: false, isMidRevert: false,
             stashCount: 0, untrackedCount: 0, unstagedCount: 0, stagedCount: 0,
             hasConflicts: false, conflictCount: 0,
             headOID: "a1b2c3d",
             rawHead: "a1b2c3d4e5f6a7b8c9d0a1b2c3d4e5f6a7b8c9d0")
         let json = try wireJSON(value)
-        #expect(json == #"{"conflictCount":0,"hasConflicts":false,"headOID":"a1b2c3d","isMidCherryPick":false,"isMidMerge":false,"isMidRebase":false,"rawHead":"a1b2c3d4e5f6a7b8c9d0a1b2c3d4e5f6a7b8c9d0","stagedCount":0,"stashCount":0,"unstagedCount":0,"untrackedCount":0}"#)
+        #expect(json == #"{"conflictCount":0,"hasConflicts":false,"headOID":"a1b2c3d","isMidCherryPick":false,"isMidMerge":false,"isMidRebase":false,"isMidRevert":false,"rawHead":"a1b2c3d4e5f6a7b8c9d0a1b2c3d4e5f6a7b8c9d0","stagedCount":0,"stashCount":0,"unstagedCount":0,"untrackedCount":0}"#)
         #expect(!json.contains("\"branch\""))
         #expect(!json.contains("null"))
     }
@@ -56,13 +56,13 @@ struct WhereAmIWireTests {
     @Test func envelopeWrapsWhereAmIWithTheV1Keys() throws {
         let value = WhereAmI(
             branch: "main", upstream: nil, ahead: nil, behind: nil,
-            isMidRebase: false, isMidMerge: false, isMidCherryPick: false,
+            isMidRebase: false, isMidMerge: false, isMidCherryPick: false, isMidRevert: false,
             stashCount: 0, untrackedCount: 0, unstagedCount: 1, stagedCount: 0,
             hasConflicts: false, conflictCount: 0,
             headOID: "cafc5cd",
             rawHead: "cafc5cde84e5e8b8ddd67d821b0b803b60f43216")
         let json = try wireJSON(Envelope(result: EncodableResult(value)))
-        #expect(json == #"{"ok":true,"result":{"branch":"main","conflictCount":0,"hasConflicts":false,"headOID":"cafc5cd","isMidCherryPick":false,"isMidMerge":false,"isMidRebase":false,"rawHead":"cafc5cde84e5e8b8ddd67d821b0b803b60f43216","stagedCount":0,"stashCount":0,"unstagedCount":1,"untrackedCount":0},"schemaVersion":1}"#)
+        #expect(json == #"{"ok":true,"result":{"branch":"main","conflictCount":0,"hasConflicts":false,"headOID":"cafc5cd","isMidCherryPick":false,"isMidMerge":false,"isMidRebase":false,"isMidRevert":false,"rawHead":"cafc5cde84e5e8b8ddd67d821b0b803b60f43216","stagedCount":0,"stashCount":0,"unstagedCount":1,"untrackedCount":0},"schemaVersion":1}"#)
 
         // Structural read-back of the envelope frame, so a failure here
         // distinguishes "envelope broke" from "payload byte drift".
@@ -120,7 +120,7 @@ struct WhereAmIWireTests {
     @Test func schemaFieldNamesMatchTheEncodedKeysExactly() throws {
         let value = WhereAmI(
             branch: "main", upstream: "origin/main", ahead: 2, behind: 1,
-            isMidRebase: false, isMidMerge: true, isMidCherryPick: false,
+            isMidRebase: false, isMidMerge: true, isMidCherryPick: false, isMidRevert: false,
             stashCount: 3, untrackedCount: 4, unstagedCount: 5, stagedCount: 6,
             hasConflicts: true, conflictCount: 7,
             headOID: "a1b2c3d",
@@ -158,14 +158,14 @@ struct WhereAmIWireTests {
     @Test func schemaOptionalFieldsMatchTheKeysAMinimalValueOmits() throws {
         let fullyPopulated = WhereAmI(
             branch: "main", upstream: "origin/main", ahead: 2, behind: 1,
-            isMidRebase: false, isMidMerge: true, isMidCherryPick: false,
+            isMidRebase: false, isMidMerge: true, isMidCherryPick: false, isMidRevert: false,
             stashCount: 3, untrackedCount: 4, unstagedCount: 5, stagedCount: 6,
             hasConflicts: true, conflictCount: 7,
             headOID: "a1b2c3d",
             rawHead: "a1b2c3d4e5f6a7b8c9d0a1b2c3d4e5f6a7b8c9d0")
         let minimallyPopulated = WhereAmI(
             branch: nil, upstream: nil, ahead: nil, behind: nil,
-            isMidRebase: false, isMidMerge: false, isMidCherryPick: false,
+            isMidRebase: false, isMidMerge: false, isMidCherryPick: false, isMidRevert: false,
             stashCount: 0, untrackedCount: 0, unstagedCount: 0, stagedCount: 0,
             hasConflicts: false, conflictCount: 0,
             headOID: "a1b2c3d",

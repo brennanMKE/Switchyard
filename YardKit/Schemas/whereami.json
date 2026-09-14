@@ -89,6 +89,12 @@
             "type" : "bool"
           },
           {
+            "description" : "True when a revert is in progress.",
+            "name" : "isMidRevert",
+            "optional" : false,
+            "type" : "bool"
+          },
+          {
             "description" : "The full form of HEAD's object id, for debugging. A full SHA, or empty on a fresh repository with no commits yet.",
             "name" : "rawHead",
             "optional" : false,
