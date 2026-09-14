@@ -1330,6 +1330,69 @@ a feature at any milestone on the grounds that GitUp had it.
     `diff --cc` block's `index` line to `a238,0bf9..fe05` without it, and with it the line is full
     40-hex regardless of `core.abbrev` — the existing pin covers the new output shape unchanged.
 
+27. **A sidebar branch is "merged" by ancestry, else upstream-gone, else content — with "unknown" —
+    and its ahead/behind baseline is the upstream when set, else the default branch, named in the
+    row.** Decided 2026-09-13 on **#0373**, the decision issue #0372 was blocked on. The decision is
+    Brennan's to overrule; it was written on dispatch because #0372 could not otherwise be planned,
+    and it is reversible by editing this entry and #0372.
+
+    Both measured repositories land work by squash — Batty has 1 merge commit among the 1,182
+    reachable from `HEAD`, Switchyard 0 (measured, #0358; re-measured 2026-09-12, git 2.50.1) — so a
+    squash-landed branch's commits are never ancestors of `main` and git's own meaning of merged (M1,
+    ancestry) is false for nearly every landed branch: 4 of 122 on Batty, 11 of 309 on Switchyard.
+    The measurements and candidate tables live in #0373; the decision:
+
+    - **Merged = M6, the composite.** A branch row shows **merged** when its tip is reachable from
+      the default branch (M1 — `%(ahead-behind:<default>)`'s ahead count 0); else **merged** when
+      its upstream was deleted on the remote (M4 — `%(upstream:track)` prints `[gone]`, the
+      delete-branch-on-merge hosting workflow's signature); else **merged** when
+      `git merge-tree --write-tree <default> <branch>` yields the default branch's tree (M3 — the
+      only candidate that recognises a squash landing of any size); else **not merged** when that
+      merge yields a different tree; **unknown** when merge-tree reports a conflict. M1's "merged"
+      answer is authoritative and its "not merged" is not — ahead > 0 against the default is exactly
+      the squash false-negative the composite exists to repair, so it means "keep looking", never
+      "unmerged".
+    - **Ahead/behind = A3.** Against the branch's **upstream** when one is set — git's meaning, and
+      what `WhereAmI` already reports for `HEAD` — else against the **default branch**, and the row
+      **names which baseline it is showing**, because the two numbers mean different things: ahead
+      of the upstream returns to 0 on push, while ahead of the default never returns to 0 after a
+      squash landing (measured: Switchyard's `chore/work-logs` sits 2 1547 against `main`).
+    - **Default branch source: `refs/remotes/origin/HEAD`'s symbolic target, falling back to the
+      literal `main`.** Read with one `git symbolic-ref refs/remotes/origin/HEAD`. A per-repository
+      setting is rejected until a repository is found where `origin/HEAD` is wrong; the literal
+      `main` alone is rejected because it silently mislabels a repository whose default is `master`
+      or `trunk`. Implementation caveat, measured: `for-each-ref` reports
+      `refs/remotes/origin/HEAD` as if it were a commit, so the remotes enumeration must skip it.
+    - **Cost budget: the synchronous sidebar-load read is one `for-each-ref` process carrying
+      `%(upstream:track)` and `%(ahead-behind:<default>)` together, and nothing else.** One
+      `--format` carries both atoms, so the combined read is bounded by the larger of #0373's two
+      single-process measurements, not their sum: 30 ms on Batty (122 branches), 53 ms on
+      Switchyard (309). The budget the engine read behind #0372 must meet is **≤ 100 ms wall clock
+      on the largest measured corpus**, and it must not spawn one process per branch on the
+      sidebar-load path. M3's content check is a **background pass that fills the merged column
+      after the sidebar appears** — per-branch spawns measured at 7.7 s for 309 branches
+      (Switchyard) and 2.2 s for 122 (Batty), with `git cherry` (M2) at 40 s there and therefore
+      not used at all. Until the pass lands, the column shows *unknown* rather than blocking.
+
+    **What the composite spends, stated plainly.** M4 is an inference, not a fact: an upstream
+    deleted for any other reason — abandoned work, a renamed branch — shows *merged*, and nothing
+    in the read distinguishes that from a delete-branch-on-merge landing. The composite takes it
+    because the alternative is worse on the measured corpora: content alone answers *unknown* for
+    102 of 121 Batty branches and 215 of 308 Switchyard branches (main excluded, #0373), and M4 is
+    the one signal that costs nothing and resolves those in the common workflow. The conflict-driven
+    *unknown* is kept rather than guessed at — "merging this branch would now need conflict
+    resolution" is a fact about the repository, and hiding it behind a guessed answer is the kind
+    of lie a sidebar cannot afford.
+
+    **Fixture verification of the exact read shapes, 2026-09-13, git 2.50.1** (five-branch fixture
+    under `build/0373-fixture/`: ancestry-merged, squash-landed, upstream-gone, unlanded,
+    conflicting): one `for-each-ref` carrying `%(upstream:track)` and `%(ahead-behind:main)`
+    answered every branch in 16.8 ms; the `[gone]` branch read `1 0` with an empty tree answer from
+    ancestry and was merged only by the M4 rule; `merge-tree --write-tree main <b>` returned main's
+    tree for the squash-landed branch, a different tree for the unlanded branch, and exit 1 for the
+    conflicting branch; `git symbolic-ref refs/remotes/origin/HEAD` returned
+    `refs/remotes/origin/main`.
+
 ### Still open
 
 **Is M1's criterion 5 closable as written, and should it be restated?** Raised by the twelfth M1
