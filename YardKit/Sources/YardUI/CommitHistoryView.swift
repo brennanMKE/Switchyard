@@ -69,6 +69,18 @@ public struct CommitHistoryView: View {
                 .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 8))
                 .listRowSeparator(.hidden)
         }
+        // #0377: with a row selected, Edit ▸ Copy (⌘C) puts that commit's
+        // full oid on the pasteboard. The context menu copies the *clicked*
+        // row's oid even when another row is selected; when #0359 lands, its
+        // CommitActionMenuItems goes below the button, after a Divider().
+        .copyable(selection.map { [$0] } ?? [])
+        .contextMenu(forSelectionType: String.self) { clicked in
+            if clicked.count == 1, let oid = clicked.first {
+                Button("Copy Commit ID") {
+                    CommitIDPasteboard.copy(oid)
+                }
+            }
+        }
     }
 }
 
