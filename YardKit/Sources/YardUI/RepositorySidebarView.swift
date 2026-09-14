@@ -26,6 +26,15 @@
 // decision's synchronous-load budget); the content pass is a background
 // `.task` (`BranchStatus.contentPass`) that fills the merged answers after
 // the rows appear -- content-dependent rows read *unknown* until it lands.
+// #0378: a filter field at the top of the sidebar (`.searchable`, sidebar
+// placement) narrows the three ref sections as the user types -- case- and
+// diacritic-insensitive substring on the short ref name (`RefFilter`).
+// While the query is significant the non-ref sections (HEAD, Worktrees,
+// Rerere, Stashes) are hidden so the list shows only results, every ref
+// section with matches renders expanded regardless of its stored state
+// (via `.constant`, which never writes the binding), and an empty result
+// set shows `ContentUnavailableView.search`. Clearing the field restores
+// the stored expansion -- filtering never mutates it.
 
 import SwiftUI
 import YardGit
@@ -75,6 +84,9 @@ public struct RepositorySidebarView: View {
     /// until the pass lands after the sidebar appears -- content-dependent
     /// merged answers read *unknown* until then, never blocking the rows.
     @State private var contentStates: [String: BranchStatus.MergedState]?
+    /// #0378: the filter field's text. Empty or all-whitespace means no
+    /// filtering; anything else narrows the three ref sections.
+    @State private var refFilter = ""
 
     public init(
         summary: RepositorySidebarSummary, stashCount: Int,
@@ -109,9 +121,15 @@ public struct RepositorySidebarView: View {
     }
 
     private var branches: [RefSnapshot.Entry] {
-        Self.sortedBranches(
-            summary.refs.refs.filter { $0.name.hasPrefix(Self.headsPrefix) },
-            currentBranchName: currentBranchName
+        // #0378: sort first (#0371), then filter -- the current branch stays
+        // first among the matches.
+        Self.filtered(
+            Self.sortedBranches(
+                summary.refs.refs.filter { $0.name.hasPrefix(Self.headsPrefix) },
+                currentBranchName: currentBranchName
+            ),
+            prefix: Self.headsPrefix,
+            query: refFilter
         )
     }
 
@@ -197,16 +215,41 @@ public struct RepositorySidebarView: View {
         }
     }
 
+    /// #0378: the entries whose *short* name -- the ref name minus `prefix`
+    /// -- survives the filter (`RefFilter.matches`). An empty or all-whitespace
+    /// query returns every entry unchanged, so the unfiltered layout is a
+    /// fixed point. Callers pre-filter by prefix, as the accessors below do.
+    /// `nonisolated` on purpose, like `sortedBranches` above.
+    public nonisolated static func filtered(
+        _ entries: [RefSnapshot.Entry], prefix: String, query: String
+    ) -> [RefSnapshot.Entry] {
+        entries.filter { RefFilter.matches(String($0.name.dropFirst(prefix.count)), query: query) }
+    }
+
     private var remotes: [RefSnapshot.Entry] {
-        summary.refs.refs
-            .filter { $0.name.hasPrefix(Self.remotesPrefix) }
-            .sorted { $0.name < $1.name }
+        Self.filtered(
+            summary.refs.refs
+                .filter { $0.name.hasPrefix(Self.remotesPrefix) }
+                .sorted { $0.name < $1.name },
+            prefix: Self.remotesPrefix,
+            query: refFilter
+        )
     }
 
     private var tags: [RefSnapshot.Entry] {
-        summary.refs.refs
-            .filter { $0.name.hasPrefix(Self.tagsPrefix) }
-            .sorted { $0.name < $1.name }
+        Self.filtered(
+            summary.refs.refs
+                .filter { $0.name.hasPrefix(Self.tagsPrefix) }
+                .sorted { $0.name < $1.name },
+            prefix: Self.tagsPrefix,
+            query: refFilter
+        )
+    }
+
+    /// #0378: true while the filter query is significant -- non-empty after
+    /// trimming, the same rule `RefFilter.matches` applies.
+    private var isFiltering: Bool {
+        !refFilter.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     /// The rerere resolutions the Detail pane can show and forget: the
@@ -220,52 +263,67 @@ public struct RepositorySidebarView: View {
 
     public var body: some View {
         List {
-            if isDetached {
+            // #0378: while filtering only the three ref sections show, so
+            // the detached-HEAD banner hides with the other non-ref
+            // sections and comes back when the field clears.
+            if !isFiltering && isDetached {
                 Section("HEAD") {
                     Label("Detached HEAD", systemImage: "arrow.triangle.branch")
                         .foregroundStyle(.secondary)
                 }
             }
             if !branches.isEmpty {
-                Section("Branches", isExpanded: $branchesExpanded) {
+                // #0378: while filtering the section renders expanded
+                // regardless of the stored binding -- `.constant` never
+                // writes it, so clearing the field restores the user's
+                // stored layout.
+                Section("Branches", isExpanded: isFiltering ? .constant(true) : $branchesExpanded) {
                     ForEach(branches, id: \.name) { entry in
                         branchRow(entry)
                     }
                 }
             }
             if !remotes.isEmpty {
-                Section("Remotes", isExpanded: $remotesExpanded) {
+                Section("Remotes", isExpanded: isFiltering ? .constant(true) : $remotesExpanded) {
                     ForEach(remotes, id: \.name) { entry in
                         refRow(entry, prefix: Self.remotesPrefix, systemImage: "network")
                     }
                 }
             }
             if !tags.isEmpty {
-                Section("Tags", isExpanded: $tagsExpanded) {
+                Section("Tags", isExpanded: isFiltering ? .constant(true) : $tagsExpanded) {
                     ForEach(tags, id: \.name) { entry in
                         refRow(entry, prefix: Self.tagsPrefix, systemImage: "tag")
                     }
                 }
             }
-            if !summary.worktrees.isEmpty {
-                Section("Worktrees") {
-                    ForEach(Array(summary.worktrees.enumerated()), id: \.offset) { _, entry in
-                        worktreeRow(entry)
+            if isFiltering {
+                // #0378: every ref section came back empty -- no matches.
+                if branches.isEmpty && remotes.isEmpty && tags.isEmpty {
+                    ContentUnavailableView.search(text: refFilter)
+                }
+            } else {
+                if !summary.worktrees.isEmpty {
+                    Section("Worktrees") {
+                        ForEach(Array(summary.worktrees.enumerated()), id: \.offset) { _, entry in
+                            worktreeRow(entry)
+                        }
                     }
                 }
-            }
-            if !recordedResolutions.isEmpty {
-                Section("Rerere") {
-                    ForEach(recordedResolutions, id: \.conflictID) { entry in
-                        rerereRow(entry)
+                if !recordedResolutions.isEmpty {
+                    Section("Rerere") {
+                        ForEach(recordedResolutions, id: \.conflictID) { entry in
+                            rerereRow(entry)
+                        }
                     }
                 }
-            }
-            Section("Stashes") {
-                Text(stashCount == 1 ? "1 stash" : "\(stashCount) stashes")
-                    .foregroundStyle(.secondary)
+                Section("Stashes") {
+                    Text(stashCount == 1 ? "1 stash" : "\(stashCount) stashes")
+                        .foregroundStyle(.secondary)
+                }
             }
         }
+        .searchable(text: $refFilter, placement: .sidebar, prompt: "Filter")
         .listStyle(.sidebar)
         .task(id: summary.currentWorktreePath) {
             // #0372: the synchronous-load read is one `for-each-ref` process
