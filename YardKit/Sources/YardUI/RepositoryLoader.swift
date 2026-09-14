@@ -225,3 +225,30 @@ public func forgetRerereResolution(
 ) async throws -> RerereForgetOutcome {
     try rerereForget(at: path, paths)
 }
+
+/// Runs the split the Split sheet composed (#0375): the change `hunkID`
+/// names becomes the new, older first commit and every other hunk stays in
+/// the second; `first`/`second` of `nil` keep the commit's original
+/// message, which is what the sheet passes for an unedited editor. The
+/// whole rewrite — both halves, the descendant replay and the ref move —
+/// is one `JournalCheckpoint.around(operation: "split")` inside
+/// `Split.run`, so `yard undo` reverses it as a single step.
+///
+/// `Split.run` is synchronous and blocks in git subprocesses;
+/// `@concurrent` keeps all of it off the main actor while the UI awaits —
+/// the same reason `forgetRerereResolution` above carries it.
+///
+/// - Throws: `SplitError` for every typed refusal and mid-run failure
+///   (unknown or stale `hunkID`, fewer than two hunks, a commit off the
+///   ref `HEAD` names, conflicts, a signing failure), or
+///   `GitProcess.Failure` for anything else.
+@concurrent
+public func splitCommit(
+    at path: String,
+    commit: String,
+    hunkID: String,
+    first: String?,
+    second: String?
+) async throws -> Split.Result {
+    try Split.run(commit: commit, hunkID: hunkID, first: first, second: second, at: path)
+}

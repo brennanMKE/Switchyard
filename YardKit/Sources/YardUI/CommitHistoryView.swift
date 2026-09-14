@@ -32,16 +32,23 @@ public struct CommitHistoryView: View {
     /// leaves every node and edge unowned, drawing `.secondary` as before,
     /// every edge solid and every row at full opacity.
     private let refs: RefSnapshot?
+    /// #0375: called with the clicked row's oid when the context menu's
+    /// Split… item is chosen; the caller opens the Split sheet for it.
+    /// `nil` — previews and callers that offer no sheet — leaves the item
+    /// inert. #0359's `CommitActionMenuItems` replaces this minimal item.
+    private let onSplit: ((String) -> Void)?
     @Binding private var selection: String?
 
     public init(
         entries: [CommitLogEntry], graphRows: [GraphRow] = [], headOid: String? = nil,
-        refs: RefSnapshot? = nil, selection: Binding<String?>
+        refs: RefSnapshot? = nil, onSplit: ((String) -> Void)? = nil,
+        selection: Binding<String?>
     ) {
         self.entries = entries
         self.graphRows = graphRows
         self.headOid = headOid
         self.refs = refs
+        self.onSplit = onSplit
         self._selection = selection
     }
 
@@ -71,13 +78,21 @@ public struct CommitHistoryView: View {
         }
         // #0377: with a row selected, Edit ▸ Copy (⌘C) puts that commit's
         // full oid on the pasteboard. The context menu copies the *clicked*
-        // row's oid even when another row is selected; when #0359 lands, its
-        // CommitActionMenuItems goes below the button, after a Divider().
+        // row's oid even when another row is selected; #0375's Split… item
+        // sits below the button, after a Divider(), the shape #0359's
+        // CommitActionMenuItems takes over when it lands.
         .copyable(selection.map { [$0] } ?? [])
         .contextMenu(forSelectionType: String.self) { clicked in
             if clicked.count == 1, let oid = clicked.first {
                 Button("Copy Commit ID") {
                     CommitIDPasteboard.copy(oid)
+                }
+                Divider()
+                // #0375: opens the Split sheet for this commit. Availability
+                // is decided inside the sheet — a commit with fewer than two
+                // hunks shows its "nothing to split" state there.
+                Button("Split…") {
+                    onSplit?(oid)
                 }
             }
         }

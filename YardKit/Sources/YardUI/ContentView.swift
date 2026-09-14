@@ -82,6 +82,22 @@ public struct ContentView: View {
     /// of a blank diff.
     @State private var selectedCommitDiffError: String?
 
+    /// #0375: the commit the Split sheet is open for — `nil` when it is
+    /// not. The subject and message are resolved from `history` at menu
+    /// time and carried by the request, so a refresh while the sheet is
+    /// open cannot change them.
+    @State private var splitRequest: SplitCommitRequest?
+
+    /// #0375: set when the split the sheet requested fails — shown as the
+    /// failure alert. #0359's runner takes this over when it lands.
+    @State private var splitError: String?
+
+    /// #0375: true while the split the sheet requested runs. The sheet has
+    /// already dismissed, so a second Split… while one runs is dropped
+    /// rather than queued — the running one refreshes the panes when it
+    /// finishes. #0359's busy state takes this over when it lands.
+    @State private var isSplitting = false
+
     /// #0081's Sidebar pane content: refs and worktrees, loaded alongside
     /// the summary. `nil` while loading -- `sidebarPane` shows a spinner
     /// rather than an empty list in that window.
@@ -281,6 +297,31 @@ public struct ContentView: View {
         )) { paneModel in
             ResolvePane(model: paneModel)
         }
+        // #0375: the Split sheet, for the commit the History context menu's
+        // Split… item named. Choosing Split dismisses the sheet first, then
+        // runs `Split.run` — one journal checkpoint, undoable — through the
+        // `@concurrent` loader; a failure shows the alert, a success
+        // refreshes the panes and selects the second half.
+        .sheet(item: $splitRequest) { request in
+            SplitCommitSheet(
+                commit: request.commit,
+                subject: request.subject,
+                repositoryPath: repositoryPath ?? "",
+                originalMessage: request.message,
+                onSplit: { arguments in
+                    splitRequest = nil
+                    Task { await runSplit(arguments) }
+                },
+                onCancel: { splitRequest = nil })
+        }
+        .alert("Couldn’t Split Commit", isPresented: Binding(
+            get: { splitError != nil },
+            set: { if !$0 { splitError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(splitError ?? "")
+        }
     }
 
     private func repositoryView(summary: RepositorySummary) -> some View {
@@ -335,6 +376,7 @@ public struct ContentView: View {
             entries: history, graphRows: graphRows,
             headOid: summary.whereAmI.rawHead.isEmpty ? nil : summary.whereAmI.rawHead,
             refs: sidebar?.refs,
+            onSplit: { oid in beginSplit(of: oid) },
             selection: Binding(
                 get: { selectedCommit },
                 set: { newValue in
@@ -512,6 +554,63 @@ public struct ContentView: View {
     /// keeps showing the forgotten resolution from its held entry.
     private func reloadSidebarAfterForget() async {
         guard let repositoryPath else { return }
+        sidebar = try? await loadRepositorySidebar(at: repositoryPath)
+    }
+
+    /// #0375: opens the Split sheet for the commit the context menu named.
+    /// The subject and full message are resolved from `history` now and
+    /// carried by the request; a commit no longer in `history` still opens
+    /// the sheet — it falls back to the oid as its subject and lets the
+    /// diff load answer whether anything is there to split.
+    private func beginSplit(of oid: String) {
+        guard !isSplitting else { return }
+        let entry = history.first(where: { $0.oid == oid })
+        splitRequest = SplitCommitRequest(
+            commit: oid,
+            subject: entry?.subject ?? oid,
+            message: entry?.message ?? "")
+    }
+
+    /// #0375: runs the split the sheet composed, after the sheet has
+    /// dismissed. `Split.run` performs the whole rewrite inside one journal
+    /// checkpoint, so `yard undo` reverses it as a single step. On failure
+    /// the alert names the typed error; on success the selection moves to
+    /// the second half — the remaining changes — and the panes refresh
+    /// without `reload()`'s clear-everything flicker.
+    private func runSplit(_ arguments: SplitArguments) async {
+        guard let repositoryPath else { return }
+        isSplitting = true
+        defer { isSplitting = false }
+        do {
+            let result = try await splitCommit(
+                at: repositoryPath,
+                commit: arguments.commit,
+                hunkID: arguments.hunkID,
+                first: arguments.firstMessage,
+                second: arguments.secondMessage)
+            selectedResolution = nil
+            selectedCommit = result.second
+            await reloadAfterRewrite()
+        } catch {
+            splitError = String(describing: error)
+        }
+    }
+
+    /// #0375: refreshes the panes after the rewrite. `reload()` clears
+    /// every selection and drops the window to the Loading spinner — the
+    /// exact flicker a history rewrite must not cause — so this reloads
+    /// the same four loads in place, error handling matching `reload()`'s:
+    /// a summary failure shows the error state, the other three degrade to
+    /// empty rather than blanking the window.
+    private func reloadAfterRewrite() async {
+        guard let repositoryPath else { return }
+        do {
+            summary = try await loadRepositorySummary(at: repositoryPath)
+        } catch {
+            errorMessage = String(describing: error)
+        }
+        history = (try? await loadCommitHistory(at: repositoryPath)) ?? []
+        graphRows = (try? await loadCommitGraph(at: repositoryPath)) ?? []
         sidebar = try? await loadRepositorySidebar(at: repositoryPath)
     }
 }
