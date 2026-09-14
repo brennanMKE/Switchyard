@@ -27,6 +27,7 @@ private func summary(branch: String?) -> RepositorySummary {
             isMidRebase: false,
             isMidMerge: false,
             isMidCherryPick: false,
+            isMidRevert: false,
             stashCount: 0,
             untrackedCount: 0,
             unstagedCount: 0,
