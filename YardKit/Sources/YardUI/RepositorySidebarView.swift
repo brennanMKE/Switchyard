@@ -6,19 +6,27 @@
 //
 // Re-scoped 2026-08-18 for the MVP (see issue 0081's "Re-scoped" section):
 // selection does not switch tab context (no tabs yet, #0079), there is no
-// live reload on external ref changes (#0217), per-worktree ahead/behind and
-// attached agent sessions are not shown, and sections are plain `Section`s
-// rather than `DisclosureGroup` -- collapsing is dropped rather than costing
-// a round.
+// live reload on external ref changes (#0217), and per-worktree ahead/behind
+// and attached agent sessions are not shown.
+//
+// #0371: the ref sections collapse again -- the MVP dropped collapsing and
+// used plain `Section`s throughout. Branches, Remotes and Tags now use
+// `Section(_:isExpanded:)` (Branches expanded, Remotes and Tags collapsed by
+// default); Worktrees, Rerere and Stashes stay plain. Whether the disclosure
+// renders correctly on macOS 26 is spike #0386's question, whose failure
+// branch is `DisclosureGroup`. Expansion state is per window and
+// deliberately not persisted.
 
 import SwiftUI
 import YardGit
 
 /// Branches, remotes, tags, worktrees, and a stash count for one repository.
 ///
-/// A `List` of plain `Section`s, not `DisclosureGroup`: `List` already gives
-/// scrolling and row selection for free, and per-issue scoping, a
-/// collapse/expand model was dropped rather than costing a round.
+/// A `List` whose three ref sections -- Branches, Remotes, Tags -- collapse
+/// via `Section(_:isExpanded:)` (#0371); every other section stays a plain
+/// `Section`. `List` already gives scrolling and row selection for free.
+/// Expansion state is per window and not persisted across launches,
+/// deliberately (#0371).
 public struct RepositorySidebarView: View {
     private let summary: RepositorySidebarSummary
     private let stashCount: Int
@@ -29,6 +37,22 @@ public struct RepositorySidebarView: View {
     /// commit selection.
     @Binding private var selectedResolution: String?
 
+    /// #0371: the ref sections' initial expansion state. Branches opens so
+    /// the current branch is visible without a click; Remotes and Tags start
+    /// collapsed -- Switchyard measures 309 local and 294 remote-tracking
+    /// refs, so a fully open sidebar is effectively unreachable. Per window;
+    /// deliberately not persisted across launches. `nonisolated` on purpose:
+    /// inert constants, asserted by tests running off the main actor.
+    public nonisolated static let branchesStartExpanded = true
+    public nonisolated static let remotesStartExpanded = false
+    public nonisolated static let tagsStartExpanded = false
+
+    /// The three ref sections' live expansion state, seeded from the
+    /// `*StartExpanded` constants above.
+    @State private var branchesExpanded = RepositorySidebarView.branchesStartExpanded
+    @State private var remotesExpanded = RepositorySidebarView.remotesStartExpanded
+    @State private var tagsExpanded = RepositorySidebarView.tagsStartExpanded
+
     public init(
         summary: RepositorySidebarSummary, stashCount: Int,
         selectedResolution: Binding<String?>
@@ -38,9 +62,14 @@ public struct RepositorySidebarView: View {
         self._selectedResolution = selectedResolution
     }
 
-    private static let headsPrefix = "refs/heads/"
-    private static let remotesPrefix = "refs/remotes/"
-    private static let tagsPrefix = "refs/tags/"
+    // `nonisolated`: inert String constants, read by the `nonisolated`
+    // `sortedBranches` below -- under YardUI's default isolation an
+    // unannotated static is MainActor-isolated, and a nonisolated reader of
+    // a MainActor static traps at runtime (see RepositoryOpener.swift's
+    // `nonisolated` statics for the same reasoning).
+    private nonisolated static let headsPrefix = "refs/heads/"
+    private nonisolated static let remotesPrefix = "refs/remotes/"
+    private nonisolated static let tagsPrefix = "refs/tags/"
 
     /// `HEAD`'s current branch name, from `RefSnapshot.head`. `nil` on a
     /// detached `HEAD` -- `isDetached` below covers that case explicitly
@@ -57,9 +86,35 @@ public struct RepositorySidebarView: View {
     }
 
     private var branches: [RefSnapshot.Entry] {
-        summary.refs.refs
-            .filter { $0.name.hasPrefix(Self.headsPrefix) }
-            .sorted { $0.name < $1.name }
+        Self.sortedBranches(
+            summary.refs.refs.filter { $0.name.hasPrefix(Self.headsPrefix) },
+            currentBranchName: currentBranchName
+        )
+    }
+
+    /// #0371: branch order -- the current branch first, the rest by full ref
+    /// name. `currentBranchName` is the short name from `RefSnapshot.head`;
+    /// `nil` (a detached `HEAD`) or a name with no matching ref yields a
+    /// plain name sort. The tuple comparison ranks the current branch's
+    /// `(0, name)` ahead of every other branch's `(1, name)`.
+    /// `nonisolated` on purpose: a pure function on inert value data, so
+    /// tests and callers off the main actor can use it without an isolation
+    /// trap (same reasoning as `RepositoryOpener`'s statics).
+    public nonisolated static func sortedBranches(
+        _ entries: [RefSnapshot.Entry], currentBranchName: String?
+    ) -> [RefSnapshot.Entry] {
+        let currentRef = currentBranchName.map { headsPrefix + $0 }
+        return entries.sorted {
+            ($0.name == currentRef ? 0 : 1, $0.name) < ($1.name == currentRef ? 0 : 1, $1.name)
+        }
+    }
+
+    /// #0371: every ref row's help text is the entry's full ref name, so a
+    /// row the sidebar truncates can be read in full on hover. The label
+    /// shows the short name; the help shows `entry.name`. `nonisolated` on
+    /// purpose, like `sortedBranches` above.
+    public nonisolated static func helpText(for entry: RefSnapshot.Entry) -> String {
+        entry.name
     }
 
     private var remotes: [RefSnapshot.Entry] {
@@ -92,25 +147,23 @@ public struct RepositorySidebarView: View {
                 }
             }
             if !branches.isEmpty {
-                Section("Branches") {
+                Section("Branches", isExpanded: $branchesExpanded) {
                     ForEach(branches, id: \.name) { entry in
                         branchRow(entry)
                     }
                 }
             }
             if !remotes.isEmpty {
-                Section("Remotes") {
+                Section("Remotes", isExpanded: $remotesExpanded) {
                     ForEach(remotes, id: \.name) { entry in
-                        refRow(name: String(entry.name.dropFirst(Self.remotesPrefix.count)),
-                               systemImage: "network")
+                        refRow(entry, prefix: Self.remotesPrefix, systemImage: "network")
                     }
                 }
             }
             if !tags.isEmpty {
-                Section("Tags") {
+                Section("Tags", isExpanded: $tagsExpanded) {
                     ForEach(tags, id: \.name) { entry in
-                        refRow(name: String(entry.name.dropFirst(Self.tagsPrefix.count)),
-                               systemImage: "tag")
+                        refRow(entry, prefix: Self.tagsPrefix, systemImage: "tag")
                     }
                 }
             }
@@ -138,16 +191,20 @@ public struct RepositorySidebarView: View {
 
     /// A branch row, with the current branch (`currentBranchName`) marked by
     /// a filled checkmark instead of the plain branch glyph every other row
-    /// uses.
+    /// uses, and the full ref name as help text (#0371).
     private func branchRow(_ entry: RefSnapshot.Entry) -> some View {
         let name = String(entry.name.dropFirst(Self.headsPrefix.count))
         let isCurrent = !isDetached && name == currentBranchName
         return Label(name, systemImage: isCurrent ? "checkmark.circle.fill" : "arrow.triangle.branch")
             .fontWeight(isCurrent ? .semibold : .regular)
+            .help(Self.helpText(for: entry))
     }
 
-    private func refRow(name: String, systemImage: String) -> some View {
-        Label(name, systemImage: systemImage)
+    /// A remote or tag row: the ref name minus its prefix as the label, the
+    /// full ref name as help text (#0371).
+    private func refRow(_ entry: RefSnapshot.Entry, prefix: String, systemImage: String) -> some View {
+        Label(String(entry.name.dropFirst(prefix.count)), systemImage: systemImage)
+            .help(Self.helpText(for: entry))
     }
 
     /// A worktree row. The current worktree -- the one `ContentView` opened
