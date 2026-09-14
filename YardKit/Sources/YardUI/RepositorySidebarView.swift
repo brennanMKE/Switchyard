@@ -16,6 +16,16 @@
 // renders correctly on macOS 26 is spike #0386's question, whose failure
 // branch is `DisclosureGroup`. Expansion state is per window and
 // deliberately not persisted.
+//
+// #0372: local branch rows carry a trailing status -- the branch's
+// ahead/behind and its merged state, as guide §11 decision 27 defines them
+// (A3: against the upstream when set, else the default branch, the baseline
+// named; M6: merged by ancestry, else upstream-gone, else content, with
+// *unknown* for conflicts). The status read is one `for-each-ref` process
+// run when the opened worktree path changes (`BranchStatus.read`, the
+// decision's synchronous-load budget); the content pass is a background
+// `.task` (`BranchStatus.contentPass`) that fills the merged answers after
+// the rows appear -- content-dependent rows read *unknown* until it lands.
 
 import SwiftUI
 import YardGit
@@ -52,6 +62,19 @@ public struct RepositorySidebarView: View {
     @State private var branchesExpanded = RepositorySidebarView.branchesStartExpanded
     @State private var remotesExpanded = RepositorySidebarView.remotesStartExpanded
     @State private var tagsExpanded = RepositorySidebarView.tagsStartExpanded
+
+    /// #0372: the per-branch ahead/behind + upstream state behind the local
+    /// branch rows' trailing status -- the one-process `for-each-ref` read
+    /// (`BranchStatus.read`, decision 27's sidebar-load budget). `nil` until
+    /// it lands, and whenever the read fails: rows then carry no numbers.
+    /// Reloaded whenever the opened worktree path changes.
+    @State private var branchStatus: BranchStatus.Report?
+
+    /// #0372: the background `merge-tree --write-tree` content pass's
+    /// answers, keyed by full ref name (`BranchStatus.contentPass`). `nil`
+    /// until the pass lands after the sidebar appears -- content-dependent
+    /// merged answers read *unknown* until then, never blocking the rows.
+    @State private var contentStates: [String: BranchStatus.MergedState]?
 
     public init(
         summary: RepositorySidebarSummary, stashCount: Int,
@@ -115,6 +138,63 @@ public struct RepositorySidebarView: View {
     /// purpose, like `sortedBranches` above.
     public nonisolated static func helpText(for entry: RefSnapshot.Entry) -> String {
         entry.name
+    }
+
+    /// #0372: a local branch row's trailing status -- the A3 ahead/behind
+    /// with the baseline named, then the M6 merged state, joined with a
+    /// middle dot -- or `nil` when the status read has not landed or has no
+    /// row for this ref. Merged answers the composite can reach without the
+    /// content pass (ancestry, upstream-gone) show as soon as the read
+    /// lands; content-dependent branches read *unknown* until the
+    /// background pass fills `content`. `nonisolated` on purpose, like
+    /// `helpText` above: pure text over inert value data, so tests and
+    /// callers off the main actor can use it.
+    public nonisolated static func branchStatusText(
+        for entry: RefSnapshot.Entry,
+        report: BranchStatus.Report?,
+        content: [String: BranchStatus.MergedState]?
+    ) -> String? {
+        guard let report, let row = report.row(forBranchNamed: entry.name) else { return nil }
+        var parts: [String] = []
+        if let aheadBehind = aheadBehindText(for: row) { parts.append(aheadBehind) }
+        parts.append(mergedText(BranchStatus.mergedState(for: row, content: content ?? [:])))
+        return parts.joined(separator: " · ")
+    }
+
+    /// #0372: the A3 numbers with the baseline named -- decision 27 requires
+    /// the row to say which branch the numbers are against, because ahead of
+    /// the upstream returns to 0 on push while ahead of the default never
+    /// returns to 0 after a squash landing. `nil` when the row has no
+    /// resolvable numbers (no upstream set and no measurable default branch).
+    public nonisolated static func aheadBehindText(for row: BranchStatus.Row) -> String? {
+        guard let ahead = row.ahead, let behind = row.behind else { return nil }
+        let baseline = row.baseline.displayName
+        let counts: String
+        switch (ahead, behind) {
+        case (0, 0):
+            counts = "in sync"
+        case (0, let b):
+            counts = "↓\(b)"
+        case (let a, 0):
+            counts = "↑\(a)"
+        case (let a, let b):
+            counts = "↑\(a)↓\(b)"
+        }
+        return "\(counts) vs \(baseline)"
+    }
+
+    /// #0372: the M6 merged-state word. `unknown` is honest, not a failure:
+    /// a conflict answer and an unlanded content pass are both shown as
+    /// unknown rather than guessed at (decision 27).
+    public nonisolated static func mergedText(_ state: BranchStatus.MergedState) -> String {
+        switch state {
+        case .merged:
+            return "merged"
+        case .notMerged:
+            return "not merged"
+        case .unknown:
+            return "unknown"
+        }
     }
 
     private var remotes: [RefSnapshot.Entry] {
@@ -187,17 +267,42 @@ public struct RepositorySidebarView: View {
             }
         }
         .listStyle(.sidebar)
+        .task(id: summary.currentWorktreePath) {
+            // #0372: the synchronous-load read is one `for-each-ref` process
+            // (decision 27's budget); the content pass is the background
+            // fill that lands after the rows appear. Both reset on a path
+            // change -- a repository switch must not show the previous
+            // repository's numbers for a moment.
+            guard let path = summary.currentWorktreePath else { return }
+            branchStatus = nil
+            contentStates = nil
+            guard let report = try? await BranchStatus.read(at: path) else { return }
+            branchStatus = report
+            contentStates = try? await BranchStatus.contentPass(for: report, at: path)
+        }
     }
 
-    /// A branch row, with the current branch (`currentBranchName`) marked by
-    /// a filled checkmark instead of the plain branch glyph every other row
-    /// uses, and the full ref name as help text (#0371).
+    /// A branch row: the branch glyph (a filled checkmark for the current
+    /// branch), the short name, and -- #0372 -- the trailing status text
+    /// (`branchStatusText`): ahead/behind with the baseline named, then the
+    /// merged state. The full ref name stays the help text (#0371).
     private func branchRow(_ entry: RefSnapshot.Entry) -> some View {
         let name = String(entry.name.dropFirst(Self.headsPrefix.count))
         let isCurrent = !isDetached && name == currentBranchName
-        return Label(name, systemImage: isCurrent ? "checkmark.circle.fill" : "arrow.triangle.branch")
-            .fontWeight(isCurrent ? .semibold : .regular)
-            .help(Self.helpText(for: entry))
+        let status = Self.branchStatusText(
+            for: entry, report: branchStatus, content: contentStates)
+        return HStack(spacing: 8) {
+            Label(name, systemImage: isCurrent ? "checkmark.circle.fill" : "arrow.triangle.branch")
+                .fontWeight(isCurrent ? .semibold : .regular)
+            if let status {
+                Spacer(minLength: 8)
+                Text(status)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+        }
+        .help(Self.helpText(for: entry))
     }
 
     /// A remote or tag row: the ref name minus its prefix as the label, the

@@ -194,6 +194,12 @@ struct ExitClassCoverageTests {
             // failure, the same class as RefSnapshot.Error's malformed ref line.
             Row("ReviewNotes.Error", ReviewNotes.Error.malformedNotesListLine("bad line"),
                 .repositoryError),
+            // #0372: an unparseable for-each-ref status line is a
+            // repository-state failure, the same class as RefSnapshot.Error's
+            // malformed ref line — a silently dropped row is a silently
+            // wrong sidebar.
+            Row("BranchStatus.Error", BranchStatus.Error.malformedStatusLine("bad line"),
+                .repositoryError),
         ]
     }
 

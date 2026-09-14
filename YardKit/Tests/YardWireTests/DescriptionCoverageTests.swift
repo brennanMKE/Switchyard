@@ -84,6 +84,11 @@ struct DescriptionCoverageTests {
             Row("Blame.swift", "BlameParser.Failure",
                 BlameParser.Failure.truncatedEntry(oid: oid1),
                 .carries([oid1])),
+            // #0372: an unparseable for-each-ref status line names the line,
+            // the same shape as RefSnapshot.Error's malformed ref line.
+            Row("BranchStatus.swift", "BranchStatus.Error",
+                BranchStatus.Error.malformedStatusLine("probe bad status line"),
+                .carries(["for-each-ref status line", "probe bad status line"])),
             Row("CommitCreate.swift", "CommitCreate.Failure",
                 CommitCreate.Failure.signingFailed(reason: "probe gpg refused the data"),
                 .carries(["signing failed", "probe gpg refused the data"])),
