@@ -8,12 +8,12 @@
 // name so the next guard (#0183 asks the same question for `Equatable`)
 // extends a call site instead of copying a scanner.
 //
-// It fails closed the same way #0181's embedded scanner does: exactly three
+// It fails closed the same way #0181's embedded scanner does: exactly four
 // line shapes are recognised — a comment, a declaration-site conformance,
-// an extension-site conformance — plus the protocol's own declaration, and
-// every other line naming the protocol is reported as unrecognized, so a
-// conformance shape the scanner cannot parse turns a guard red rather than
-// becoming a silently missed conformer.
+// an extension-site conformance, a dynamic-cast usage — plus the protocol's
+// own declaration, and every other line naming the protocol is reported as
+// unrecognized, so a conformance shape the scanner cannot parse turns a
+// guard red rather than becoming a silently missed conformer.
 
 import Foundation
 import Testing
@@ -39,6 +39,12 @@ struct ConformanceScan {
     struct Result {
         var declarationSites: Set<Site> = []
         var extensionSites: Set<Site> = []
+        /// Lines that name the protocol only inside a dynamic cast
+        /// (`error as? any ExitClassCarrying`) — a usage, never an
+        /// adoption: a cast can conform nothing, so these are accounted
+        /// here instead of turning the unrecognized guard red (#0359's UI
+        /// reads a carried exit class this way, the first of the shape).
+        var castSites: [String] = []
         var protocolDeclarations = 0
         var unrecognized: [String] = []
         var duplicates: [String] = []
@@ -58,6 +64,8 @@ struct ConformanceScan {
             "^(?:public\\s+)?extension\\s+\(typeName)\\s*:[^{]*\\b\(escaped)\\b")
         let protocolDeclaration = try Regex(
             "^(?:public\\s+)?protocol\\s+\(escaped)\\b")
+        let castSite = try Regex(
+            "\\bas\\?\\s+(?:any\\s+)?\(escaped)\\b")
 
         var result = Result()
         let enumerator = try #require(
@@ -77,6 +85,8 @@ struct ConformanceScan {
                            into: &result.extensionSites, duplicates: &result.duplicates)
                 } else if try protocolDeclaration.firstMatch(in: trimmed) != nil {
                     result.protocolDeclarations += 1
+                } else if try castSite.firstMatch(in: trimmed) != nil {
+                    result.castSites.append("\(url.lastPathComponent):\(index + 1)")
                 } else {
                     result.unrecognized.append("\(url.lastPathComponent):\(index + 1): \(trimmed)")
                 }

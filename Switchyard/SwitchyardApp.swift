@@ -52,9 +52,14 @@ struct SwitchyardApp: App {
         .handlesExternalEvents(matching: Set())
         // #0084: File ▸ Open… and Open Recent, both funnelled through
         // `RepositoryOpener`. Pure menu declarations; the focus-or-open
-        // behaviour lives in YardUI.
+        // behaviour lives in YardUI. #0359 adds the Commit menu — the same
+        // `CommitActionMenuItems` the History row's context menu renders,
+        // acting on the focused window's selected commit, which is what
+        // makes the menu's key equivalents real (#0382's spike covers the
+        // context menu's own equivalents).
         .commands {
             SwitchyardCommands()
+            CommitCommands()
         }
 
         // #0352: the Settings scene (Cmd-,). The CLI install section and the

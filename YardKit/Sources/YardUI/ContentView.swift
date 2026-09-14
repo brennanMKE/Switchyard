@@ -88,15 +88,30 @@ public struct ContentView: View {
     /// open cannot change them.
     @State private var splitRequest: SplitCommitRequest?
 
-    /// #0375: set when the split the sheet requested fails — shown as the
-    /// failure alert. #0359's runner takes this over when it lands.
-    @State private var splitError: String?
+    /// #0359: the action running right now, `nil` when none. Feeds the
+    /// menu's `isBusy` — every item disables with "Another operation is
+    /// still running" — and the header's progress line. `defer` clears it
+    /// on every exit; there is no Cancel button, because the engine calls
+    /// are synchronous and cannot be cancelled, and signing may raise a
+    /// prompt the user must be able to reach.
+    @State private var runningAction: CommitAction?
 
-    /// #0375: true while the split the sheet requested runs. The sheet has
-    /// already dismissed, so a second Split… while one runs is dropped
-    /// rather than queued — the running one refreshes the panes when it
-    /// finishes. #0359's busy state takes this over when it lands.
-    @State private var isSplitting = false
+    /// #0359: set when a commit action's engine call throws — shown as the
+    /// failure alert. #0375's split failure alert folded into this.
+    @State private var actionFailure: CommitActionFailure?
+
+    /// #0359: the pending prompt from the commit action menu — the sheet
+    /// for Edit Message, Squash with Parent, Add Tag, Create Branch and
+    /// Edit Local Branch. Delete Commit… presents through `pendingDelete`
+    /// below; Split… presents through `splitRequest` above (#0375).
+    @State private var actionPrompt: CommitActionPrompt?
+
+    /// #0359: the acted-on commit's chain index, captured when a prompt
+    /// opens so the post-run selection lands on it at its new position.
+    @State private var actionPromptIndex: Int?
+
+    /// #0359: the pending Delete Commit… confirmation.
+    @State private var pendingDelete: PendingDelete?
 
     /// #0081's Sidebar pane content: refs and worktrees, loaded alongside
     /// the summary. `nil` while loading -- `sidebarPane` shows a spinner
@@ -297,31 +312,34 @@ public struct ContentView: View {
         )) { paneModel in
             ResolvePane(model: paneModel)
         }
-        // #0375: the Split sheet, for the commit the History context menu's
-        // Split… item named. Choosing Split dismisses the sheet first, then
-        // runs `Split.run` — one journal checkpoint, undoable — through the
-        // `@concurrent` loader; a failure shows the alert, a success
-        // refreshes the panes and selects the second half.
-        .sheet(item: $splitRequest) { request in
-            SplitCommitSheet(
-                commit: request.commit,
-                subject: request.subject,
-                repositoryPath: repositoryPath ?? "",
-                originalMessage: request.message,
-                onSplit: { arguments in
-                    splitRequest = nil
-                    Task { await runSplit(arguments) }
-                },
-                onCancel: { splitRequest = nil })
-        }
-        .alert("Couldn’t Split Commit", isPresented: Binding(
-            get: { splitError != nil },
-            set: { if !$0 { splitError = nil } }
-        )) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(splitError ?? "")
-        }
+        .modifier(CommitActionOverlays(
+            splitRequest: $splitRequest,
+            actionPrompt: $actionPrompt,
+            actionPromptIndex: $actionPromptIndex,
+            pendingDelete: $pendingDelete,
+            actionFailure: $actionFailure,
+            commitMenuTarget: commitMenuTarget,
+            repositoryPath: repositoryPath,
+            branchName: summary?.whereAmI.branch,
+            onPromptRequest: { request in
+                actionPrompt = nil
+                let index = actionPromptIndex ?? 0
+                actionPromptIndex = nil
+                run(request, CommitAction.action(of: request), fromIndex: index)
+            },
+            onPromptCancel: {
+                actionPrompt = nil
+                actionPromptIndex = nil
+            },
+            onDeleteConfirmed: { delete in
+                pendingDelete = nil
+                let index = chainIndex(of: delete.commit) ?? 0
+                run(.delete(commit: delete.commit), .delete, fromIndex: index)
+            },
+            onSplit: { arguments in
+                splitRequest = nil
+                Task { await runSplit(arguments) }
+            }))
     }
 
     private func repositoryView(summary: RepositorySummary) -> some View {
@@ -329,6 +347,21 @@ public struct ContentView: View {
             RepositoryHeaderView(whereAmI: summary.whereAmI)
                 .padding()
             Divider()
+            // #0359: the running action's progress line. No modal and no
+            // Cancel button — signing can take seconds and may raise a
+            // pinentry or agent prompt the user must be able to reach.
+            if let runningAction {
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(runningAction.progressLabel)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 4)
+                Divider()
+            }
             HSplitView {
                 sidebarPane(summary: summary)
                     .frame(minWidth: PaneLayout.sidebarMinWidth, maxWidth: .infinity, maxHeight: .infinity)
@@ -370,13 +403,17 @@ public struct ContentView: View {
     /// #0340's commit list with #0052's lane gutter beside it. The
     /// selection binding mirrors `selectedResolution`'s: picking a commit
     /// clears the rerere selection, so the Detail pane always shows
-    /// whichever selection was made last.
+    /// whichever selection was made last. #0359: the row context menu's
+    /// states and actions come from `menuStates`/`perform` below, built
+    /// from this pane's own graph rows and the summary's `WhereAmI`.
     private func historyPane(summary: RepositorySummary) -> some View {
         CommitHistoryView(
             entries: history, graphRows: graphRows,
             headOid: summary.whereAmI.rawHead.isEmpty ? nil : summary.whereAmI.rawHead,
             refs: sidebar?.refs,
-            onSplit: { oid in beginSplit(of: oid) },
+            branchName: summary.whereAmI.branch,
+            menuStates: { oid in menuStates(for: oid, summary: summary) },
+            perform: { action, oid in perform(action, oid, summary: summary) },
             selection: Binding(
                 get: { selectedCommit },
                 set: { newValue in
@@ -557,13 +594,138 @@ public struct ContentView: View {
         sidebar = try? await loadRepositorySidebar(at: repositoryPath)
     }
 
+    // MARK: - #0359: commit actions
+
+    /// #0359: an action is running, or #0375's split is. Feeds the menu's
+    /// `isBusy` — every item disables with "Another operation is still
+    /// running" — so a second action is dropped rather than queued.
+    private var isBusy: Bool { runningAction != nil }
+
+    /// The owners map the row gutter colours with, which the Merge into
+    /// Current Branch and Edit Local Branch rules read: the branch that
+    /// owns a node is the branch Merge merges; a local branch whose tip
+    /// names the node is the one Edit Local Branch edits.
+    private var owners: [String: BranchTip] {
+        guard let refs = sidebar?.refs else { return [:] }
+        return BranchOwnership.owners(in: graphRows, tips: BranchOwnership.tips(from: refs))
+    }
+
+    /// #0359: the menu states for one node — its shape from this pane's
+    /// graph rows, the branch context from the summary's `WhereAmI`, the
+    /// in-progress-operation guards from `TrackingSummary`.
+    private func menuStates(for oid: String, summary: RepositorySummary) -> [CommitActionState] {
+        guard let context = CommitActionContext.make(
+            oid: oid, rows: graphRows, whereAmI: summary.whereAmI,
+            owners: owners, isBusy: isBusy)
+        else {
+            return CommitActionRules.allDisabled(reason: "This commit is no longer in the loaded history")
+        }
+        return CommitActionRules.states(for: context)
+    }
+
+    /// The menu bar's Commit menu target: the selected commit's states and
+    /// the same `perform` the context menu calls, so both menus act
+    /// identically. `nil` — nothing selected, nothing loaded — leaves every
+    /// item disabled with "Select a commit first".
+    private var commitMenuTarget: CommitMenuTarget? {
+        guard let summary, let selectedCommit else { return nil }
+        return CommitMenuTarget(
+            states: menuStates(for: selectedCommit, summary: summary),
+            perform: { action in perform(action, selectedCommit, summary: summary) })
+    }
+
+    /// The acted-on commit's index on `HEAD`'s first-parent chain, captured
+    /// at dispatch time so the post-rewrite selection lands on the acted-on
+    /// commit at its new position.
+    private func chainIndex(of oid: String) -> Int? {
+        guard let summary, !summary.whereAmI.rawHead.isEmpty else { return nil }
+        return FirstParentChain.oids(in: graphRows, from: summary.whereAmI.rawHead)
+            .firstIndex(of: oid)
+    }
+
+    /// #0359: dispatches one menu action for `oid`. The input-free actions
+    /// run at once; the sheet- and confirmation-composed ones open their
+    /// prompts, which call back into `run` with the composed request.
+    private func perform(_ action: CommitAction, _ oid: String, summary: RepositorySummary) {
+        guard !isBusy else { return }
+        let entry = history.first(where: { $0.oid == oid })
+        let subject = entry?.subject ?? oid
+        let chain = summary.whereAmI.rawHead.isEmpty
+            ? [] : FirstParentChain.oids(in: graphRows, from: summary.whereAmI.rawHead)
+        switch action {
+        case .editMessage:
+            actionPromptIndex = chain.firstIndex(of: oid) ?? 0
+            actionPrompt = .editMessage(
+                commit: oid, subject: subject, message: entry?.message ?? "")
+        case .squashIntoParent:
+            // #0374: the engine's pre-fill — the parent's message and this
+            // commit's, combined. The parent is the next commit on the
+            // chain; outside the loaded window it contributes nothing.
+            let parentMessage = chain.count > 1
+                ? history.first(where: { $0.oid == chain[1] })?.message ?? "" : ""
+            actionPromptIndex = chain.firstIndex(of: oid) ?? 0
+            actionPrompt = .squash(
+                commit: oid, subject: subject,
+                message: Squash.combinedMessage(
+                    parent: parentMessage, child: entry?.message ?? ""))
+        case .split:
+            beginSplit(of: oid)
+        case .delete:
+            pendingDelete = PendingDelete(commit: oid, subject: subject)
+        case .addTag:
+            actionPromptIndex = chain.firstIndex(of: oid) ?? 0
+            actionPrompt = .addTag(commit: oid, subject: subject)
+        case .createBranch:
+            actionPromptIndex = chain.firstIndex(of: oid) ?? 0
+            actionPrompt = .createBranch(commit: oid, subject: subject)
+        case .editLocalBranch:
+            guard let branch = owners[oid], !branch.isRemote, branch.oid == oid else { return }
+            actionPromptIndex = chain.firstIndex(of: oid) ?? 0
+            actionPrompt = .renameBranch(old: branch.name, commit: oid, subject: subject)
+        case .fixupIntoParent, .swapWithParent, .swapWithChild, .revert, .cherryPick,
+             .merge, .rebaseOnto, .setBranchTip:
+            guard let request = CommitActionRequest.make(
+                for: action, oid: oid, chain: chain, owners: owners)
+            else { return }
+            run(request, action, fromIndex: chain.firstIndex(of: oid) ?? 0)
+        }
+    }
+
+    /// #0359: runs one engine-backed commit action and refreshes the panes
+    /// in place. The engine call runs inside its own journal checkpoint —
+    /// one undo step, as the CLI verbs are — so this adds no checkpoint of
+    /// its own. On failure the alert names the typed refusal; the refresh
+    /// happens after a failure too, because a conflicted replay leaves the
+    /// repository mid-cherry-pick and only a refresh makes the header say
+    /// so — and the refreshed `WhereAmI` then disables every item with that
+    /// same sentence.
+    private func run(_ request: CommitActionRequest, _ action: CommitAction, fromIndex index: Int) {
+        guard let repositoryPath else { return }
+        runningAction = action
+        Task {
+            defer { runningAction = nil }
+            var succeeded = true
+            do {
+                try await performCommitAction(request, at: repositoryPath)
+            } catch {
+                succeeded = false
+                actionFailure = CommitActionFailure.make(for: action, error: error)
+            }
+            await refreshAfterMutation { rows, newHead in
+                succeeded
+                    ? RewriteSelection.oid(after: action, from: index, rows: rows, newHead: newHead)
+                    : selectedCommit
+            }
+        }
+    }
+
     /// #0375: opens the Split sheet for the commit the context menu named.
     /// The subject and full message are resolved from `history` now and
     /// carried by the request; a commit no longer in `history` still opens
     /// the sheet — it falls back to the oid as its subject and lets the
     /// diff load answer whether anything is there to split.
     private func beginSplit(of oid: String) {
-        guard !isSplitting else { return }
+        guard !isBusy else { return }
         let entry = history.first(where: { $0.oid == oid })
         splitRequest = SplitCommitRequest(
             commit: oid,
@@ -572,46 +734,142 @@ public struct ContentView: View {
     }
 
     /// #0375: runs the split the sheet composed, after the sheet has
-    /// dismissed. `Split.run` performs the whole rewrite inside one journal
-    /// checkpoint, so `yard undo` reverses it as a single step. On failure
-    /// the alert names the typed error; on success the selection moves to
-    /// the second half — the remaining changes — and the panes refresh
-    /// without `reload()`'s clear-everything flicker.
+    /// dismissed, through the same `performCommitAction` path every other
+    /// action takes. `Split.run` performs the whole rewrite inside one
+    /// journal checkpoint, so `yard undo` reverses it as a single step.
+    /// On failure the alert names the typed error; on success the selection
+    /// moves to the second half — the remaining changes, which sit at the
+    /// acted-on commit's old chain index — and the panes refresh in place.
     private func runSplit(_ arguments: SplitArguments) async {
         guard let repositoryPath else { return }
-        isSplitting = true
-        defer { isSplitting = false }
+        let index = chainIndex(of: arguments.commit) ?? 0
+        runningAction = .split
+        defer { runningAction = nil }
         do {
-            let result = try await splitCommit(
-                at: repositoryPath,
-                commit: arguments.commit,
-                hunkID: arguments.hunkID,
-                first: arguments.firstMessage,
-                second: arguments.secondMessage)
-            selectedResolution = nil
-            selectedCommit = result.second
-            await reloadAfterRewrite()
+            try await performCommitAction(
+                .split(
+                    commit: arguments.commit, hunkID: arguments.hunkID,
+                    first: arguments.firstMessage, second: arguments.secondMessage),
+                at: repositoryPath)
+            await refreshAfterMutation { rows, newHead in
+                RewriteSelection.oid(
+                    after: .split, from: index, rows: rows, newHead: newHead)
+            }
         } catch {
-            splitError = String(describing: error)
+            actionFailure = CommitActionFailure.make(for: .split, error: error)
+            await refreshAfterMutation { _, _ in selectedCommit }
         }
     }
 
-    /// #0375: refreshes the panes after the rewrite. `reload()` clears
-    /// every selection and drops the window to the Loading spinner — the
-    /// exact flicker a history rewrite must not cause — so this reloads
-    /// the same four loads in place, error handling matching `reload()`'s:
-    /// a summary failure shows the error state, the other three degrade to
-    /// empty rather than blanking the window.
-    private func reloadAfterRewrite() async {
+    /// #0359: re-reads after an in-app mutation without blanking the
+    /// window: every value loads into a local, then all assignments happen
+    /// together on one main-actor turn. `reload()` stays the
+    /// open-a-repository path — it clears every selection and drops the
+    /// window to the Loading spinner, the exact flicker a history rewrite
+    /// must not cause.
+    private func refreshAfterMutation(select: ([GraphRow], String) -> String?) async {
         guard let repositoryPath else { return }
         do {
-            summary = try await loadRepositorySummary(at: repositoryPath)
+            let newSummary = try await loadRepositorySummary(at: repositoryPath)
+            let newHistory = (try? await loadCommitHistory(at: repositoryPath)) ?? []
+            let newRows = (try? await loadCommitGraph(at: repositoryPath)) ?? []
+            let newSidebar = try? await loadRepositorySidebar(at: repositoryPath)
+            summary = newSummary
+            history = newHistory
+            graphRows = newRows
+            sidebar = newSidebar
+            if let newSelection = select(newRows, newSummary.whereAmI.rawHead) {
+                selectedResolution = nil
+                selectedCommit = newSelection
+            }
         } catch {
             errorMessage = String(describing: error)
+            summary = nil
         }
-        history = (try? await loadCommitHistory(at: repositoryPath)) ?? []
-        graphRows = (try? await loadCommitGraph(at: repositoryPath)) ?? []
-        sidebar = try? await loadRepositorySidebar(at: repositoryPath)
+    }
+}
+
+/// #0359: the commit action's presentations — the #0375 Split sheet, the
+/// prompt sheets, the Delete Commit… confirmation, the failure alert and
+/// the menu bar's focused target — as one modifier, so `body` stays inside
+/// the type-checker's budget. A `ViewModifier` rather than chained
+/// closures: the same shape, one level of indentation up.
+private struct CommitActionOverlays: ViewModifier {
+    @Binding var splitRequest: SplitCommitRequest?
+    @Binding var actionPrompt: CommitActionPrompt?
+    @Binding var actionPromptIndex: Int?
+    @Binding var pendingDelete: PendingDelete?
+    @Binding var actionFailure: CommitActionFailure?
+    let commitMenuTarget: CommitMenuTarget?
+    let repositoryPath: String?
+    let branchName: String?
+    let onPromptRequest: (CommitActionRequest) -> Void
+    let onPromptCancel: () -> Void
+    let onDeleteConfirmed: (PendingDelete) -> Void
+    let onSplit: (SplitArguments) -> Void
+
+    func body(content: Content) -> some View {
+        content
+            // #0359: the menu bar's Commit menu acts on the focused
+            // window's selected commit — the same states and the same
+            // `perform` the row context menu uses, which is what makes the
+            // shortcuts real (#0382's spike covers whether the context
+            // menu's own equivalents fire while it is closed).
+            .focusedSceneValue(\.commitMenuTarget, commitMenuTarget)
+            // #0375: the Split sheet, for the commit the History context
+            // menu's Split… item named. Choosing Split dismisses the sheet
+            // first, then runs `Split.run` — one journal checkpoint,
+            // undoable — through `performCommitAction`; a failure shows the
+            // alert, a success refreshes the panes and selects the second
+            // half.
+            .sheet(item: $splitRequest) { request in
+                SplitCommitSheet(
+                    commit: request.commit,
+                    subject: request.subject,
+                    repositoryPath: repositoryPath ?? "",
+                    originalMessage: request.message,
+                    onSplit: onSplit,
+                    onCancel: { splitRequest = nil })
+            }
+            // #0359: the prompt sheets the commit action menu opens.
+            .sheet(item: $actionPrompt) { prompt in
+                CommitActionPromptSheet(
+                    prompt: prompt,
+                    onRequest: onPromptRequest,
+                    onCancel: onPromptCancel)
+            }
+            // #0359: the Delete Commit… confirmation. Return does nothing —
+            // there is deliberately no `.keyboardShortcut(.defaultAction)`
+            // on the destructive button, which must never sit one accidental
+            // Return away from deleting history.
+            .confirmationDialog(
+                pendingDelete?.dialogTitle ?? "",
+                isPresented: Binding(
+                    get: { pendingDelete != nil },
+                    set: { if !$0 { pendingDelete = nil } }),
+                titleVisibility: .visible,
+                presenting: pendingDelete
+            ) { delete in
+                Button("Delete Commit", role: .destructive) { onDeleteConfirmed(delete) }
+                Button("Cancel", role: .cancel) { pendingDelete = nil }
+            } message: { _ in
+                Text(
+                    "Its changes are removed from \(branchName ?? "HEAD"), and every newer commit is replayed without them."
+                )
+            }
+            // #0359: a failed engine call names its typed refusal, with the
+            // recovery sentence for the conflict and signing exit classes.
+            .alert(
+                actionFailure?.title ?? "",
+                isPresented: Binding(
+                    get: { actionFailure != nil },
+                    set: { if !$0 { actionFailure = nil } }
+                )
+            ) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(actionFailure?.message ?? "")
+            }
     }
 }
 

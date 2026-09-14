@@ -296,6 +296,14 @@ struct ExitClassCoverageTests {
             """)
         #expect(scan.duplicates.isEmpty,
                 "duplicate conformance sites: \(scan.duplicates.joined(separator: ", "))")
+        // #0359: CommitActions.swift reads the carried §6 class off an
+        // arbitrary error with `as? any ExitClassCarrying` — a usage, not
+        // an adoption, so it is accounted as a cast site. Pinning the count
+        // keeps the category explicit: the next cast line updates this
+        // assertion rather than passing unnoticed.
+        #expect(
+            scan.castSites.count == 1,
+            "expected exactly one ExitClassCarrying cast site, found \(scan.castSites.joined(separator: ", "))")
         #expect(
             scan.unrecognized.isEmpty,
             """

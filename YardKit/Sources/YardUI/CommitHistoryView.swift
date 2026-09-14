@@ -32,23 +32,31 @@ public struct CommitHistoryView: View {
     /// leaves every node and edge unowned, drawing `.secondary` as before,
     /// every edge solid and every row at full opacity.
     private let refs: RefSnapshot?
-    /// #0375: called with the clicked row's oid when the context menu's
-    /// Split… item is chosen; the caller opens the Split sheet for it.
-    /// `nil` — previews and callers that offer no sheet — leaves the item
-    /// inert. #0359's `CommitActionMenuItems` replaces this minimal item.
-    private let onSplit: ((String) -> Void)?
+    /// #0359: the commit action menu's states for the clicked row's oid,
+    /// built by `ContentView` from that row's shape. `nil` — previews and
+    /// callers that offer no menu — leaves only Copy Commit ID.
+    private let menuStates: ((String) -> [CommitActionState])?
+    /// #0359: runs the chosen action against the clicked row's oid. `nil`
+    /// alongside `menuStates`.
+    private let perform: ((CommitAction, String) -> Void)?
+    /// #0359: the current branch, for the branch-aware item titles.
+    private let branchName: String?
     @Binding private var selection: String?
 
     public init(
         entries: [CommitLogEntry], graphRows: [GraphRow] = [], headOid: String? = nil,
-        refs: RefSnapshot? = nil, onSplit: ((String) -> Void)? = nil,
+        refs: RefSnapshot? = nil, branchName: String? = nil,
+        menuStates: ((String) -> [CommitActionState])? = nil,
+        perform: ((CommitAction, String) -> Void)? = nil,
         selection: Binding<String?>
     ) {
         self.entries = entries
         self.graphRows = graphRows
         self.headOid = headOid
         self.refs = refs
-        self.onSplit = onSplit
+        self.branchName = branchName
+        self.menuStates = menuStates
+        self.perform = perform
         self._selection = selection
     }
 
@@ -78,21 +86,22 @@ public struct CommitHistoryView: View {
         }
         // #0377: with a row selected, Edit ▸ Copy (⌘C) puts that commit's
         // full oid on the pasteboard. The context menu copies the *clicked*
-        // row's oid even when another row is selected; #0375's Split… item
-        // sits below the button, after a Divider(), the shape #0359's
-        // CommitActionMenuItems takes over when it lands.
+        // row's oid even when another row is selected.
         .copyable(selection.map { [$0] } ?? [])
+        // #0359: one `CommitActionMenuItems` for the clicked row — the same
+        // body the menu bar's Commit menu renders, so items, order,
+        // shortcuts and disabled states cannot drift apart. Right-clicking
+        // an unselected row targets that row, not the selection.
         .contextMenu(forSelectionType: String.self) { clicked in
             if clicked.count == 1, let oid = clicked.first {
                 Button("Copy Commit ID") {
                     CommitIDPasteboard.copy(oid)
                 }
-                Divider()
-                // #0375: opens the Split sheet for this commit. Availability
-                // is decided inside the sheet — a commit with fewer than two
-                // hunks shows its "nothing to split" state there.
-                Button("Split…") {
-                    onSplit?(oid)
+                if let menuStates, let perform {
+                    Divider()
+                    CommitActionMenuItems(
+                        states: menuStates(oid), branchName: branchName,
+                        perform: { perform($0, oid) })
                 }
             }
         }
