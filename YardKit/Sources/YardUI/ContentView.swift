@@ -133,6 +133,22 @@ public struct ContentView: View {
         self.resolves = resolves
     }
 
+    /// #0370: the window title — the open repository's folder name, so two
+    /// open windows are told apart in the Window menu, Mission Control and
+    /// ⌘\` cycling — or "Switchyard" when nothing is open. A pure static so
+    /// the string SwiftUI will install as the title can be unit-tested
+    /// without instantiating scene machinery.
+    public static func windowTitle(repositoryPath: String?) -> String {
+        repositoryPath.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "Switchyard"
+    }
+
+    /// #0370: the window subtitle — the current branch, "detached HEAD"
+    /// when HEAD points at no branch, empty while nothing is loaded. Pure
+    /// for the same reason as `windowTitle(repositoryPath:)`.
+    public static func windowSubtitle(summary: RepositorySummary?) -> String {
+        summary.map { $0.whereAmI.branch ?? "detached HEAD" } ?? ""
+    }
+
     public var body: some View {
         Group {
             if let repositoryPath {
@@ -156,6 +172,15 @@ public struct ContentView: View {
                 )
             }
         }
+        // #0370: the window title names the open repository — the folder
+        // name, so two open windows are told apart in Mission Control, the
+        // Window menu and ⌘` cycling — with the current branch as the
+        // subtitle, "detached HEAD" when HEAD points at no branch. With
+        // nothing open the title falls back to "Switchyard". The strings are
+        // derived by the public pure helpers below so they can be tested at
+        // the access level the app target sees.
+        .navigationTitle(Self.windowTitle(repositoryPath: repositoryPath))
+        .navigationSubtitle(Self.windowSubtitle(summary: summary))
         .frame(minWidth: 480, minHeight: 360)
         // #0216: the transport pane, pinned below whatever the window shows —
         // it is app-global, not per-repository, and the "the CLI can't

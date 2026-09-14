@@ -25,3 +25,12 @@ func contentViewIsPubliclyConstructible() async throws {
     // the app depends on.
     #expect(String(describing: ContentView.self) == "ContentView")
 }
+
+@MainActor
+@Test("ContentView's window title helpers are callable at a caller's access level (#0370)")
+func windowTitleHelpersArePubliclyCallable() {
+    // Both fail to COMPILE if the #0370 helpers drop to internal: the app
+    // target reads the same strings the window title and subtitle show.
+    #expect(ContentView.windowTitle(repositoryPath: "/tmp/repo") == "repo")
+    #expect(ContentView.windowSubtitle(summary: nil) == "")
+}
