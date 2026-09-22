@@ -736,12 +736,17 @@ invocation, and every path lookup goes through it. It exists from M1 for this re
   marker in `switchyard` and have the hook skip its own transactions, or the journal records itself
   recording itself. **Do real work only on `committed`; return 0 immediately in every other state.**
 
-  The states git 2.50.1 actually emits are **`prepared`, `committed`, `aborted`** — measured, by
-  installing a hook that logs `$1` and running a real commit. There is **no `preparing` state**;
-  this file and the internals document both named one until 2026-08-07. A non-zero exit in
-  `prepared` aborts the user's transaction — also measured: `[ "$1" = prepared ] && exit 1` yields
-  `fatal: ref updates aborted by hook`, exit 128, and the ref is never created. Treat any state
-  that is not `committed` as do-nothing, so a future git that adds one cannot break a repository.
+  The states git 2.54.0 (Apple Git-157) actually emits are **`preparing`, `prepared`, `committed`,
+  `aborted`** — measured 2026-09-22, by installing a hook that logs `$1` and its stdin per
+  invocation, one scenario per scratch repo, in both ref formats. A create fires `preparing` →
+  `prepared` → `committed`. A successful delete fires `preparing` → `aborted` → `prepared` →
+  `committed` under the **files** backend — an `aborted` can fire mid-transaction on an update that
+  succeeds — but `preparing` → `prepared` → `committed` under **reftable**, so the sequences differ
+  per ref format. Stdin arrives on every invocation, not only on `prepared`. A non-zero exit aborts
+  the user's transaction — also measured: `[ "$1" = prepared ] && exit 1` yields `fatal: in
+  'prepared' phase, update aborted by the reference-transaction hook`, exit 128, and the ref is
+  never created. Treat any state that is not `committed` as do-nothing, so a future git that changes
+  this contract cannot break a repository.
 - **`git write-tree` refuses an unmerged index.** When conflicts are present, snapshot the index
   file itself as a blob and restore it byte-for-byte. That is the one place where reading a git file
   directly is correct, because the file *is* the state.

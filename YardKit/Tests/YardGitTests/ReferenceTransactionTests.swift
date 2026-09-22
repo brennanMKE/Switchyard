@@ -30,6 +30,39 @@ private func lines(of url: URL) -> [String] {
     return text.split(separator: "\n").map(String.init)
 }
 
+/// One `reference-transaction` invocation as a per-invocation logging hook
+/// recorded it: the state argument and the stdin lines delivered with it.
+private struct HookInvocation: Equatable {
+    let state: String
+    let stdinLines: [String]
+}
+
+/// Parses the marker-delimited log the measured-contract hook writes:
+/// `--- state=<state> begin ---`, the raw stdin lines, then
+/// `--- state=<state> end ---`. Unopened stdin lines are dropped — a log
+/// this parser cannot make sense of fails the assertions downstream.
+private func invocations(of url: URL) -> [HookInvocation] {
+    var result: [HookInvocation] = []
+    var state: String?
+    var stdin: [String] = []
+    for line in lines(of: url) {
+        if line.hasPrefix("--- state="), line.hasSuffix(" begin ---") {
+            state = String(line.dropFirst("--- state=".count)
+                .dropLast(" begin ---".count))
+            stdin = []
+        } else if line.hasPrefix("--- state="), line.hasSuffix(" end ---") {
+            if let open = state {
+                result.append(HookInvocation(state: open, stdinLines: stdin))
+            }
+            state = nil
+            stdin = []
+        } else if state != nil {
+            stdin.append(line)
+        }
+    }
+    return result
+}
+
 // MARK: - Parsing the measured stdin format
 
 @Test func parseClassifiesCreationUpdateAndDeletion() throws {
@@ -106,8 +139,9 @@ private func lines(of url: URL) -> [String] {
 // MARK: - The decision policy
 
 @Test func nonCommittedStatesExitZeroWithoutReadingStdin() {
-    // "preparing" is prose folklore — git 2.50.1 has no such state — but a
-    // handler that sees it must behave identically: exit 0, touch nothing.
+    // git 2.54.0 emits `preparing` before `prepared` on every transaction
+    // (measured 2026-09-22); like every non-`committed` state, a handler
+    // that sees it must behave identically: exit 0, touch nothing.
     for state in ["prepared", "preparing", "aborted", "", "future-state"] {
         var reads = 0
         let decision = ReferenceTransaction.decide(
@@ -202,9 +236,10 @@ func hookReceivesTheMeasuredContract(_ format: FixtureRepository.RefFormat) thro
     let states = Set(lines(of: statesLog))
     #expect(states.contains("prepared"))
     #expect(states.contains("committed"))
-    // Tripwire: if a future git adds a state (the "preparing" of the prose),
-    // this fails and the contract gets re-measured rather than assumed.
-    #expect(states.isSubset(of: ["prepared", "committed", "aborted"]),
+    // Tripwire: this is the state set measured on git 2.54.0 (2026-09-22,
+    // both ref formats). A state git adds, drops, or renames fails here and
+    // the contract gets re-measured rather than assumed.
+    #expect(states.isSubset(of: ["preparing", "prepared", "committed", "aborted"]),
             "unexpected hook state in \(states)")
 
     let captured = try Data(contentsOf: stdinLog)
@@ -216,6 +251,80 @@ func hookReceivesTheMeasuredContract(_ format: FixtureRepository.RefFormat) thro
     #expect(observed[0].isCreation)
     #expect(observed[0].newValue == oidA)
     #expect(observed[1].isDeletion)
+}
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func hookSequencesAndStdinMatchTheMeasuredContract(
+    _ format: FixtureRepository.RefFormat
+) throws {
+    // Pins, as exact equality, the per-transaction invocation sequences git
+    // 2.54.0 emits (measured 2026-09-22, one scenario per scratch repo, both
+    // ref formats) and that stdin carries the update lines on EVERY
+    // invocation, not only on `prepared`. A state added, dropped, or
+    // reordered — or stdin withheld from any state — fails here and forces a
+    // re-measure.
+    func loggingScript(_ log: URL) -> String {
+        """
+        #!/bin/sh
+        { echo "--- state=$1 begin ---"
+          cat
+          echo "--- state=$1 end ---"
+        } >> "\(log.path)"
+        exit 0
+        """
+    }
+
+    // CREATE: the hook exists before the repo's only ref update.
+    var createRepo = try FixtureRepository(refFormat: format)
+    defer { createRepo.destroy() }
+    try createRepo.build([.init("a")])
+    let oidA = try #require(createRepo.oids["a"])
+
+    let createLog = createRepo.url.appendingPathComponent("hook-transactions.log")
+    try installReferenceTransactionHook(in: createRepo, script: loggingScript(createLog))
+    try GitProcess().run(["update-ref", "refs/heads/observed", oidA],
+                         workingDirectory: createRepo.url.path)
+
+    let created = invocations(of: createLog)
+    #expect(created.map { $0.state } == ["preparing", "prepared", "committed"],
+            "create sequence was \(created.map { $0.state })")
+    let createLine = "\(zeros40) \(oidA) refs/heads/observed"
+    for invocation in created {
+        #expect(invocation.stdinLines == [createLine],
+                "state \(invocation.state) must receive the update line on stdin")
+    }
+
+    // DELETE: the ref predates the hook, so only the deletion logs. The
+    // sequences genuinely differ per ref format on git 2.54.0 (measured
+    // 2026-09-22; the scratch repo and this fixture agree): the files
+    // backend fires `aborted` mid-transaction on a *successful* delete,
+    // reftable does not. An unconditional `update-ref -d` reports
+    // zeros→zeros on every invocation (measured), not old→zeros.
+    var deleteRepo = try FixtureRepository(refFormat: format)
+    defer { deleteRepo.destroy() }
+    try deleteRepo.build([.init("a")])
+    let oidB = try #require(deleteRepo.oids["a"])
+    try GitProcess().run(["update-ref", "refs/heads/observed", oidB],
+                         workingDirectory: deleteRepo.url.path)
+
+    let deleteLog = deleteRepo.url.appendingPathComponent("hook-transactions.log")
+    let expectedDeleteStates: [String]
+    switch format {
+    case .files: expectedDeleteStates = ["preparing", "aborted", "prepared", "committed"]
+    case .reftable: expectedDeleteStates = ["preparing", "prepared", "committed"]
+    }
+    try installReferenceTransactionHook(in: deleteRepo, script: loggingScript(deleteLog))
+    try GitProcess().run(["update-ref", "-d", "refs/heads/observed"],
+                         workingDirectory: deleteRepo.url.path)
+
+    let deleted = invocations(of: deleteLog)
+    #expect(deleted.map { $0.state } == expectedDeleteStates,
+            "delete sequence was \(deleted.map { $0.state })")
+    let deleteLine = "\(zeros40) \(zeros40) refs/heads/observed"
+    for invocation in deleted {
+        #expect(invocation.stdinLines == [deleteLine],
+                "state \(invocation.state) must receive the update line on stdin")
+    }
 }
 
 @Test(arguments: FixtureRepository.RefFormat.supported())
@@ -267,7 +376,8 @@ func nonZeroExitInPreparedAbortsTheTransaction(
     let attempt = try git.capture(["update-ref", "refs/heads/doomed", oidA],
                                   workingDirectory: repo.url.path)
     #expect(attempt.exitCode != 0)
-    #expect(attempt.standardError.contains("aborted by hook"))
+    #expect(attempt.standardError
+        .contains("update aborted by the reference-transaction hook"))
 
     let verify = try git.capture(
         ["rev-parse", "--verify", "--quiet", "refs/heads/doomed"],

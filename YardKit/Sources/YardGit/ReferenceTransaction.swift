@@ -9,8 +9,9 @@ import Foundation
 ///
 /// - **`decide` is total.** It never throws and its exit code is 0 for every
 ///   input — a non-zero exit in the `prepared` state makes git abort the
-///   user's transaction (`fatal: ref updates aborted by hook`, measured on
-///   git 2.50.1), and under #0041's chaining a non-zero from any link can be
+///   user's transaction (`fatal: in 'prepared' phase, update aborted by the
+///   reference-transaction hook`, exit 128, measured on git 2.54.0), and
+///   under #0041's chaining a non-zero from any link can be
 ///   surfaced by the chain wrapper. There is deliberately no `Failure` enum
 ///   and no `ExitClassCarrying` conformance here: a handler that can fail is
 ///   a handler that can abort someone else's work.
@@ -26,12 +27,17 @@ public enum ReferenceTransaction {
 
     /// The transaction state git passes as the hook's single argument.
     ///
-    /// Measured on git 2.50.1: the states that fire are `prepared`,
-    /// `committed`, and `aborted` — there is no `preparing` state despite
-    /// older prose claiming one. `unrecognized` absorbs anything a future
-    /// git adds, and the policy for it is the same as for every
-    /// non-`committed` state: exit 0, record nothing.
+    /// Measured on git 2.54.0 (Apple Git-157), 2026-09-22, in both ref
+    /// formats: a create fires `preparing`, `prepared`, `committed`. A
+    /// successful delete fires `preparing`, `aborted`, `prepared`,
+    /// `committed` under the files backend — an `aborted` fires
+    /// mid-transaction even when the update itself succeeds — but
+    /// `preparing`, `prepared`, `committed` under reftable. The policy is
+    /// unaffected: every non-`committed` state is do-nothing.
+    /// `unrecognized` absorbs anything a future git adds, with the same
+    /// policy: exit 0, record nothing.
     public enum State: Equatable, Sendable {
+        case preparing
         case prepared
         case committed
         case aborted
@@ -39,6 +45,7 @@ public enum ReferenceTransaction {
 
         public init(argument: String) {
             switch argument {
+            case "preparing": self = .preparing
             case "prepared": self = .prepared
             case "committed": self = .committed
             case "aborted": self = .aborted
@@ -196,8 +203,9 @@ extension ReferenceTransaction {
     public struct HookOutcome: Equatable, Sendable {
         /// What the hook must exit with. **Always 0**, including when
         /// recording failed — a non-zero exit from this hook aborts the
-        /// user's ref transaction (`fatal: ref updates aborted by hook`,
-        /// exit 128, measured), so a journal defect must never become a
+        /// user's ref transaction (`fatal: in '<state>' phase, update
+        /// aborted by the reference-transaction hook`, exit 128, measured
+        /// on git 2.54.0), so a journal defect must never become a
         /// repository defect.
         public let exitCode: Int32
         /// The observed entry written, when one was.
