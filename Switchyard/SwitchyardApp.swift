@@ -60,6 +60,9 @@ struct SwitchyardApp: App {
         .commands {
             SwitchyardCommands()
             CommitCommands()
+            // #0393: Edit ▸ Undo/Redo over the focused window's journal,
+            // replacing the system .undoRedo group.
+            JournalCommands()
         }
 
         // #0352: the Settings scene (Cmd-,). The CLI install section and the

@@ -80,8 +80,11 @@ public nonisolated enum CommitRowAccessibility {
 
 extension BranchColor {
     /// #0367's chip tint: a branch chip takes its branch's colour, a remote
-    /// chip its local counterpart's, and tags stay neutral.
-    public static func color(for chip: RefChip) -> Color {
+    /// chip its local counterpart's, and tags stay neutral. `nonisolated`
+    /// matches the enum's own declaration in BranchColors.swift; without it
+    /// the target's default isolation makes the method `@MainActor` and the
+    /// nonisolated tests calling it do not compile.
+    nonisolated public static func color(for chip: RefChip) -> Color {
         switch chip.kind {
         case .localBranch: palette[index(forKey: chip.name)]
         case .remoteBranch: color(for: BranchTip(name: chip.name, oid: "", isRemote: true))

@@ -118,6 +118,26 @@ public struct ContentView: View {
     /// rather than an empty list in that window.
     @State private var sidebar: RepositorySidebarSummary?
 
+    /// #0393: the journal listing for the open repository — the chain state
+    /// the Edit menu's Undo and Redo titles and enabled flags read. `nil`
+    /// while loading or with no repository open, which leaves both items
+    /// disabled with their plain titles.
+    @State private var journalListing: JournalList.Listing?
+
+    /// #0393: true while a journal traversal (undo or redo) runs. Both menu
+    /// items disable with it, the same guard `runningAction` gives the
+    /// commit actions.
+    @State private var journalRunning = false
+
+    /// #0393: set when a journal traversal throws — presented as the
+    /// failure alert, with the engine's message.
+    @State private var journalFailure: CommitActionFailure?
+
+    /// #0393: the not-clean traversal report's note — a branch a sibling
+    /// worktree has checked out was left as it is — presented as an
+    /// informational alert. Nil for the ordinary, clean case.
+    @State private var journalNotice: String?
+
     /// #0216's transport pane model, injected by the app target from its own
     /// `AgentRegistrar`/`AppXPCServer` state. `nil` when nothing is injected
     /// (tests, previews) and the pane is not rendered at all.
@@ -340,6 +360,35 @@ public struct ContentView: View {
                 splitRequest = nil
                 Task { await runSplit(arguments) }
             }))
+        // #0393: the menu bar's Edit menu acts on the focused window's
+        // journal — titles, enabled flags and the traversal to run — the
+        // same focused-scene pattern the Commit menu's target uses.
+        .focusedSceneValue(\.journalMenuTarget, journalMenuTarget)
+        // #0393: a not-clean traversal report. Informational — the undo or
+        // redo itself succeeded; a branch a sibling worktree has checked
+        // out was left as it is (guide §11 decisions 16 and 23).
+        .alert(
+            journalNotice ?? "",
+            isPresented: Binding(
+                get: { journalNotice != nil },
+                set: { if !$0 { journalNotice = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        }
+        // #0393: a failed traversal — a lock timeout, a cross-tool refusal —
+        // names the engine's message.
+        .alert(
+            journalFailure?.title ?? "",
+            isPresented: Binding(
+                get: { journalFailure != nil },
+                set: { if !$0 { journalFailure = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(journalFailure?.message ?? "")
+        }
     }
 
     private func repositoryView(summary: RepositorySummary) -> some View {
@@ -529,6 +578,9 @@ public struct ContentView: View {
         selectedResolutionDiffError = nil
         selectedCommitDiff = nil
         selectedCommitDiffError = nil
+        journalListing = nil
+        journalFailure = nil
+        journalNotice = nil
         do {
             summary = try await loadRepositorySummary(at: repositoryPath)
             // Separate from the summary load on purpose: a repository whose
@@ -540,6 +592,10 @@ public struct ContentView: View {
             history = (try? await loadCommitHistory(at: repositoryPath)) ?? []
             graphRows = (try? await loadCommitGraph(at: repositoryPath)) ?? []
             sidebar = try? await loadRepositorySidebar(at: repositoryPath)
+            // #0393: the journal listing rides along with the other loads —
+            // a listing that fails (or a repository that never checkpointed)
+            // leaves the menu disabled with its plain titles, not an error.
+            journalListing = try? await loadJournalListing(at: repositoryPath)
         } catch {
             errorMessage = String(describing: error)
         }
@@ -632,6 +688,25 @@ public struct ContentView: View {
         return CommitMenuTarget(
             states: menuStates(for: selectedCommit, summary: summary),
             perform: { action in perform(action, selectedCommit, summary: summary) })
+    }
+
+    /// #0393: the menu bar's Edit menu target — the journal's chain state
+    /// and the traversal to run. `nil` with no repository open, which
+    /// leaves both items disabled with their plain titles. Both items also
+    /// disable while a commit action or a traversal is running, so a second
+    /// engine write is dropped rather than queued behind the journal's lock
+    /// timeout.
+    private var journalMenuTarget: JournalMenuTarget? {
+        guard repositoryPath != nil else { return nil }
+        let busy = runningAction != nil || journalRunning
+        return JournalMenuTarget(
+            undoTitle: JournalMenuTitles.undo(
+                operation: JournalMenu.undoOperation(in: journalListing)),
+            redoTitle: JournalMenuTitles.redo(
+                operation: JournalMenu.redoOperation(in: journalListing)),
+            undoEnabled: journalListing?.state.undoTarget != nil && !busy,
+            redoEnabled: journalListing?.state.redoTarget != nil && !busy,
+            perform: { runJournal($0) })
     }
 
     /// The acted-on commit's index on `HEAD`'s first-parent chain, captured
@@ -761,6 +836,47 @@ public struct ContentView: View {
         }
     }
 
+    /// #0393: runs one journal traversal for the Edit menu and refreshes
+    /// the panes through #0359's in-place refresh — never `reload()`,
+    /// which blanks the window. The selection survives when its commit is
+    /// still loaded and moves to `HEAD` otherwise, which a traversal that
+    /// moved branches may have changed. A not-clean report presents its
+    /// note; a throw presents the engine's message; the listing is re-read
+    /// on every path through `refreshAfterMutation`, so the titles stay
+    /// current after the chain moves.
+    private func runJournal(_ kind: JournalMenuTarget.Kind) {
+        guard let repositoryPath, runningAction == nil, !journalRunning else { return }
+        journalRunning = true
+        Task {
+            defer { journalRunning = false }
+            do {
+                let reports = kind == .undo
+                    ? try await undoJournal(at: repositoryPath)
+                    : try await redoJournal(at: repositoryPath)
+                if let branch = reports.first(where: { $0.detachedFrom != nil })?.detachedFrom
+                    ?? reports.flatMap(\.leftAlone).first {
+                    journalNotice =
+                        "Undone, but “\(branch)” is checked out in another worktree and was left as it is."
+                }
+                await refreshAfterMutation { rows, newHead in
+                    if let selected = selectedCommit,
+                       rows.contains(where: { $0.oid == selected }) {
+                        return selected
+                    }
+                    return newHead.isEmpty ? nil : newHead
+                }
+            } catch {
+                journalFailure = CommitActionFailure(
+                    title: kind == .undo ? "Couldn’t Undo" : "Couldn’t Redo",
+                    message: String(describing: error))
+                // The traversal refused, so the chain is where it was — but
+                // the listing is cheap, and re-reading it keeps the titles
+                // honest if the journal moved while the menu was open.
+                journalListing = try? await loadJournalListing(at: repositoryPath)
+            }
+        }
+    }
+
     /// #0359: re-reads after an in-app mutation without blanking the
     /// window: every value loads into a local, then all assignments happen
     /// together on one main-actor turn. `reload()` stays the
@@ -774,10 +890,15 @@ public struct ContentView: View {
             let newHistory = (try? await loadCommitHistory(at: repositoryPath)) ?? []
             let newRows = (try? await loadCommitGraph(at: repositoryPath)) ?? []
             let newSidebar = try? await loadRepositorySidebar(at: repositoryPath)
+            // #0393: every in-app mutation re-reads the journal listing too,
+            // so the Edit menu's titles and enabled flags track the chain —
+            // a commit action wrote a checkpoint the menu must now see.
+            let newJournal = try? await loadJournalListing(at: repositoryPath)
             summary = newSummary
             history = newHistory
             graphRows = newRows
             sidebar = newSidebar
+            journalListing = newJournal
             if let newSelection = select(newRows, newSummary.whereAmI.rawHead) {
                 selectedResolution = nil
                 selectedCommit = newSelection

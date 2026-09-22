@@ -252,3 +252,45 @@ public func splitCommit(
 ) async throws -> Split.Result {
     try Split.run(commit: commit, hunkID: hunkID, first: first, second: second, at: path)
 }
+
+/// Loads the journal listing for the repository at `path` (#0393): every
+/// anchored entry oldest-first and the calling worktree's chain state,
+/// which the Edit menu's Undo and Redo titles and enabled flags read.
+///
+/// `YardUI` sets `.defaultIsolation(MainActor.self)` (`Package.swift`), so
+/// this needs `@concurrent` for the same reason `forgetRerereResolution`
+/// above does: `WorktreeContext.resolve` and `JournalList.list` both shell
+/// out to git, and `@concurrent` keeps them — and the metadata decoding —
+/// off the main actor while the UI awaits.
+@concurrent
+public func loadJournalListing(at path: String) async throws -> JournalList.Listing {
+    let context = try await WorktreeContext.resolve(path: path)
+    return try JournalList.list(in: context)
+}
+
+/// Undoes one journal step at `path` (#0393) — Edit ▸ Undo. `JournalUndo.undo`
+/// is synchronous and blocks in git subprocesses; `@concurrent` keeps all of
+/// it off the main actor while the UI awaits — the same reason
+/// `forgetRerereResolution` above carries it.
+///
+/// - Throws: `JournalUndo.Error.nothingToUndo` when the chain has no step
+///   left — the menu disables, so a throw here means the journal moved under
+///   it — or `GitProcess.Failure` for anything else.
+@concurrent
+@discardableResult
+public func undoJournal(at path: String) async throws -> [JournalRestore.Report] {
+    let context = try await WorktreeContext.resolve(path: path)
+    return try JournalUndo.undo(in: context)
+}
+
+/// Redoes one journal step at `path` (#0393) — Edit ▸ Redo. The same shape
+/// as `undoJournal` above; `redo` walks the chain back toward present.
+///
+/// - Throws: `JournalUndo.Error.nothingToRedo` when the chain has no redo
+///   step left, or `GitProcess.Failure` for anything else.
+@concurrent
+@discardableResult
+public func redoJournal(at path: String) async throws -> [JournalRestore.Report] {
+    let context = try await WorktreeContext.resolve(path: path)
+    return try JournalUndo.redo(in: context)
+}
