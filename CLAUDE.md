@@ -71,15 +71,26 @@ a queue designed not to need one.
 2. **Outward-facing actions on Brennan's accounts.** Pushing to a GitHub repo other than this one,
    registering an SSH signing key, publishing a release, anything that touches an external service
    as him.
-3. **A decision that changes what gets built**, where two readings produce materially different
-   work — the UI hierarchy question was a real example. Not "which name is nicer".
+3. **A decision that changes what gets built** where two readings produce materially different work
+   **and you cannot pick with high confidence** — the UI hierarchy question was a real example. Not
+   "which name is nicer". File it into an issue and move on; do not stop the queue for it.
 4. **A clean-room judgment call** — if it is unclear whether something is derived from GitUp.
 5. **An M0 spike answering negatively.** #0002 or #0003 failing is an escalation; the project's
    premise depends on both.
 
-**When blocked, do not stop — reroute.** Move to the next unblocked issue and collect blockers into
-one batched question at the end of the session. One question with five items beats five
-interruptions.
+**When blocked, do not stop — file the question and reroute.** Write the question into the issue it
+belongs to — what needs answering, the context that would answer it, and what you assumed in the
+meantime — then move to the next unblocked issue. Brennan reads filed questions and answers them in
+the tracker, which unblocks the issue for a later round. **Never stop and wait for an answer**: an
+answer that arrives hours later unblocks nothing, because the session that waited is gone.
+
+**Decide; do not ask, when confidence is high.** You are free to make the call when you have a
+high-confidence recommendation. Record the decision and its reasoning where the work is recorded —
+the issue, or `docs/` — and move on. We can always change it later. A wrong call that is written
+down is cheap to reverse; hours spent stopped are not. File a question instead of deciding only
+when confidence is genuinely low **and** the decision is expensive to reverse. One issue carrying
+five questions still beats five interruptions — but questions live in issues, not in a session-end
+report.
 
 **A progress report between issues is a stop.** Emitting text ends the turn, so "here is what I
 found, next I will do X" is functionally quitting, however it is phrased. Do not narrate transitions
@@ -152,8 +163,8 @@ not require is a stall nobody will see until hours later.
   worktree, dispatch — in the same turn, taking tool calls the whole way.
 - Narration between issues is quitting, whatever it is called. No "shall I continue?", no progress
   summary as a turn-ender, no reporting back after each one.
-- Blocked on one issue: checkpoint the quest, reroute to the next unblocked one, and batch the
-  questions into one report at the end.
+- Blocked on one issue: file the questions into the issue, checkpoint the quest, reroute to the
+  next unblocked one in the same turn.
 - The legitimate stops are: a genuine stop-list item, a compaction boundary with the checkpoint
   written and `nextAction` executable, and the quest's completion test passing — audited against
   the tracker (`scripts/list-issues-by-milestone`), never against memory.
@@ -626,6 +637,26 @@ cd YardKit && swift build && swift test
 `YardKit/` exists with four targets — `YardGit`, `YardKit`, `YardUI` and the `switchyard`
 executable — and five test targets. See [Current state](#current-state).
 
+## UI test automation runs in a VM
+
+**All UI test automations run inside a Tart VM on this Mac — never on the host.** Brennan's
+instruction, 2026-09-22: VM runs do not disrupt whoever is using the Mac, and they avoid the
+permission prompts (Accessibility, Screen Recording, Automation) that host-side UI automation
+needs a human to approve.
+
+- `docs/ui-test-automation-vm.md` is the Switchyard plan and recipe. The proven template this
+  machine already runs is `~/Developer/Homelab/cameron/tart-ui-test-vm.md` (Changeover, measured
+  end-to-end here on 2026-09-14: clone → boot → test in guest → pull results → delete, ~90 s).
+- The crash class this prevents is real: `XCTAutomationSupport` loaded into other running GUI apps
+  and segfaulted Batty on gordon, killing ~38 terminal sessions. A guest has its own WindowServer,
+  apps and TCC database, so the crash cannot cross the boundary — and a guest destroyed after
+  every run cannot accumulate approval debt.
+- The golden image is only ever cloned, never run directly. Directory shares are read-only
+  per-run exports — never the live working copy, never `$HOME` read-write.
+- After every run, verify the host is untouched: GUI apps alive with the same ASNs (`lsappinfo`,
+  not `pgrep -x`), no new entries in `~/Library/Logs/DiagnosticReports`, and `tart list` clean of
+  leftover clones.
+
 ## Layering
 
 **Everything lives in the package, including the views.** `YardUI` holds every SwiftUI view and
@@ -634,9 +665,11 @@ The Xcode project keeps only what cannot live in a package — the `@main` `App`
 catalog, `Info.plist`, entitlements, `SMAppService` registration, and the embedded `switchyard`
 binary.
 
-The reason is testability, not tidiness: **UI tests cannot run under CLI-driven `xcodebuild` here**,
-so a view in the app target is a view nothing can exercise unattended. The same view in a package
-target is reachable from `swift test`. Guide §11 decision 10.
+The reason is testability, not tidiness: **UI tests cannot run under CLI-driven `xcodebuild` on
+this Mac's host** — and UI test automation belongs in a VM regardless, see
+[UI test automation runs in a VM](#ui-test-automation-runs-in-a-vm) — so a view in the app target
+is a view nothing can exercise unattended. The same view in a package target is reachable from
+`swift test`. Guide §11 decision 10.
 
 `YardUI` sets `.defaultIsolation(MainActor.self)`. A package target does not inherit the app's
 `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, and a view moved across that boundary silently changes

@@ -616,7 +616,46 @@ compaction boundary with the checkpoint written.
 - Finishing an issue is not a stopping point. Claim the next one immediately: set status, preflight,
   worktree, dispatch — in the same turn, taking tool calls the whole way.
 - Narration between issues is quitting. No "shall I continue?", no progress summary as a turn-ender.
-- Blocked on one issue: checkpoint the quest, reroute to the next unblocked one, batch the questions.
+- Blocked on one issue: file the questions into the issue, checkpoint the quest, reroute to the
+  next unblocked one in the same turn.
+
+## Rule 12 — Work autonomously. A question goes into an issue, never into a wait.
+
+Brennan's instruction, 2026-09-22: **it is better to make progress than to stop for hours waiting
+for answers.** You are free to make decisions when you have high confidence in your own
+recommendation — record the decision and its reasoning where the work is recorded (the issue, or
+`docs/`), and move on. We can always change it later. A wrong call that is written down is cheap
+to reverse; hours spent stopped are not.
+
+- **If you need to ask a question, note it in an issue and move on.** The question, the context
+  needed to answer it, and what you assumed in the meantime go into the issue file. Brennan
+  answers filed questions in the tracker, which unblocks the issue for a later round. Do not end a
+  turn waiting for an answer, and do not hold questions for a session-end report.
+- **For a dispatched round** this refines Rule 9: the question goes into the issue file or your
+  round report, the issue's unambiguous work still gets done, and you finish. You do not switch
+  issues (Rule 4) — the orchestrator reroutes.
+- **For the orchestrator**: file the question, checkpoint, and claim the next unblocked issue in
+  the same turn.
+- **The hard stops still stop.** Signing assets (Rule 2), outward-facing actions on Brennan's
+  accounts, and an unclear clean-room call (Rule 1) are never decided by confidence alone — file
+  the question, move to other work, and leave the stopped item stopped.
+
+## Rule 13 — UI test automations run inside a VM, never on this Mac's host.
+
+Brennan's instruction, 2026-09-22: **all UI test automation runs inside a Tart VM.** The plan and
+recipe live in `docs/ui-test-automation-vm.md`; the proven template this machine already runs is
+`~/Developer/Homelab/cameron/tart-ui-test-vm.md`.
+
+- The guest has its own WindowServer, apps and TCC database: `XCTAutomationSupport` cannot load
+  into the user's running GUI apps — that crash class segfaulted Batty and killed ~38 terminal
+  sessions on gordon — and Automation Mode inside the guest needs no human to approve prompts.
+- **Never run UI tests on the host**, and never seek Accessibility, Screen Recording, or
+  Automation grants on the host for a test process. The golden image is only ever cloned, never
+  run directly; directory shares are read-only per-run exports, never the live working copy or
+  `$HOME` read-write.
+- After every run, verify the host is untouched: GUI apps alive with the same ASNs via
+  `lsappinfo` (not `pgrep -x`), no new `~/Library/Logs/DiagnosticReports` entries, and
+  `tart list` showing no leftover clones.
 - A quest never overrides the stop-list, licensing, or verification rules. Complete what is safely
   completable, checkpoint the rest, report the conflict once.
 
@@ -641,4 +680,5 @@ xcodebuild -project Switchyard.xcodeproj -scheme Switchyard \
   -destination 'platform=macOS' -only-testing:SwitchyardTests test
 ```
 
-`YardKit/` does not exist yet. The repository is a stock SwiftUI template plus documents and tasks.
+`YardKit/` exists with four targets — `YardGit`, `YardKit`, `YardUI` and the `switchyard`
+executable — and five test targets. See CLAUDE.md's Current state section for the suite baseline.
