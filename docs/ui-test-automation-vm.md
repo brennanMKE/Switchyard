@@ -207,3 +207,28 @@ Anything unexpected → stop the automation work and report; do not debug inside
    unchanged, including `.defaultIsolation(MainActor.self)` on `YardUI`?
 3. Does the Switchyard app need a repository fixture at launch, and should the fixture be
    generated per-run inside the guest or shared read-only from the host?
+
+---
+
+## Compatibility gate — PASSED, 2026-09-22
+
+Brennan updated the VM out-of-session: `ghcr.io/cirruslabs/macos-tahoe-xcode:27` pulled, and
+`changeover-uitest-golden` rebuilt on it. Measured through a `switchyard-uitest-golden` clone
+(decision S0: clone-and-diverge, executed):
+
+| Check | Result |
+|---|---|
+| Guest macOS | 26.6.2 (25G83) — meets Xcode 27.0's 26.6 minimum |
+| Guest Xcode | 27.0 (27A266a) — matches the host exactly |
+| Automation Mode | disabled, and authentication NOT required to enable — the property unattended runs need |
+| Console user | `admin`, auto-logged-in |
+| Host disk | 192 GB free after the update |
+| `swift build` of `YardKit` (main @ 622471b) in the guest | **`Build complete!` (11.28 s)** — the package compiles with the guest toolchain; no 27-only API blockers |
+
+Transfer notes, measured: streaming a tarball **into** the guest through `tart exec` stdin fails
+(`tar: Write error` on the host side) — use the read-only `--dir` share, which is the proven
+pattern anyway. `cp -R <share>/src ~/src` nests when `~/src` already exists; copy into the parent
+(`cp -R …/src /Users/admin/`) or `rm -rf` first.
+
+Open question 2 from the plan is answered: the package targets build unchanged in the guest,
+including `YardUI`'s `.defaultIsolation(MainActor.self)`.
