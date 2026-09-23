@@ -95,18 +95,21 @@ public struct RepositorySidebarView: View {
     /// merged answers read *unknown* until then, never blocking the rows.
     @State private var contentStates: [String: BranchStatus.MergedState]?
     /// #0378: the filter field's text. Empty or all-whitespace means no
-    /// filtering; anything else narrows the three ref sections.
-    @State private var refFilter = ""
+    /// filtering; anything else narrows the three ref sections. #0402: owned
+    /// by ContentView so the History pane filters too.
+    @Binding private var refFilter: String
 
     public init(
         summary: RepositorySidebarSummary, stashCount: Int,
         selectedResolution: Binding<String?>,
+        refFilter: Binding<String> = .constant(""),
         selectedRef: String? = nil,
         onSelectRef: ((RefSnapshot.Entry) -> Void)? = nil
     ) {
         self.summary = summary
         self.stashCount = stashCount
         self._selectedResolution = selectedResolution
+        self._refFilter = refFilter
         self.selectedRef = selectedRef
         self.onSelectRef = onSelectRef
     }
