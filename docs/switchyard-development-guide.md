@@ -815,7 +815,7 @@ the detail pane into a window of its own. The reference screenshots are in `issu
 
 **Exit criteria:**
 
-- [ ] #0399 through #0407 are resolved, plus any children they are split into.
+- [ ] #0399 through #0409 are resolved, plus any children they are split into.
 - [ ] On Batty (127 branches), every local branch can be found and focused from the graph or the
       sidebar without reading commit text.
 - [ ] Each behaviour has a VM UI test (`scripts/run-ui-tests-vm.sh`), or a unit test where the
