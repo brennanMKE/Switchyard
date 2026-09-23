@@ -155,8 +155,14 @@ private struct CommitHistoryRow: View {
             Spacer(minLength: 0)
         }
         .frame(height: CommitHistoryRow.rowHeight)
-        .accessibilityElement(children: .combine)
+        // #0399: an explicit element. With no Text left in the row,
+        // `.combine` has nothing to combine and SwiftUI emits no element at
+        // all for a chipless row (measured in the VM); `.ignore` plus the
+        // label always yields one, and the static-text trait keeps it a
+        // text element for VoiceOver and the UI tests.
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel(CommitRowAccessibility.label(entry: entry, chips: chips))
+        .accessibilityAddTraits(.isStaticText)
     }
 
     /// #0399: a graph row is as tall as a node and a chip need, not a

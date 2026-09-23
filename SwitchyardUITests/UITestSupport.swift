@@ -77,7 +77,7 @@ extension XCUIApplication {
     @MainActor
     func historyRows(containing subject: String) -> XCUIElementQuery {
         let byLine = "by \(UITestFixture.author)"
-        return descendants(matching: .any).matching(NSPredicate(
+        return staticTexts.matching(NSPredicate(
             format: "(label CONTAINS %@ AND label CONTAINS %@) OR " +
                 "(value CONTAINS %@ AND value CONTAINS %@)",
             subject, byLine, subject, byLine))
