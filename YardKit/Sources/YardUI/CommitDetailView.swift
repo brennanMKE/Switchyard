@@ -4,10 +4,11 @@ import SwiftUI
 import YardGit
 
 /// The Detail pane's content for a selected commit (#0082): its metadata,
-/// then its diff. `ContentView` owns loading `files` (`loadCommitDiff`,
-/// `RepositoryLoader.swift`) and passes the result in here separately from
-/// `entry`, because the diff loads asynchronously off the History
-/// selection while `entry`'s metadata is already in hand from
+/// then the paths it changed and a Show Changes button (#0403) that opens
+/// the diff in its own window (#0406). `ContentView` owns loading `files`
+/// (`loadCommitDiff`, `RepositoryLoader.swift`) and passes the result in
+/// here separately from `entry`, because the diff loads asynchronously off
+/// the History selection while `entry`'s metadata is already in hand from
 /// `CommitLogEntry`.
 public struct CommitDetailView: View {
     private let entry: CommitLogEntry
@@ -16,6 +17,9 @@ public struct CommitDetailView: View {
     private let files: [FileDiff]?
     /// Set when `loadCommitDiff` throws.
     private let diffError: String?
+    /// #0403: opens this commit's changes window (#0406). `nil` hides the
+    /// Show Changes button.
+    private let onShowChanges: (() -> Void)?
 
     /// `commitDiff` returns an empty result for **every** merge commit,
     /// whatever it changed (measured, #0341) -- so a blank pane there would
@@ -23,10 +27,12 @@ public struct CommitDetailView: View {
     /// the explicit note independently of what `files` came back as.
     private var isMerge: Bool { entry.parents.count > 1 }
 
-    public init(entry: CommitLogEntry, files: [FileDiff]?, diffError: String?) {
+    public init(entry: CommitLogEntry, files: [FileDiff]?, diffError: String?,
+                onShowChanges: (() -> Void)? = nil) {
         self.entry = entry
         self.files = files
         self.diffError = diffError
+        self.onShowChanges = onShowChanges
     }
 
     public var body: some View {
@@ -158,9 +164,23 @@ public struct CommitDetailView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
             } else {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Text(Self.changedFilesSummary(count: files.count))
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                        if let onShowChanges {
+                            Button("Show Changes") { onShowChanges() }
+                        }
+                    }
+                    // #0403: paths only; the diff itself lives in the
+                    // changes window (#0404, #0406).
                     ForEach(files, id: \.path) { file in
-                        FileDiffView(file: file)
+                        Label(file.path, systemImage: FileChangeKind.of(file).systemImage)
+                            .font(.callout)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .help(file.path)
                     }
                 }
             }
@@ -168,6 +188,11 @@ public struct CommitDetailView: View {
             ProgressView()
                 .frame(maxWidth: .infinity, alignment: .center)
         }
+    }
+
+    /// #0403: "1 changed file" / "N changed files".
+    public nonisolated static func changedFilesSummary(count: Int) -> String {
+        count == 1 ? "1 changed file" : "\(count) changed files"
     }
 }
 
