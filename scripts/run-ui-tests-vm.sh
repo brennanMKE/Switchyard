@@ -265,7 +265,7 @@ tart exec "$CLONE" /bin/zsh -lc \
    printf 'second\n' > b.txt && git add b.txt && git commit -m '0382 second commit' && \
    printf 'third\n' > c.txt && git add c.txt && git commit -m '0382 third commit' && \
    printf 'tip\n' > d.txt && git add d.txt && git commit -m '0382 tip commit' && \
-   git branch spike-side && git branch alpha-fork && \
+   git branch spike-side && git branch alpha-fork && git branch beta-older HEAD~2 && \
    git update-ref refs/remotes/origin/uitest-side HEAD && \
    git tag v0.1"
   local actual_branch
@@ -315,6 +315,7 @@ run_spike_if_selected 0382 Spike0382ContextKeysUITests
 run_spike_if_selected 0383 Spike0383ArrowsUITests
 run_spike_if_selected 0385 Spike0385AlertLiveUpdateUITests
 run_spike_if_selected 0386 Spike0386SectionsCollapseUITests
+run_spike_if_selected 0401 Spike0401SidebarBranchFocusUITests
 
 print ""
 if (( TEST_RC == 0 )); then

@@ -59,6 +59,13 @@ public struct RepositorySidebarView: View {
     /// commit selection.
     @Binding private var selectedResolution: String?
 
+    /// #0401: the full ref name of the sidebar row last clicked, owned by
+    /// `ContentView`; the matching row draws selected.
+    private let selectedRef: String?
+    /// #0401: reports a click on a branch or remote row. The sidebar never
+    /// writes the History selection itself.
+    private let onSelectRef: ((RefSnapshot.Entry) -> Void)?
+
     /// #0371: the ref sections' initial expansion state. Branches opens so
     /// the current branch is visible without a click; Remotes and Tags start
     /// collapsed -- Switchyard measures 309 local and 294 remote-tracking
@@ -93,11 +100,15 @@ public struct RepositorySidebarView: View {
 
     public init(
         summary: RepositorySidebarSummary, stashCount: Int,
-        selectedResolution: Binding<String?>
+        selectedResolution: Binding<String?>,
+        selectedRef: String? = nil,
+        onSelectRef: ((RefSnapshot.Entry) -> Void)? = nil
     ) {
         self.summary = summary
         self.stashCount = stashCount
         self._selectedResolution = selectedResolution
+        self.selectedRef = selectedRef
+        self.onSelectRef = onSelectRef
     }
 
     // `nonisolated`: inert String constants, read by the `nonisolated`
@@ -287,7 +298,7 @@ public struct RepositorySidebarView: View {
                         isExpanded: isFiltering ? .constant(true) : $branchesExpanded
                     ) {
                         ForEach(branches, id: \.name) { entry in
-                            branchRow(entry)
+                            selectable(entry, branchRow(entry))
                         }
                     } label: {
                         Text("Branches")
@@ -300,7 +311,7 @@ public struct RepositorySidebarView: View {
                         isExpanded: isFiltering ? .constant(true) : $remotesExpanded
                     ) {
                         ForEach(remotes, id: \.name) { entry in
-                            refRow(entry, prefix: Self.remotesPrefix, systemImage: "network")
+                            selectable(entry, refRow(entry, prefix: Self.remotesPrefix, systemImage: "network"))
                         }
                     } label: {
                         Text("Remotes")
@@ -361,6 +372,19 @@ public struct RepositorySidebarView: View {
             branchStatus = report
             contentStates = try? await BranchStatus.contentPass(for: report, at: path)
         }
+    }
+
+    /// #0401: makes a branch or remote row clickable. A tap gesture rather
+    /// than a `Button` keeps the row's `Label` text a plain static text,
+    /// which the VM UI tests find the row by (`sidebarRow(named:)`).
+    private func selectable<Content: View>(_ entry: RefSnapshot.Entry, _ content: Content) -> some View {
+        content
+            .contentShape(Rectangle())
+            .onTapGesture { onSelectRef?(entry) }
+            .listRowBackground(
+                selectedRef == entry.name
+                    ? RoundedRectangle(cornerRadius: 5).fill(Color.accentColor.opacity(0.25))
+                    : nil)
     }
 
     /// A branch row: the branch glyph (a filled checkmark for the current
