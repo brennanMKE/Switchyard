@@ -352,6 +352,14 @@ public struct ContentView: View {
             commitMenuTarget: commitMenuTarget,
             repositoryPath: repositoryPath,
             branchName: summary?.whereAmI.branch,
+            existingBranches: (sidebar?.refs.refs ?? []).compactMap { entry in
+                entry.name.hasPrefix("refs/heads/")
+                    ? String(entry.name.dropFirst("refs/heads/".count)) : nil
+            },
+            existingTags: (sidebar?.refs.refs ?? []).compactMap { entry in
+                entry.name.hasPrefix("refs/tags/")
+                    ? String(entry.name.dropFirst("refs/tags/".count)) : nil
+            },
             onPromptRequest: { request in
                 actionPrompt = nil
                 let index = actionPromptIndex ?? 0
@@ -935,6 +943,11 @@ private struct CommitActionOverlays: ViewModifier {
     let commitMenuTarget: CommitMenuTarget?
     let repositoryPath: String?
     let branchName: String?
+    /// #0397: short branch and tag names from the sidebar's ref snapshot —
+    /// the names the prompt sheets refuse to collide with. Entries carry
+    /// full refnames (`refs/heads/x`); the caller strips the namespace.
+    let existingBranches: [String]
+    let existingTags: [String]
     let onPromptRequest: (CommitActionRequest) -> Void
     let onPromptCancel: () -> Void
     let onDeleteConfirmed: (PendingDelete) -> Void
@@ -967,6 +980,8 @@ private struct CommitActionOverlays: ViewModifier {
             .sheet(item: $actionPrompt) { prompt in
                 CommitActionPromptSheet(
                     prompt: prompt,
+                    existingBranches: existingBranches,
+                    existingTags: existingTags,
                     onRequest: onPromptRequest,
                     onCancel: onPromptCancel)
             }

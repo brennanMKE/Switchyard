@@ -125,6 +125,72 @@ public nonisolated enum CommitPromptRequest {
     }
 }
 
+/// #0397: the name rules the three name prompts refuse at the surface,
+/// before the engine ever runs — the same refusal class the engine's typed
+/// errors return, but checkable live as the user types. Pure Swift, no git
+/// call: the tests drive it without a repository.
+///
+/// `nonisolated`: `YardUI` sets `.defaultIsolation(MainActor.self)`, and a
+/// validator the sheet computes on every keystroke must not be pinned to
+/// the main actor.
+public nonisolated enum RefNameCheck {
+    /// Which surface the name is for — it picks the collision wording.
+    public enum Kind: Equatable, Sendable {
+        case branch
+        case tag
+    }
+
+    /// `nil` when `name` is acceptable for `kind`; otherwise the reason the
+    /// sheet shows as secondary text under the name field. A name is
+    /// refused when it is empty or whitespace, already exists in
+    /// `existing` (compared after trimming, so padded input still collides),
+    /// or is invalid per git-check-ref-format's common rules.
+    public static func problem(name: String, kind: Kind, existing: [String]) -> String? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return "Enter a name" }
+        if existing.contains(trimmed) {
+            switch kind {
+            case .branch: return "A branch named “\(trimmed)” already exists"
+            case .tag: return "A tag named “\(trimmed)” already exists"
+            }
+        }
+        if isInvalid(trimmed) { return "“\(trimmed)” is not a valid name" }
+        return nil
+    }
+
+    /// git-check-ref-format's common rules, the subset that catches what a
+    /// user types into a sheet: a leading `-` or `.`, a trailing `/` or `.`
+    /// or `.lock`, `..`, any of `~ ^ : ? * [ \`, a space, `@{`, or `//`.
+    private static func isInvalid(_ name: String) -> Bool {
+        if name.hasPrefix("-") || name.hasPrefix(".") { return true }
+        if name.hasSuffix("/") || name.hasSuffix(".") || name.hasSuffix(".lock") { return true }
+        if name.contains("..") || name.contains("@{") || name.contains("//") { return true }
+        let forbidden: Set<Character> = ["~", "^", ":", "?", "*", "[", "\\", " "]
+        return name.contains(where: forbidden.contains)
+    }
+
+    /// The sheet's per-kind routing, pure so the tests can drive it with
+    /// typed names: createBranch refuses collisions with branches *and*
+    /// tags, addTag with tags, and rename with the remaining branches — its
+    /// own old name is the unchanged case and stays allowed. The two
+    /// message prompts have no name field and never refuse.
+    public static func problem(
+        for prompt: CommitActionPrompt, name: String,
+        existingBranches: [String], existingTags: [String]
+    ) -> String? {
+        switch prompt {
+        case .createBranch:
+            problem(name: name, kind: .branch, existing: existingBranches + existingTags)
+        case .addTag:
+            problem(name: name, kind: .tag, existing: existingTags)
+        case let .renameBranch(old, _, _):
+            problem(name: name, kind: .branch, existing: existingBranches.filter { $0 != old })
+        case .editMessage, .squash:
+            nil
+        }
+    }
+}
+
 /// One sheet for all five prompts: a monospaced message editor for the two
 /// message actions, a name field — with the annotated toggle and message
 /// editor for a tag — for the three name actions. The Save/Create button
@@ -132,6 +198,11 @@ public nonisolated enum CommitPromptRequest {
 /// dismisses the sheet first, then runs the engine call. Cancel is Esc.
 public struct CommitActionPromptSheet: View {
     public let prompt: CommitActionPrompt
+    /// #0397: the names the name prompts refuse to collide with — the
+    /// caller passes them from the sidebar's ref snapshot; defaults keep
+    /// every existing caller compiling.
+    public var existingBranches: [String]
+    public var existingTags: [String]
     public var onRequest: (CommitActionRequest) -> Void
     public var onCancel: () -> Void
 
@@ -140,10 +211,15 @@ public struct CommitActionPromptSheet: View {
     @State private var annotated = false
 
     public init(
-        prompt: CommitActionPrompt, onRequest: @escaping (CommitActionRequest) -> Void,
+        prompt: CommitActionPrompt,
+        existingBranches: [String] = [],
+        existingTags: [String] = [],
+        onRequest: @escaping (CommitActionRequest) -> Void,
         onCancel: @escaping () -> Void
     ) {
         self.prompt = prompt
+        self.existingBranches = existingBranches
+        self.existingTags = existingTags
         self.onRequest = onRequest
         self.onCancel = onCancel
         switch prompt {
@@ -203,6 +279,11 @@ public struct CommitActionPromptSheet: View {
             VStack(alignment: .leading, spacing: 8) {
                 TextField("Tag name", text: $name)
                     .textFieldStyle(.roundedBorder)
+                if let problem = nameProblem {
+                    Text(problem)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
                 Toggle("Annotated", isOn: $annotated)
                 if annotated {
                     TextEditor(text: $message)
@@ -227,6 +308,11 @@ public struct CommitActionPromptSheet: View {
                     .foregroundStyle(.secondary)
                 TextField("Branch name", text: $name)
                     .textFieldStyle(.roundedBorder)
+                if let problem = nameProblem {
+                    Text(problem)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
             }
             .padding()
         }
@@ -235,6 +321,21 @@ public struct CommitActionPromptSheet: View {
     private var isCreateBranch: Bool {
         if case .createBranch = prompt { return true }
         return false
+    }
+
+    /// #0397: why the name input is not acceptable yet — `RefNameCheck`'s
+    /// per-kind routing against the caller's name lists. `nil` for the two
+    /// message prompts, which have no name field.
+    var nameProblem: String? {
+        RefNameCheck.problem(
+            for: prompt, name: name,
+            existingBranches: existingBranches, existingTags: existingTags)
+    }
+
+    /// The confirm button's condition, extracted so the tests assert the
+    /// exact boolean the button is disabled with.
+    var confirmDisabled: Bool {
+        composedRequest == nil || nameProblem != nil
     }
 
     private var composedRequest: CommitActionRequest? {
@@ -268,7 +369,7 @@ public struct CommitActionPromptSheet: View {
                 onRequest(request)
             }
             .keyboardShortcut(.return, modifiers: .command)
-            .disabled(composedRequest == nil)
+            .disabled(confirmDisabled)
             .buttonStyle(.borderedProminent)
         }
         .padding()
