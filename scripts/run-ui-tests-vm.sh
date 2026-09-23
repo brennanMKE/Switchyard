@@ -324,7 +324,7 @@ else
 fi
 for log_file in "$RESULTS_DIR"/spike-*/xcodebuild-*.log; do
   [[ -f "$log_file" ]] || continue
-  print "--- $(basename "$log_file")"
+  print -r -- "--- $(basename "$log_file")"
   grep -E 'Test Case .* (passed|failed)|TEST (SUCCEEDED|FAILED)' "$log_file" | tail -8 || true
 done
 print ""
