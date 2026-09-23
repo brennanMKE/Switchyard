@@ -808,6 +808,19 @@ and the path from an in-app conflict into the resolve pane. M6 and M7 are tracke
 
 - [ ] #0387, #0388, #0389, #0390, #0391, #0392, #0393 and #0394 are resolved.
 
+**M9 — A graph you can browse.** Set 2026-09-22 by Brennan after using the app on Batty
+side by side with GitUp. The center pane becomes a branch map with no commit text, every local
+branch is labelled and reachable, the filter acts on the graph, and a commit's diff moves out of
+the detail pane into a window of its own. The reference screenshots are in `issues/0399/`.
+
+**Exit criteria:**
+
+- [ ] #0399, #0400, #0401, #0402, #0403 and #0404 are resolved, plus any children they are split into.
+- [ ] On Batty (127 branches), every local branch can be found and focused from the graph or the
+      sidebar without reading commit text.
+- [ ] Each behaviour has a VM UI test (`scripts/run-ui-tests-vm.sh`), or a unit test where the
+      behaviour is not interactive.
+
 **The `switchyard` skill ships continuously from M1**, regenerated whenever the command surface changes.
 It is not a milestone of its own. See [Section 8](#8-the-agent-skill-and-why-there-is-no-mcp-server).
 
