@@ -89,6 +89,7 @@ public struct CommitHistoryView: View {
                     .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 8))
                     .listRowSeparator(.hidden)
             }
+            .environment(\.defaultMinListRowHeight, CommitHistoryRow.rowHeight)
             // #0377: with a row selected, Edit ▸ Copy (⌘C) puts that commit's
             // full oid on the pasteboard. The context menu copies the *clicked*
             // row's oid even when another row is selected.
@@ -121,12 +122,12 @@ public struct CommitHistoryView: View {
     }
 }
 
-/// One row: a lane gutter, then ref chips and the subject, short OID, author.
-/// The chips (#0358, #0367) are the row's ref labels -- branches and remotes
-/// from the sidebar's snapshot, tags and a detached `HEAD` from `%D` -- and
-/// the whole row is one VoiceOver element speaking `CommitRowAccessibility.label`.
-/// A commit no local tip reaches (#0368) draws its text at 0.6 opacity: its
-/// history is reachable only from remote-tracking branches.
+/// One row: a lane gutter, then the ref chips for the commit (#0358, #0367)
+/// -- branches and remotes from the sidebar's snapshot, tags and a detached
+/// `HEAD` from `%D`. #0399: no commit text; the whole row is still one
+/// VoiceOver element speaking `CommitRowAccessibility.label`, which keeps
+/// the subject, short OID and author. A commit no local tip reaches (#0368)
+/// draws its chips at 0.6 opacity.
 private struct CommitHistoryRow: View {
     let entry: CommitLogEntry
     let graphRow: GraphRow?
@@ -141,33 +142,26 @@ private struct CommitHistoryRow: View {
 
     var body: some View {
         let isRemoteOnly = localOids.map { !$0.contains(entry.oid) } ?? false
-        HStack(alignment: .center, spacing: 8) {
+        HStack(alignment: .center, spacing: 4) {
             LaneGutterView(row: graphRow, segments: segments, owners: owners, localOids: localOids,
                            isHead: isHead, width: gutterWidth)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 4) {
-                    ForEach(chips, id: \.self) { chip in
-                        RefChipView(chip: chip, tint: BranchColor.color(for: chip))
-                    }
-                    Text(entry.subject)
-                        .fontWeight(isHead ? .semibold : .regular)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                }
-                HStack(spacing: 8) {
-                    Text(entry.shortOid)
-                        .font(.system(.caption, design: .monospaced))
-                    Text(entry.author)
-                        .font(.caption)
-                }
-                .foregroundStyle(.secondary)
+            // #0399: no subject, SHA or author in the graph; the chips are
+            // the only text, naming each branch, remote and tag at its commit.
+            // The Detail pane carries the commit's identity.
+            ForEach(chips, id: \.self) { chip in
+                RefChipView(chip: chip, tint: BranchColor.color(for: chip))
             }
-            .padding(.vertical, 4)
             .opacity(isRemoteOnly ? 0.6 : 1)
+            Spacer(minLength: 0)
         }
+        .frame(height: CommitHistoryRow.rowHeight)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(CommitRowAccessibility.label(entry: entry, chips: chips))
     }
+
+    /// #0399: a graph row is as tall as a node and a chip need, not a
+    /// two-line text row.
+    static let rowHeight: CGFloat = 22
 }
 
 /// One ref chip: a capsule before the subject, tinted by #0366's colours and
