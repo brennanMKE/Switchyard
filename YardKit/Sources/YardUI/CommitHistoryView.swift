@@ -142,18 +142,20 @@ private struct CommitHistoryRow: View {
 
     var body: some View {
         let isRemoteOnly = localOids.map { !$0.contains(entry.oid) } ?? false
-        HStack(alignment: .center, spacing: 4) {
+        ZStack(alignment: .leading) {
             LaneGutterView(row: graphRow, segments: segments, owners: owners, localOids: localOids,
                            isHead: isHead, width: gutterWidth)
-            // #0399: no subject, SHA or author in the graph; the chips are
-            // the only text, naming each branch, remote and tag at its commit.
-            // The Detail pane carries the commit's identity.
-            ForEach(chips, id: \.self) { chip in
-                RefChipView(chip: chip, tint: BranchColor.color(for: chip))
+            // #0400: the chips start beside this row's node, over any lanes
+            // to its right; RefChipView's opaque backing keeps them legible.
+            HStack(spacing: 4) {
+                ForEach(chips, id: \.self) { chip in
+                    RefChipView(chip: chip, tint: BranchColor.color(for: chip))
+                }
             }
             .opacity(isRemoteOnly ? 0.6 : 1)
-            Spacer(minLength: 0)
+            .padding(.leading, LaneGeometry.labelLeading(forLane: graphRow?.lane ?? 0))
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: CommitHistoryRow.rowHeight)
         // #0399: an explicit element. With no Text left in the row,
         // `.combine` has nothing to combine and SwiftUI emits no element at
@@ -196,6 +198,9 @@ struct RefChipView: View {
                     Capsule().strokeBorder(.orange, lineWidth: 1.5)
                 }
             }
+            // #0400: chips can sit over lanes to their right; an opaque
+            // capsule behind the tint keeps the name legible.
+            .background(Capsule().fill(.background))
             .help(helpText)
     }
 

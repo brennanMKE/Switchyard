@@ -46,3 +46,9 @@ func maxLaneInCountsParentEdgesBeyondOwnLane() {
     let rows = [GraphRow(oid: "a", parents: ["b"], lane: 0, parentLanes: [2])]
     #expect(LaneGeometry.maxLane(in: rows) == 2)
 }
+
+@Test("a row's labels start just right of that row's own node (#0400)")
+func labelLeadingIsBesideTheNode() {
+    #expect(LaneGeometry.labelLeading(forLane: 0) == 30.5)   // 20 + 0*36 + 4.5 + 6
+    #expect(LaneGeometry.labelLeading(forLane: 2) == 102.5)  // 20 + 2*36 + 4.5 + 6
+}
