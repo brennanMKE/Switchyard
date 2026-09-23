@@ -27,6 +27,9 @@ import YardGit
 
 public struct ContentView: View {
 
+    /// #0406: opens the `CommitChangesTarget` scene window.
+    @Environment(\.openWindow) private var openWindow
+
     /// The chosen repository's folder path, or `nil` before anything is
     /// picked. `.task(id:)` reloads whenever this changes.
     @State private var repositoryPath: String?
@@ -526,6 +529,7 @@ public struct ContentView: View {
             menuStates: { oid in menuStates(for: oid, summary: summary) },
             perform: { action, oid in perform(action, oid, summary: summary) },
             scrollRequest: historyScrollRequest,
+            onOpenChanges: { openChanges(for: $0) },
             selection: Binding(
                 get: { selectedCommit },
                 set: { newValue in
@@ -628,6 +632,15 @@ public struct ContentView: View {
         case .refused:
             break // RepositoryOpener already presented the refusal
         }
+    }
+
+    /// #0406: opens `oid`'s changes window. `WindowGroup(for:)` focuses an
+    /// existing window for an equal target rather than opening a second one.
+    private func openChanges(for oid: String) {
+        guard let repositoryPath,
+              let entry = history.first(where: { $0.oid == oid }) else { return }
+        openWindow(value: CommitChangesTarget(
+            repositoryPath: repositoryPath, oid: oid, subject: entry.subject))
     }
 
     private func reload() async {

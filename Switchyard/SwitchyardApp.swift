@@ -125,6 +125,19 @@ struct SwitchyardApp: App {
             JournalCommands()
         }
 
+        // #0406: one window per commit's changes. Equal targets focus the
+        // existing window. It volunteers for no OS URL events (same reason as
+        // the main group above, #0078), and it is not restored at relaunch:
+        // a stale commit window is noise.
+        WindowGroup("Commit Changes", for: CommitChangesTarget.self) { $target in
+            if let target {
+                CommitChangesView(target: target)
+            }
+        }
+        .handlesExternalEvents(matching: Set())
+        .defaultSize(width: 1100, height: 720)
+        .restorationBehavior(.disabled)
+
         // #0352: the Settings scene (Cmd-,). The CLI install section and the
         // broker section both funnel into the existing machinery —
         // `CLIInstallActions` (#0222) and the transport bridge's model, the
