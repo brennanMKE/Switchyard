@@ -195,6 +195,11 @@ paths, guard clauses that skip. The question to answer is not "does the code do 
 
 ### Judgment — read the issue and answer honestly
 
+- **Does the issue quote another repository's branch name shaped `issue/NNNN`?** (#0401, #0409,
+  2026-09-22.) Mechanical check 5 reads any `issue/NNNN` as a dependency on a Switchyard branch
+  and fails hard. When quoting Batty's or any other repository's branches, write them in prose
+  ("Batty's 0337 issue branch"). Two claims were blocked by this in one evening.
+
 - **Does the issue change what a view exposes to accessibility, or how a UI test finds an
   element?** (#0399 r1.) Then run the pasted change in the VM through `build/uitest-overlay/`
   before dispatching; reading SwiftUI is not enough. Two measured traps: a
