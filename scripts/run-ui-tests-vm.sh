@@ -317,6 +317,7 @@ run_spike_if_selected 0385 Spike0385AlertLiveUpdateUITests
 run_spike_if_selected 0386 Spike0386SectionsCollapseUITests
 run_spike_if_selected 0401 Spike0401SidebarBranchFocusUITests
 run_spike_if_selected 0399 Spike0399CompactGraphRowsUITests
+run_spike_if_selected 0400 Spike0400GraphScreenshotUITests
 run_spike_if_selected 0406 Spike0406CommitChangesWindowUITests
 
 print ""

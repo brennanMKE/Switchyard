@@ -36,6 +36,13 @@ public nonisolated enum LaneGeometry {
         leadingInset + CGFloat(lane) * laneSpacing
     }
 
+    /// #0400: where a row's ref chips start -- just right of that row's own
+    /// node, so a branch label sits beside the commit it names rather than
+    /// at the gutter's far edge.
+    public static func labelLeading(forLane lane: Int) -> CGFloat {
+        xOffset(forLane: lane) + nodeRadius + 6
+    }
+
     /// The gutter's total width for a loaded set whose widest touched lane
     /// is `maxLane` -- 0 for a purely linear history, so lane 0 alone still
     /// reserves only enough width for itself. A negative `maxLane` (an empty
