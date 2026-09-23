@@ -96,6 +96,12 @@ public struct ContentView: View {
     /// prompt the user must be able to reach.
     @State private var runningAction: CommitAction?
 
+    /// #0394: one of the header's conflict actions (Resolve Conflicts…,
+    /// Continue, Abort) is running. Folded into `isBusy` so the row menu's
+    /// items disable with it — a second engine write is dropped rather than
+    /// queued, the same guard `runningAction` gives the commit actions.
+    @State private var conflictActionRunning = false
+
     /// #0359: set when a commit action's engine call throws — shown as the
     /// failure alert. #0375's split failure alert folded into this.
     @State private var actionFailure: CommitActionFailure?
@@ -164,6 +170,15 @@ public struct ContentView: View {
     /// is injected (tests, previews) and no pane is ever presented.
     public var resolves: ResolveCenter?
 
+    /// #0394: registers the app-side pending resolve behind the header's
+    /// Resolve Conflicts… button, injected by the app target. The await
+    /// returns when the human decides (the pane's resolution path), the
+    /// request times out, or the request is superseded; the pane itself
+    /// opens through the `resolves.activePane` sheet binding above when
+    /// `pendingDidRegister` fires. `nil` when nothing is injected (tests,
+    /// previews) — `beginResolve` below then only refreshes.
+    public var onBeginInAppResolve: ((String) async -> Void)?
+
     /// The transport pane's disclosure state. Local UI state, so `@State`
     /// is the right home; nothing else reads it.
     @State private var transportExpanded = false
@@ -184,12 +199,14 @@ public struct ContentView: View {
         reviews: ReviewCenter? = nil,
         asks: AskCenter? = nil,
         resolves: ResolveCenter? = nil,
+        onBeginInAppResolve: ((String) async -> Void)? = nil,
         initialRepositoryPath: String? = nil
     ) {
         self.transportStatus = transportStatus
         self.reviews = reviews
         self.asks = asks
         self.resolves = resolves
+        self.onBeginInAppResolve = onBeginInAppResolve
         if let initialRepositoryPath {
             _repositoryPath = State(initialValue: initialRepositoryPath)
         }
@@ -412,7 +429,20 @@ public struct ContentView: View {
 
     private func repositoryView(summary: RepositorySummary) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            RepositoryHeaderView(whereAmI: summary.whereAmI)
+            // #0394: the header's conflict hand-off. The view gates the
+            // buttons on `WhereAmI` fields itself; the closures below re-
+            // derive the kind at click time from the summary that rendered
+            // them, so a refresh between render and click cannot act on a
+            // state that has already moved.
+            RepositoryHeaderView(
+                whereAmI: summary.whereAmI,
+                onResolveConflicts: { beginResolve() },
+                onContinue: {
+                    guard let kind = ConflictHandoff.continuableKind(for: summary.whereAmI)
+                    else { return }
+                    runContinue(kind: kind)
+                },
+                onAbort: { runAbort() })
                 .padding()
             Divider()
             // #0359: the running action's progress line. No modal and no
@@ -673,8 +703,10 @@ public struct ContentView: View {
 
     /// #0359: an action is running, or #0375's split is. Feeds the menu's
     /// `isBusy` — every item disables with "Another operation is still
-    /// running" — so a second action is dropped rather than queued.
-    private var isBusy: Bool { runningAction != nil }
+    /// running" — so a second action is dropped rather than queued. #0394:
+    /// the header's conflict actions take the same guard through
+    /// `conflictActionRunning`.
+    private var isBusy: Bool { runningAction != nil || conflictActionRunning }
 
     /// The owners map the row gutter colours with, which the Merge into
     /// Current Branch and Edit Local Branch rules read: the branch that
@@ -892,6 +924,82 @@ public struct ContentView: View {
                 // the listing is cheap, and re-reading it keeps the titles
                 // honest if the journal moved while the menu was open.
                 journalListing = try? await loadJournalListing(at: repositoryPath)
+            }
+        }
+    }
+
+    // MARK: - #0394: the header's conflict hand-off
+
+    /// #0394: the header's Resolve Conflicts… — registers the app-side
+    /// pending resolve through the injected closure, whose await returns
+    /// when the human decides in the pane (the pane itself opens through
+    /// the `resolves.activePane` sheet binding when `pendingDidRegister`
+    /// fires), then refreshes in place so the header shows the resolved
+    /// state. With nothing injected (tests, previews) this only refreshes.
+    private func beginResolve() {
+        guard let repositoryPath, !isBusy else { return }
+        conflictActionRunning = true
+        Task {
+            defer { conflictActionRunning = false }
+            await onBeginInAppResolve?(repositoryPath)
+            await refreshAfterMutation { _, _ in selectedCommit }
+        }
+    }
+
+    /// #0394: the header's Continue — completes the in-flight operation the
+    /// way git does from a terminal, through the `@concurrent` wrapper on
+    /// `ConflictHandoff.runContinue`. Never called for the `Rewrite`
+    /// family's detached replay (the header's gate is
+    /// `ConflictHandoff.continuableKind`); the refresh uses `runJournal`'s
+    /// selection rule — keep the selected commit when it is still loaded,
+    /// else HEAD's new oid. A failure presents as the failure alert, and
+    /// the refresh happens anyway, because only a refresh makes the header
+    /// say what the repository actually shows.
+    private func runContinue(kind: ConflictHandoff.Kind) {
+        guard let repositoryPath, !isBusy else { return }
+        conflictActionRunning = true
+        Task {
+            defer { conflictActionRunning = false }
+            do {
+                _ = try await continueInAppOperation(kind: kind, at: repositoryPath)
+            } catch {
+                actionFailure = CommitActionFailure(
+                    title: "Couldn’t Continue \(ConflictHandoff.name(of: kind))",
+                    message: String(describing: error))
+            }
+            await refreshAfterMutation { rows, newHead in
+                if let selected = selectedCommit,
+                   rows.contains(where: { $0.oid == selected }) {
+                    return selected
+                }
+                return newHead.isEmpty ? nil : newHead
+            }
+        }
+    }
+
+    /// #0394: the header's Abort, already confirmed by the dialog — one
+    /// journal undo restores the pre-operation entry and the operation's
+    /// own `--abort` clears the conflict state files the restore leaves
+    /// (`ConflictHandoff.runAbort`). A failure presents as the failure
+    /// alert, and the refresh happens anyway, the same as `runContinue`.
+    private func runAbort() {
+        guard let repositoryPath, !isBusy else { return }
+        conflictActionRunning = true
+        Task {
+            defer { conflictActionRunning = false }
+            do {
+                try await abortInAppOperation(at: repositoryPath)
+            } catch {
+                actionFailure = CommitActionFailure(
+                    title: "Couldn’t Abort",
+                    message: String(describing: error))
+            }
+            await refreshAfterMutation { rows, newHead in
+                if let selected = selectedCommit,
+                   rows.contains(where: { $0.oid == selected }) {
+                    return selected
+                }
+                return newHead.isEmpty ? nil : newHead
             }
         }
     }

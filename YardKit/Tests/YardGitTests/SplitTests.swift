@@ -448,17 +448,27 @@ private extension SplitError {
 }
 
 @Test func conflictingReplayLeavesThePickResumable() throws {
+    // x1 is built BEFORE s on purpose (#0394 round 1, measured): the
+    // replay's pick list is `git rev-list --reverse c2..m`, whose sibling
+    // order rides the commit-date tie-break (Split.swift documents it).
+    // Built in the other order, a load-slowed fixture build lets s and x1
+    // cross a second boundary, `rev-list --reverse` then lists s first, s
+    // picks cleanly onto the second half (its parent IS c2), HEAD moves off
+    // the second half, and the `HEAD^{tree}` assertion below fails on the
+    // tie-break, not on the contract. x1 first pins x1 as the first pick in
+    // both timings — x1's pick is the one that conflicts — so the test
+    // measures the resumable stop, not the machine's clock.
     var repo = try FixtureRepository()
     try repo.build([
         .init("c1", files: ["f.txt": "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\nl11\nl12\nl13\nl14\n"]),
         .init("c2", files: ["f.txt": "l1\nl2\nT3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\nl11\nT12\nl13\nl14\n"]),
-        // s, on top of c2, changes an unrelated line.
-        .init("s", files: ["f.txt": "l1\nl2\nT3\nl4\nl5\nl6\nS7\nl8\nl9\nl10\nl11\nT12\nl13\nl14\n"]),
         // x1, a side branch off c1, rewrites line 3 — the very line the
         // chosen hunk changes. Measured: picking it onto the second half
         // (whose line 3 is T3) conflicts, because the pick's base is x1's
         // parent c1, where line 3 is l3.
         .init("x1", parents: ["c1"], files: ["f.txt": "l1\nl2\nZ3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\nl11\nl12\nl13\nl14\n"]),
+        // s, on top of c2, changes an unrelated line.
+        .init("s", parents: ["c2"], files: ["f.txt": "l1\nl2\nT3\nl4\nl5\nl6\nS7\nl8\nl9\nl10\nl11\nT12\nl13\nl14\n"]),
         // The merge resolves line 3 to x1's value; a dirty merge the
         // fixture resolves by writing the file (the harness's own idiom).
         .init("m", parents: ["s", "x1"], files: ["f.txt": "l1\nl2\nZ3\nl4\nl5\nl6\nS7\nl8\nl9\nl10\nl11\nT12\nl13\nl14\n"]),

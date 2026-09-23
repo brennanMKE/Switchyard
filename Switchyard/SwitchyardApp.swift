@@ -80,12 +80,17 @@ struct SwitchyardApp: App {
             // app-target objects that know the real status. #0055: the
             // review sheets come from the same server's bridge. #0056: the
             // ask sheets come from its ask bridge. #0057: the resolve panes
-            // come from its resolve bridge.
+            // come from its resolve bridge. #0394: the header's Resolve
+            // Conflicts… registers the app-side pending resolve on the same
+            // server.
             ContentView(
                 transportStatus: appDelegate.transportBridge.model,
                 reviews: appDelegate.server.reviewBridge.center,
                 asks: appDelegate.server.askBridge.center,
-                resolves: appDelegate.server.resolveBridge.center)
+                resolves: appDelegate.server.resolveBridge.center,
+                onBeginInAppResolve: { path in
+                    await appDelegate.server.beginInAppResolve(repositoryPath: path)
+                })
             }
         } defaultValue: {
             // Return the WindowID already seeded in WindowStore.shared, so

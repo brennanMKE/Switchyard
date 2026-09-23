@@ -227,6 +227,48 @@ final class AppXPCServer {
         }
     }
 
+    // MARK: - The header's conflict hand-off (#0394)
+
+    /// Registers the app-owned pending resolve behind the repository
+    /// header's Resolve Conflicts… button (#0394).
+    ///
+    /// The encoded request carries an empty `commonDir` —
+    /// `runResolveRequest` fills the resolved one in before registering,
+    /// exactly as it does for the CLI — and every conflicted path's scope
+    /// (`pathspec: nil`). The timeout is 86 400 seconds because there is no
+    /// CLI backstop to beat: the pane simply never times out in practice.
+    /// `owner` stays the default `PendingOwner()` — a fresh token no CLI
+    /// connection was ever handed — so no connection's invalidation can
+    /// abandon an app-owned request. The `onPending` bridge is
+    /// `performResolve`'s exact shape, so the pane gets the same per-path
+    /// details the CLI path delivers; the await returns when the human
+    /// decides, the request times out, or it is superseded.
+    ///
+    /// `@Sendable` on the closure is load-bearing, the same rule as every
+    /// handler above: written inside this `@MainActor` method it would
+    /// otherwise inherit main-actor isolation, and `runResolveRequest`
+    /// calls it from its own nonisolated context — an isolation assertion
+    /// trap, not a routing bug.
+    func beginInAppResolve(repositoryPath: String) async {
+        let request = ResolveRequest(commonDir: "", pathspec: nil, timeoutSeconds: 86_400)
+        guard let requestData = try? JSONEncoder().encode(request) else { return }
+        let store = pendingResolves
+        let bridge = resolveBridge
+        _ = await runResolveRequest(
+            requestData: requestData,
+            workingDirectory: repositoryPath,
+            store: store,
+            onPending: { @Sendable registered, context, details, errorMessage in
+                Task { @MainActor in
+                    bridge.pendingDidRegister(
+                        request: registered,
+                        context: context,
+                        details: details,
+                        errorMessage: errorMessage)
+                }
+            })
+    }
+
     private func makeBrokerConnection() -> NSXPCConnection {
         let connection = NSXPCConnection(machServiceName: ServiceNames.machServiceName)
         // Set before resume(), or calls silently do nothing.

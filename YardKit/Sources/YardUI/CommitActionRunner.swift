@@ -51,3 +51,32 @@ public func performCommitAction(_ request: CommitActionRequest, at path: String)
         _ = try Branch.rename(old: old, new: new, at: path)
     }
 }
+
+/// #0394: continues the in-app operation the header's Continue names, the
+/// way git completes it from a terminal — `ConflictHandoff.runContinue`'s
+/// per-kind argv, with the same signing intent the original invocation
+/// rode. The engine call blocks in a git subprocess;
+/// `@concurrent` keeps all of it off the main actor while the UI awaits —
+/// the same reason `performCommitAction` above carries it.
+///
+/// - Returns: `rev-parse HEAD` after the continue — the oid the
+///   operation's own ref move landed on.
+@concurrent
+@discardableResult
+public func continueInAppOperation(
+    kind: ConflictHandoff.Kind,
+    signing: CommitCreate.Signing = .config,
+    at path: String
+) async throws -> String {
+    try ConflictHandoff.runContinue(kind: kind, signing: signing, at: path)
+}
+
+/// #0394: aborts the in-app operation the header's Abort confirmed — one
+/// journal undo restores the pre-operation entry, then the still-live
+/// conflict state's own `--abort` clears the state files the restore does
+/// not touch (`ConflictHandoff.runAbort`). `@concurrent` for the same
+/// reason `continueInAppOperation` above carries it.
+@concurrent
+public func abortInAppOperation(at path: String) async throws {
+    try ConflictHandoff.runAbort(at: path)
+}
