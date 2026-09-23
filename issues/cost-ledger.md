@@ -449,7 +449,9 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-09-12 | #0387-#0394 | M8 filing pass, resumed agent (O, measured; figure as reported, may be cumulative) | 586,624 | $4.69 |
 | 2026-09-22 | #0404 | round 1, Sonnet implementation, 416 s wall, passed (S, measured) | 80,366 | — |
 | 2026-09-22 | #0405 | round 1, Sonnet implementation, 1,264 s wall, passed (S, measured) | 86,735 | — |
-| | | **Total measured** (tokens include 2026-09-22 rows; $ not updated for them) | **45,656,584** | **$437.24** |
+| 2026-09-22 | #0401 | round 1, Sonnet implementation, 595 s wall, passed (S, measured) | 125,810 | — |
+| 2026-09-22 | #0407 | round 1, Sonnet implementation, 70 s wall, passed (S, measured) | 57,781 | — |
+| | | **Total measured** (tokens include 2026-09-22 rows; $ not updated for them) | **45,840,175** | **$437.24** |
 
 ## What this total does and does not cover
 

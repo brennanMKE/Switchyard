@@ -42,6 +42,12 @@ public func loadRepositorySummary(at path: String) async throws -> RepositorySum
     return RepositorySummary(whereAmI: info, status: status)
 }
 
+/// How many commits the History pane loads (#0405). Shared by
+/// `loadCommitHistory` and `loadCommitGraph` so the two collections always
+/// cover the same commits. 5,000 loads all of a 2,000-commit repository in
+/// about 0.04 s and costs about 0.1 s on git/git (measured 2026-09-22).
+public nonisolated let historyLoadLimit = 5_000
+
 /// Loads the most recent commits reachable from `HEAD`, every local branch,
 /// and every remote-tracking branch at `path`, in topological order, for the
 /// History pane (#0340, #0364).
@@ -67,14 +73,14 @@ public func loadRepositorySummary(at path: String) async throws -> RepositorySum
 public func loadCommitHistory(at path: String) async throws -> [CommitLogEntry] {
     try await CommitLog.run(
         path: path,
-        rangeArguments: ["--topo-order", "-100", "HEAD", "--branches", "--remotes"])
+        rangeArguments: ["--topo-order", "-\(historyLoadLimit)", "HEAD", "--branches", "--remotes"])
 }
 
 /// Loads the lane-assigned commit graph for the History pane's lane gutter
 /// (#0052).
 ///
-/// Bounded to `limit: 100` -- the same bound `loadCommitHistory` above
-/// applies via its `-100` -- and started from `["HEAD", "--branches",
+/// Bounded by `historyLoadLimit` (#0405), the same bound `loadCommitHistory`
+/// above applies, and started from `["HEAD", "--branches",
 /// "--remotes"]`, the same refs `loadCommitHistory` walks, in the same
 /// `--topo-order` `graphRowsArguments` pins (#0364), so the two collections
 /// cover the same commits in the same order. Tags are deliberately not
@@ -97,7 +103,7 @@ public func loadCommitHistory(at path: String) async throws -> [CommitLogEntry] 
 /// above for `FileDiff`/`Hunk`.
 @concurrent
 public func loadCommitGraph(at path: String) async throws -> [GraphRow] {
-    try await graphRows(at: path, limit: 100, revisions: ["HEAD", "--branches", "--remotes"])
+    try await graphRows(at: path, limit: historyLoadLimit, revisions: ["HEAD", "--branches", "--remotes"])
 }
 
 /// Loads the diff `revision` introduced, for the Detail pane's commit view
