@@ -148,8 +148,21 @@ private struct CommitHistoryRow: View {
             // #0400: the chips start beside this row's node, over any lanes
             // to its right; RefChipView's opaque backing keeps them legible.
             HStack(spacing: 4) {
-                ForEach(chips, id: \.self) { chip in
+                let split = RefChips.split(chips)
+                ForEach(split.shown, id: \.self) { chip in
                     RefChipView(chip: chip, tint: BranchColor.color(for: chip))
+                        .fixedSize()
+                }
+                if !split.hidden.isEmpty {
+                    // #0409: never truncate a name -- fold the rest into +N.
+                    Text("+\(split.hidden.count)")
+                        .font(.caption)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(.quaternary))
+                        .background(Capsule().fill(.background))
+                        .fixedSize()
+                        .help(split.hidden.map(\.name).joined(separator: ", "))
                 }
             }
             .opacity(isRemoteOnly ? 0.6 : 1)

@@ -37,9 +37,8 @@ func windowMinWidthIsTheSumOfPaneMinimums() {
     #expect(computedWidth == computedSum)
 }
 
-@Test("windowMinWidth fits inside ContentView's existing 480pt minimum, so the window did not need to grow")
-func windowMinWidthFitsExistingContentViewMinimum() {
-    // One assertion, not two: `== 480` already implies `<= 480`, and a
-    // redundant expectation reads as extra coverage while adding none.
-    #expect(PaneLayout.windowMinWidth == 480)
+@Test("the window minimum is 840 pt, wide enough for a readable sidebar, graph and detail (#0409)")
+func windowMinWidthIsReadable() {
+    #expect(PaneLayout.windowMinWidth == 840)
+    #expect(PaneLayout.sidebarMinWidth >= 200)
 }

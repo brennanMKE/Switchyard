@@ -106,6 +106,22 @@ struct RefChipsTests {
         #expect(BranchColor.color(for: RefChip(name: "v1", kind: .tag, isHead: false)) == .secondary)
         #expect(BranchColor.color(for: RefChip(name: "HEAD", kind: .detachedHead, isHead: true)) == .orange)
     }
+
+    @Test func splitShowsTwoChipsHeadFirstAndFoldsTheRest() {
+        let head = RefChip(name: "main", kind: .localBranch, isHead: true)
+        let a = RefChip(name: "alpha", kind: .localBranch, isHead: false)
+        let b = RefChip(name: "beta", kind: .localBranch, isHead: false)
+        let r = RefChip(name: "origin/main", kind: .remoteBranch, isHead: false)
+        let split = RefChips.split([a, head, b, r])
+        #expect(split.shown == [head, a])
+        #expect(split.hidden == [b, r])
+    }
+
+    @Test func splitHidesNothingWhenTwoOrFewer() {
+        let a = RefChip(name: "alpha", kind: .localBranch, isHead: false)
+        #expect(RefChips.split([a]).hidden.isEmpty)
+        #expect(RefChips.split([a]).shown == [a])
+    }
 }
 
 @Suite("CommitRowAccessibility")

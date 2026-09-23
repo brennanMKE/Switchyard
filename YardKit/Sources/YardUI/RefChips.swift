@@ -58,6 +58,14 @@ public nonisolated enum RefChips {
             .map { RefChip(name: String($0.dropFirst("tag: ".count)), kind: .tag, isHead: false) }
         return chips
     }
+
+    /// #0409: the chips a graph row shows at full width -- at most `limit`,
+    /// the HEAD chip first -- and the rest, which the row folds into a
+    /// "+N" chip. Order within each group is `make`'s display order.
+    public static func split(_ chips: [RefChip], limit: Int = 2) -> (shown: [RefChip], hidden: [RefChip]) {
+        let ordered = chips.filter(\.isHead) + chips.filter { !$0.isHead }
+        return (Array(ordered.prefix(limit)), Array(ordered.dropFirst(limit)))
+    }
 }
 
 public nonisolated enum CommitRowAccessibility {

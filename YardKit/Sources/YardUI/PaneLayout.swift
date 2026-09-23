@@ -19,16 +19,17 @@ import SwiftUI
 /// as a namespace -- there is nothing here to instantiate.
 public nonisolated enum PaneLayout {
     /// Sidebar pane minimum width, in points.
-    public static let sidebarMinWidth: CGFloat = 120
+    public static let sidebarMinWidth: CGFloat = 200
 
     /// History pane minimum width, in points.
-    public static let historyMinWidth: CGFloat = 160
+    public static let historyMinWidth: CGFloat = 360
 
     /// Detail pane minimum width, in points.
-    public static let detailMinWidth: CGFloat = 200
+    public static let detailMinWidth: CGFloat = 280
 
     /// The narrowest a window can be while giving every pane its minimum
-    /// width. `ContentView`'s `minWidth` must be at least this -- it is
-    /// exactly today's 480, chosen so the window did not need to grow.
+    /// width. `ContentView`'s `minWidth` must be at least this -- #0409
+    /// raised the pane minimums so a typical branch name and a commit's
+    /// chips are readable, which raised this sum to 840.
     public static let windowMinWidth: CGFloat = sidebarMinWidth + historyMinWidth + detailMinWidth
 }
