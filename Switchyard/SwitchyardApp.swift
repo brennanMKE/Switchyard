@@ -110,6 +110,10 @@ struct SwitchyardApp: App {
         // actions and are unaffected -- only OS URL opens are suppressed
         // (#0078; Batty #0251's second root cause).
         .handlesExternalEvents(matching: Set())
+        // #0409: a fresh window opens large enough to read the graph -- the
+        // sidebar's branch names and a commit's chips both truncated at the
+        // old 900x450 default (measured in the #0400 VM screenshot).
+        .defaultSize(width: 1280, height: 800)
         // #0084: File ▸ Open… and Open Recent, both funnelled through
         // `RepositoryOpener`. Pure menu declarations; the focus-or-open
         // behaviour lives in YardUI. #0359 adds the Commit menu — the same
