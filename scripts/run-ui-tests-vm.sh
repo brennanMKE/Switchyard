@@ -319,6 +319,7 @@ run_spike_if_selected 0401 Spike0401SidebarBranchFocusUITests
 run_spike_if_selected 0399 Spike0399CompactGraphRowsUITests
 run_spike_if_selected 0400 Spike0400GraphScreenshotUITests
 run_spike_if_selected 0406 Spike0406CommitChangesWindowUITests
+run_spike_if_selected 0403 Spike0403DetailWithoutDiffUITests
 run_spike_if_selected 0402 Spike0402FilterHighlightsGraphUITests
 
 print ""

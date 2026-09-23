@@ -273,7 +273,7 @@ public struct ContentView: View {
         // the access level the app target sees.
         .navigationTitle(Self.windowTitle(repositoryPath: repositoryPath))
         .navigationSubtitle(Self.windowSubtitle(summary: summary))
-        .frame(minWidth: 480, minHeight: 360)
+        .frame(minWidth: PaneLayout.windowMinWidth, minHeight: 480)
         // #0216: the transport pane, pinned below whatever the window shows —
         // it is app-global, not per-repository, and the "the CLI can't
         // connect" diagnosis usually happens with no repository open. Only
@@ -568,7 +568,8 @@ public struct ContentView: View {
                 CommitDetailView(
                     entry: entry,
                     files: selectedCommitDiff,
-                    diffError: selectedCommitDiffError
+                    diffError: selectedCommitDiffError,
+                    onShowChanges: { openChanges(for: entry.oid) }
                 )
             } else if summary.status.entries.isEmpty {
                 Text("Working tree clean")
