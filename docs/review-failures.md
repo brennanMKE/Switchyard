@@ -129,6 +129,7 @@ Checks read the **spec only** — everything above the first `## Review`, `## Wo
 ### Mechanical — the script decides
 
 | # | Check | Hard? | Derived from |
+| #0399 | 1 | The VM suite failed 4 of 10 UI tests (0382, 0383, 0385 and 0399), each with `Failed to get matching snapshots: Timed out while evaluating UI query` after about 136 s. The round itself was faithful: the package suite was green and the UI-test target built. | **Two spec defects in my plan, neither measured before it was pasted.** (1) Removing every `Text` from a row carrying `.accessibilityElement(children: .combine)` plus an `.accessibilityLabel` **drops the element from the accessibility tree** for rows with nothing left to combine. The VM hierarchy showed chip-bearing rows keeping a `StaticText` and chipless rows showing only an empty `Cell`. That is a VoiceOver regression as well as a test break. (2) The helper change to `descendants(matching: .any)` with a `value CONTAINS` clause makes XCUITest evaluate `CONTAINS` against non-string values (disclosure triangles and splitters carry numbers) inside the app. It throws (the spindump shows Switchyard "swallowed at least one exception") and retries until the query times out. The analysis was done in the main loop from the result bundle's hierarchy and spindump, not by a separate learning subagent. | `spec-defect` |
 |---|---|---|---|
 | 1 | Does it name a file inside an executable target? Nothing there can be unit-tested. | hard | #0085 |
 | 2 | Does it direct work to `/tmp`, `/var/tmp`, or `$TMPDIR`? The sandbox auto-rejects those. | hard | #0070 r2, #0098 r1 |
@@ -193,6 +194,13 @@ paths, guard clauses that skip. The question to answer is not "does the code do 
 "would this test notice if the case it names never occurred?"
 
 ### Judgment — read the issue and answer honestly
+
+- **Does the issue change what a view exposes to accessibility, or how a UI test finds an
+  element?** (#0399 r1.) Then run the pasted change in the VM through `build/uitest-overlay/`
+  before dispatching; reading SwiftUI is not enough. Two measured traps: a
+  `.accessibilityElement(children: .combine)` whose children hold no text **vanishes** from the
+  accessibility tree even with an `.accessibilityLabel`, and `value CONTAINS` over
+  `descendants(matching: .any)` throws on numeric values and times out the query.
 
 0. **For every mutation-table row: has the mutation been applied and the named test observed going
    RED?** Not "the code behaves correctly here" — that is a different claim, and it is the one that
