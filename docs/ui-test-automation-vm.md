@@ -13,6 +13,14 @@ the host.
 
 ## Why the VM is the policy going forward
 
+**Visual checks count too (Brennan, 2026-09-22).** Never launch the app under test on the host for
+a screenshot or a "quick look" either: *"You are popping up apps here instead of inside the VM."*
+A visual check is a VM UI test that attaches `XCUIScreen.main.screenshot()` with
+`lifetime = .keepAlways`. Pull the result bundle back with `scripts/run-ui-tests-vm.sh` and export
+it with `xcrun xcresulttool export attachments`. Never run `screencapture` inside the guest: it
+raises a Screen Recording prompt that breaks the run (measured 2026-09-22). The only exception is
+Brennan explicitly asking for the app to be opened on his Mac.
+
 Brennan's instruction, 2026-09-22: *"Going forward you should be doing all UI test automations
 inside of a VM so it does not disrupt the user currently using this Mac. It also avoids all kinds
 of permission issues."*
