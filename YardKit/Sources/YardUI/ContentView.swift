@@ -63,6 +63,10 @@ public struct ContentView: View {
     /// #0401: asks the History list to scroll a commit into view.
     @State private var historyScrollRequest: HistoryScrollRequest?
 
+    /// #0402: the one filter field's text -- the sidebar narrows refs, the
+    /// History pane dims non-matches.
+    @State private var filterText = ""
+
     /// #0065: the Sidebar pane's selected recorded resolution, keyed on
     /// conflict id. Selecting one clears the commit selection and the other
     /// way round — the Detail pane shows whichever was picked last — which
@@ -500,6 +504,7 @@ public struct ContentView: View {
                             // only keep the pane's commit branch alive.
                             if newValue != nil { selectedCommit = nil }
                         }),
+                    refFilter: $filterText,
                     selectedRef: selectedRef,
                     onSelectRef: { entry in
                         selectedRef = entry.name
@@ -530,6 +535,7 @@ public struct ContentView: View {
             perform: { action, oid in perform(action, oid, summary: summary) },
             scrollRequest: historyScrollRequest,
             onOpenChanges: { openChanges(for: $0) },
+            highlightQuery: filterText,
             selection: Binding(
                 get: { selectedCommit },
                 set: { newValue in

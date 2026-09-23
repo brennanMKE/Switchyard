@@ -45,6 +45,10 @@ public struct CommitHistoryView: View {
     private let scrollRequest: HistoryScrollRequest?
     /// #0406: double-clicking a row opens that commit's changes window.
     private let onOpenChanges: ((String) -> Void)?
+    /// #0402: the filter field's text; non-matching rows dim.
+    private let highlightQuery: String
+    /// #0402: which match the previous/next buttons are on.
+    @State private var matchIndex = 0
     @Binding private var selection: String?
 
     public init(
@@ -54,6 +58,7 @@ public struct CommitHistoryView: View {
         perform: ((CommitAction, String) -> Void)? = nil,
         scrollRequest: HistoryScrollRequest? = nil,
         onOpenChanges: ((String) -> Void)? = nil,
+        highlightQuery: String = "",
         selection: Binding<String?>
     ) {
         self.entries = entries
@@ -65,6 +70,7 @@ public struct CommitHistoryView: View {
         self.perform = perform
         self.scrollRequest = scrollRequest
         self.onOpenChanges = onOpenChanges
+        self.highlightQuery = highlightQuery
         self._selection = selection
     }
 
@@ -78,57 +84,119 @@ public struct CommitHistoryView: View {
             LocalReachability.oids(in: graphRows, from: LocalReachability.localTips(refs: $0, headOid: headOid))
         }
         let gutterWidth = LaneGeometry.laneGutterWidth(maxLane: LaneGeometry.maxLane(in: graphRows))
+        let query = HistoryFilter.normalized(highlightQuery)
+        let chipsByOid: [String: [RefChip]] = Dictionary(
+            entries.map { entry in
+                (entry.oid, refs.map { RefChips.make(oid: entry.oid, refs: $0, decoration: entry.refs) } ?? [])
+            },
+            uniquingKeysWith: { first, _ in first })
+        let matchOids: [String] = query.isEmpty ? [] : entries.compactMap { entry in
+            HistoryFilter.matches(entry, chips: chipsByOid[entry.oid] ?? [], query: query) ? entry.oid : nil
+        }
+        let matchSet = Set(matchOids)
 
         ScrollViewReader { proxy in
-            List(entries, id: \.oid, selection: $selection) { entry in
-                CommitHistoryRow(
-                    entry: entry,
-                    graphRow: rowsByOid[entry.oid],
-                    segments: segmentsByOid[entry.oid],
-                    owners: owners,
-                    localOids: localOids,
-                    isHead: entry.oid == headOid,
-                    chips: refs.map { RefChips.make(oid: entry.oid, refs: $0, decoration: entry.refs) } ?? [],
-                    gutterWidth: gutterWidth)
-                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 8))
-                    .listRowSeparator(.hidden)
+            VStack(spacing: 0) {
+                if !query.isEmpty {
+                    matchBar(matchOids: matchOids, proxy: proxy)
+                    Divider()
+                }
+                List(entries, id: \.oid, selection: $selection) { entry in
+                    CommitHistoryRow(
+                        entry: entry,
+                        graphRow: rowsByOid[entry.oid],
+                        segments: segmentsByOid[entry.oid],
+                        owners: owners,
+                        localOids: localOids,
+                        isHead: entry.oid == headOid,
+                        chips: chipsByOid[entry.oid] ?? [],
+                        gutterWidth: gutterWidth)
+                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 8))
+                        .listRowSeparator(.hidden)
+                        .opacity(query.isEmpty || matchSet.contains(entry.oid) ? 1 : 0.25)
+                }
+                .environment(\.defaultMinListRowHeight, CommitHistoryRow.rowHeight)
+                // #0377: with a row selected, Edit ▸ Copy (⌘C) puts that commit's
+                // full oid on the pasteboard. The context menu copies the *clicked*
+                // row's oid even when another row is selected.
+                .copyable(selection.map { [$0] } ?? [])
+                // #0359: one `CommitActionMenuItems` for the clicked row — the same
+                // body the menu bar's Commit menu renders, so items, order,
+                // shortcuts and disabled states cannot drift apart. Right-clicking
+                // an unselected row targets that row, not the selection.
+                .contextMenu(forSelectionType: String.self, menu: { clicked in
+                    if clicked.count == 1, let oid = clicked.first {
+                        Button("Copy Commit ID") {
+                            CommitIDPasteboard.copy(oid)
+                        }
+                        if let menuStates, let perform {
+                            Divider()
+                            CommitActionMenuItems(
+                                states: menuStates(oid), branchName: branchName,
+                                perform: { perform($0, oid) })
+                        }
+                    }
+                }, primaryAction: { clicked in
+                    // #0406: double-click (or Return) on a single row opens its
+                    // changes window.
+                    if clicked.count == 1, let oid = clicked.first {
+                        onOpenChanges?(oid)
+                    }
+                })
+                // #0401: a sidebar click asks for its branch tip to be shown.
+                // Only a new request scrolls; picking a row in this list does
+                // not, so the list never jumps under the user's cursor.
+                .onChange(of: scrollRequest) { _, request in
+                    guard let request else { return }
+                    withAnimation { proxy.scrollTo(request.oid, anchor: .center) }
+                }
             }
-            .environment(\.defaultMinListRowHeight, CommitHistoryRow.rowHeight)
-            // #0377: with a row selected, Edit ▸ Copy (⌘C) puts that commit's
-            // full oid on the pasteboard. The context menu copies the *clicked*
-            // row's oid even when another row is selected.
-            .copyable(selection.map { [$0] } ?? [])
-            // #0359: one `CommitActionMenuItems` for the clicked row — the same
-            // body the menu bar's Commit menu renders, so items, order,
-            // shortcuts and disabled states cannot drift apart. Right-clicking
-            // an unselected row targets that row, not the selection.
-            .contextMenu(forSelectionType: String.self, menu: { clicked in
-                if clicked.count == 1, let oid = clicked.first {
-                    Button("Copy Commit ID") {
-                        CommitIDPasteboard.copy(oid)
-                    }
-                    if let menuStates, let perform {
-                        Divider()
-                        CommitActionMenuItems(
-                            states: menuStates(oid), branchName: branchName,
-                            perform: { perform($0, oid) })
-                    }
+            // #0402: typing jumps to the first match.
+            .onChange(of: query) { _, _ in
+                matchIndex = 0
+                if let first = matchOids.first {
+                    withAnimation { proxy.scrollTo(first, anchor: .center) }
                 }
-            }, primaryAction: { clicked in
-                // #0406: double-click (or Return) on a single row opens its
-                // changes window.
-                if clicked.count == 1, let oid = clicked.first {
-                    onOpenChanges?(oid)
-                }
-            })
-            // #0401: a sidebar click asks for its branch tip to be shown.
-            // Only a new request scrolls; picking a row in this list does
-            // not, so the list never jumps under the user's cursor.
-            .onChange(of: scrollRequest) { _, request in
-                guard let request else { return }
-                withAnimation { proxy.scrollTo(request.oid, anchor: .center) }
             }
         }
+    }
+
+    /// #0402: "N matches" with previous/next. Stepping selects the match (so
+    /// the Detail pane follows) and scrolls it to the centre.
+    private func matchBar(matchOids: [String], proxy: ScrollViewProxy) -> some View {
+        HStack(spacing: 8) {
+            Text(matchOids.count == 1 ? "1 match" : "\(matchOids.count) matches")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Button {
+                step(-1, in: matchOids, proxy: proxy)
+            } label: {
+                Image(systemName: "chevron.up")
+            }
+            .keyboardShortcut("g", modifiers: [.command, .shift])
+            .help("Previous match (⇧⌘G)")
+            .disabled(matchOids.isEmpty)
+            Button {
+                step(1, in: matchOids, proxy: proxy)
+            } label: {
+                Image(systemName: "chevron.down")
+            }
+            .keyboardShortcut("g", modifiers: .command)
+            .help("Next match (⌘G)")
+            .disabled(matchOids.isEmpty)
+        }
+        .buttonStyle(.borderless)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+    }
+
+    private func step(_ delta: Int, in matchOids: [String], proxy: ScrollViewProxy) {
+        guard !matchOids.isEmpty else { return }
+        matchIndex = (matchIndex + delta + matchOids.count) % matchOids.count
+        let oid = matchOids[matchIndex]
+        selection = oid
+        withAnimation { proxy.scrollTo(oid, anchor: .center) }
     }
 }
 
