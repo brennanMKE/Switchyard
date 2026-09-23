@@ -19,7 +19,7 @@ import SwiftUI
 /// as a namespace -- there is nothing here to instantiate.
 public nonisolated enum PaneLayout {
     /// Sidebar pane minimum width, in points.
-    public static let sidebarMinWidth: CGFloat = 200
+    public static let sidebarMinWidth: CGFloat = 260
 
     /// History pane minimum width, in points.
     public static let historyMinWidth: CGFloat = 360

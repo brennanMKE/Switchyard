@@ -37,8 +37,8 @@ func windowMinWidthIsTheSumOfPaneMinimums() {
     #expect(computedWidth == computedSum)
 }
 
-@Test("the window minimum is 840 pt, wide enough for a readable sidebar, graph and detail (#0409)")
+@Test("the window minimum is 900 pt, wide enough for a readable sidebar, graph and detail (#0409)")
 func windowMinWidthIsReadable() {
-    #expect(PaneLayout.windowMinWidth == 840)
-    #expect(PaneLayout.sidebarMinWidth >= 200)
+    #expect(PaneLayout.windowMinWidth == 900)
+    #expect(PaneLayout.sidebarMinWidth >= 260)
 }
