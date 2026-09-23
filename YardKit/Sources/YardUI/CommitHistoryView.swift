@@ -43,6 +43,8 @@ public struct CommitHistoryView: View {
     private let branchName: String?
     /// #0401: scrolls the list when it changes; `nil` means no request.
     private let scrollRequest: HistoryScrollRequest?
+    /// #0406: double-clicking a row opens that commit's changes window.
+    private let onOpenChanges: ((String) -> Void)?
     @Binding private var selection: String?
 
     public init(
@@ -51,6 +53,7 @@ public struct CommitHistoryView: View {
         menuStates: ((String) -> [CommitActionState])? = nil,
         perform: ((CommitAction, String) -> Void)? = nil,
         scrollRequest: HistoryScrollRequest? = nil,
+        onOpenChanges: ((String) -> Void)? = nil,
         selection: Binding<String?>
     ) {
         self.entries = entries
@@ -61,6 +64,7 @@ public struct CommitHistoryView: View {
         self.menuStates = menuStates
         self.perform = perform
         self.scrollRequest = scrollRequest
+        self.onOpenChanges = onOpenChanges
         self._selection = selection
     }
 
@@ -98,7 +102,7 @@ public struct CommitHistoryView: View {
             // body the menu bar's Commit menu renders, so items, order,
             // shortcuts and disabled states cannot drift apart. Right-clicking
             // an unselected row targets that row, not the selection.
-            .contextMenu(forSelectionType: String.self) { clicked in
+            .contextMenu(forSelectionType: String.self, menu: { clicked in
                 if clicked.count == 1, let oid = clicked.first {
                     Button("Copy Commit ID") {
                         CommitIDPasteboard.copy(oid)
@@ -110,7 +114,13 @@ public struct CommitHistoryView: View {
                             perform: { perform($0, oid) })
                     }
                 }
-            }
+            }, primaryAction: { clicked in
+                // #0406: double-click (or Return) on a single row opens its
+                // changes window.
+                if clicked.count == 1, let oid = clicked.first {
+                    onOpenChanges?(oid)
+                }
+            })
             // #0401: a sidebar click asks for its branch tip to be shown.
             // Only a new request scrolls; picking a row in this list does
             // not, so the list never jumps under the user's cursor.
