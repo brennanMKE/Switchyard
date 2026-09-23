@@ -41,6 +41,8 @@ public struct CommitHistoryView: View {
     private let perform: ((CommitAction, String) -> Void)?
     /// #0359: the current branch, for the branch-aware item titles.
     private let branchName: String?
+    /// #0401: scrolls the list when it changes; `nil` means no request.
+    private let scrollRequest: HistoryScrollRequest?
     @Binding private var selection: String?
 
     public init(
@@ -48,6 +50,7 @@ public struct CommitHistoryView: View {
         refs: RefSnapshot? = nil, branchName: String? = nil,
         menuStates: ((String) -> [CommitActionState])? = nil,
         perform: ((CommitAction, String) -> Void)? = nil,
+        scrollRequest: HistoryScrollRequest? = nil,
         selection: Binding<String?>
     ) {
         self.entries = entries
@@ -57,6 +60,7 @@ public struct CommitHistoryView: View {
         self.branchName = branchName
         self.menuStates = menuStates
         self.perform = perform
+        self.scrollRequest = scrollRequest
         self._selection = selection
     }
 
@@ -71,38 +75,47 @@ public struct CommitHistoryView: View {
         }
         let gutterWidth = LaneGeometry.laneGutterWidth(maxLane: LaneGeometry.maxLane(in: graphRows))
 
-        List(entries, id: \.oid, selection: $selection) { entry in
-            CommitHistoryRow(
-                entry: entry,
-                graphRow: rowsByOid[entry.oid],
-                segments: segmentsByOid[entry.oid],
-                owners: owners,
-                localOids: localOids,
-                isHead: entry.oid == headOid,
-                chips: refs.map { RefChips.make(oid: entry.oid, refs: $0, decoration: entry.refs) } ?? [],
-                gutterWidth: gutterWidth)
-                .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 8))
-                .listRowSeparator(.hidden)
-        }
-        // #0377: with a row selected, Edit ▸ Copy (⌘C) puts that commit's
-        // full oid on the pasteboard. The context menu copies the *clicked*
-        // row's oid even when another row is selected.
-        .copyable(selection.map { [$0] } ?? [])
-        // #0359: one `CommitActionMenuItems` for the clicked row — the same
-        // body the menu bar's Commit menu renders, so items, order,
-        // shortcuts and disabled states cannot drift apart. Right-clicking
-        // an unselected row targets that row, not the selection.
-        .contextMenu(forSelectionType: String.self) { clicked in
-            if clicked.count == 1, let oid = clicked.first {
-                Button("Copy Commit ID") {
-                    CommitIDPasteboard.copy(oid)
+        ScrollViewReader { proxy in
+            List(entries, id: \.oid, selection: $selection) { entry in
+                CommitHistoryRow(
+                    entry: entry,
+                    graphRow: rowsByOid[entry.oid],
+                    segments: segmentsByOid[entry.oid],
+                    owners: owners,
+                    localOids: localOids,
+                    isHead: entry.oid == headOid,
+                    chips: refs.map { RefChips.make(oid: entry.oid, refs: $0, decoration: entry.refs) } ?? [],
+                    gutterWidth: gutterWidth)
+                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 8))
+                    .listRowSeparator(.hidden)
+            }
+            // #0377: with a row selected, Edit ▸ Copy (⌘C) puts that commit's
+            // full oid on the pasteboard. The context menu copies the *clicked*
+            // row's oid even when another row is selected.
+            .copyable(selection.map { [$0] } ?? [])
+            // #0359: one `CommitActionMenuItems` for the clicked row — the same
+            // body the menu bar's Commit menu renders, so items, order,
+            // shortcuts and disabled states cannot drift apart. Right-clicking
+            // an unselected row targets that row, not the selection.
+            .contextMenu(forSelectionType: String.self) { clicked in
+                if clicked.count == 1, let oid = clicked.first {
+                    Button("Copy Commit ID") {
+                        CommitIDPasteboard.copy(oid)
+                    }
+                    if let menuStates, let perform {
+                        Divider()
+                        CommitActionMenuItems(
+                            states: menuStates(oid), branchName: branchName,
+                            perform: { perform($0, oid) })
+                    }
                 }
-                if let menuStates, let perform {
-                    Divider()
-                    CommitActionMenuItems(
-                        states: menuStates(oid), branchName: branchName,
-                        perform: { perform($0, oid) })
-                }
+            }
+            // #0401: a sidebar click asks for its branch tip to be shown.
+            // Only a new request scrolls; picking a row in this list does
+            // not, so the list never jumps under the user's cursor.
+            .onChange(of: scrollRequest) { _, request in
+                guard let request else { return }
+                withAnimation { proxy.scrollTo(request.oid, anchor: .center) }
             }
         }
     }

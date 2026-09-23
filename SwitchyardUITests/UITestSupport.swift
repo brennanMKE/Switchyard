@@ -25,6 +25,7 @@ enum UITestFixture {
     /// The sidebar's two non-current branches.
     static let sideBranch = "spike-side"
     static let filterBranch = "alpha-fork"
+    static let olderBranch = "beta-older"
     /// The remote-tracking ref's short name and the tag (sidebar sections).
     static let remoteBranch = "origin/uitest-side"
     static let tag = "v0.1"

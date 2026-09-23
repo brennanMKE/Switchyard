@@ -54,6 +54,12 @@ public struct ContentView: View {
     /// observes it to show the selected commit.
     @State private var selectedCommit: String?
 
+    /// #0401: the sidebar ref last clicked (full ref name), highlighted
+    /// there until a commit is picked in the History list.
+    @State private var selectedRef: String?
+    /// #0401: asks the History list to scroll a commit into view.
+    @State private var historyScrollRequest: HistoryScrollRequest?
+
     /// #0065: the Sidebar pane's selected recorded resolution, keyed on
     /// conflict id. Selecting one clears the commit selection and the other
     /// way round — the Detail pane shows whichever was picked last — which
@@ -490,7 +496,14 @@ public struct ContentView: View {
                             // pane shows; a stale commit selection would
                             // only keep the pane's commit branch alive.
                             if newValue != nil { selectedCommit = nil }
-                        }))
+                        }),
+                    selectedRef: selectedRef,
+                    onSelectRef: { entry in
+                        selectedRef = entry.name
+                        selectedResolution = nil
+                        selectedCommit = entry.oid
+                        historyScrollRequest = HistoryScrollRequest(oid: entry.oid)
+                    })
             } else {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -512,11 +525,15 @@ public struct ContentView: View {
             branchName: summary.whereAmI.branch,
             menuStates: { oid in menuStates(for: oid, summary: summary) },
             perform: { action, oid in perform(action, oid, summary: summary) },
+            scrollRequest: historyScrollRequest,
             selection: Binding(
                 get: { selectedCommit },
                 set: { newValue in
                     selectedCommit = newValue
-                    if newValue != nil { selectedResolution = nil }
+                    if newValue != nil {
+                        selectedResolution = nil
+                        selectedRef = nil
+                    }
                 }))
     }
 
