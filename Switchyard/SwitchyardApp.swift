@@ -23,6 +23,16 @@ struct SwitchyardApp: App {
         return arguments[arguments.index(after: index)]
     }()
 
+    /// #0395 round 2: present when the launch arguments also carry
+    /// `-uiTestRealSurfaces`. The UI-test window then renders the REAL
+    /// `ContentView` — sidebar, history, the menus the spike questions are
+    /// about — fed the fixture repository through the `initialRepositoryPath`
+    /// seam, instead of the smoke test's minimal branch view. Round 1's smoke
+    /// test passes only `-uiTestRepository` and still gets the minimal view;
+    /// an ordinary launch sets neither argument and is unchanged.
+    static let uiTestRealSurfaces: Bool = ProcessInfo.processInfo.arguments
+        .contains("-uiTestRealSurfaces")
+
     init() {
         // #0083, declarations only: both stores restore the persisted
         // layout from the state directory before the first scene is built,
@@ -55,7 +65,15 @@ struct SwitchyardApp: App {
             // view below exists only under `-uiTestRepository`, so an
             // ordinary launch is unchanged.
             if let path = Self.uiTestRepositoryPath {
-                UITestRepositoryView(path: path)
+                // #0395 round 2: with `-uiTestRealSurfaces` the window shows
+                // the real panes loaded from the fixture — the surfaces the
+                // four spike re-derivations drive. Without the flag the
+                // round-1 smoke view renders, unchanged.
+                if Self.uiTestRealSurfaces {
+                    ContentView(initialRepositoryPath: path)
+                } else {
+                    UITestRepositoryView(path: path)
+                }
             } else {
             // #0216: the transport pane's model lives on the app delegate,
             // which owns both `AgentRegistrar` and `AppXPCServer` — the two

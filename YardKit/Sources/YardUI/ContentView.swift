@@ -172,16 +172,27 @@ public struct ContentView: View {
     /// `ContentView()` is unreachable from the app target — the same defect
     /// #0116 found on `WorktreeStatusEntry`, and one `@testable import` hides it
     /// because `@testable` grants internal access.
+    ///
+    /// #0395 round 2: `initialRepositoryPath` seeds `repositoryPath` at
+    /// construction — the seam the `-uiTestRealSurfaces` launch hook uses so a
+    /// UI-test launch renders the REAL panes against a fixture repository
+    /// without an `NSOpenPanel`. `nil` (every existing caller) initialises
+    /// `repositoryPath` exactly as before, so no existing call site changes
+    /// behaviour.
     public init(
         transportStatus: TransportStatusModel? = nil,
         reviews: ReviewCenter? = nil,
         asks: AskCenter? = nil,
-        resolves: ResolveCenter? = nil
+        resolves: ResolveCenter? = nil,
+        initialRepositoryPath: String? = nil
     ) {
         self.transportStatus = transportStatus
         self.reviews = reviews
         self.asks = asks
         self.resolves = resolves
+        if let initialRepositoryPath {
+            _repositoryPath = State(initialValue: initialRepositoryPath)
+        }
     }
 
     /// #0370: the window title — the open repository's folder name, so two
