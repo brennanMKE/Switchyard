@@ -562,7 +562,8 @@ public struct ContentView: View {
                 CommitDetailView(
                     entry: entry,
                     files: selectedCommitDiff,
-                    diffError: selectedCommitDiffError
+                    diffError: selectedCommitDiffError,
+                    onShowChanges: { openChanges(for: entry.oid) }
                 )
             } else if summary.status.entries.isEmpty {
                 Text("Working tree clean")
