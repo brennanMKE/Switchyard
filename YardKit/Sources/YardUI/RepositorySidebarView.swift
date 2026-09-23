@@ -10,11 +10,12 @@
 // and attached agent sessions are not shown.
 //
 // #0371: the ref sections collapse again -- the MVP dropped collapsing and
-// used plain `Section`s throughout. Branches, Remotes and Tags now use
-// `Section(_:isExpanded:)` (Branches expanded, Remotes and Tags collapsed by
-// default); Worktrees, Rerere and Stashes stay plain. Whether the disclosure
-// renders correctly on macOS 26 is spike #0386's question, whose failure
-// branch is `DisclosureGroup`. Expansion state is per window and
+// used plain `Section`s throughout. Branches, Remotes and Tags collapse
+// (Branches expanded, Remotes and Tags collapsed by default); Worktrees,
+// Rerere and Stashes stay plain. #0398: the collapse control is a
+// `DisclosureGroup` inside a plain `Section` -- `Section(_:isExpanded:)`
+// draws no disclosure control on macOS 26.6.2 (#0386 measured), so the
+// spike's failure branch shipped. Expansion state is per window and
 // deliberately not persisted.
 //
 // #0372: local branch rows carry a trailing status -- the branch's
@@ -42,7 +43,9 @@ import YardGit
 /// Branches, remotes, tags, worktrees, and a stash count for one repository.
 ///
 /// A `List` whose three ref sections -- Branches, Remotes, Tags -- collapse
-/// via `Section(_:isExpanded:)` (#0371); every other section stays a plain
+/// via a `DisclosureGroup` inside a plain `Section` (#0371 re-planned onto
+/// this by #0398, after #0386 measured `Section(_:isExpanded:)` rendering no
+/// disclosure control on macOS 26.6.2); every other section stays a plain
 /// `Section`. `List` already gives scrolling and row selection for free.
 /// Expansion state is per window and not persisted across launches,
 /// deliberately (#0371).
@@ -273,27 +276,47 @@ public struct RepositorySidebarView: View {
                 }
             }
             if !branches.isEmpty {
-                // #0378: while filtering the section renders expanded
-                // regardless of the stored binding -- `.constant` never
-                // writes it, so clearing the field restores the user's
-                // stored layout.
-                Section("Branches", isExpanded: isFiltering ? .constant(true) : $branchesExpanded) {
-                    ForEach(branches, id: \.name) { entry in
-                        branchRow(entry)
+                // #0398: `Section(_:isExpanded:)` draws no disclosure control
+                // on macOS 26.6.2 (#0386 measured), so the collapse moves to
+                // a `DisclosureGroup` inside a plain `Section` -- same
+                // binding, including #0378's force-expand while filtering
+                // (`.constant` never writes it, so clearing the field
+                // restores the user's stored layout).
+                Section {
+                    DisclosureGroup(
+                        isExpanded: isFiltering ? .constant(true) : $branchesExpanded
+                    ) {
+                        ForEach(branches, id: \.name) { entry in
+                            branchRow(entry)
+                        }
+                    } label: {
+                        Text("Branches")
                     }
                 }
             }
             if !remotes.isEmpty {
-                Section("Remotes", isExpanded: isFiltering ? .constant(true) : $remotesExpanded) {
-                    ForEach(remotes, id: \.name) { entry in
-                        refRow(entry, prefix: Self.remotesPrefix, systemImage: "network")
+                Section {
+                    DisclosureGroup(
+                        isExpanded: isFiltering ? .constant(true) : $remotesExpanded
+                    ) {
+                        ForEach(remotes, id: \.name) { entry in
+                            refRow(entry, prefix: Self.remotesPrefix, systemImage: "network")
+                        }
+                    } label: {
+                        Text("Remotes")
                     }
                 }
             }
             if !tags.isEmpty {
-                Section("Tags", isExpanded: isFiltering ? .constant(true) : $tagsExpanded) {
-                    ForEach(tags, id: \.name) { entry in
-                        refRow(entry, prefix: Self.tagsPrefix, systemImage: "tag")
+                Section {
+                    DisclosureGroup(
+                        isExpanded: isFiltering ? .constant(true) : $tagsExpanded
+                    ) {
+                        ForEach(tags, id: \.name) { entry in
+                            refRow(entry, prefix: Self.tagsPrefix, systemImage: "tag")
+                        }
+                    } label: {
+                        Text("Tags")
                     }
                 }
             }
