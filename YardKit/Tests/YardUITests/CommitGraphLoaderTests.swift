@@ -60,3 +60,26 @@ func bothHistoryLoadersWalkUnmergedSideBranchAndAgree() async throws {
     // parent of both tips, so it must be last whatever the b/side tie-break.
     #expect(historyOids.last == rootOid)
 }
+
+@Test("both history loaders load past the old 100-commit bound")
+func bothHistoryLoadersLoadPastOneHundredCommits() async throws {
+    var repo = try FixtureRepository(refFormat: .files)
+    defer { repo.destroy() }
+
+    // A 150-commit chain: c0 <- c1 <- ... <- c149. The old bound (#0405)
+    // returned 100 of them from each loader.
+    var commits = [FixtureRepository.Commit("c0")]
+    for i in 1..<150 {
+        commits.append(FixtureRepository.Commit("c\(i)", parents: ["c\(i - 1)"]))
+    }
+    try repo.build(commits)
+    try repo.branch("main", at: "c149")
+    try repo.checkout("main")
+
+    let entries = try await loadCommitHistory(at: repo.url.path)
+    let rows = try await loadCommitGraph(at: repo.url.path)
+
+    #expect(entries.count == 150)
+    #expect(rows.count == 150)
+    #expect(entries.last?.oid == repo.oids["c0"])
+}
