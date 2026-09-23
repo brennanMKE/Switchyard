@@ -1,11 +1,27 @@
 // SwitchyardApp.swift
 
 import SwiftUI
+import YardGit
 import YardUI
 
 @main
 struct SwitchyardApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
+
+    /// #0395: the repository path a `-uiTestRepository <path>` launch
+    /// argument names, or nil for an ordinary launch. UI tests run in a
+    /// disposable VM pass this so the app starts with a repository already
+    /// open through the one funnel every entry point uses
+    /// (`RepositoryOpener.open(path:)`), no `NSOpenPanel`. Static so the
+    /// launch hook below and the window content both read the same parsed
+    /// value exactly once.
+    static let uiTestRepositoryPath: String? = {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-uiTestRepository"),
+              arguments.index(after: index) < arguments.count
+        else { return nil }
+        return arguments[arguments.index(after: index)]
+    }()
 
     init() {
         // #0083, declarations only: both stores restore the persisted
@@ -17,10 +33,30 @@ struct SwitchyardApp: App {
         // degrades to the single-window launch, never a crash. A real
         // relaunch is not testable here; the launch smoke test is #0125's.
         WindowStore.shared.restore(from: WindowStore.stateFileURL, tabs: RepositoryTabs.shared)
+        // #0395: the UI-test launch hook. `open(path:)` is the
+        // non-interactive gate — it resolves the fixture through the same
+        // focus-or-open rule as every other entry point and opens no panel;
+        // a refusal presents the shared alert, and the smoke test fails on
+        // the missing branch header either way.
+        if let path = Self.uiTestRepositoryPath {
+            RepositoryOpener.open(path: path)
+        }
     }
 
     var body: some Scene {
         WindowGroup(for: WindowID.self) { _ in
+            // #0395: a UI-test launch renders a minimal repository view
+            // that loads the fixture through the public engine loader and
+            // shows its branch — the value the production repository header
+            // (`RepositoryHeaderView`, fed by the same summary) renders.
+            // The regular content view keeps showing whatever the user
+            // opened in the app itself; its displayed-repository state is
+            // internal to YardUI, which a UI-test round does not edit. The
+            // view below exists only under `-uiTestRepository`, so an
+            // ordinary launch is unchanged.
+            if let path = Self.uiTestRepositoryPath {
+                UITestRepositoryView(path: path)
+            } else {
             // #0216: the transport pane's model lives on the app delegate,
             // which owns both `AgentRegistrar` and `AppXPCServer` — the two
             // app-target objects that know the real status. #0055: the
@@ -32,6 +68,7 @@ struct SwitchyardApp: App {
                 reviews: appDelegate.server.reviewBridge.center,
                 asks: appDelegate.server.askBridge.center,
                 resolves: appDelegate.server.resolveBridge.center)
+            }
         } defaultValue: {
             // Return the WindowID already seeded in WindowStore.shared, so
             // SwiftUI's first content window reuses the existing runtime
@@ -77,6 +114,48 @@ struct SwitchyardApp: App {
             SettingsView(
                 transport: appDelegate.transportBridge.model,
                 refreshOnAppear: { appDelegate.transportBridge.refresh() })
+        }
+    }
+}
+
+/// #0395: the window content a `-uiTestRepository` launch shows. Minimal by
+/// design — it loads the fixture's summary through the public engine loader
+/// (the same `loadRepositorySummary` the production repository header's
+/// summary comes from) and renders the branch that header shows, so the
+/// smoke test asserts a value the engine produced from the real fixture.
+/// An ordinary launch never constructs this view.
+private struct UITestRepositoryView: View {
+    let path: String
+
+    /// The branch the fixture's `WhereAmI` reports, or nil while loading.
+    @State private var branch: String?
+    /// Set when the summary load throws — shown instead of a branch.
+    @State private var failure: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let failure {
+                Text("Couldn't open \(path)")
+                    .font(.headline)
+                Text(failure)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            } else if let branch {
+                Text(branch)
+                    .font(.title2.monospaced())
+            } else {
+                ProgressView()
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .task(id: path) {
+            do {
+                let summary = try await loadRepositorySummary(at: path)
+                branch = summary.whereAmI.branch ?? "detached HEAD"
+            } catch {
+                failure = String(describing: error)
+            }
         }
     }
 }
