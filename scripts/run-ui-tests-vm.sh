@@ -41,6 +41,7 @@ GUEST_SRC="/Users/$GUEST_USER/src"
 GUEST_RESULTS="/Users/$GUEST_USER/results"
 GUEST_FIXTURE="/Users/$GUEST_USER/uitest-fixture-repo"
 GUEST_FIXTURE_BRANCH="uitest-main"
+GUEST_MAP_FIXTURE="/Users/$GUEST_USER/uitest-map-repo"
 RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"
 # Optional spike filter: pass an issue number (e.g. `0383`) to run just that
 # spike's clone; with no argument all four run, each in its own clone.
@@ -243,7 +244,7 @@ run_spike() {
     sleep 5
   done
   log "[$label] Guest reachable; copying source, generating the fixture"
-  tart exec "$CLONE" /bin/zsh -lc "rm -rf $GUEST_SRC $GUEST_RESULTS $GUEST_FIXTURE && mkdir -p $GUEST_RESULTS"
+  tart exec "$CLONE" /bin/zsh -lc "rm -rf $GUEST_SRC $GUEST_RESULTS $GUEST_FIXTURE $GUEST_MAP_FIXTURE && mkdir -p $GUEST_RESULTS"
   tart exec "$CLONE" /bin/zsh -lc "cp -R '/Volumes/My Shared Files/run/src' $GUEST_SRC"
 # The fixture the spike re-derivations (#0395 round 2) drive:
 #   - four commits with distinctive subjects (History rows to select;
@@ -268,6 +269,8 @@ tart exec "$CLONE" /bin/zsh -lc \
    git branch spike-side && git branch alpha-fork && git branch beta-older HEAD~2 && \
    git update-ref refs/remotes/origin/uitest-side HEAD && \
    git tag v0.1"
+  # #0410: the branch-map fixture, from its own script in the export.
+  tart exec "$CLONE" /bin/zsh -lc "zsh $GUEST_SRC/scripts/uitest-fixtures/make-map-fixture.sh $GUEST_MAP_FIXTURE"
   local actual_branch
   actual_branch="$(tart exec "$CLONE" /bin/zsh -lc "git -C $GUEST_FIXTURE symbolic-ref --short HEAD" | tr -d '[:space:]')"
   [[ "$actual_branch" == "$GUEST_FIXTURE_BRANCH" ]] \
@@ -321,6 +324,7 @@ run_spike_if_selected 0400 Spike0400GraphScreenshotUITests
 run_spike_if_selected 0406 Spike0406CommitChangesWindowUITests
 run_spike_if_selected 0403 Spike0403DetailWithoutDiffUITests
 run_spike_if_selected 0402 Spike0402FilterHighlightsGraphUITests
+run_spike_if_selected 0415 Spike0415BranchMapUITests
 
 print ""
 if (( TEST_RC == 0 )); then
