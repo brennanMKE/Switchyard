@@ -31,9 +31,11 @@ final class Spike0383ArrowsUITests: XCTestCase {
         let deadline = Date().addingTimeInterval(timeout)
         var flipped = false
         while Date() < deadline {
-            let upper = app.historyRows(containing: above).firstMatch
-            let lower = app.historyRows(containing: below).firstMatch
-            if upper.exists, lower.exists, upper.frame.minY < lower.frame.minY {
+            // #0410: the reorder leaves spike-side and alpha-fork on the old
+            // commits, so compare the nodes in HEAD's lane.
+            if let upper = app.headLaneNode(containing: above),
+               let lower = app.headLaneNode(containing: below),
+               upper.frame.minY < lower.frame.minY {
                 flipped = true
                 break
             }

@@ -3,24 +3,19 @@
 import SwiftUI
 import YardGit
 
-/// The History pane's content: one selectable row per commit, newest first
-/// as `CommitLog.run` returns them (#0340), each with a lane-gutter graph
-/// beside it (#0052).
+/// The History pane's content: #0410's branch map (`BranchMapView`). Every
+/// labelled lane's tip sits on the top row under its slanted label, each
+/// branch's own commits run down its lane, and fork and merge edges join
+/// them. Until #0410 this was a `List` of commits in topological order with
+/// a lane gutter (#0052, #0399).
 ///
 /// `selection` is keyed on `oid` rather than an index or a wrapper type so
 /// #0082's detail pane can observe it without this view owning navigation.
-/// This view takes no action on selection beyond changing the binding —
-/// checkout, revert, and the rest are MVP gaps, not omissions.
 ///
-/// `graphRows` and `entries` are two separate engine calls
-/// (`loadCommitGraph`/`loadCommitHistory`, `RepositoryLoader.swift`) joined
-/// here by `oid`. A commit with no matching `GraphRow` -- the two calls are
-/// independent reads of a repository that can in principle change between
-/// them -- renders through `LaneGutterView(row: nil, ...)`, which draws
-/// nothing but still reserves the shared gutter width, so that row's text
-/// does not shift relative to a matched row's. `graphRows` defaults to `[]`
-/// so every existing call site (this file's `#Preview` included) still
-/// compiles unchanged.
+/// The map is laid out from `graphRows` (only each commit's oid and parents
+/// matter); `entries` supply what each commit's accessibility label and the
+/// filter read. `graphRows` defaults to `[]`, and then the map is laid out
+/// from `entries`, so the `#Preview` below still shows a commit.
 public struct CommitHistoryView: View {
     private let entries: [CommitLogEntry]
     private let graphRows: [GraphRow]
@@ -49,6 +44,9 @@ public struct CommitHistoryView: View {
     private let highlightQuery: String
     /// #0402: which match the previous/next buttons are on.
     @State private var matchIndex = 0
+    /// #0410: the commit the map should scroll to -- set from
+    /// `scrollRequest`, the first match and match stepping.
+    @State private var focusRequest: HistoryScrollRequest?
     @Binding private var selection: String?
 
     public init(
@@ -75,15 +73,6 @@ public struct CommitHistoryView: View {
     }
 
     public var body: some View {
-        let rowsByOid = Dictionary(graphRows.map { ($0.oid, $0) }, uniquingKeysWith: { first, _ in first })
-        let segmentsByOid = Dictionary(
-            zip(graphRows.map(\.oid), LaneSegments.make(graphRows)),
-            uniquingKeysWith: { first, _ in first })
-        let owners = refs.map { BranchOwnership.owners(in: graphRows, tips: BranchOwnership.tips(from: $0)) } ?? [:]
-        let localOids = refs.map {
-            LocalReachability.oids(in: graphRows, from: LocalReachability.localTips(refs: $0, headOid: headOid))
-        }
-        let gutterWidth = LaneGeometry.laneGutterWidth(maxLane: LaneGeometry.maxLane(in: graphRows))
         let query = HistoryFilter.normalized(highlightQuery)
         let chipsByOid: [String: [RefChip]] = Dictionary(
             entries.map { entry in
@@ -93,84 +82,59 @@ public struct CommitHistoryView: View {
         let matchOids: [String] = query.isEmpty ? [] : entries.compactMap { entry in
             HistoryFilter.matches(entry, chips: chipsByOid[entry.oid] ?? [], query: query) ? entry.oid : nil
         }
-        let matchSet = Set(matchOids)
+        // #0410: the map needs only each commit's oid and parents. Callers
+        // that pass no graph rows (previews) get the map from `entries`.
+        let mapRows = graphRows.isEmpty
+            ? entries.map { GraphRow(oid: $0.oid, parents: $0.parents, lane: 0, parentLanes: $0.parents.map { _ in 0 }) }
+            : graphRows
+        let localOids = refs.map {
+            LocalReachability.oids(in: mapRows, from: LocalReachability.localTips(refs: $0, headOid: headOid))
+        }
 
-        ScrollViewReader { proxy in
-            VStack(spacing: 0) {
-                if !query.isEmpty {
-                    matchBar(matchOids: matchOids, proxy: proxy)
-                    Divider()
-                }
-                List(entries, id: \.oid, selection: $selection) { entry in
-                    CommitHistoryRow(
-                        entry: entry,
-                        graphRow: rowsByOid[entry.oid],
-                        segments: segmentsByOid[entry.oid],
-                        owners: owners,
-                        localOids: localOids,
-                        isHead: entry.oid == headOid,
-                        chips: chipsByOid[entry.oid] ?? [],
-                        gutterWidth: gutterWidth)
-                        .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 8))
-                        .listRowSeparator(.hidden)
-                        .opacity(query.isEmpty || matchSet.contains(entry.oid) ? 1 : 0.25)
-                }
-                .environment(\.defaultMinListRowHeight, CommitHistoryRow.rowHeight)
-                // #0377: with a row selected, Edit ▸ Copy (⌘C) puts that commit's
-                // full oid on the pasteboard. The context menu copies the *clicked*
-                // row's oid even when another row is selected.
-                .copyable(selection.map { [$0] } ?? [])
-                // #0359: one `CommitActionMenuItems` for the clicked row — the same
-                // body the menu bar's Commit menu renders, so items, order,
-                // shortcuts and disabled states cannot drift apart. Right-clicking
-                // an unselected row targets that row, not the selection.
-                .contextMenu(forSelectionType: String.self, menu: { clicked in
-                    if clicked.count == 1, let oid = clicked.first {
-                        Button("Copy Commit ID") {
-                            CommitIDPasteboard.copy(oid)
-                        }
-                        if let menuStates, let perform {
-                            Divider()
-                            CommitActionMenuItems(
-                                states: menuStates(oid), branchName: branchName,
-                                perform: { perform($0, oid) })
-                        }
-                    }
-                }, primaryAction: { clicked in
-                    // #0406: double-click (or Return) on a single row opens its
-                    // changes window.
-                    if clicked.count == 1, let oid = clicked.first {
-                        onOpenChanges?(oid)
-                    }
-                })
-                // #0401: a sidebar click asks for its branch tip to be shown.
-                // Only a new request scrolls; picking a row in this list does
-                // not, so the list never jumps under the user's cursor.
-                .onChange(of: scrollRequest) { _, request in
-                    guard let request else { return }
-                    withAnimation { proxy.scrollTo(request.oid, anchor: .center) }
-                }
+        VStack(spacing: 0) {
+            if !query.isEmpty {
+                matchBar(matchOids: matchOids)
+                Divider()
             }
-            // #0402: typing jumps to the first match.
-            .onChange(of: query) { _, _ in
-                matchIndex = 0
-                if let first = matchOids.first {
-                    withAnimation { proxy.scrollTo(first, anchor: .center) }
-                }
+            BranchMapView(
+                layout: BranchMapLayout.make(rows: mapRows, refs: refs),
+                entriesByOid: Dictionary(entries.map { ($0.oid, $0) }, uniquingKeysWith: { first, _ in first }),
+                chipsByOid: chipsByOid,
+                headOid: headOid,
+                localOids: localOids,
+                matches: query.isEmpty ? nil : Set(matchOids),
+                branchName: branchName,
+                menuStates: menuStates,
+                perform: perform,
+                onOpenChanges: onOpenChanges,
+                focusRequest: focusRequest,
+                selection: $selection)
+        }
+        // #0401: a sidebar click asks for its branch tip to be shown. Only a
+        // new request scrolls; picking a commit in the map does not, so the
+        // map never jumps under the user's cursor.
+        .onChange(of: scrollRequest) { _, request in
+            focusRequest = request
+        }
+        // #0402: typing jumps to the first match.
+        .onChange(of: query) { _, _ in
+            matchIndex = 0
+            if let first = matchOids.first {
+                focusRequest = HistoryScrollRequest(oid: first)
             }
         }
     }
 
     /// #0402: "N matches" with previous/next. Stepping selects the match (so
     /// the Detail pane follows) and scrolls it to the centre.
-    private func matchBar(matchOids: [String], proxy: ScrollViewProxy) -> some View {
+    private func matchBar(matchOids: [String]) -> some View {
         HStack(spacing: 8) {
             Text(matchOids.count == 1 ? "1 match" : "\(matchOids.count) matches")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer()
             Button {
-                step(-1, in: matchOids, proxy: proxy)
+                step(-1, in: matchOids)
             } label: {
                 Image(systemName: "chevron.up")
             }
@@ -178,7 +142,7 @@ public struct CommitHistoryView: View {
             .help("Previous match (⇧⌘G)")
             .disabled(matchOids.isEmpty)
             Button {
-                step(1, in: matchOids, proxy: proxy)
+                step(1, in: matchOids)
             } label: {
                 Image(systemName: "chevron.down")
             }
@@ -191,76 +155,13 @@ public struct CommitHistoryView: View {
         .padding(.vertical, 4)
     }
 
-    private func step(_ delta: Int, in matchOids: [String], proxy: ScrollViewProxy) {
+    private func step(_ delta: Int, in matchOids: [String]) {
         guard !matchOids.isEmpty else { return }
         matchIndex = (matchIndex + delta + matchOids.count) % matchOids.count
         let oid = matchOids[matchIndex]
         selection = oid
-        withAnimation { proxy.scrollTo(oid, anchor: .center) }
+        focusRequest = HistoryScrollRequest(oid: oid)
     }
-}
-
-/// One row: a lane gutter, then the ref chips for the commit (#0358, #0367)
-/// -- branches and remotes from the sidebar's snapshot, tags and a detached
-/// `HEAD` from `%D`. #0399: no commit text; the whole row is still one
-/// VoiceOver element speaking `CommitRowAccessibility.label`, which keeps
-/// the subject, short OID and author. A commit no local tip reaches (#0368)
-/// draws its chips at 0.6 opacity.
-private struct CommitHistoryRow: View {
-    let entry: CommitLogEntry
-    let graphRow: GraphRow?
-    let segments: LaneRowSegments?
-    let owners: [String: BranchTip]
-    /// #0368: `LocalReachability.oids(in:from:)`; `nil` draws every row at
-    /// full opacity.
-    let localOids: Set<String>?
-    let isHead: Bool
-    let chips: [RefChip]
-    let gutterWidth: CGFloat
-
-    var body: some View {
-        let isRemoteOnly = localOids.map { !$0.contains(entry.oid) } ?? false
-        ZStack(alignment: .leading) {
-            LaneGutterView(row: graphRow, segments: segments, owners: owners, localOids: localOids,
-                           isHead: isHead, width: gutterWidth)
-            // #0400: the chips start beside this row's node, over any lanes
-            // to its right; RefChipView's opaque backing keeps them legible.
-            HStack(spacing: 4) {
-                let split = RefChips.split(chips)
-                ForEach(split.shown, id: \.self) { chip in
-                    RefChipView(chip: chip, tint: BranchColor.color(for: chip))
-                        .fixedSize()
-                }
-                if !split.hidden.isEmpty {
-                    // #0409: never truncate a name -- fold the rest into +N.
-                    Text("+\(split.hidden.count)")
-                        .font(.caption)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 1)
-                        .background(Capsule().fill(.quaternary))
-                        .background(Capsule().fill(.background))
-                        .fixedSize()
-                        .help(split.hidden.map(\.name).joined(separator: ", "))
-                }
-            }
-            .opacity(isRemoteOnly ? 0.6 : 1)
-            .padding(.leading, LaneGeometry.labelLeading(forLane: graphRow?.lane ?? 0))
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(height: CommitHistoryRow.rowHeight)
-        // #0399: an explicit element. With no Text left in the row,
-        // `.combine` has nothing to combine and SwiftUI emits no element at
-        // all for a chipless row (measured in the VM); `.ignore` plus the
-        // label always yields one, and the static-text trait keeps it a
-        // text element for VoiceOver and the UI tests.
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(CommitRowAccessibility.label(entry: entry, chips: chips))
-        .accessibilityAddTraits(.isStaticText)
-    }
-
-    /// #0399: a graph row is as tall as a node and a chip need, not a
-    /// two-line text row.
-    static let rowHeight: CGFloat = 22
 }
 
 /// One ref chip: a capsule before the subject, tinted by #0366's colours and
