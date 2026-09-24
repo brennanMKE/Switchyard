@@ -816,6 +816,8 @@ the detail pane into a window of its own. The reference screenshots are in `issu
 **Exit criteria:**
 
 - [ ] #0399 through #0409 are resolved, plus any children they are split into.
+- [ ] #0410 is resolved: every local branch's tip sits on the map's top row with its name visible
+      (children #0411-#0415, filed 2026-09-23 after Brennan tried M9 on Batty).
 - [ ] On Batty (127 branches), every local branch can be found and focused from the graph or the
       sidebar without reading commit text.
 - [ ] Each behaviour has a VM UI test (`scripts/run-ui-tests-vm.sh`), or a unit test where the
