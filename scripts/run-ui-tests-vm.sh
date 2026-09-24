@@ -60,6 +60,12 @@ cleanup() {
   local rc=$?
   trap - EXIT
   log "Cleaning up (exit $rc)"
+  # Release whatever spike-scoped lease is open. Not fatal if missed: leases
+  # are pid-stamped and the next acquire prunes ours.
+  if [[ -n "${LEASE_ID:-}" ]]; then
+    tart-lease release --id "$LEASE_ID" 2>/dev/null || true
+    LEASE_ID=""
+  fi
   # memory-signal release: tell the observer this run is done with any
   # memory it freed. Best effort — never affects the exit code.
   if [[ -n "${MEMORY_REQUEST_ID:-}" ]]; then
@@ -225,6 +231,7 @@ fi
 
 typeset -g TEST_RC=0
 typeset -g CLONE=""
+typeset -g LEASE_ID=""
 
 run_spike() {
   local index="$1" label="$2"; shift 2
@@ -233,6 +240,14 @@ run_spike() {
   # Run-id-shaped name: the stale sweep matches only
   # `switchyard-uitest-<YYYYMMDD>-<HHMMSS>-<numeric>`, so the suffix stays
   # purely numeric and every crashed run's clone is sweepable.
+  # A lease per spike, not one for the whole run: the spikes are serial and a
+  # full pass is ~20 minutes, which would shut every other repo out. Between
+  # spikes another session can take the slot.
+  # See Homelab protocols/tart-lease/PROTOCOL.md
+  if command -v tart-lease >/dev/null; then
+    LEASE_ID=$(tart-lease acquire --label "switchyard-$label" --pid $$)
+  fi
+
   CLONE="switchyard-uitest-$(date +%Y%m%d-%H%M%S)-$(( $$ * 10 + index ))"
   log "[$label] Cloning $GOLDEN → $CLONE"
   tart clone "$GOLDEN" "$CLONE"
@@ -303,6 +318,11 @@ tart exec "$CLONE" /bin/zsh -lc \
   tart stop "$CLONE" >/dev/null 2>&1 || true
   tart delete "$CLONE" >/dev/null 2>&1 || true
   CLONE=""
+
+  if [[ -n "${LEASE_ID:-}" ]]; then
+    tart-lease release --id "$LEASE_ID" 2>/dev/null || true
+    LEASE_ID=""
+  fi
 }
 
 # Which spikes to run: all four by default; the arguments filter by issue
