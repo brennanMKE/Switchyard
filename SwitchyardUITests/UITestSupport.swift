@@ -150,3 +150,38 @@ extension XCUIApplication {
             .min { $0.frame.minX < $1.frame.minX }
     }
 }
+
+/// #0410: the branch-map fixture scripts/uitest-fixtures/make-map-fixture.sh
+/// generates inside the guest — keep the two in sync.
+enum UITestMapFixture {
+    static let repositoryPath = "/Users/admin/uitest-map-repo"
+    /// Tip subjects of four lanes that must share the top row.
+    static let mainTip = "map main 12"
+    static let newestLaneTip = "lane-01 commit"
+    static let nearTip = "near commit 2"
+    static let midTip = "mid commit 3"
+    /// The rightmost branch with commits of its own, and its tip.
+    static let deepBranch = "feature-deep"
+    static let deepTip = "deep tip commit"
+    /// A stub lane whose tip is 30 rows down map-main.
+    static let oldBranch = "merged-old"
+    static let oldTip = "map base 04"
+}
+
+extension XCUIApplication {
+    /// Launches the app on the branch-map fixture with the real panes.
+    @MainActor
+    func launchWithMapFixture() {
+        launchArguments = [
+            "-uiTestRepository", UITestMapFixture.repositoryPath,
+            "-uiTestRealSurfaces",
+        ]
+        launch()
+        let tree = debugDescription
+        XCTAssertTrue(
+            windows.firstMatch.waitForExistence(timeout: 60),
+            "The app launched but opened no window within 60 s — its element " +
+            "tree starts with: \(String(tree.prefix(1200)))",
+            file: #filePath, line: #line)
+    }
+}
