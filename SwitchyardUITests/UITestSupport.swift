@@ -138,3 +138,15 @@ extension XCUIApplication {
             file: file, line: line)
     }
 }
+
+extension XCUIApplication {
+    /// #0410: the map node for `subject` in the leftmost lane that has one.
+    /// A rewrite leaves branches on the old commits, so after a reorder
+    /// the same subject can sit in two lanes; `HEAD`'s lane is lane 0.
+    @MainActor
+    func headLaneNode(containing subject: String) -> XCUIElement? {
+        historyRows(containing: subject).allElementsBoundByIndex
+            .filter(\.exists)
+            .min { $0.frame.minX < $1.frame.minX }
+    }
+}
