@@ -588,6 +588,7 @@ public struct ContentView: View {
             entries: history, graphRows: graphRows,
             headOid: summary.whereAmI.rawHead.isEmpty ? nil : summary.whereAmI.rawHead,
             refs: sidebar?.refs,
+            branchTips: sidebar?.branchTips,
             branchName: summary.whereAmI.branch,
             menuStates: { oid in menuStates(for: oid, summary: summary) },
             perform: { action, oid in perform(action, oid, summary: summary) },

@@ -27,6 +27,10 @@ public struct CommitHistoryView: View {
     /// leaves every node and edge unowned, drawing `.secondary` as before,
     /// every edge solid and every row at full opacity.
     private let refs: RefSnapshot?
+    /// #0428: the default branch (the map's root lane) and each branch tip's
+    /// commit date (#0429's recency filter). `nil` roots the map at `main`,
+    /// else `HEAD`'s branch.
+    private let branchTips: BranchTipDates.Report?
     /// #0359: the commit action menu's states for the clicked row's oid,
     /// built by `ContentView` from that row's shape. `nil` — previews and
     /// callers that offer no menu — leaves only Copy Commit ID.
@@ -53,7 +57,7 @@ public struct CommitHistoryView: View {
 
     public init(
         entries: [CommitLogEntry], graphRows: [GraphRow] = [], headOid: String? = nil,
-        refs: RefSnapshot? = nil, branchName: String? = nil,
+        refs: RefSnapshot? = nil, branchTips: BranchTipDates.Report? = nil, branchName: String? = nil,
         menuStates: ((String) -> [CommitActionState])? = nil,
         perform: ((CommitAction, String) -> Void)? = nil,
         scrollRequest: HistoryScrollRequest? = nil,
@@ -65,6 +69,7 @@ public struct CommitHistoryView: View {
         self.graphRows = graphRows
         self.headOid = headOid
         self.refs = refs
+        self.branchTips = branchTips
         self.branchName = branchName
         self.menuStates = menuStates
         self.perform = perform
@@ -89,7 +94,8 @@ public struct CommitHistoryView: View {
         let mapRows = graphRows.isEmpty
             ? entries.map { GraphRow(oid: $0.oid, parents: $0.parents, lane: 0, parentLanes: $0.parents.map { _ in 0 }) }
             : graphRows
-        let layout = BranchMapLayout.make(rows: mapRows, refs: refs, expandedFolds: expandedFolds)
+        let layout = BranchMapLayout.make(
+            rows: mapRows, refs: refs, defaultBranch: branchTips?.defaultBranch, expandedFolds: expandedFolds)
         let localOids = refs.map {
             LocalReachability.oids(in: mapRows, from: LocalReachability.localTips(refs: $0, headOid: headOid))
         }
