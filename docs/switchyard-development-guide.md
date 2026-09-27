@@ -1408,6 +1408,13 @@ a feature at any milestone on the grounds that GitUp had it.
     conflicting branch; `git symbolic-ref refs/remotes/origin/HEAD` returned
     `refs/remotes/origin/main`.
 
+    **Addendum, 2026-09-26 (#0422, 974db8fd).** When the default branch does not resolve (no
+    `origin/HEAD` and no local `main`), no merged answer except upstream-gone can ever be reached,
+    so *unknown* is permanent rather than pending. The row drops the word in that case and shows
+    only upstream numbers, or nothing. *Unknown* still shows where it is honest: the default
+    resolves and the content pass is pending, or merge-tree conflicted. The default-branch source
+    is unchanged.
+
 ### Still open
 
 **Is M1's criterion 5 closable as written, and should it be restated?** Raised by the twelfth M1
