@@ -12,6 +12,7 @@ public func runEngineCommand(
     arguments: [String],
     workingDirectory: String
 ) -> (stdout: String, stderr: String, exitCode: ExitCode)? {
+    let arguments = removingGlobalJSONFlag(arguments)
     guard let command = arguments.first else { return nil }
 
     switch command {

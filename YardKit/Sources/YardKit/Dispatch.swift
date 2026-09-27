@@ -46,6 +46,7 @@ public func dispatch(
     },
     emitWatch: (@Sendable (String) -> Void)? = WatchArm.standardOutputSink
 ) async -> (stdout: String, stderr: String, exitCode: ExitCode) {
+    let arguments = removingGlobalJSONFlag(arguments)
     switch route(arguments) {
     case .local, .unknown:
         // The hook arm (#0154) is local but not pure — it drains stdin and

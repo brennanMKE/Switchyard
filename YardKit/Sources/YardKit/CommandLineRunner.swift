@@ -41,6 +41,34 @@ func isKnownRemoteCommand(_ command: String) -> Bool {
         && CommandRegistry.all.contains { $0.name == command }
 }
 
+/// The global `--json` flag. CLAUDE.md's agent-surface contract is
+/// "`--json` on every command", and every command's stdout already *is* its
+/// JSON envelope, so the flag changes nothing — but it must never be a usage
+/// error. It is removed here, once, before `route`, `runYard`,
+/// `runEngineCommand` or any arm's own parser sees the tail (#0420).
+///
+/// Every `--json` token is removed except one that is the value of a
+/// value-taking flag (`reword <c> --message --json` keeps its message). The
+/// value-taking flags are read from `CommandRegistry.all`, so a new one is
+/// covered without editing this function. `hook` argv is returned unchanged:
+/// it is the installed git hook's own argv, never typed by a caller.
+public func removingGlobalJSONFlag(_ arguments: [String]) -> [String] {
+    guard arguments.first != HookArm.commandName else { return arguments }
+    var kept: [String] = []
+    kept.reserveCapacity(arguments.count)
+    for (index, argument) in arguments.enumerated() {
+        let isFlagValue = index > 0 && valueTakingFlags.contains(arguments[index - 1])
+        if argument == "--json" && !isFlagValue { continue }
+        kept.append(argument)
+    }
+    return kept
+}
+
+/// `--<long>` for every flag in the registry that takes an argument
+/// (`--message`, `--limit`, `--timeout`, …).
+let valueTakingFlags: Set<String> = Set(
+    CommandRegistry.all.flatMap(\.flags).filter { $0.argument != nil }.map { "--" + $0.long })
+
 /// The three ways `dispatch` (`Dispatch.swift`) can answer a command:
 ///
 /// - `.local` — answered by `runYard` on its own, no app.
@@ -81,6 +109,7 @@ func route(_ arguments: [String]) -> Route {
 /// That is what makes it testable: `main.swift` cannot be `@testable import`ed
 /// because SwiftPM does not allow that on an executable target.
 public func runYard(arguments: [String]) -> (stdout: String, stderr: String, exitCode: ExitCode) {
+    let arguments = removingGlobalJSONFlag(arguments)
 
     guard !arguments.isEmpty else {
         let env = Envelope(result: EncodableResult(VersionResolver.cliVersionSummary(
