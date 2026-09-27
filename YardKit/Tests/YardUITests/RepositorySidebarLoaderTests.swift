@@ -51,4 +51,9 @@ func loadRepositorySidebarExcludesJournalAnchor() async throws {
     // `currentWorktreePath` -- itself resolved the same way via
     // `WorktreeContext.topLevel` -- without any extra canonicalization here.
     #expect(sidebar.currentWorktreePath == repo.url.path)
+
+    // #0428: the branch map's inputs ride along -- no origin/HEAD here, so
+    // decision 27's literal `main`, and a date for each local branch.
+    #expect(sidebar.branchTips?.defaultBranch == "main")
+    #expect(Set(sidebar.branchTips?.dates.keys.map { $0 } ?? []) == ["refs/heads/main", "refs/heads/feature"])
 }

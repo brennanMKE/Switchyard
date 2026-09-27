@@ -155,14 +155,22 @@ public nonisolated struct RepositorySidebarSummary: Sendable {
     /// disabled shape so existing callers (and previews) still compile.
     public var rerere: Rerere.Status
 
+    /// #0428: the default branch and every branch tip's commit date, for the
+    /// branch map's root lane and recency filter (guide §11 decision 29).
+    /// `nil` when the read failed: the map then roots at `main` or `HEAD`
+    /// and filters nothing, rather than the sidebar failing to load.
+    public var branchTips: BranchTipDates.Report?
+
     public init(
         refs: RefSnapshot, worktrees: [WorktreeEntry], currentWorktreePath: String?,
-        rerere: Rerere.Status = Rerere.Status(enabled: false, entries: [])
+        rerere: Rerere.Status = Rerere.Status(enabled: false, entries: []),
+        branchTips: BranchTipDates.Report? = nil
     ) {
         self.refs = refs
         self.worktrees = worktrees
         self.currentWorktreePath = currentWorktreePath
         self.rerere = rerere
+        self.branchTips = branchTips
     }
 }
 
@@ -196,8 +204,12 @@ public func loadRepositorySidebar(at path: String) async throws -> RepositorySid
     let refs = try await RefSnapshot.capture(in: context)
     let worktrees = try await worktreeList(path: path)
     let rerere = try Rerere.status(at: path)
+    // #0428: `try?` on purpose -- the map's inputs are a refinement, and a
+    // failed read must not take the sidebar down with it.
+    let branchTips = try? await BranchTipDates.read(at: path)
     return RepositorySidebarSummary(
-        refs: refs, worktrees: worktrees, currentWorktreePath: context.topLevel, rerere: rerere)
+        refs: refs, worktrees: worktrees, currentWorktreePath: context.topLevel, rerere: rerere,
+        branchTips: branchTips)
 }
 
 /// Loads one recorded rerere resolution — the cached conflict preimage, the

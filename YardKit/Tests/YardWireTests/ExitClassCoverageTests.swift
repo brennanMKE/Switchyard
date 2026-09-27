@@ -200,6 +200,10 @@ struct ExitClassCoverageTests {
             // wrong sidebar.
             Row("BranchStatus.Error", BranchStatus.Error.malformedStatusLine("bad line"),
                 .repositoryError),
+            // #0428: an unparseable tip-date line, the same class as
+            // BranchStatus.Error's.
+            Row("BranchTipDates.Error", BranchTipDates.Error.malformedLine("bad line"),
+                .repositoryError),
         ]
     }
 

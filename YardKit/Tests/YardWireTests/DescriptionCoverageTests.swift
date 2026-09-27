@@ -89,6 +89,10 @@ struct DescriptionCoverageTests {
             Row("BranchStatus.swift", "BranchStatus.Error",
                 BranchStatus.Error.malformedStatusLine("probe bad status line"),
                 .carries(["for-each-ref status line", "probe bad status line"])),
+            // #0428: an unparseable tip-date line names the line.
+            Row("BranchTipDates.swift", "BranchTipDates.Error",
+                BranchTipDates.Error.malformedLine("probe bad tip line"),
+                .carries(["branch tip date", "probe bad tip line"])),
             Row("CommitCreate.swift", "CommitCreate.Failure",
                 CommitCreate.Failure.signingFailed(reason: "probe gpg refused the data"),
                 .carries(["signing failed", "probe gpg refused the data"])),
