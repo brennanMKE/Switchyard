@@ -23,11 +23,11 @@ private let git = GitProcess()
 
 @Test func parseReadsEveryUpstreamTrackVocabulary() throws {
     let lines = [
-        "refs/heads/ahead\trefs/remotes/origin/ahead\tahead 2\t0 5",
-        "refs/heads/behind\trefs/remotes/origin/behind\tbehind 3\t0 9",
-        "refs/heads/diverged\trefs/remotes/origin/diverged\tahead 1, behind 4\t1 7",
+        "refs/heads/ahead\trefs/remotes/origin/ahead\t[ahead 2]\t0 5",
+        "refs/heads/behind\trefs/remotes/origin/behind\t[behind 3]\t0 9",
+        "refs/heads/diverged\trefs/remotes/origin/diverged\t[ahead 1, behind 4]\t1 7",
         "refs/heads/insync\trefs/remotes/origin/insync\t\t2 0",
-        "refs/heads/localup\trefs/heads/main\tahead 1\t0 0",
+        "refs/heads/localup\trefs/heads/main\t[ahead 1]\t0 0",
         "refs/heads/plain\t\t\t3 1",
         "refs/heads/gone\trefs/remotes/origin/gone\t[gone]\t1 0",
     ]
@@ -101,6 +101,23 @@ private let git = GitProcess()
 }
 
 // MARK: - A3: baseline selection against real git
+
+@Test func readParsesGitsBracketedAheadAndBehindAgainstTheUpstream() throws {
+    // #0431: git prints `[ahead 1]`, brackets included (measured, git
+    // 2.54.0); the unbracketed parse threw on every repository with a
+    // branch ahead of or behind its upstream.
+    var repo = try FixtureRepository()
+    defer { repo.destroy() }
+    try repo.build([.init("c1")])
+    try repo.addUpstream(branch: "main")
+    try repo.build([.init("c2")])
+
+    let report = try BranchStatus.read(at: repo.url.path, git: git)
+
+    let main = try #require(report.row(forBranchNamed: "refs/heads/main"))
+    #expect(main.baseline == .upstream("refs/remotes/origin/main"))
+    #expect(main.ahead == 1 && main.behind == 0, "one local commit not yet pushed")
+}
 
 @Test func readFallsBackToMainWhenOriginHEADIsMissing() throws {
     // FixtureRepository.linear: main at a → b → c, no remote, so no

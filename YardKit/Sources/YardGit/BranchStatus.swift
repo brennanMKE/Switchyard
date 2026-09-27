@@ -253,13 +253,16 @@ public enum BranchStatus {
     }
 
     /// `%(upstream:track)`'s vocabulary under `LC_ALL=C`: empty (in sync, or
-    /// no upstream), `[gone]`, `ahead N`, `behind N`, `ahead N, behind M`.
+    /// no upstream), else bracketed -- `[gone]`, `[ahead N]`, `[behind N]`,
+    /// `[ahead N, behind M]` (#0431 measured the brackets on every answer,
+    /// git 2.54.0; #0372 had parsed the counts unbracketed).
     static func parseTrack(_ raw: String) throws -> Track {
         if raw.isEmpty { return Track(ahead: nil, behind: nil, gone: false) }
         if raw == "[gone]" { return Track(ahead: nil, behind: nil, gone: true) }
+        guard raw.hasPrefix("["), raw.hasSuffix("]") else { throw Error.malformedStatusLine(raw) }
         var ahead: Int?
         var behind: Int?
-        for part in raw.split(separator: ",") {
+        for part in raw.dropFirst().dropLast().split(separator: ",") {
             let word = part.trimmingCharacters(in: .whitespaces)
             if word.hasPrefix("ahead "), let n = Int(word.dropFirst("ahead ".count)) {
                 ahead = n
