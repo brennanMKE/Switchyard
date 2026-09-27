@@ -190,6 +190,13 @@ public final class WindowStore {
     /// attach a spy to count writes.
     public var stateWriter: CoalescingStateWriter?
 
+    /// #0416: the window the user was last working in -- `ContentView`
+    /// sets it when its window becomes active (`appearsActive`), and
+    /// `place(_:)` reads it to decide whether an open can land in the
+    /// current window. Nothing renders it, so it is not observed: a write
+    /// from a focus change can never invalidate a view.
+    @ObservationIgnored public var activeWindowID: WindowID?
+
     public init() {
         // Two-step on purpose: `makeWindow` reads `self` (its hook reads
         // `stateWriter` at fire time), so `windows` must be initialized

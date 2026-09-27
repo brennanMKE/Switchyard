@@ -476,7 +476,7 @@ private nonisolated final class AppService: NSObject, AppServiceProtocol {
     /// the request also opens that repository through the SAME focus-or-open
     /// rule every other entry point uses (`RepositoryTabs.open(path:)`).
     /// When the repository has no tab yet, the new one attaches to the
-    /// user's active window (`openInFrontmostWindow`), and the activation
+    /// user's window (`openInWindow`, #0416), and the activation
     /// below brings the app's frontmost window forward — `NSApp.windows`
     /// ordering is only visible here, which is what makes this half
     /// app-target code, checked by #0054's manual script. The hop is
@@ -491,7 +491,7 @@ private nonisolated final class AppService: NSObject, AppServiceProtocol {
         if !workingDirectory.isEmpty {
             Task { @MainActor in
                 NSApp.activate()
-                let outcome = RepositoryTabs.shared.openInFrontmostWindow(
+                let outcome = RepositoryTabs.shared.openInWindow(
                     path: workingDirectory,
                     windowStore: .shared
                 )

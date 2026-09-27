@@ -345,6 +345,7 @@ run_spike_if_selected 0406 Spike0406CommitChangesWindowUITests
 run_spike_if_selected 0403 Spike0403DetailWithoutDiffUITests
 run_spike_if_selected 0402 Spike0402FilterHighlightsGraphUITests
 run_spike_if_selected 0415 Spike0415BranchMapUITests
+run_spike_if_selected 0416 Spike0416OpenShowsRepositoryUITests
 
 print ""
 if (( TEST_RC == 0 )); then

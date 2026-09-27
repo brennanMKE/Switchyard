@@ -30,9 +30,29 @@ public struct ContentView: View {
     /// #0406: opens the `CommitChangesTarget` scene window.
     @Environment(\.openWindow) private var openWindow
 
-    /// The chosen repository's folder path, or `nil` before anything is
-    /// picked. `.task(id:)` reloads whenever this changes.
-    @State private var repositoryPath: String?
+    /// #0416: whether this view's window is the active one -- reported to
+    /// `WindowStore.activeWindowID` so an open can land in the current
+    /// window when it is empty.
+    @Environment(\.appearsActive) private var appearsActive
+
+    /// #0416: this window's share of the window model. The repository it
+    /// shows is the tab its `tabIDs` holds -- one per window -- so every
+    /// entry point that opens a repository (`RepositoryTabs.openInWindow`)
+    /// is visible here. `nil` for tests and previews.
+    private let window: WindowState?
+
+    /// The tab store `window.tabIDs` points into.
+    private let tabs: RepositoryTabs
+
+    /// #0395 round 2's UI-test seam: shown when the window model holds no
+    /// repository. `nil` for every production caller.
+    private let initialRepositoryPath: String?
+
+    /// The repository this window shows, or `nil` when it shows none.
+    /// `.task(id:)` reloads whenever this changes.
+    private var repositoryPath: String? {
+        Self.repositoryPath(window: window, tabs: tabs, fallback: initialRepositoryPath)
+    }
 
     /// The most recent successful load. `nil` while loading or after an
     /// error, so the three states below are mutually exclusive.
@@ -213,16 +233,33 @@ public struct ContentView: View {
         asks: AskCenter? = nil,
         resolves: ResolveCenter? = nil,
         onBeginInAppResolve: ((String) async -> Void)? = nil,
-        initialRepositoryPath: String? = nil
+        initialRepositoryPath: String? = nil,
+        window: WindowState? = nil,
+        tabs: RepositoryTabs = .shared
     ) {
         self.transportStatus = transportStatus
         self.reviews = reviews
         self.asks = asks
         self.resolves = resolves
         self.onBeginInAppResolve = onBeginInAppResolve
-        if let initialRepositoryPath {
-            _repositoryPath = State(initialValue: initialRepositoryPath)
+        self.initialRepositoryPath = initialRepositoryPath
+        self.window = window
+        self.tabs = tabs
+    }
+
+    /// #0416: the folder a window shows -- the working tree of the tab its
+    /// model holds (the repository directory for a bare repository), else
+    /// `fallback`. Pure and public so the rule is tested at the access
+    /// level the app target sees.
+    public static func repositoryPath(
+        window: WindowState?,
+        tabs: RepositoryTabs,
+        fallback: String?
+    ) -> String? {
+        guard let tabID = window?.tabIDs.first, let tab = tabs.tab(for: tabID) else {
+            return fallback
         }
+        return tab.context.topLevel ?? tab.context.commonDir
     }
 
     /// #0370: the window title — the open repository's folder name, so two
@@ -309,6 +346,20 @@ public struct ContentView: View {
         } isTargeted: { _ in }
         .task(id: repositoryPath) {
             await reload()
+        }
+        // #0416: the entry points that are not views (app delegate, XPC,
+        // menu) present windows through this action; any window's copy
+        // opens a window for any id.
+        .onAppear {
+            WindowPresenter.shared.show = { [openWindow] id in
+                NSApplication.shared.activate()
+                openWindow(value: id)
+            }
+        }
+        .onChange(of: appearsActive, initial: true) { _, isActive in
+            if isActive, let window {
+                WindowStore.shared.activeWindowID = window.id
+            }
         }
         .task(id: selectedCommit) {
             await reloadSelectedCommitDiff()
@@ -631,14 +682,10 @@ public struct ContentView: View {
     /// No repository validation happens here — the resolver inside
     /// `open(path:)` is the single gate.
     private func chooseFolder() {
-        guard let outcome = RepositoryOpener.chooseAndOpen(store: .shared) else { return }
-        switch outcome {
-        case .opened(let tab), .focusedExisting(let tab, _):
-            // The pane follows the repository the open landed on.
-            repositoryPath = tab.context.topLevel ?? tab.context.commonDir
-        case .refused:
-            break // RepositoryOpener already presented the refusal
-        }
+        // #0416: the window model is the one authority -- the open lands in
+        // this window when it is empty, or in a new one, and this view
+        // follows its model, so nothing is assigned here.
+        RepositoryOpener.chooseAndOpen(store: tabs)
     }
 
     /// #0406: opens `oid`'s changes window. `WindowGroup(for:)` focuses an

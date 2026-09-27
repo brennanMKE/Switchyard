@@ -54,7 +54,7 @@ struct SwitchyardApp: App {
     }
 
     var body: some Scene {
-        WindowGroup(for: WindowID.self) { _ in
+        WindowGroup(for: WindowID.self) { windowID in
             // #0395: a UI-test launch renders a minimal repository view
             // that loads the fixture through the public engine loader and
             // shows its branch — the value the production repository header
@@ -90,7 +90,10 @@ struct SwitchyardApp: App {
                 resolves: appDelegate.server.resolveBridge.center,
                 onBeginInAppResolve: { path in
                     await appDelegate.server.beginInAppResolve(repositoryPath: path)
-                })
+                },
+                // #0416: the window's model -- the repository it shows is
+                // whatever `RepositoryTabs.openInWindow` placed in it.
+                window: WindowStore.shared.windowState(for: windowID.wrappedValue))
             }
         } defaultValue: {
             // Return the WindowID already seeded in WindowStore.shared, so
@@ -110,6 +113,10 @@ struct SwitchyardApp: App {
         // actions and are unaffected -- only OS URL opens are suppressed
         // (#0078; Batty #0251's second root cause).
         .handlesExternalEvents(matching: Set())
+        // #0416: no SwiftUI window restoration. A restored window carries a
+        // `WindowID` the fresh `WindowStore` does not hold, so it could show
+        // no repository and receive no open. Relaunch starts with one window.
+        .restorationBehavior(.disabled)
         // #0409: a fresh window opens large enough to read the graph -- the
         // sidebar's branch names and a commit's chips both truncated at the
         // old 900x450 default (measured in the #0400 VM screenshot).

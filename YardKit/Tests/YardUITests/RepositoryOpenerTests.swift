@@ -127,34 +127,29 @@ func fileURLDeliversItsOwnPath() throws {
 // MARK: - Entry point 4's model half: open into the frontmost window
 
 @MainActor
-@Test("An XPC open for a repository with no tab attaches the new tab to the active window")
-func xpcOpenAttachesNewTabToActiveWindow() throws {
+@Test("An XPC open fills the empty current window, then opens a new window for the next repository")
+func xpcOpenFillsEmptyWindowThenOpensANewOne() throws {
     let repoA = try FixtureRepository.linear()
     let repoB = try FixtureRepository.linear()
     defer { repoA.destroy(); repoB.destroy() }
 
     let windowStore = WindowStore()
-    let secondWindow = windowStore.addWindow()
-    #expect(windowStore.windows.count == 2)
     let store = RepositoryTabs()
 
-    // Nothing is selected yet, so the open lands in the first window.
+    // #0416: nothing has been active yet, so the open lands in the first
+    // (empty) window.
     let tabA = try openedTab(
-        store.openInFrontmostWindow(path: repoA.url.path, windowStore: windowStore))
+        store.openInWindow(path: repoA.url.path, windowStore: windowStore))
+    #expect(windowStore.windows.count == 1)
     #expect(windowStore.windows[0].tabIDs == [tabA.id])
-    #expect(secondWindow.tabIDs.isEmpty)
     #expect(store.selectedTabID == tabA.id)
 
-    // The user then moves to the second window -- which is what the
-    // tab-bar binding committing a's tab into it looks like in the model
-    // (#0080's wiring) -- and the next XPC open follows the user there.
-    secondWindow.tabIDs = [tabA.id]
-    windowStore.windows[0].tabIDs = []
-
+    // That window now shows a repository, so the next one gets its own.
     let tabB = try openedTab(
-        store.openInFrontmostWindow(path: repoB.url.path, windowStore: windowStore))
-    #expect(secondWindow.tabIDs == [tabA.id, tabB.id])
-    #expect(windowStore.windows[0].tabIDs.isEmpty)
+        store.openInWindow(path: repoB.url.path, windowStore: windowStore))
+    #expect(windowStore.windows.count == 2)
+    #expect(windowStore.windows[0].tabIDs == [tabA.id])
+    #expect(windowStore.windows[1].tabIDs == [tabB.id])
     #expect(store.selectedTabID == tabB.id)
     #expect(store.tabs.count == 2)
 }
@@ -170,7 +165,7 @@ func xpcOpenForOpenRepositoryFocusesWithoutTouchingWindows() throws {
     let store = RepositoryTabs()
 
     let tab = try openedTab(
-        store.openInFrontmostWindow(path: repo.url.path, windowStore: windowStore))
+        store.openInWindow(path: repo.url.path, windowStore: windowStore))
     #expect(windowStore.windows[0].tabIDs == [tab.id])
 
     // The tab-bar binding has since moved the tab into the second window;
@@ -180,7 +175,7 @@ func xpcOpenForOpenRepositoryFocusesWithoutTouchingWindows() throws {
     windowStore.windows[0].tabIDs = []
 
     let again = try focusedExisting(
-        store.openInFrontmostWindow(path: repo.url.path, windowStore: windowStore))
+        store.openInWindow(path: repo.url.path, windowStore: windowStore))
     #expect(again === tab, "focus returns the same tab")
     #expect(store.tabs.count == 1, "focus, never a duplicate tab")
     #expect(secondWindow.tabIDs == [tab.id], "a focus touches no window's tab list")
@@ -200,7 +195,7 @@ func xpcOpenForNonRepositoryRefusesAndTouchesNoWindow() throws {
     let secondWindow = windowStore.addWindow()
     let store = RepositoryTabs()
 
-    guard case .refused = store.openInFrontmostWindow(
+    guard case .refused = store.openInWindow(
         path: dir.path, windowStore: windowStore)
     else {
         throw WrongOutcome(outcome: store.open(path: dir.path))
