@@ -30,6 +30,11 @@
 #                 filter keeps stale-base as a greyed context lane
 #   stale-only    "stale only commit", 40 days old, off "map base 04" with no
 #                 child: the default filter hides it
+#   squash-landed "squash landed commit" off "map base 04", re-adding exactly
+#                 the file "map base 05" added -- a squash landing, which
+#                 decision 27's merge-tree content check calls merged (#0430)
+# origin/map-main and origin/HEAD -> origin/map-main make map-main the
+# default branch, so the merged read has something to measure against.
 # #0427 folds map-main's quiet runs: "map main 06".."04" (3),
 # "map main 02".."map base 05" (22) and "map base 03".."01" (3), which
 # puts "map base 04" on row 10 and the map at 12 rows.
@@ -98,5 +103,12 @@ git switch -q -c stale-only merged-old
 print -r -- "stale only" > stale-only.txt
 git add stale-only.txt
 GIT_AUTHOR_DATE="$old" GIT_COMMITTER_DATE="$old" git commit -q -m "stale only commit"
+# #0430: a squash landing of "map base 05" (file-5.txt), and a default branch.
+git switch -q -c squash-landed merged-old
+git checkout -q map-main -- file-5.txt
+n=$((n + 1)); stamp="$((base + n * 60)) +0000"
+GIT_AUTHOR_DATE="$stamp" GIT_COMMITTER_DATE="$stamp" git commit -q -m "squash landed commit"
+git update-ref refs/remotes/origin/map-main map-main
+git symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/map-main
 git switch -q map-main
 git branch -q -D feature-deep-base feature-mid-base feature-near-base lane-base

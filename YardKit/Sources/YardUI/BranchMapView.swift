@@ -37,6 +37,8 @@ struct BranchMapView: View {
     let focusRequest: HistoryScrollRequest?
     /// #0427: a click on a "⋯ N" fold, with its `Fold.key`.
     let onExpandFold: (String) -> Void
+    /// #0430: lanes whose branches are merged; drawn faint.
+    let dimmedLanes: Set<Int>
     @Binding var selection: String?
 
     @State private var position = ScrollPosition()
@@ -59,7 +61,7 @@ struct BranchMapView: View {
                             folds: foldsByRow[row])
                     }
                 } header: {
-                    BranchMapHeader(layout: layout, width: content.width)
+                    BranchMapHeader(layout: layout, width: content.width, dimmedLanes: dimmedLanes)
                 }
             }
             .frame(width: content.width, alignment: .leading)
@@ -136,6 +138,9 @@ struct BranchMapView: View {
 
     // MARK: Drawing
 
+    /// #0430: a merged lane's opacity -- faint, but still readable.
+    static let mergedOpacity: Double = 0.35
+
     private func laneColor(_ lane: Int) -> Color {
         guard lane < layout.headers.count, let chip = layout.headers[lane].chips.first else { return .secondary }
         // #0429: a context lane -- hidden by the recency filter, drawn only
@@ -145,6 +150,8 @@ struct BranchMapView: View {
     }
 
     private func draw(edge: BranchMapLayout.Edge, in context: GraphicsContext) {
+        var context = context
+        if dimmedLanes.contains(edge.from.lane) { context.opacity = Self.mergedOpacity }
         let points = BranchMapGeometry.polyline(edge)
         var path = Path()
         path.addLines(points)
@@ -161,6 +168,8 @@ struct BranchMapView: View {
     private func drawStubMarker(_ header: BranchMapLayout.Header, in context: GraphicsContext) {
         let center = BranchMapGeometry.point(BranchMapLayout.Point(lane: header.lane, row: 0))
         let radius: CGFloat = 3.5
+        var context = context
+        if dimmedLanes.contains(header.lane) { context.opacity = Self.mergedOpacity }
         let ring = Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius,
                                           width: radius * 2, height: radius * 2))
         context.fill(ring, with: .color(laneColor(header.lane)))
@@ -173,6 +182,7 @@ struct BranchMapView: View {
         } else if let localOids, !localOids.contains(node.oid) {
             context.opacity = 0.6
         }
+        if dimmedLanes.contains(node.lane) { context.opacity *= Self.mergedOpacity }
         let center = BranchMapGeometry.point(node.point)
         let radius = BranchMapGeometry.nodeRadius
         let dot = Path(ellipseIn: CGRect(x: center.x - radius, y: center.y - radius,
@@ -249,6 +259,7 @@ extension BranchMapView {
             .background(Capsule().fill(.background))
             .overlay(Capsule().strokeBorder(laneColor(fold.lane), lineWidth: 1.5))
             .fixedSize()
+            .opacity(dimmedLanes.contains(fold.lane) ? Self.mergedOpacity : 1)
             .contentShape(Capsule())
             .onTapGesture { onExpandFold(key) }
             .help("\(fold.count) commits folded. Click to show them.")
@@ -288,11 +299,12 @@ private struct BranchMapNodeMenu: View {
 struct BranchMapHeader: View {
     let layout: BranchMapLayout
     let width: CGFloat
+    let dimmedLanes: Set<Int>
 
     var body: some View {
         ZStack(alignment: .bottomLeading) {
             ForEach(layout.headers, id: \.lane) { header in
-                BranchMapLabel(header: header)
+                BranchMapLabel(header: header, isMerged: dimmedLanes.contains(header.lane))
                     .rotationEffect(.degrees(-45), anchor: .bottomLeading)
                     .padding(.leading, BranchMapGeometry.x(lane: header.lane) - 2)
                     .padding(.bottom, 4)
@@ -305,6 +317,8 @@ struct BranchMapHeader: View {
 
 private struct BranchMapLabel: View {
     let header: BranchMapLayout.Header
+    /// #0430: faint, and "(merged)" to VoiceOver.
+    let isMerged: Bool
 
     var body: some View {
         let isHead = header.chips.first?.isHead == true
@@ -320,8 +334,9 @@ private struct BranchMapLabel: View {
                     .fill(header.isContext ? .gray : header.chips.first.map { BranchColor.color(for: $0) } ?? .secondary)
                     .frame(height: 1.5)
             }
-            .help(header.chips.map(\.name).joined(separator: ", "))
-            .accessibilityLabel(BranchMapLabels.accessibilityLabel(header.chips))
+            .opacity(isMerged ? 0.45 : 1)
+            .help(header.chips.map(\.name).joined(separator: ", ") + (isMerged ? " (merged)" : ""))
+            .accessibilityLabel(BranchMapLabels.accessibilityLabel(header.chips, isMerged: isMerged))
     }
 }
 
@@ -336,7 +351,8 @@ public nonisolated enum BranchMapLabels {
     /// What VoiceOver says for a lane label -- every name, and never just a
     /// bare name, so a UI test's exact-name query for a sidebar row cannot
     /// match a lane label instead.
-    public static func accessibilityLabel(_ chips: [RefChip]) -> String {
-        "Lane " + chips.map(\.name).joined(separator: ", ")
+    /// #0430: a merged lane ends in " (merged)".
+    public static func accessibilityLabel(_ chips: [RefChip], isMerged: Bool = false) -> String {
+        "Lane " + chips.map(\.name).joined(separator: ", ") + (isMerged ? " (merged)" : "")
     }
 }

@@ -31,6 +31,9 @@ public struct CommitHistoryView: View {
     /// commit date (#0429's recency filter). `nil` roots the map at `main`,
     /// else `HEAD`'s branch.
     private let branchTips: BranchTipDates.Report?
+    /// #0430: the repository, for the merged read. `nil` (previews) dims
+    /// nothing.
+    private let repositoryPath: String?
     /// #0359: the commit action menu's states for the clicked row's oid,
     /// built by `ContentView` from that row's shape. `nil` — previews and
     /// callers that offer no menu — leaves only Copy Commit ID.
@@ -58,11 +61,14 @@ public struct CommitHistoryView: View {
     /// #0429: commits the sidebar asked for; a hidden lane whose tip is one
     /// of them shows. Per window, not persisted.
     @State private var revealedTips: Set<String> = []
+    /// #0430: short names of the shown branches decision 27 calls merged.
+    @State private var mergedBranches: Set<String> = []
     @Binding private var selection: String?
 
     public init(
         entries: [CommitLogEntry], graphRows: [GraphRow] = [], headOid: String? = nil,
-        refs: RefSnapshot? = nil, branchTips: BranchTipDates.Report? = nil, branchName: String? = nil,
+        refs: RefSnapshot? = nil, branchTips: BranchTipDates.Report? = nil, repositoryPath: String? = nil,
+        branchName: String? = nil,
         menuStates: ((String) -> [CommitActionState])? = nil,
         perform: ((CommitAction, String) -> Void)? = nil,
         scrollRequest: HistoryScrollRequest? = nil,
@@ -75,6 +81,7 @@ public struct CommitHistoryView: View {
         self.headOid = headOid
         self.refs = refs
         self.branchTips = branchTips
+        self.repositoryPath = repositoryPath
         self.branchName = branchName
         self.menuStates = menuStates
         self.perform = perform
@@ -104,6 +111,11 @@ public struct CommitHistoryView: View {
         let layout = BranchMapLayout.make(
             rows: mapRows, refs: refs, defaultBranch: branchTips?.defaultBranch, expandedFolds: expandedFolds,
             shownTips: shownTips)
+        // #0430: the local branches on the map's lanes, which the merged
+        // read is limited to -- and which restart it when they change.
+        let laneBranches = layout.headers
+            .flatMap { $0.chips.filter { $0.kind == .localBranch }.map { "refs/heads/" + $0.name } }
+            .sorted()
         let localOids = refs.map {
             LocalReachability.oids(in: mapRows, from: LocalReachability.localTips(refs: $0, headOid: headOid))
         }
@@ -128,7 +140,14 @@ public struct CommitHistoryView: View {
                 onOpenChanges: onOpenChanges,
                 focusRequest: focusRequest,
                 onExpandFold: { expandedFolds.insert($0) },
+                dimmedLanes: layout.dimmedLanes(mergedBranches: mergedBranches),
                 selection: $selection)
+        }
+        // #0430: guide §11 decision 27's composite, for the lanes shown:
+        // ancestry and upstream-gone from one for-each-ref first, then the
+        // merge-tree content pass for the rest.
+        .task(id: [repositoryPath ?? ""] + laneBranches) {
+            await reloadMerged(branches: Set(laneBranches))
         }
         // #0401: a sidebar click asks for its branch tip to be shown. Only a
         // new request scrolls; picking a commit in the map does not, so the
@@ -145,6 +164,21 @@ public struct CommitHistoryView: View {
                 focus(HistoryScrollRequest(oid: first), in: layout)
             }
         }
+    }
+
+    /// #0430: fills `mergedBranches` for `branches` (full ref names).
+    private func reloadMerged(branches: Set<String>) async {
+        guard let repositoryPath, !branches.isEmpty,
+              let report = try? await BranchStatus.read(at: repositoryPath)
+        else {
+            mergedBranches = []
+            return
+        }
+        let shown = BranchStatus.Report(
+            defaultBranch: report.defaultBranch, rows: report.rows.filter { branches.contains($0.ref) })
+        mergedBranches = BranchMapLayout.mergedBranches(in: shown, content: [:])
+        let content = (try? await BranchStatus.contentPass(for: shown, at: repositoryPath)) ?? [:]
+        mergedBranches = BranchMapLayout.mergedBranches(in: shown, content: content)
     }
 
     /// #0429: the recency pop-up. It filters only the map (the sidebar

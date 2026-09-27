@@ -589,6 +589,7 @@ public struct ContentView: View {
             headOid: summary.whereAmI.rawHead.isEmpty ? nil : summary.whereAmI.rawHead,
             refs: sidebar?.refs,
             branchTips: sidebar?.branchTips,
+            repositoryPath: repositoryPath,
             branchName: summary.whereAmI.branch,
             menuStates: { oid in menuStates(for: oid, summary: summary) },
             perform: { action, oid in perform(action, oid, summary: summary) },

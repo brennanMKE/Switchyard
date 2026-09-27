@@ -367,6 +367,34 @@ public nonisolated struct BranchMapLayout: Equatable, Sendable {
             rowCount: maxRow + 1)
     }
 
+    /// #0430: the lanes to dim -- every lane with a parent whose local
+    /// branches are all in `mergedBranches` (short names). A root lane and a
+    /// remote-only lane never dim.
+    public func dimmedLanes(mergedBranches: Set<String>) -> Set<Int> {
+        Set(headers.compactMap { header in
+            let locals = header.chips.filter { $0.kind == .localBranch }.map(\.name)
+            guard header.parentLane != nil, !locals.isEmpty, locals.allSatisfy(mergedBranches.contains) else {
+                return nil
+            }
+            return header.lane
+        })
+    }
+
+    /// #0430: the short names of the branches guide §11 decision 27's
+    /// composite calls merged -- ancestry, else upstream-gone, else the
+    /// content pass's answer. Unknown and not-merged are left out.
+    public static func mergedBranches(
+        in report: BranchStatus.Report, content: [String: BranchStatus.MergedState]
+    ) -> Set<String> {
+        let heads = "refs/heads/"
+        return Set(report.rows.compactMap { row in
+            guard case .merged = BranchStatus.mergedState(for: row, content: content), row.ref.hasPrefix(heads) else {
+                return nil
+            }
+            return String(row.ref.dropFirst(heads.count))
+        })
+    }
+
     private struct Group {
         let tip: String
         var chips: [RefChip]

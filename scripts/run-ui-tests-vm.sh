@@ -349,6 +349,7 @@ run_spike_if_selected 0416 Spike0416OpenShowsRepositoryUITests
 run_spike_if_selected 0417 Spike0417RepositoryTabsUITests
 run_spike_if_selected 0427 Spike0427BranchMapFoldUITests
 run_spike_if_selected 0429 Spike0429BranchMapRecencyUITests
+run_spike_if_selected 0430 Spike0430BranchMapMergedUITests
 
 print ""
 if (( TEST_RC == 0 )); then
