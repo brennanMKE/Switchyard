@@ -465,6 +465,8 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-09-23 | #0414 | round 1, Sonnet implementation, 992 s wall, passed (S, measured) | 99,922 | — |
 | 2026-09-23 | #0415 | round 1, Sonnet implementation, 604 s wall, passed (S, measured) | 89,981 | — |
 | 2026-09-23 | #0410-#0415 | Opus planning/orchestration subagent for the branch map (design, prototype, 5 plans, reviews, VM runs), 11,916 s wall (O, measured; excludes its Sonnet rounds, already listed) | 332,401 | — |
+| 2026-09-26 | open-issue audit | Opus audit of #0066-#0069, #0074, #0076, #0089, #0103, #0408, 82 s wall (O, measured) | 81,640 | — |
+| 2026-09-26 | #0419-#0422 | Opus planning subagent, four issues, 1,083 s wall (O, measured) | 205,612 | — |
 | | | **Total measured** (tokens include 2026-09-22/23 rows; $ not updated for them) | **47,386,796** | **$437.24** |
 
 ## What this total does and does not cover
