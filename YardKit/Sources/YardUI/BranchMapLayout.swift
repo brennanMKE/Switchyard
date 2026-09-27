@@ -1,29 +1,38 @@
 // BranchMapLayout.swift
 //
-// #0411 (umbrella #0410): where every commit sits in the branch map. Pure --
-// graph rows and refs in, lanes and rows out -- so `swift test` pins it.
+// #0411 (umbrella #0410) placed every commit in the branch map; #0426
+// (umbrella #0425, guide §11 decision 29) re-shapes it as a staircase tree.
+// Pure -- graph rows and refs in, lanes and rows out -- so `swift test` pins
+// it.
 //
-// The model, in our own words (docs: issues/0410.md "Design"):
+// The model, in our own words (decision 29):
 //
-// - Every tip commit a local branch, remote-tracking branch or detached
-//   `HEAD` names gets one labelled lane. Refs at the same commit share it.
-//   `HEAD`'s lane is first; other lanes with a local branch follow, most
-//   recent first (topo position of the tip); a lane holding only
-//   remote-tracking refs sits right after the lane of its local namesake
-//   (`origin/feature` after `feature`), or at the end when it has none.
-// - Lanes claim history in that order: each walks its tip's first-parent
-//   chain and takes every commit nobody took before it. Those commits are
-//   the lane's own and stack from row 0 down, one row each, so every
-//   labelled lane starts on the top row. The first already-taken commit the
-//   walk meets is the lane's fork point.
-// - A lane whose tip an earlier lane already took (the branch is behind, or
-//   fast-forward merged) owns nothing: it is a stub -- a marker on row 0 and
-//   a fork edge to its tip commit.
-// - Commits no labelled lane takes (history merged in from deleted
-//   branches) form unlabelled runs, each starting one row below the lowest
-//   child that points at it. Runs pack into shared tracks right of the
-//   labelled lanes; a track is reused once the previous run's rows (and
-//   its fork edge) have ended.
+// - Every branch tip gets one labelled lane: each distinct tip a local
+//   branch or a detached `HEAD` names, and each remote-tracking branch that
+//   does not fold into its local namesake. `origin/x` folds into `x`'s lane
+//   (a chip on that lane) when its tip is on `x`'s first-parent chain --
+//   the same commit, or behind; ahead or diverged, it gets a lane of its own.
+// - The root lane is the default branch's (`defaultBranch`, else the
+//   literal `main`), else `HEAD`'s. Lanes claim history in order: the root
+//   first, then every other lane by how many first-parent commits it has
+//   that the root does not reach, fewest first. A lane takes every commit
+//   on its tip's first-parent chain nobody took before it; the first
+//   already-taken commit is its fork point, and the lane owning that commit
+//   is its parent. A lane whose tip was already taken is a stub: a marker
+//   on row 0 and its connector.
+// - Lanes form a tree. Each child sits immediately right of its parent and
+//   its subtree, siblings ordered nearest-fork-first (ties: newer tip first),
+//   so no connector crosses a lane. A lane with no fork point in the loaded
+//   rows (an unrelated history) is another root, placed after the first
+//   root's tree.
+// - Rows are a staircase: each lane's commits stack from row 0 down, one row
+//   each, except that a commit a child forks from is pushed down to one row
+//   below the child's lowest row. Every tip starts on the top row unless a
+//   child forks from the tip itself.
+// - Exactly one horizontal per branch: its connector, from the lane's last
+//   row down its own lane to the fork row, then across to the parent lane.
+//   Merge edges and commits no lane takes (history merged in from deleted
+//   branches) are not drawn.
 
 import YardGit
 
@@ -44,17 +53,21 @@ public nonisolated struct BranchMapLayout: Equatable, Sendable {
         public let lane: Int
         public let tipOid: String
         /// Display order: the `HEAD` chip first, then local branches by
-        /// name, then remote-tracking branches by name.
+        /// name, then remote-tracking branches by name -- the refs at the
+        /// tip, then a folded `origin/x` that is behind it.
         public let chips: [RefChip]
         /// The tip belongs to an earlier lane; this lane draws a marker on
-        /// row 0 and a fork edge to it.
+        /// row 0 and its connector.
         public let isStub: Bool
+        /// The lane this lane's connector joins; `nil` for a root lane.
+        public let parentLane: Int?
 
-        public init(lane: Int, tipOid: String, chips: [RefChip], isStub: Bool) {
+        public init(lane: Int, tipOid: String, chips: [RefChip], isStub: Bool, parentLane: Int?) {
             self.lane = lane
             self.tipOid = tipOid
             self.chips = chips
             self.isStub = isStub
+            self.parentLane = parentLane
         }
 
         /// Only remote-tracking refs name this tip.
@@ -76,38 +89,32 @@ public nonisolated struct BranchMapLayout: Equatable, Sendable {
     }
 
     public enum EdgeKind: Equatable, Sendable {
-        /// A first parent on the next row of the same lane.
-        case chain
-        /// The last commit of a lane's run (or a stub's marker) to the
-        /// commit it forked from.
+        /// A lane's vertical, row 0 to its last row.
+        case lane
+        /// A lane's one connector: from its last row (a stub's marker)
+        /// down its own lane to the fork row, then across to the parent.
         case fork
-        /// A merge commit to a parent other than its first.
-        case merge
     }
 
     public struct Edge: Equatable, Sendable {
         public let kind: EdgeKind
+        /// Always in the edge's own lane.
         public let from: Point
         public let to: Point
-        /// `nil` for a stub's marker, which is not a commit.
-        public let childOid: String?
-        public let parentOid: String
 
-        public init(kind: EdgeKind, from: Point, to: Point, childOid: String?, parentOid: String) {
+        public init(kind: EdgeKind, from: Point, to: Point) {
             self.kind = kind
             self.from = from
             self.to = to
-            self.childOid = childOid
-            self.parentOid = parentOid
         }
     }
 
     /// Labelled lanes, lane `i` at index `i`.
     public let headers: [Header]
-    /// One node per input row that was placed, in input order.
+    /// One node per placed commit, in input order.
     public let nodes: [Node]
     public let edges: [Edge]
-    /// Labelled lanes plus unlabelled tracks.
+    /// Labelled lanes, or 1 for the unlabelled lane `nil` refs lay out.
     public let laneCount: Int
     /// One past the lowest row used; 0 for an empty map.
     public let rowCount: Int
@@ -121,167 +128,213 @@ public nonisolated struct BranchMapLayout: Equatable, Sendable {
     }
 
     /// Lays out `rows` (topological order, children first -- what
-    /// `graphRows` returns) under the lanes `refs` names. `nil` refs (the
-    /// sidebar has not loaded) gives no labelled lanes: every commit then
-    /// sits in an unlabelled run.
-    public static func make(rows: [GraphRow], refs: RefSnapshot?) -> BranchMapLayout {
+    /// `graphRows` returns) under the lanes `refs` names. `defaultBranch` is
+    /// the short name of the root lane's branch (`nil` means the literal
+    /// `main`); when no local branch has that name, `HEAD`'s lane is the
+    /// root. `nil` refs (the sidebar has not loaded) lays out the first
+    /// row's first-parent chain as one unlabelled lane.
+    public static func make(rows: [GraphRow], refs: RefSnapshot?, defaultBranch: String? = nil) -> BranchMapLayout {
         let byOid = Dictionary(rows.map { ($0.oid, $0) }, uniquingKeysWith: { first, _ in first })
         let topoIndex = Dictionary(
             rows.enumerated().map { ($1.oid, $0) }, uniquingKeysWith: { first, _ in first })
-        var children: [String: [String]] = [:]
-        for row in rows {
-            for parent in row.parents where byOid[parent] != nil {
-                children[parent, default: []].append(row.oid)
+
+        var groups = refs.map { makeGroups(refs: $0, byOid: byOid, topoIndex: topoIndex) } ?? []
+        if refs == nil, let first = rows.first {
+            groups = [Group(tip: first.oid, chips: [])]
+        }
+        guard !groups.isEmpty else {
+            return BranchMapLayout(headers: [], nodes: [], edges: [], laneCount: 0, rowCount: 0)
+        }
+
+        // Claim order: the root, then fewest commits the root does not reach.
+        let rootName = defaultBranch ?? "main"
+        let rootIndex = groups.firstIndex { $0.chips.contains { $0.kind == .localBranch && $0.name == rootName } }
+            ?? groups.firstIndex { $0.chips.contains(where: \.isHead) }
+            ?? 0
+        let reached = reachable(from: groups[rootIndex].tip, byOid: byOid)
+        func ownLength(_ group: Group) -> Int {
+            var count = 0
+            var next: String? = group.tip
+            while let oid = next, let row = byOid[oid], !reached.contains(oid) {
+                count += 1
+                next = row.parents.first
+            }
+            return count
+        }
+        let others = groups.indices.filter { $0 != rootIndex }
+            .map { (index: $0, own: ownLength(groups[$0]), topo: topoIndex[groups[$0].tip] ?? Int.max) }
+            .sorted { ($0.own, $0.topo) < ($1.own, $1.topo) }
+            .map(\.index)
+        let claimOrder = [rootIndex] + others
+
+        // Claim first-parent chains. Everything below is indexed by claim
+        // order, not by group.
+        var owner: [String: Int] = [:]
+        var commits: [[String]] = Array(repeating: [], count: groups.count)
+        var parent: [Int?] = Array(repeating: nil, count: groups.count)
+        var forkIndex: [Int] = Array(repeating: 0, count: groups.count)
+        var isStub: [Bool] = Array(repeating: false, count: groups.count)
+        var indexInLane: [String: Int] = [:]
+        for (order, groupIndex) in claimOrder.enumerated() {
+            var next: String? = groups[groupIndex].tip
+            while let oid = next, let row = byOid[oid], owner[oid] == nil {
+                owner[oid] = order
+                indexInLane[oid] = commits[order].count
+                commits[order].append(oid)
+                next = row.parents.first
+            }
+            if let fork = next, let forkOwner = owner[fork], forkOwner != order {
+                parent[order] = forkOwner
+                forkIndex[order] = indexInLane[fork] ?? 0
+                isStub[order] = commits[order].isEmpty
             }
         }
 
-        let groups = refs.map { orderedGroups(refs: $0, topoIndex: topoIndex) } ?? []
+        // Tree: children per lane, nearest fork first, newer tip first.
+        var children: [[Int]] = Array(repeating: [], count: groups.count)
+        for order in claimOrder.indices {
+            if let parentOrder = parent[order] { children[parentOrder].append(order) }
+        }
+        for order in claimOrder.indices {
+            children[order].sort { a, b in
+                (forkIndex[a], topoIndex[groups[claimOrder[a]].tip] ?? Int.max)
+                    < (forkIndex[b], topoIndex[groups[claimOrder[b]].tip] ?? Int.max)
+            }
+        }
 
-        var lane: [String: Int] = [:]
-        var rowOf: [String: Int] = [:]
+        // Rows, bottom-up: a commit a child forks from sits one row below
+        // that child's lowest row.
+        var rowsOf: [[Int]] = Array(repeating: [], count: groups.count)
+        var bottom: [Int] = Array(repeating: 0, count: groups.count)
+        func assignRows(_ order: Int) {
+            for child in children[order] { assignRows(child) }
+            var need: [Int: Int] = [:]
+            for child in children[order] {
+                need[forkIndex[child]] = max(need[forkIndex[child]] ?? 0, bottom[child] + 1)
+            }
+            var previous = -1
+            rowsOf[order] = commits[order].indices.map { index in
+                previous = max(previous + 1, need[index] ?? 0)
+                return previous
+            }
+            bottom[order] = rowsOf[order].last ?? 0
+        }
+
+        // Lane order: depth-first from each root.
+        var laneOf: [Int] = Array(repeating: 0, count: groups.count)
+        var laneOrder: [Int] = []
+        func place(_ order: Int) {
+            laneOf[order] = laneOrder.count
+            laneOrder.append(order)
+            for child in children[order] { place(child) }
+        }
+        for order in claimOrder.indices where parent[order] == nil {
+            assignRows(order)
+            place(order)
+        }
+
         var headers: [Header] = []
         var edges: [Edge] = []
-        var maxRow = -1
-
-        // Labelled lanes claim their first-parent chains in order.
-        for (index, group) in groups.enumerated() {
-            if lane[group.tip] != nil, let tipRow = rowOf[group.tip], let tipLane = lane[group.tip] {
-                headers.append(Header(lane: index, tipOid: group.tip, chips: group.chips, isStub: true))
+        var maxRow = 0
+        for order in laneOrder {
+            let lane = laneOf[order]
+            let group = groups[claimOrder[order]]
+            if refs != nil {
+                headers.append(Header(
+                    lane: lane, tipOid: group.tip, chips: group.chips,
+                    isStub: isStub[order], parentLane: parent[order].map { laneOf[$0] }))
+            }
+            if bottom[order] > 0 {
                 edges.append(Edge(
-                    kind: .fork, from: Point(lane: index, row: 0), to: Point(lane: tipLane, row: tipRow),
-                    childOid: nil, parentOid: group.tip))
-                maxRow = max(maxRow, 0)
-                continue
+                    kind: .lane, from: Point(lane: lane, row: 0), to: Point(lane: lane, row: bottom[order])))
             }
-            headers.append(Header(lane: index, tipOid: group.tip, chips: group.chips, isStub: false))
-            var next: String? = group.tip
-            var row = 0
-            while let oid = next, let graphRow = byOid[oid], lane[oid] == nil {
-                lane[oid] = index
-                rowOf[oid] = row
-                maxRow = max(maxRow, row)
-                row += 1
-                next = graphRow.parents.first
+            maxRow = max(maxRow, bottom[order])
+            if let parentOrder = parent[order] {
+                edges.append(Edge(
+                    kind: .fork, from: Point(lane: lane, row: bottom[order]),
+                    to: Point(lane: laneOf[parentOrder], row: rowsOf[parentOrder][forkIndex[order]])))
             }
         }
 
-        // Unlabelled runs, in topological order of their first commit, so
-        // every child of a run's first commit already has a row.
-        let firstTrack = headers.count
-        var trackEnds: [Int] = []
-        for graphRow in rows where lane[graphRow.oid] == nil {
-            var members: [String] = []
-            var next: String? = graphRow.oid
-            while let oid = next, let member = byOid[oid], lane[oid] == nil {
-                members.append(oid)
-                next = member.parents.first
-            }
-            let childRows = (children[graphRow.oid] ?? []).compactMap { rowOf[$0] }
-            let start = (childRows.max() ?? -1) + 1
-            let last = start + members.count - 1
-            let forkRow = next.flatMap { rowOf[$0] }
-            let occupiedFrom = childRows.isEmpty ? start : start - 1
-            let occupiedTo = max(last, forkRow ?? last)
-            let track: Int
-            if let free = trackEnds.firstIndex(where: { $0 < occupiedFrom }) {
-                track = free
-                trackEnds[free] = occupiedTo
-            } else {
-                track = trackEnds.count
-                trackEnds.append(occupiedTo)
-            }
-            for (offset, oid) in members.enumerated() {
-                lane[oid] = firstTrack + track
-                rowOf[oid] = start + offset
-            }
-            maxRow = max(maxRow, last)
-        }
-
-        // Nodes and commit edges, in input order.
         var nodes: [Node] = []
         nodes.reserveCapacity(rows.count)
-        for graphRow in rows {
-            guard let childLane = lane[graphRow.oid], let childRow = rowOf[graphRow.oid] else { continue }
-            nodes.append(Node(oid: graphRow.oid, lane: childLane, row: childRow))
-            for (index, parent) in graphRow.parents.enumerated() {
-                guard let parentLane = lane[parent], let parentRow = rowOf[parent] else { continue }
-                let kind: EdgeKind
-                if index > 0 {
-                    kind = .merge
-                } else if parentLane == childLane && parentRow == childRow + 1 {
-                    kind = .chain
-                } else {
-                    kind = .fork
-                }
-                edges.append(Edge(
-                    kind: kind, from: Point(lane: childLane, row: childRow),
-                    to: Point(lane: parentLane, row: parentRow),
-                    childOid: graphRow.oid, parentOid: parent))
-            }
+        for row in rows {
+            guard let order = owner[row.oid], let index = indexInLane[row.oid] else { continue }
+            nodes.append(Node(oid: row.oid, lane: laneOf[order], row: rowsOf[order][index]))
         }
 
         return BranchMapLayout(
-            headers: headers, nodes: nodes, edges: edges,
-            laneCount: firstTrack + trackEnds.count, rowCount: maxRow + 1)
+            headers: headers, nodes: nodes, edges: edges, laneCount: laneOrder.count, rowCount: maxRow + 1)
     }
 
     private struct Group {
         let tip: String
-        let chips: [RefChip]
+        var chips: [RefChip]
     }
 
-    /// One group per distinct tip commit inside the loaded rows, in lane
-    /// order (see the file header).
-    private static func orderedGroups(refs: RefSnapshot, topoIndex: [String: Int]) -> [Group] {
-        var tips: [String] = []
-        var detached: String?
-        if case let .detached(oid) = refs.head {
-            detached = oid
-            tips.append(oid)
-        }
-        for entry in refs.refs where entry.name.hasPrefix("refs/heads/")
-            || (entry.name.hasPrefix("refs/remotes/") && !entry.name.hasSuffix("/HEAD")) {
-            tips.append(entry.oid)
-        }
+    /// Every commit reachable from `tip` through any parent, inside the
+    /// loaded rows.
+    private static func reachable(from tip: String, byOid: [String: GraphRow]) -> Set<String> {
         var seen: Set<String> = []
-        let groups: [Group] = tips.compactMap { oid in
-            guard topoIndex[oid] != nil, seen.insert(oid).inserted else { return nil }
+        var stack = [tip]
+        while let oid = stack.popLast() {
+            guard let row = byOid[oid], seen.insert(oid).inserted else { continue }
+            stack += row.parents
+        }
+        return seen
+    }
+
+    /// One group per distinct tip inside the loaded rows: a detached `HEAD`
+    /// and local branches first, then every remote-tracking branch that does
+    /// not fold into its local namesake (see the file header).
+    private static func makeGroups(
+        refs: RefSnapshot, byOid: [String: GraphRow], topoIndex: [String: Int]
+    ) -> [Group] {
+        let heads = "refs/heads/"
+        let remotes = "refs/remotes/"
+        var groups: [Group] = []
+        var groupOfTip: [String: Int] = [:]
+        func addGroup(_ oid: String) {
+            guard byOid[oid] != nil, groupOfTip[oid] == nil else { return }
             var chips = RefChips.make(oid: oid, refs: refs, decoration: "")
-            if oid == detached {
+            if case let .detached(detached) = refs.head, detached == oid {
                 chips.insert(RefChip(name: "HEAD", kind: .detachedHead, isHead: true), at: 0)
             }
-            return chips.isEmpty ? nil : Group(tip: oid, chips: chips)
+            groupOfTip[oid] = groups.count
+            groups.append(Group(tip: oid, chips: chips))
         }
-        func recency(_ group: Group) -> Int { topoIndex[group.tip] ?? Int.max }
+        if case let .detached(oid) = refs.head { addGroup(oid) }
+        let locals = refs.refs.filter { $0.name.hasPrefix(heads) }
+        for entry in locals { addGroup(entry.oid) }
+        let localTip = Dictionary(
+            locals.map { (String($0.name.dropFirst(heads.count)), $0.oid) }, uniquingKeysWith: { first, _ in first })
 
-        let head = groups.filter { $0.chips.contains(where: \.isHead) }
-        let locals = groups
-            .filter { group in
-                !group.chips.contains(where: \.isHead) && group.chips.contains { $0.kind == .localBranch }
-            }
-            .sorted { recency($0) < recency($1) }
-        let remotes = groups
-            .filter { group in group.chips.allSatisfy { $0.kind == .remoteBranch } }
-            .sorted { recency($0) < recency($1) }
-
-        let anchored = head + locals
-        var after: [[Group]] = Array(repeating: [], count: anchored.count)
-        var unanchored: [Group] = []
-        for remote in remotes {
-            let names = Set(remote.chips.map { BranchTip(name: $0.name, oid: "", isRemote: true).colorKey })
-            if let anchor = anchored.firstIndex(where: { group in
-                group.chips.contains { $0.kind == .localBranch && names.contains($0.name) }
-            }) {
-                after[anchor].append(remote)
+        for entry in refs.refs where entry.name.hasPrefix(remotes) && !entry.name.hasSuffix("/HEAD") {
+            guard byOid[entry.oid] != nil, groupOfTip[entry.oid] == nil else { continue }
+            let short = String(entry.name.dropFirst(remotes.count))
+            let branch = short.split(separator: "/", maxSplits: 1).dropFirst().first.map(String.init) ?? short
+            if let tip = localTip[branch], let group = groupOfTip[tip],
+               isOnFirstParentChain(entry.oid, from: tip, byOid: byOid, topoIndex: topoIndex) {
+                groups[group].chips.append(RefChip(name: short, kind: .remoteBranch, isHead: false))
             } else {
-                unanchored.append(remote)
+                addGroup(entry.oid)
             }
         }
-        var ordered: [Group] = []
-        for (index, group) in anchored.enumerated() {
-            ordered.append(group)
-            ordered += after[index]
+        return groups.filter { !$0.chips.isEmpty }
+    }
+
+    /// Whether `target` is on `tip`'s first-parent chain. The walk stops once
+    /// it passes `target`'s topological position, since a parent is never
+    /// above its child.
+    private static func isOnFirstParentChain(
+        _ target: String, from tip: String, byOid: [String: GraphRow], topoIndex: [String: Int]
+    ) -> Bool {
+        guard let limit = topoIndex[target] else { return false }
+        var next: String? = tip
+        while let oid = next, let row = byOid[oid], let index = topoIndex[oid], index <= limit {
+            if oid == target { return true }
+            next = row.parents.first
         }
-        return ordered + unanchored
+        return false
     }
 }

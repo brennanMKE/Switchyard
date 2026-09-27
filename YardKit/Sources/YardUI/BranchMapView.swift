@@ -3,7 +3,7 @@
 // #0413 (umbrella #0410): the History pane's branch map. Every labelled
 // lane's tip sits on the top row under a slanted branch label that stays
 // pinned while the map scrolls vertically; each branch's own commits run
-// down its lane; fork and merge edges run to the commits they join.
+// down its lane; #0426: each lane's one connector runs to its parent.
 // `BranchMapLayout` places the commits and `BranchMapGeometry` turns cells
 // into points; this view only draws and routes input.
 //
@@ -83,8 +83,12 @@ struct BranchMapView: View {
                 return .ignored
             }
             let step = press.key == .upArrow ? -1 : 1
-            guard let next = layout.nodes.first(where: { $0.lane == current.lane && $0.row == current.row + step })
-            else { return .handled }
+            // #0426: a lane's rows can skip where a child's commits push
+            // its fork point down, so step to the nearest node, not row ± 1.
+            let next = step < 0
+                ? layout.nodes.last(where: { $0.lane == current.lane && $0.row < current.row })
+                : layout.nodes.first(where: { $0.lane == current.lane && $0.row > current.row })
+            guard let next else { return .handled }
             self.selection = next.oid
             scroll(to: next, content: content)
             return .handled
@@ -133,8 +137,11 @@ struct BranchMapView: View {
         let points = BranchMapGeometry.polyline(edge)
         var path = Path()
         path.addLines(points)
-        let color = laneColor(edge.kind == .merge ? edge.to.lane : edge.from.lane)
-        let dashed = edge.childOid.map { oid in localOids.map { !$0.contains(oid) } ?? false } ?? true
+        let color = laneColor(edge.from.lane)
+        // #0368, re-keyed by #0426: a lane whose tip no local branch reaches
+        // (a remote-only lane) draws dashed, its vertical and its connector.
+        let dashed = edge.from.lane < layout.headers.count
+            && localOids.map { !$0.contains(layout.headers[edge.from.lane].tipOid) } ?? false
         context.stroke(
             path, with: .color(color),
             style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round, dash: dashed ? [4, 3] : []))

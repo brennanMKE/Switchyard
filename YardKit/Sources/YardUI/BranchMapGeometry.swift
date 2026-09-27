@@ -20,8 +20,6 @@ public nonisolated enum BranchMapGeometry {
     public static let trailingInset: CGFloat = 160
     /// Height of the pinned header the slanted branch labels sit in.
     public static let headerHeight: CGFloat = 120
-    /// How far below its start (or above its end) an edge turns.
-    public static let bend: CGFloat = rowHeight / 2
     /// The side of a node's square hit target, which is also its
     /// accessibility frame -- smaller than a row, so the #0399 compactness
     /// bound (26 pt) still holds.
@@ -51,26 +49,19 @@ public nonisolated enum BranchMapGeometry {
 
     /// The polyline an edge draws, start to end.
     ///
-    /// - A chain is a straight vertical.
-    /// - A fork runs down its own lane and turns into the fork point half a
-    ///   row above it; when the fork point is not below, it drops half a row
-    ///   and runs straight there. On one row it is a straight line.
-    /// - A merge turns into the parent's lane half a row below the merge
-    ///   and runs down that lane to the parent; when the parent is not
-    ///   below that turn, it is a straight line.
+    /// - A lane is a straight vertical.
+    /// - A fork (a lane's one connector) runs down its own lane to the fork
+    ///   row, then straight across to the parent lane. On one row it is a
+    ///   straight line.
     public static func polyline(_ edge: BranchMapLayout.Edge) -> [CGPoint] {
         let start = point(edge.from)
         let end = point(edge.to)
         switch edge.kind {
-        case .chain:
+        case .lane:
             return [start, end]
         case .fork:
-            if start.y == end.y { return [start, end] }
-            if end.y - bend > start.y { return [start, CGPoint(x: start.x, y: end.y - bend), end] }
-            return [start, CGPoint(x: start.x, y: start.y + bend), end]
-        case .merge:
-            if end.y > start.y + bend { return [start, CGPoint(x: end.x, y: start.y + bend), end] }
-            return [start, end]
+            if start.y == end.y || start.x == end.x { return [start, end] }
+            return [start, CGPoint(x: start.x, y: end.y), end]
         }
     }
 

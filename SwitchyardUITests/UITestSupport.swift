@@ -160,10 +160,15 @@ enum UITestMapFixture {
     static let newestLaneTip = "lane-01 commit"
     static let nearTip = "near commit 2"
     static let midTip = "mid commit 3"
+    /// #0426: feature-near's lowest commit, the commit it forks from, and a
+    /// commit of the deleted topic no branch claims.
+    static let nearLowest = "near commit 1"
+    static let nearFork = "map main 11"
+    static let goneTopic = "gone topic one"
     /// The rightmost branch with commits of its own, and its tip.
     static let deepBranch = "feature-deep"
     static let deepTip = "deep tip commit"
-    /// A stub lane whose tip is 30 rows down map-main.
+    /// A stub lane whose tip is row 33 of map-main (#0426).
     static let oldBranch = "merged-old"
     static let oldTip = "map base 04"
 }

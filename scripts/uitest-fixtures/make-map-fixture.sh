@@ -5,18 +5,21 @@
 # never host-live. Every commit gets its own fixed date so `--topo-order`
 # (and so the map's recency order) is identical on every run.
 #
-# Shape (lane order the map must produce, left to right):
-#   map-main      HEAD: "map base 01".."24", then "map main 01".."12", where
-#                 "map main 09" is a --no-ff merge of a deleted two-commit
-#                 topic (an unlabelled run). 36 rows: taller than the pane.
-#   lane-01..24   one commit each ("lane-NN commit") off "map main 10",
-#                 newest first -- 24 lanes, so the map is wider than the pane
-#   feature-near  "near commit 1", "near commit 2" off "map main 11"
-#   feature-mid   "mid commit 1".."3" off "map main 07";
-#                 origin/feature-mid one commit behind it (a stub lane)
-#   feature-deep  "deep commit 1".."3", "deep tip commit" off "map main 03"
-#                 -- the oldest branch commit, so right of every lane above
-#   merged-old    at "map base 04", 30 rows down map-main (a stub lane, last)
+# Shape (the #0426 staircase tree the map must produce, left to right):
+#   map-main      lane 0, HEAD and the root (no `main` here, so HEAD's
+#                 branch roots the tree): "map base 01".."24", then
+#                 "map main 01".."12", where "map main 09" is a --no-ff merge
+#                 of a deleted two-commit topic -- history no branch claims,
+#                 so the map does not draw it. 37 rows: taller than the pane.
+#   feature-near  lane 1, the nearest fork: "near commit 1", "near commit 2"
+#                 off "map main 11", which sits one row below "near commit 1"
+#   lane-01..24   lanes 2-25: one commit each ("lane-NN commit") off
+#                 "map main 10", newest first -- wider than the pane
+#   feature-mid   lane 26: "mid commit 1".."3" off "map main 07";
+#                 origin/feature-mid, one commit behind, folds into its lane
+#   feature-deep  lane 27: "deep commit 1".."3", "deep tip commit" off
+#                 "map main 03" -- the farthest fork with commits of its own
+#   merged-old    lane 28, a stub at "map base 04", row 33 of map-main
 set -euo pipefail
 repo="$1"
 rm -rf "$repo"
