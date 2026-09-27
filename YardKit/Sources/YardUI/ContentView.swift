@@ -311,6 +311,8 @@ public struct ContentView: View {
         .navigationTitle(Self.windowTitle(repositoryPath: repositoryPath))
         .navigationSubtitle(Self.windowSubtitle(summary: summary))
         .frame(minWidth: PaneLayout.windowMinWidth, minHeight: 480)
+        // #0417: repository windows are native tabs of one another.
+        .background(RepositoryWindowTabbingAccessor())
         // #0216: the transport pane, pinned below whatever the window shows —
         // it is app-global, not per-repository, and the "the CLI can't
         // connect" diagnosis usually happens with no repository open. Only
@@ -351,6 +353,11 @@ public struct ContentView: View {
         // menu) present windows through this action; any window's copy
         // opens a window for any id.
         .onAppear {
+            // #0417: a window SwiftUI opens with no value gets a fresh id
+            // once this one has been shown (`idForWindowWithoutValue`).
+            if let window {
+                WindowStore.shared.noteShown(window.id)
+            }
             WindowPresenter.shared.show = { [openWindow] id in
                 NSApplication.shared.activate()
                 openWindow(value: id)

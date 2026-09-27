@@ -129,7 +129,7 @@ Switchyard.xcodeproj
 ├── Switchyard/          macOS app target (SwiftUI)
 │   ├── AppXPCServer, URLSchemeHandler, AgentRegistrar
 │   ├── SwitchyardApp    WindowGroup(for: WindowID.self), Settings, commands
-│   ├── WindowView       tab bar (SlidingTabs) + the active repo's Git View
+│   ├── WindowView       one repository's Git View; windows tab natively (#0417)
 │   ├── GitView          the three panes: Sidebar, Graph, Detail
 │   └── CLIInstallActions (File menu wiring)
 ├── BrokerAgent/         launch agent executable, bootstrap broker only
@@ -154,7 +154,7 @@ no single-window mode to also maintain.
 
 ```
 ┌────────────────────────────────────────────────────────┐
-│ [Switchyard ●] [Batty] [RemoteControl]            [+]  │  ← SlidingTabs, one tab per repository
+│ [Switchyard ●] [Batty] [RemoteControl]            [+]  │  ← native window tabs, one per repository
 ├────────────┬─────────────────────┬─────────────────────┤
 │ Branches   │   ● main            │  diff of the        │
 │  main      │   │╲                │  selected commit    │
@@ -187,15 +187,16 @@ The three panes are **Sidebar / Graph / Detail**: refs, worktrees, and stashes o
 commit graph in the middle; the selected commit's diff — later the three-way merge and review
 surfaces — on the right.
 
-**Tab chrome comes from [SlidingTabs](https://github.com/brennanMKE/SlidingTabs)**, MIT by the same
-author, depended on by tag (`from: "1.0.0"`) rather than by local path, so a public clone of this
-repository builds without also cloning SlidingTabs. `SlidingTabBar` is generic over `Identifiable`
-and takes a chip `ViewBuilder`, so reordering and the "+" affordance come with it.
+**Tabs are native macOS window tabs** (#0417, §11 decision 28). Each repository is its own window,
+and every repository window sets `tabbingMode = .preferred` with a repository-only
+`tabbingIdentifier` (`RepositoryWindowTabbing`), so a second repository opens as a tab of the
+current window. AppKit supplies the tab bar, "+", reordering, tearing a tab out, and Window ▸ Merge
+All Windows.
 
 ### Multiple windows
 
 Multiple windows are supported from the start, as in Batty: `WindowGroup(for: WindowID.self)` with a
-`WindowID` value type, each window holding its own set of repository tabs.
+`WindowID` value type, each window showing one repository and tabbing with the others (#0416, #0417).
 
 Two traps here are already documented by Batty's `BattyApp.swift`, both from Batty issue 0251, and
 **Switchyard is more exposed to the second than Batty is** because it has a URL scheme *and* XPC
@@ -1414,6 +1415,18 @@ a feature at any milestone on the grounds that GitUp had it.
     only upstream numbers, or nothing. *Unknown* still shows where it is honest: the default
     resolves and the content pass is pending, or merge-tree conflicted. The default-branch source
     is unchanged.
+
+28. **Repository tabs are native window tabs; each repository is its own window.** Decided
+    2026-09-26 on #0417 (planning pass, with #0416). SwitchyardApp's `WindowGroup` gives every
+    repository a window (`WindowStore.place`, one repository per window, identity
+    `$GIT_COMMON_DIR`), and `RepositoryWindowTabbing` makes those windows prefer tabbing. AppKit
+    then provides the tab bar, "+", reorder, tear-out, Merge All Windows and tab cycling. The
+    SlidingTabs chrome (`RepositoryTabBar`) was never mounted and is deleted with its dependency.
+    The custom bar would have needed several repositories per window, and so a second
+    which-repository-is-shown authority and per-tab content switching inside one `ContentView`,
+    all of which native tabbing avoids. File ▸ New Tab (⌘T) replaces New Window, and the group's
+    `defaultValue` hands out a fresh window id once the launch window has been shown, because
+    "+" otherwise opened a second view of the launch window (measured in the VM).
 
 29. **The branch map is a folded staircase tree, filtered by recency, with merged branches dimmed.**
     **Brennan's decision, 2026-09-26** (option B of the branch-map design exploration, umbrella

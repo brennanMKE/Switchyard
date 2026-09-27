@@ -57,6 +57,22 @@ public enum RepositoryOpener {
         return open(path: url.path, store: store)
     }
 
+    // MARK: - #0417: File ▸ New Tab
+
+    /// Opens an empty repository window. It joins the current window's tab
+    /// group (`RepositoryWindowTabbing`), and an open from it lands in it,
+    /// because it is the current, empty window (`WindowStore.place(_:)`).
+    /// Returns the new window's id.
+    @discardableResult
+    public static func openNewTab(
+        windowStore: WindowStore = .shared,
+        presenter: WindowPresenter = .shared
+    ) -> WindowID {
+        let id = windowStore.addWindow().id
+        presenter.present(id)
+        return id
+    }
+
     // MARK: - Entry point 2: drag and drop (window and Dock alike)
 
     /// Opens the first file URL a drop delivered, whatever surface it

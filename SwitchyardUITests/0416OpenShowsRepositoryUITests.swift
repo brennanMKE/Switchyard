@@ -58,13 +58,15 @@ final class Spike0416OpenShowsRepositoryUITests: XCTestCase {
         deliver(UITestMapFixture.repositoryPath)
         XCTAssertTrue(app.historyRows(containing: UITestMapFixture.mainTip).firstMatch
             .waitForExistence(timeout: 30), "the second repository never appeared")
-        XCTAssertEqual(app.windows.count, 2, "a second repository opens its own window")
+        // #0417: its own window is a native tab of the current one.
+        XCTAssertEqual(app.windows.count, 1, "a second repository is a tab, not a second window")
+        XCTAssertEqual(app.tabs.count, 2, "a second repository opens its own tab")
 
         // 3. Reopening the first repository focuses its window; no third window.
         deliver(UITestFixture.repositoryPath)
         XCTAssertTrue(app.historyRows(containing: UITestFixture.tipSubject).firstMatch
             .waitForExistence(timeout: 30))
-        XCTAssertEqual(app.windows.count, 2, "reopening an open repository adds no window")
+        XCTAssertEqual(app.tabs.count, 2, "reopening an open repository adds no tab")
 
         // 4. A folder that is not a repository: an alert, and no new window.
         deliver("/Users/admin")
@@ -78,14 +80,14 @@ final class Spike0416OpenShowsRepositoryUITests: XCTestCase {
         add(refusal)
         app.buttons["OK"].firstMatch.click()
         XCTAssertTrue(app.waitUntilDisappears(alertTitle, timeout: 10))
-        XCTAssertEqual(app.windows.count, 2, "a refused folder opens no window")
+        XCTAssertEqual(app.tabs.count, 2, "a refused folder opens no tab")
 
         // 5. Every window closed: an open still brings one back.
         app.typeKey("w", modifierFlags: .command)
         app.typeKey("w", modifierFlags: .command)
         let deadline = Date().addingTimeInterval(10)
         while Date() < deadline, app.windows.count > 0 { usleep(200_000) }
-        XCTAssertEqual(app.windows.count, 0, "Cmd-W twice should close both windows")
+        XCTAssertEqual(app.windows.count, 0, "Cmd-W twice should close both tabs")
         deliver(UITestMapFixture.repositoryPath)
         XCTAssertTrue(app.historyRows(containing: UITestMapFixture.mainTip).firstMatch
             .waitForExistence(timeout: 30), "with no window open, an open must bring one back")

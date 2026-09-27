@@ -197,6 +197,10 @@ public final class WindowStore {
     /// from a focus change can never invalidate a view.
     @ObservationIgnored public var activeWindowID: WindowID?
 
+    /// #0417: the windows a `ContentView` has appeared in at least once.
+    /// Not observed, for the same reason as `activeWindowID`.
+    @ObservationIgnored private var shownWindowIDs: Set<WindowID> = []
+
     public init() {
         // Two-step on purpose: `makeWindow` reads `self` (its hook reads
         // `stateWriter` at fire time), so `windows` must be initialized
@@ -238,6 +242,27 @@ public final class WindowStore {
     /// outlive its state.
     public var initialWindowID: WindowID {
         windows[0].id // safe: the list is never empty
+    }
+
+    /// #0417: records that a window for `id` has appeared on screen.
+    /// `ContentView` calls it from `onAppear`.
+    public func noteShown(_ id: WindowID) {
+        shownWindowIDs.insert(id)
+    }
+
+    /// #0417: the id for a window SwiftUI opens with no value -- the
+    /// `WindowGroup`'s `defaultValue`. That is the launch window, and the
+    /// tab bar's "+" (AppKit's `newWindowForTab:`). The first window no
+    /// view has shown yet (at launch, the seeded window, which may already
+    /// hold a repository a Dock or `open -a` launch placed in it);
+    /// otherwise a new, empty window. Returning the launch window's id
+    /// every time made "+" add a second tab showing the launch window's
+    /// repository (measured in the VM, 2026-09-26).
+    public func idForWindowWithoutValue() -> WindowID {
+        if let unshown = windows.first(where: { !shownWindowIDs.contains($0.id) }) {
+            return unshown.id
+        }
+        return addWindow().id
     }
 
     /// The state for `id`, or `nil` when no window with that id is open.
