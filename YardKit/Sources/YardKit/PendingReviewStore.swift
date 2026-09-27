@@ -90,7 +90,19 @@ public final class PendingReviewStore: @unchecked Sendable {
     /// that mutates it mid-serving owns that race.
     public var onPendingChange: (@Sendable (Pending, ReviewOutcome?) -> Void)?
 
-    public init() {}
+    /// How a pending's reaper waits out its `timeoutSeconds` (#0408). The
+    /// app always uses the default, a real `Task.sleep`; a test injects a
+    /// sleep it completes by hand, so "the timer fired" is an event the test
+    /// causes rather than a race against a real clock. The closure MUST throw
+    /// when its task is cancelled — cancellation is how a resolved slot
+    /// disarms its reaper.
+    private let reaperSleep: @Sendable (Duration) async throws -> Void
+
+    public init(
+        reaperSleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }
+    ) {
+        self.reaperSleep = reaperSleep
+    }
 
     /// The pending reviews right now — one per repository. Round 2's sheet
     /// binds to this snapshot; the store itself never touches AppKit.
@@ -121,9 +133,10 @@ public final class PendingReviewStore: @unchecked Sendable {
             // sleep swallows only cancellation — a cancelled task returns
             // without firing, because the slot is already gone. The timer
             // also survives abandonment: it is the reaper (#0349).
+            let reaperSleep = self.reaperSleep
             let timeoutTask = Task { [weak self] in
                 do {
-                    try await Task.sleep(for: .seconds(Double(request.timeoutSeconds)))
+                    try await reaperSleep(.seconds(Double(request.timeoutSeconds)))
                 } catch {
                     return
                 }

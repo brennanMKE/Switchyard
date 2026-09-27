@@ -519,10 +519,16 @@ public struct GitProcess: Sendable {
                 }
             }
         } onCancel: {
+            // Finish the gate BEFORE terminating (#0408): the terminated
+            // child's exit + EOF race to `complete()` on Foundation's queues,
+            // and whichever reaches the gate first wins. Terminating first
+            // let a SIGTERM'd child report a successful capture (exit 15)
+            // instead of the cancellation — the same ordering rule the
+            // watchdog follows with `markDeadlineExpired()`.
+            gate.finish(.failure(CancellationError()))
             if childProcess.isRunning {
                 childProcess.terminate()
             }
-            gate.finish(.failure(CancellationError()))
             // Same escalation the timeout path uses, so a child that traps
             // SIGTERM cannot outlive the caller that cancelled it. The gate
             // is already finished, so nothing this task does later can
