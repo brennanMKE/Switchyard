@@ -138,6 +138,9 @@ struct BranchMapView: View {
 
     private func laneColor(_ lane: Int) -> Color {
         guard lane < layout.headers.count, let chip = layout.headers[lane].chips.first else { return .secondary }
+        // #0429: a context lane -- hidden by the recency filter, drawn only
+        // so a shown lane can connect -- is grey.
+        if layout.headers[lane].isContext { return .gray }
         return BranchColor.color(for: chip)
     }
 
@@ -308,12 +311,13 @@ private struct BranchMapLabel: View {
         Text(BranchMapLabels.title(header.chips))
             .font(.caption.weight(isHead ? .bold : .regular))
             .italic(header.isRemoteOnly)
+            .foregroundStyle(header.isContext ? .secondary : .primary)
             .lineLimit(1)
             .fixedSize()
             .padding(.bottom, 2)
             .overlay(alignment: .bottom) {
                 Rectangle()
-                    .fill(header.chips.first.map { BranchColor.color(for: $0) } ?? .secondary)
+                    .fill(header.isContext ? .gray : header.chips.first.map { BranchColor.color(for: $0) } ?? .secondary)
                     .frame(height: 1.5)
             }
             .help(header.chips.map(\.name).joined(separator: ", "))

@@ -169,6 +169,11 @@ enum UITestMapFixture {
     /// its fold of 22.
     static let foldedMain = "map main 05"
     static let foldedBase = "map base 12"
+    /// #0429: a recent branch stacked on a 40-day-old one, and a 40-day-old
+    /// branch with no child.
+    static let freshChild = "fresh-child"
+    static let staleBase = "stale-base"
+    static let staleOnly = "stale-only"
     /// The rightmost branch with commits of its own, and its tip.
     static let deepBranch = "feature-deep"
     static let deepTip = "deep tip commit"
