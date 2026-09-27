@@ -177,11 +177,18 @@ public struct RepositorySidebarView: View {
 
     /// #0372: a local branch row's trailing status -- the A3 ahead/behind
     /// with the baseline named, then the M6 merged state, joined with a
-    /// middle dot -- or `nil` when the status read has not landed or has no
-    /// row for this ref. Merged answers the composite can reach without the
-    /// content pass (ancestry, upstream-gone) show as soon as the read
-    /// lands; content-dependent branches read *unknown* until the
-    /// background pass fills `content`. `nonisolated` on purpose, like
+    /// middle dot -- or `nil` when the status read has not landed, has no
+    /// row for this ref, or has nothing to say. Merged answers the composite
+    /// can reach without the content pass (ancestry, upstream-gone) show as
+    /// soon as the read lands; content-dependent branches read *unknown*
+    /// until the background pass fills `content`.
+    ///
+    /// #0422: when the default branch does not resolve (no `origin/HEAD`
+    /// and no local `main` -- `row.defaultAhead` is `nil`), no merged answer
+    /// short of upstream-gone is reachable at all, so *unknown* is not
+    /// pending, it is permanent -- and it was every row's only text. The
+    /// word is dropped in that case; a row with neither numbers nor a
+    /// merged answer shows nothing. `nonisolated` on purpose, like
     /// `helpText` above: pure text over inert value data, so tests and
     /// callers off the main actor can use it.
     public nonisolated static func branchStatusText(
@@ -192,8 +199,11 @@ public struct RepositorySidebarView: View {
         guard let report, let row = report.row(forBranchNamed: entry.name) else { return nil }
         var parts: [String] = []
         if let aheadBehind = aheadBehindText(for: row) { parts.append(aheadBehind) }
-        parts.append(mergedText(BranchStatus.mergedState(for: row, content: content ?? [:])))
-        return parts.joined(separator: " · ")
+        let merged = BranchStatus.mergedState(for: row, content: content ?? [:])
+        if merged != .unknown || row.defaultAhead != nil {
+            parts.append(mergedText(merged))
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     /// #0372: the A3 numbers with the baseline named -- decision 27 requires
