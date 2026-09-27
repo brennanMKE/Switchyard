@@ -220,10 +220,27 @@ struct GitProcessAsyncTests {
         }
     }
 
+    /// A child that exits when the file named by `$0` exists, or after
+    /// 3 600 polls of 50 ms — the backstop that lets a failing run end.
+    private static let waitForRelease =
+        "i=0; while [ ! -e \"$0\" ] && [ $i -lt 3600 ]; do sleep 0.05; i=$((i+1)); done"
+
     /// The starvation property, asserted by construction — see the suite
     /// comment for why "all started, none completed" demonstrates the fix.
+    ///
+    /// Each child blocks until the test creates a release file (#0408), so
+    /// "none completed" cannot be broken by the clock: with a fixed
+    /// `sleep 2`, a poll that woke late under parallel load saw captures
+    /// that had already finished. Each child also gives up after 3 600
+    /// polls of 50 ms (at least 180 s): under the blocking mutation the
+    /// saturated pool cannot resume this test's own poll loop, so without
+    /// that bound nothing would ever create the release file and the run
+    /// would hang instead of failing.
     @Test func concurrentAsyncCapturesDoNotHoldCooperativePoolThreads() async throws {
-        let sleeper = GitProcess(executablePath: "/bin/sleep")
+        let shell = GitProcess(executablePath: "/bin/sh")
+        let release = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("yard-starvation-release-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: release) }
         // Twice the pool width: enough concurrent subprocesses that a
         // blocking implementation must saturate the pool and queue the rest.
         let count = ProcessInfo.processInfo.activeProcessorCount * 2
@@ -233,14 +250,16 @@ struct GitProcessAsyncTests {
             for _ in 0..<count {
                 group.addTask {
                     counter.markStarted()
-                    _ = try await sleeper.capture(["2"])
+                    _ = try await shell.capture(
+                        ["-c", Self.waitForRelease, release.path])
                     counter.markCompleted()
                 }
             }
             // Bounded wait for every capture to have started (Rule 7c: a
-            // bounded loop, never a wall-clock assertion). 500 polls × 10ms.
+            // bounded loop, never a wall-clock assertion). 18 000 polls of
+            // at least 10 ms — generous, because nothing can complete early.
             var polls = 0
-            while counter.started < count, polls < 500 {
+            while counter.started < count, polls < 18_000 {
                 try await Task.sleep(for: .milliseconds(10))
                 polls += 1
             }
@@ -248,8 +267,10 @@ struct GitProcessAsyncTests {
             #expect(counter.started == count,
                     "only \(counter.started) of \(count) captures started; pool threads are being held")
             #expect(counter.completed == 0,
-                    "\(counter.completed) captures completed while others were still queued to start; a suspended capture is holding a cooperative-pool thread")
+                    "\(counter.completed) captures completed before the release file existed")
 
+            // Release every child, so a failing run still terminates.
+            FileManager.default.createFile(atPath: release.path, contents: nil)
             try await group.waitForAll()
         }
 

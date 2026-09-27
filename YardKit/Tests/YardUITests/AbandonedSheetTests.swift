@@ -71,22 +71,40 @@ struct AbandonedSheetTests {
 
     /// The pending's own timer remains the reaper: a terminal outcome after
     /// abandonment still lands, disables the decisions, and names itself in
-    /// the banner. SHORT real timeout (1 s).
+    /// the banner.
+    ///
+    /// The reaper's sleep is injected and fired by hand (#0408). With a real
+    /// 1 s timer the test raced it: under parallel load the timer could fire
+    /// before `abandonAll` (the slot is gone, nothing is abandoned) or its
+    /// `.timedOut` hop could reach the main actor before the `.abandoned`
+    /// hop (the sheet ignores abandonment after a terminal outcome), and
+    /// either way `waitUntil { model.isAbandoned }` waited out 180 s. Now the
+    /// reaper fires only after the abandonment is observed.
     @Test func theReaperStillEndsAnAbandonedReview() async throws {
-        let store = PendingReviewStore()
+        let (reaperFired, fireReaper) = AsyncStream.makeStream(of: Void.self)
+        let store = PendingReviewStore(reaperSleep: { _ in
+            // Returns when the test fires the reaper; throws when the
+            // reaper task is cancelled (the stream ends with no element).
+            for await _ in reaperFired { return }
+            throw CancellationError()
+        })
         let center = ReviewCenter(store: store)
         let owner = PendingOwner()
         let request = ReviewRequest(
             commonDir: "/repos/a/.git", selector: .staged, timeoutSeconds: 1)
 
-        async let outcome = store.awaitDecision(for: request, owner: owner)
+        // An unstructured task, not `async let`: if a wait below throws, an
+        // `async let` would block the test's exit on a continuation only the
+        // reaper can resume.
+        let waiter = Task { await store.awaitDecision(for: request, owner: owner) }
         try await waitUntil { center.sheets.count == 1 }
         let model = try #require(center.sheets.first)
-        store.abandonAll(ownedBy: owner)
+        #expect(store.abandonAll(ownedBy: owner) == 1, "the pending is still registered")
         try await waitUntil { model.isAbandoned }
 
-        #expect(await outcome == .timedOut, "the abandoned pending's own timer reaps it")
+        fireReaper.yield()
         try await waitUntil { model.outcome == .timedOut }
+        #expect(await waiter.value == .timedOut, "the abandoned pending's own timer reaps it")
         #expect(model.outcomeLabel == "This review timed out before a decision was made.",
                 "the terminal outcome names itself in the banner")
         #expect(!model.decisionsEnabled, "the reaper ends the review")
