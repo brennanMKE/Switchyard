@@ -88,3 +88,15 @@ private func geoEdge(
         centering: CGPoint(x: 300, y: 300), viewport: CGSize(width: 900, height: 900),
         content: CGSize(width: 400, height: 400)) == .zero)
 }
+
+@Test func foldsAreGroupedByRow() {
+    let layout = BranchMapLayout(
+        headers: [], nodes: [], edges: [],
+        folds: [
+            BranchMapLayout.Fold(lane: 0, row: 1, oids: ["a", "b", "c"]),
+            BranchMapLayout.Fold(lane: 1, row: 1, oids: ["d", "e", "f"]),
+            BranchMapLayout.Fold(lane: 0, row: 3, oids: ["g", "h", "i"]),
+        ],
+        laneCount: 2, rowCount: 4)
+    #expect(BranchMapGeometry.foldsByRow(layout) == [[], [0, 1], [], [2]])
+}

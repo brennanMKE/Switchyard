@@ -47,6 +47,8 @@ public struct CommitHistoryView: View {
     /// #0410: the commit the map should scroll to -- set from
     /// `scrollRequest`, the first match and match stepping.
     @State private var focusRequest: HistoryScrollRequest?
+    /// #0427: the folds opened in this window, by `Fold.key`. Not persisted.
+    @State private var expandedFolds: Set<String> = []
     @Binding private var selection: String?
 
     public init(
@@ -87,17 +89,18 @@ public struct CommitHistoryView: View {
         let mapRows = graphRows.isEmpty
             ? entries.map { GraphRow(oid: $0.oid, parents: $0.parents, lane: 0, parentLanes: $0.parents.map { _ in 0 }) }
             : graphRows
+        let layout = BranchMapLayout.make(rows: mapRows, refs: refs, expandedFolds: expandedFolds)
         let localOids = refs.map {
             LocalReachability.oids(in: mapRows, from: LocalReachability.localTips(refs: $0, headOid: headOid))
         }
 
         VStack(spacing: 0) {
             if !query.isEmpty {
-                matchBar(matchOids: matchOids)
+                matchBar(matchOids: matchOids, layout: layout)
                 Divider()
             }
             BranchMapView(
-                layout: BranchMapLayout.make(rows: mapRows, refs: refs),
+                layout: layout,
                 entriesByOid: Dictionary(entries.map { ($0.oid, $0) }, uniquingKeysWith: { first, _ in first }),
                 chipsByOid: chipsByOid,
                 headOid: headOid,
@@ -108,33 +111,34 @@ public struct CommitHistoryView: View {
                 perform: perform,
                 onOpenChanges: onOpenChanges,
                 focusRequest: focusRequest,
+                onExpandFold: { expandedFolds.insert($0) },
                 selection: $selection)
         }
         // #0401: a sidebar click asks for its branch tip to be shown. Only a
         // new request scrolls; picking a commit in the map does not, so the
         // map never jumps under the user's cursor.
         .onChange(of: scrollRequest) { _, request in
-            focusRequest = request
+            focus(request, in: layout)
         }
         // #0402: typing jumps to the first match.
         .onChange(of: query) { _, _ in
             matchIndex = 0
             if let first = matchOids.first {
-                focusRequest = HistoryScrollRequest(oid: first)
+                focus(HistoryScrollRequest(oid: first), in: layout)
             }
         }
     }
 
     /// #0402: "N matches" with previous/next. Stepping selects the match (so
     /// the Detail pane follows) and scrolls it to the centre.
-    private func matchBar(matchOids: [String]) -> some View {
+    private func matchBar(matchOids: [String], layout: BranchMapLayout) -> some View {
         HStack(spacing: 8) {
             Text(matchOids.count == 1 ? "1 match" : "\(matchOids.count) matches")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer()
             Button {
-                step(-1, in: matchOids)
+                step(-1, in: matchOids, layout: layout)
             } label: {
                 Image(systemName: "chevron.up")
             }
@@ -142,7 +146,7 @@ public struct CommitHistoryView: View {
             .help("Previous match (⇧⌘G)")
             .disabled(matchOids.isEmpty)
             Button {
-                step(1, in: matchOids)
+                step(1, in: matchOids, layout: layout)
             } label: {
                 Image(systemName: "chevron.down")
             }
@@ -155,12 +159,22 @@ public struct CommitHistoryView: View {
         .padding(.vertical, 4)
     }
 
-    private func step(_ delta: Int, in matchOids: [String]) {
+    private func step(_ delta: Int, in matchOids: [String], layout: BranchMapLayout) {
         guard !matchOids.isEmpty else { return }
         matchIndex = (matchIndex + delta + matchOids.count) % matchOids.count
         let oid = matchOids[matchIndex]
         selection = oid
-        focusRequest = HistoryScrollRequest(oid: oid)
+        focus(HistoryScrollRequest(oid: oid), in: layout)
+    }
+
+    /// #0427: scrolls the map to `request`'s commit, first opening the fold
+    /// that hides it, so a sidebar click or a filter match inside a fold
+    /// lands on a node.
+    private func focus(_ request: HistoryScrollRequest?, in layout: BranchMapLayout) {
+        if let oid = request?.oid, let fold = layout.folds.first(where: { $0.oids.contains(oid) }) {
+            expandedFolds.insert(fold.key)
+        }
+        focusRequest = request
     }
 }
 

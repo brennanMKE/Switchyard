@@ -92,6 +92,15 @@ public nonisolated enum BranchMapGeometry {
         return result
     }
 
+    /// #0427: for each row, the indices into `layout.folds` on that row.
+    public static func foldsByRow(_ layout: BranchMapLayout) -> [[Int]] {
+        var result = Array(repeating: [Int](), count: layout.rowCount)
+        for (index, fold) in layout.folds.enumerated() where fold.row < layout.rowCount {
+            result[fold.row].append(index)
+        }
+        return result
+    }
+
     /// The scroll offset that puts `target` (a point in the rows area) at the
     /// centre of a `viewport` showing `content`, clamped so the view never
     /// scrolls past the content's edges. `headerHeight` is the pinned header

@@ -347,6 +347,7 @@ run_spike_if_selected 0402 Spike0402FilterHighlightsGraphUITests
 run_spike_if_selected 0415 Spike0415BranchMapUITests
 run_spike_if_selected 0416 Spike0416OpenShowsRepositoryUITests
 run_spike_if_selected 0417 Spike0417RepositoryTabsUITests
+run_spike_if_selected 0427 Spike0427BranchMapFoldUITests
 
 print ""
 if (( TEST_RC == 0 )); then

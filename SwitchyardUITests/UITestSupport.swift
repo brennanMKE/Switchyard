@@ -165,6 +165,10 @@ enum UITestMapFixture {
     static let nearLowest = "near commit 1"
     static let nearFork = "map main 11"
     static let goneTopic = "gone topic one"
+    /// #0427: a commit in the root lane's first fold of three, and one in
+    /// its fold of 22.
+    static let foldedMain = "map main 05"
+    static let foldedBase = "map base 12"
     /// The rightmost branch with commits of its own, and its tip.
     static let deepBranch = "feature-deep"
     static let deepTip = "deep tip commit"

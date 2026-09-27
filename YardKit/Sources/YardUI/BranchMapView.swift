@@ -35,6 +35,8 @@ struct BranchMapView: View {
     let onOpenChanges: ((String) -> Void)?
     /// Scrolls the map to centre this commit when it changes.
     let focusRequest: HistoryScrollRequest?
+    /// #0427: a click on a "⋯ N" fold, with its `Fold.key`.
+    let onExpandFold: (String) -> Void
     @Binding var selection: String?
 
     @State private var position = ScrollPosition()
@@ -44,6 +46,7 @@ struct BranchMapView: View {
         let content = BranchMapGeometry.contentSize(layout)
         let edgesByRow = BranchMapGeometry.edgesByRow(layout)
         let nodesByRow = BranchMapGeometry.nodesByRow(layout)
+        let foldsByRow = BranchMapGeometry.foldsByRow(layout)
         let nodeRowByOid = Dictionary(
             layout.nodes.map { ($0.oid, $0) }, uniquingKeysWith: { first, _ in first })
 
@@ -51,7 +54,9 @@ struct BranchMapView: View {
             LazyVStack(alignment: .leading, spacing: 0, pinnedViews: [.sectionHeaders]) {
                 Section {
                     ForEach(0..<layout.rowCount, id: \.self) { row in
-                        strip(row: row, width: content.width, edges: edgesByRow[row], nodes: nodesByRow[row])
+                        strip(
+                            row: row, width: content.width, edges: edgesByRow[row], nodes: nodesByRow[row],
+                            folds: foldsByRow[row])
                     }
                 } header: {
                     BranchMapHeader(layout: layout, width: content.width)
@@ -101,7 +106,7 @@ struct BranchMapView: View {
         withAnimation { position.scrollTo(point: offset) }
     }
 
-    private func strip(row: Int, width: CGFloat, edges: [Int], nodes: [Int]) -> some View {
+    private func strip(row: Int, width: CGFloat, edges: [Int], nodes: [Int], folds: [Int]) -> some View {
         ZStack(alignment: .topLeading) {
             Canvas { context, _ in
                 context.translateBy(x: 0, y: -CGFloat(row) * BranchMapGeometry.rowHeight)
@@ -121,6 +126,9 @@ struct BranchMapView: View {
             .accessibilityHidden(true)
             ForEach(nodes, id: \.self) { index in
                 nodeTarget(layout.nodes[index])
+            }
+            ForEach(folds, id: \.self) { index in
+                foldTarget(layout.folds[index])
             }
         }
         .frame(width: width, height: BranchMapGeometry.rowHeight, alignment: .topLeading)
@@ -223,6 +231,29 @@ struct BranchMapView: View {
             .accessibilityAction { selection = oid }
             .padding(.leading, BranchMapGeometry.x(lane: node.lane) - side / 2)
             .padding(.top, (BranchMapGeometry.rowHeight - side) / 2)
+    }
+}
+
+extension BranchMapView {
+    /// #0427: a "⋯ N" capsule over the lane's line; a click opens the fold.
+    /// One button-like accessibility element, "Folded N commits".
+    fileprivate func foldTarget(_ fold: BranchMapLayout.Fold) -> some View {
+        let key = fold.key
+        return Text("⋯ \(fold.count)")
+            .font(.caption2.monospacedDigit())
+            .padding(.horizontal, 5)
+            .frame(height: 16)
+            .background(Capsule().fill(.background))
+            .overlay(Capsule().strokeBorder(laneColor(fold.lane), lineWidth: 1.5))
+            .fixedSize()
+            .contentShape(Capsule())
+            .onTapGesture { onExpandFold(key) }
+            .help("\(fold.count) commits folded. Click to show them.")
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Folded \(fold.count) commits")
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { onExpandFold(key) }
+            .position(x: BranchMapGeometry.x(lane: fold.lane), y: BranchMapGeometry.rowHeight / 2)
     }
 }
 
