@@ -174,6 +174,10 @@ enum UITestMapFixture {
     static let freshChild = "fresh-child"
     static let staleBase = "stale-base"
     static let staleOnly = "stale-only"
+    /// #0430: a squash landing (merged by content) beside the ancestry-merged
+    /// merged-old; the root lane carries origin/map-main.
+    static let squashLanded = "squash-landed"
+    static let rootLaneLabel = "Lane map-main, origin/map-main"
     /// The rightmost branch with commits of its own, and its tip.
     static let deepBranch = "feature-deep"
     static let deepTip = "deep tip commit"
