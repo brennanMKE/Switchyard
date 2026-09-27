@@ -33,6 +33,10 @@
 //   child forks from folds into one row -- a lane's tip, its last commit
 //   (unless it is a root) and every fork point never fold. A fold whose
 //   first commit is in `expandedFolds` shows its commits instead.
+// - Recency (#0429): with `shownTips`, only lanes whose tip is in it show,
+//   plus the root lane and `HEAD`'s lane always. A hidden lane that a shown
+//   lane needs in order to connect to the root shows too, as context. A
+//   hidden lane's commits are not drawn.
 // - Exactly one horizontal per branch: its connector, from the lane's last
 //   row down its own lane to the fork row, then across to the parent lane.
 //   Merge edges and commits no lane takes (history merged in from deleted
@@ -65,13 +69,19 @@ public nonisolated struct BranchMapLayout: Equatable, Sendable {
         public let isStub: Bool
         /// The lane this lane's connector joins; `nil` for a root lane.
         public let parentLane: Int?
+        /// #0429: the recency filter hides this lane's tip, but a shown lane
+        /// connects through it; drawn greyed.
+        public let isContext: Bool
 
-        public init(lane: Int, tipOid: String, chips: [RefChip], isStub: Bool, parentLane: Int?) {
+        public init(
+            lane: Int, tipOid: String, chips: [RefChip], isStub: Bool, parentLane: Int?, isContext: Bool = false
+        ) {
             self.lane = lane
             self.tipOid = tipOid
             self.chips = chips
             self.isStub = isStub
             self.parentLane = parentLane
+            self.isContext = isContext
         }
 
         /// Only remote-tracking refs name this tip.
@@ -165,9 +175,11 @@ public nonisolated struct BranchMapLayout: Equatable, Sendable {
     /// `main`); when no local branch has that name, `HEAD`'s lane is the
     /// root. `nil` refs (the sidebar has not loaded) lays out the first
     /// row's first-parent chain as one unlabelled lane. `expandedFolds`
-    /// holds the `Fold.key`s the user opened.
+    /// holds the `Fold.key`s the user opened. `shownTips` (#0429) is the
+    /// recency filter's answer, tip oids; `nil` shows every lane.
     public static func make(
-        rows: [GraphRow], refs: RefSnapshot?, defaultBranch: String? = nil, expandedFolds: Set<String> = []
+        rows: [GraphRow], refs: RefSnapshot?, defaultBranch: String? = nil, expandedFolds: Set<String> = [],
+        shownTips: Set<String>? = nil
     ) -> BranchMapLayout {
         let byOid = Dictionary(rows.map { ($0.oid, $0) }, uniquingKeysWith: { first, _ in first })
         let topoIndex = Dictionary(
@@ -225,9 +237,31 @@ public nonisolated struct BranchMapLayout: Equatable, Sendable {
             }
         }
 
+        // Recency (#0429): a lane shows when its tip is shown, when it is the
+        // root or HEAD's, or -- as context -- when a shown lane descends
+        // from it.
+        var visible = Array(repeating: shownTips == nil, count: groups.count)
+        var isContext = Array(repeating: false, count: groups.count)
+        if let shownTips {
+            for order in claimOrder.indices {
+                let group = groups[claimOrder[order]]
+                guard order == 0 || group.chips.contains(where: \.isHead) || shownTips.contains(group.tip) else {
+                    continue
+                }
+                visible[order] = true
+                isContext[order] = false
+                var ancestor = parent[order]
+                while let current = ancestor, !visible[current] {
+                    visible[current] = true
+                    isContext[current] = true
+                    ancestor = parent[current]
+                }
+            }
+        }
+
         // Tree: children per lane, nearest fork first, newer tip first.
         var children: [[Int]] = Array(repeating: [], count: groups.count)
-        for order in claimOrder.indices {
+        for order in claimOrder.indices where visible[order] {
             if let parentOrder = parent[order] { children[parentOrder].append(order) }
         }
         for order in claimOrder.indices {
@@ -284,7 +318,7 @@ public nonisolated struct BranchMapLayout: Equatable, Sendable {
             laneOrder.append(order)
             for child in children[order] { place(child) }
         }
-        for order in claimOrder.indices where parent[order] == nil {
+        for order in claimOrder.indices where parent[order] == nil && visible[order] {
             assignRows(order)
             place(order)
         }
@@ -298,7 +332,8 @@ public nonisolated struct BranchMapLayout: Equatable, Sendable {
             if refs != nil {
                 headers.append(Header(
                     lane: lane, tipOid: group.tip, chips: group.chips,
-                    isStub: isStub[order], parentLane: parent[order].map { laneOf[$0] }))
+                    isStub: isStub[order], parentLane: parent[order].map { laneOf[$0] },
+                    isContext: isContext[order]))
             }
             if bottom[order] > 0 {
                 edges.append(Edge(
@@ -323,7 +358,7 @@ public nonisolated struct BranchMapLayout: Equatable, Sendable {
         var nodes: [Node] = []
         nodes.reserveCapacity(rows.count)
         for row in rows where !folded.contains(row.oid) {
-            guard let order = owner[row.oid], let index = indexInLane[row.oid] else { continue }
+            guard let order = owner[row.oid], visible[order], let index = indexInLane[row.oid] else { continue }
             nodes.append(Node(oid: row.oid, lane: laneOf[order], row: rowsOf[order][index]))
         }
 

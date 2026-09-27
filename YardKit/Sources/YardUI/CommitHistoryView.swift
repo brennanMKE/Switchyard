@@ -53,6 +53,11 @@ public struct CommitHistoryView: View {
     @State private var focusRequest: HistoryScrollRequest?
     /// #0427: the folds opened in this window, by `Fold.key`. Not persisted.
     @State private var expandedFolds: Set<String> = []
+    /// #0429: the map's recency window, app-wide (guide §11 decision 29).
+    @AppStorage("branchMapRecency") private var recency: BranchRecency = .standard
+    /// #0429: commits the sidebar asked for; a hidden lane whose tip is one
+    /// of them shows. Per window, not persisted.
+    @State private var revealedTips: Set<String> = []
     @Binding private var selection: String?
 
     public init(
@@ -94,13 +99,18 @@ public struct CommitHistoryView: View {
         let mapRows = graphRows.isEmpty
             ? entries.map { GraphRow(oid: $0.oid, parents: $0.parents, lane: 0, parentLanes: $0.parents.map { _ in 0 }) }
             : graphRows
+        let shownTips = recency.shownTips(
+            refs: refs, dates: branchTips?.dates, now: Date(), revealed: revealedTips)
         let layout = BranchMapLayout.make(
-            rows: mapRows, refs: refs, defaultBranch: branchTips?.defaultBranch, expandedFolds: expandedFolds)
+            rows: mapRows, refs: refs, defaultBranch: branchTips?.defaultBranch, expandedFolds: expandedFolds,
+            shownTips: shownTips)
         let localOids = refs.map {
             LocalReachability.oids(in: mapRows, from: LocalReachability.localTips(refs: $0, headOid: headOid))
         }
 
         VStack(spacing: 0) {
+            recencyBar
+            Divider()
             if !query.isEmpty {
                 matchBar(matchOids: matchOids, layout: layout)
                 Divider()
@@ -124,6 +134,8 @@ public struct CommitHistoryView: View {
         // new request scrolls; picking a commit in the map does not, so the
         // map never jumps under the user's cursor.
         .onChange(of: scrollRequest) { _, request in
+            // #0429: a branch the recency filter hides shows once picked.
+            if let request { revealedTips.insert(request.oid) }
             focus(request, in: layout)
         }
         // #0402: typing jumps to the first match.
@@ -133,6 +145,28 @@ public struct CommitHistoryView: View {
                 focus(HistoryScrollRequest(oid: first), in: layout)
             }
         }
+    }
+
+    /// #0429: the recency pop-up. It filters only the map (the sidebar
+    /// lists every branch), so it sits at the top of this pane rather than
+    /// in the window toolbar -- guide §11 decision 29.
+    private var recencyBar: some View {
+        HStack(spacing: 8) {
+            Picker("Branches", selection: $recency) {
+                ForEach(BranchRecency.allCases) { window in
+                    Text(window.title).tag(window)
+                }
+            }
+            .pickerStyle(.menu)
+            .fixedSize()
+            .accessibilityIdentifier("branch-map-recency")
+            .help("Show branches whose tip was committed this recently. The default branch, "
+                + "the current branch and branches picked in the sidebar always show.")
+            Spacer()
+        }
+        .controlSize(.small)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
     }
 
     /// #0402: "N matches" with previous/next. Stepping selects the match (so
