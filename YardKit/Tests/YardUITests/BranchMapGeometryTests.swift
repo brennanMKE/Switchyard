@@ -13,8 +13,7 @@ private func geoEdge(
     BranchMapLayout.Edge(
         kind: kind,
         from: BranchMapLayout.Point(lane: from.0, row: from.1),
-        to: BranchMapLayout.Point(lane: to.0, row: to.1),
-        childOid: "c", parentOid: "p")
+        to: BranchMapLayout.Point(lane: to.0, row: to.1))
 }
 
 @Test func cellsMapToLaneAndRowCentres() {
@@ -27,41 +26,26 @@ private func geoEdge(
     #expect(BranchMapGeometry.contentSize(layout) == CGSize(width: 24 + 30 * 36 + 160, height: 36 * 24))
 }
 
-@Test func aChainIsAStraightVertical() {
-    #expect(BranchMapGeometry.polyline(geoEdge(.chain, from: (1, 0), to: (1, 1)))
-        == [CGPoint(x: 60, y: 12), CGPoint(x: 60, y: 36)])
+@Test func aLaneIsAStraightVertical() {
+    #expect(BranchMapGeometry.polyline(geoEdge(.lane, from: (1, 0), to: (1, 4)))
+        == [CGPoint(x: 60, y: 12), CGPoint(x: 60, y: 108)])
 }
 
-@Test func aForkRunsDownItsOwnLaneAndTurnsHalfARowAboveTheForkPoint() {
-    // Lane 1 row 1 down to lane 0 row 5.
+@Test func aForkRunsDownItsOwnLaneToTheForkRowThenAcrossToTheParent() {
+    // Lane 1 row 1 down to lane 0 row 5: one corner, at lane 1 row 5.
     #expect(BranchMapGeometry.polyline(geoEdge(.fork, from: (1, 1), to: (0, 5)))
-        == [CGPoint(x: 60, y: 36), CGPoint(x: 60, y: 120), CGPoint(x: 24, y: 132)])
-}
-
-@Test func aForkToAPointAboveDropsHalfARowThenRunsStraightThere() {
-    #expect(BranchMapGeometry.polyline(geoEdge(.fork, from: (1, 3), to: (0, 0)))
-        == [CGPoint(x: 60, y: 84), CGPoint(x: 60, y: 96), CGPoint(x: 24, y: 12)])
+        == [CGPoint(x: 60, y: 36), CGPoint(x: 60, y: 132), CGPoint(x: 24, y: 132)])
 }
 
 @Test func aForkOnOneRowIsAStraightLine() {
-    #expect(BranchMapGeometry.polyline(geoEdge(.fork, from: (3, 0), to: (0, 0)))
-        == [CGPoint(x: 132, y: 12), CGPoint(x: 24, y: 12)])
-}
-
-@Test func aMergeTurnsIntoTheParentsLaneHalfARowBelowTheMerge() {
-    #expect(BranchMapGeometry.polyline(geoEdge(.merge, from: (0, 0), to: (2, 3)))
-        == [CGPoint(x: 24, y: 12), CGPoint(x: 96, y: 24), CGPoint(x: 96, y: 84)])
-}
-
-@Test func aMergeToAParentNotBelowIsAStraightLine() {
-    #expect(BranchMapGeometry.polyline(geoEdge(.merge, from: (0, 2), to: (1, 0)))
-        == [CGPoint(x: 24, y: 60), CGPoint(x: 60, y: 12)])
+    #expect(BranchMapGeometry.polyline(geoEdge(.fork, from: (3, 2), to: (0, 2)))
+        == [CGPoint(x: 132, y: 60), CGPoint(x: 24, y: 60)])
 }
 
 @Test func anEdgeIsListedForEveryRowStripItCrosses() {
     let layout = BranchMapLayout(
         headers: [], nodes: [],
-        edges: [geoEdge(.chain, from: (0, 0), to: (0, 1)), geoEdge(.fork, from: (1, 0), to: (0, 3))],
+        edges: [geoEdge(.lane, from: (0, 0), to: (0, 1)), geoEdge(.fork, from: (1, 0), to: (0, 3))],
         laneCount: 2, rowCount: 5)
     let strips = BranchMapGeometry.edgesByRow(layout)
     #expect(strips.count == 5)

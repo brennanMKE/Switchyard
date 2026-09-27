@@ -2,7 +2,9 @@ import XCTest
 
 /// #0415 (umbrella #0410): on the multi-branch fixture, every branch tip
 /// shares the top row, lanes carry their labels, and a sidebar click
-/// scrolls a far branch's tip into view -- sideways and downward.
+/// scrolls a far branch's tip into view -- sideways and downward. #0426
+/// (umbrella #0425): a fork point sits below its child's commits, and
+/// history no branch claims is not drawn.
 final class Spike0415BranchMapUITests: XCTestCase {
     @MainActor
     func testBranchMapAlignsTipsAndScrollsToFarBranches() {
@@ -25,6 +27,16 @@ final class Spike0415BranchMapUITests: XCTestCase {
         let label = app.staticTexts.matching(NSPredicate(
             format: "label == %@ OR value == %@", "Lane feature-near", "Lane feature-near")).firstMatch
         XCTAssertTrue(label.exists, "no lane label for feature-near")
+
+        // #0426: the staircase. feature-near's lowest commit sits above the
+        // commit it forks from, and history no branch claims is not drawn.
+        let nearLowest = app.historyRows(containing: UITestMapFixture.nearLowest).firstMatch
+        let nearFork = app.historyRows(containing: UITestMapFixture.nearFork).firstMatch
+        XCTAssertTrue(nearFork.waitForExistence(timeout: 10), "no node for \(UITestMapFixture.nearFork)")
+        XCTAssertGreaterThan(nearFork.frame.midY, nearLowest.frame.midY + 12,
+                             "\(UITestMapFixture.nearFork) is not below feature-near's lowest commit")
+        XCTAssertFalse(app.historyRows(containing: UITestMapFixture.goneTopic).firstMatch.exists,
+                       "the deleted topic's commits are still drawn")
 
         let deep = app.historyRows(containing: UITestMapFixture.deepTip).firstMatch
         XCTAssertTrue(deep.waitForExistence(timeout: 10), "no node for the deep tip")
