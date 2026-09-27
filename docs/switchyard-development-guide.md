@@ -1415,6 +1415,58 @@ a feature at any milestone on the grounds that GitUp had it.
     resolves and the content pass is pending, or merge-tree conflicted. The default-branch source
     is unchanged.
 
+29. **The branch map is a folded staircase tree, filtered by recency, with merged branches dimmed.**
+    **Brennan's decision, 2026-09-26** (option B of the branch-map design exploration, umbrella
+    **#0425**), replacing #0410's recency-ordered lanes. Decision 28 is reserved by #0417's plan;
+    this entry takes 29. In his words: *"the branches should be visible at the top. At some point
+    each branch should connect with a parent branch. That is the only way it should connect
+    horizontally. We could clean this up by only showing branches with commits which are recent,
+    like the last 2 weeks. A drop down list or slider could define the time period."* He never asked
+    for commits to be time-aligned across lanes, and the map does not do it.
+
+    - **Lanes form a tree.** One lane per branch tip. The root lane is the default branch (decision
+      27's source: `origin/HEAD`'s target, else the literal `main`), else `HEAD`'s branch. Lanes
+      claim first-parent history root first, then fewest-commits-the-root-does-not-reach first; a
+      lane's fork point is the first commit on its first-parent chain someone else already claimed,
+      and its **parent is the lane that owns that commit**. Each child lane sits immediately right
+      of its parent's subtree, siblings ordered **nearest fork first** (ties: newer tip first), so
+      no connector crosses a lane. Measured on #0426's layout: 0 crossings on the #0415 fixture,
+      on this repository (2,394 rows, 357 lanes) and on `git/git` (5,000 rows).
+    - **Exactly one horizontal per branch**: its connector, down its own lane to the fork row and
+      across to the parent. **Merge edges are not drawn**, and commits no branch's first-parent
+      chain claims (history merged in from deleted branches) are not drawn either; a merge commit
+      still shows as a hollow node. Siblings forking from one commit share the connector line.
+    - **Tips and labels on the top row; rows are a staircase.** Each lane's commits stack from row 0;
+      a commit a child forks from is pushed one row below that child's lowest row. Vertical
+      position means "above its fork point", never "when".
+    - **Folding.** Runs of three or more commits in a lane with no fork point among them fold into
+      one "⋯ N" row, the count on the marker, and so does a lane's tail below its last fork point.
+      Runs of one or two stay unfolded. Clicking a fold expands it; expansion is per window, keyed
+      by the fold's first commit, and not persisted. A sidebar click on a folded commit expands its
+      fold.
+    - **`origin/x` folds into `x`'s lane** as a chip when its tip is on `x`'s first-parent chain (the
+      same commit, or behind). Ahead or diverged, it gets a lane of its own, a child of `x`'s. A
+      remote-only branch gets its own lane.
+    - **Recency filter, default two weeks, by tip commit date** (`%(committerdate)` of the lane's
+      refs; a lane shows when any of its refs is inside the window). Choices: 1 day, 3 days,
+      1 week, 2 weeks, 1 month, 3 months, All. The root lane and `HEAD`'s lane always show; a parent
+      a shown lane needs in order to connect is drawn **greyed** as context; a branch clicked in the
+      sidebar is revealed in the map even when the filter hides it. The control is a pop-up
+      **at the top of the History pane**, not in the window toolbar: it filters only the map, and
+      the window toolbar belongs to #0416/#0417's window and tab work. The choice persists
+      app-wide (`@AppStorage`), a per-viewer convenience.
+    - **The sidebar is not filtered.** It is the complete index of refs and the way to reach a
+      branch the map hides (a click reveals it); filtering it too would leave no path to an old
+      branch but changing the filter. High confidence; Brennan can overrule.
+    - **Merged branches are dimmed, not hidden**, using decision 27's composite unchanged
+      (`BranchStatus.mergedState`: ancestry, else upstream-gone, else the `merge-tree` content
+      pass). The map runs the content pass only for the lanes it shows. In the last two weeks
+      nearly every branch here is merged, so hiding them would leave an empty map. Remote-only
+      lanes have no `BranchStatus` row and are never dimmed; *unknown* is not dimmed.
+
+    Every default here is the demo's recommendation, adopted without objection; each is Brennan's
+    to overrule by editing this entry and the matching child of #0425.
+
 ### Still open
 
 **Is M1's criterion 5 closable as written, and should it be restated?** Raised by the twelfth M1
