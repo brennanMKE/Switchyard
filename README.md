@@ -28,16 +28,17 @@ is looking at — not a second implementation that can drift from it.
 
 ## What works today
 
-**Switchyard.app** opens a repository (File ▸ Open…, or the toolbar's Open button) into a window
-with a header — branch, ahead/behind its upstream, working-tree counts — over three panes:
+**Switchyard.app** opens a repository through the toolbar's Open button into a window with a
+header — branch, ahead/behind its upstream, working-tree counts — over three panes. File ▸ Open,
+Open Recent and drag-and-drop don't reach the window yet (#0416).
 
 - **Sidebar** — local branches (current branch first, each with ahead/behind and merged state),
   remotes, tags, worktrees, a stash count and recorded rerere resolutions.
 - **History** — the commit history drawn as a **branch map**: every branch tip on the top row under
   its label, each branch's commits down its own lane; commits reachable only from remote-tracking
   refs are dimmed. Clicking a branch in the sidebar scrolls to its tip.
-- **Detail** — the selected commit's metadata, trailers and diff, or the working tree's status.
-  **Show Changes** opens the commit's files and diffs in a window of its own.
+- **Detail** — the selected commit's metadata, trailers and changed files, or the working tree's
+  status. **Show Changes** opens the commit's files and diffs in a window of its own.
 
 The toolbar's **Filter** field narrows the sidebar's refs and matches History commits by message,
 ref name or hash prefix.
@@ -47,8 +48,8 @@ Squash with Parent, Split, Swap with Parent or Child, Delete, Revert, Cherry-Pic
 Current Branch, Rebase onto Here, Set Branch Tip, Add Tag, Create Branch, Edit Local Branch. Every
 one of them is journaled, and **Edit ▸ Undo / Redo** walks the journal.
 
-Not there yet: one tab per repository (in progress), staging and committing from the app, and
-network operations.
+Not there yet: one tab per repository (in progress), opening from File ▸ Open, Open Recent and
+drag-drop (#0416), staging and committing from the app, and network operations.
 
 ## What it is for
 
