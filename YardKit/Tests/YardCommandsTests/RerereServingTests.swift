@@ -151,14 +151,16 @@ struct RerereServingTests {
         #expect(error["code"] as? String == "usage")
     }
 
-    @Test func duplicatedJSONFlagIsUsageAtExitOne() throws {
+    @Test func duplicatedJSONFlagIsAcceptedLikeOne() throws {
         let result = try #require(
             runEngineCommand(
                 arguments: ["rerere", "status", "--json", "--json"], workingDirectory: "/"))
 
-        #expect(result.exitCode == .usage)
+        // #0420: `--json` is the global flag, removed before any parser runs,
+        // so a repeat is accepted. "/" is not a repository: request-failed.
+        #expect(result.exitCode == .requestFailed)
         let error = try #require((try jsonObject(result.stdout))["error"] as? [String: Any])
-        #expect(error["code"] as? String == "usage")
+        #expect(error["code"] as? String == "request_failed")
     }
 
     // MARK: - The request-failed arm
