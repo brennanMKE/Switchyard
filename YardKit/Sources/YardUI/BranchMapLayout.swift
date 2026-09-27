@@ -29,6 +29,10 @@
 //   each, except that a commit a child forks from is pushed down to one row
 //   below the child's lowest row. Every tip starts on the top row unless a
 //   child forks from the tip itself.
+// - Folding (#0427): a run of three or more commits in a lane that no
+//   child forks from folds into one row -- a lane's tip, its last commit
+//   (unless it is a root) and every fork point never fold. A fold whose
+//   first commit is in `expandedFolds` shows its commits instead.
 // - Exactly one horizontal per branch: its connector, from the lane's last
 //   row down its own lane to the fork row, then across to the parent lane.
 //   Merge edges and commits no lane takes (history merged in from deleted
@@ -109,20 +113,48 @@ public nonisolated struct BranchMapLayout: Equatable, Sendable {
         }
     }
 
+    /// #0427: a run of quiet commits drawn as one "⋯ N" row.
+    public struct Fold: Equatable, Sendable {
+        public let lane: Int
+        public let row: Int
+        /// The folded commits, newest first.
+        public let oids: [String]
+
+        public init(lane: Int, row: Int, oids: [String]) {
+            self.lane = lane
+            self.row = row
+            self.oids = oids
+        }
+
+        /// What `expandedFolds` holds to show this fold's commits: its
+        /// newest commit, which stays the same while the lane grows.
+        public var key: String { oids[0] }
+        public var count: Int { oids.count }
+        public var point: Point { Point(lane: lane, row: row) }
+    }
+
+    /// The shortest run of quiet commits that folds.
+    public static let minimumFold = 3
+
     /// Labelled lanes, lane `i` at index `i`.
     public let headers: [Header]
     /// One node per placed commit, in input order.
     public let nodes: [Node]
     public let edges: [Edge]
+    /// #0427: one per folded run, lane by lane.
+    public let folds: [Fold]
     /// Labelled lanes, or 1 for the unlabelled lane `nil` refs lay out.
     public let laneCount: Int
     /// One past the lowest row used; 0 for an empty map.
     public let rowCount: Int
 
-    public init(headers: [Header], nodes: [Node], edges: [Edge], laneCount: Int, rowCount: Int) {
+    public init(
+        headers: [Header], nodes: [Node], edges: [Edge], folds: [Fold] = [], laneCount: Int, rowCount: Int
+    ) {
         self.headers = headers
         self.nodes = nodes
         self.edges = edges
+        self.folds = folds
         self.laneCount = laneCount
         self.rowCount = rowCount
     }
@@ -132,8 +164,11 @@ public nonisolated struct BranchMapLayout: Equatable, Sendable {
     /// the short name of the root lane's branch (`nil` means the literal
     /// `main`); when no local branch has that name, `HEAD`'s lane is the
     /// root. `nil` refs (the sidebar has not loaded) lays out the first
-    /// row's first-parent chain as one unlabelled lane.
-    public static func make(rows: [GraphRow], refs: RefSnapshot?, defaultBranch: String? = nil) -> BranchMapLayout {
+    /// row's first-parent chain as one unlabelled lane. `expandedFolds`
+    /// holds the `Fold.key`s the user opened.
+    public static func make(
+        rows: [GraphRow], refs: RefSnapshot?, defaultBranch: String? = nil, expandedFolds: Set<String> = []
+    ) -> BranchMapLayout {
         let byOid = Dictionary(rows.map { ($0.oid, $0) }, uniquingKeysWith: { first, _ in first })
         let topoIndex = Dictionary(
             rows.enumerated().map { ($1.oid, $0) }, uniquingKeysWith: { first, _ in first })
@@ -203,21 +238,42 @@ public nonisolated struct BranchMapLayout: Equatable, Sendable {
         }
 
         // Rows, bottom-up: a commit a child forks from sits one row below
-        // that child's lowest row.
+        // that child's lowest row; a fold (#0427) takes one row.
         var rowsOf: [[Int]] = Array(repeating: [], count: groups.count)
         var bottom: [Int] = Array(repeating: 0, count: groups.count)
+        var foldRuns: [(order: Int, run: Range<Int>)] = []
         func assignRows(_ order: Int) {
             for child in children[order] { assignRows(child) }
             var need: [Int: Int] = [:]
             for child in children[order] {
                 need[forkIndex[child]] = max(need[forkIndex[child]] ?? 0, bottom[child] + 1)
             }
+            let count = commits[order].count
+            var kept: Set<Int> = [0]
+            kept.formUnion(children[order].map { forkIndex[$0] })
+            if parent[order] != nil { kept.insert(count - 1) }
+            var rows = Array(repeating: 0, count: count)
             var previous = -1
-            rowsOf[order] = commits[order].indices.map { index in
-                previous = max(previous + 1, need[index] ?? 0)
-                return previous
+            var index = 0
+            while index < count {
+                var end = index + 1
+                if !kept.contains(index) {
+                    while end < count, !kept.contains(end) { end += 1 }
+                }
+                if end - index >= minimumFold, !expandedFolds.contains(commits[order][index]) {
+                    previous += 1
+                    for member in index..<end { rows[member] = previous }
+                    foldRuns.append((order, index..<end))
+                } else {
+                    for member in index..<end {
+                        previous = max(previous + 1, need[member] ?? 0)
+                        rows[member] = previous
+                    }
+                }
+                index = end
             }
-            bottom[order] = rowsOf[order].last ?? 0
+            rowsOf[order] = rows
+            bottom[order] = rows.last ?? 0
         }
 
         // Lane order: depth-first from each root.
@@ -256,15 +312,24 @@ public nonisolated struct BranchMapLayout: Equatable, Sendable {
             }
         }
 
+        var folded: Set<String> = []
+        var folds: [Fold] = []
+        for (order, run) in foldRuns.sorted(by: { (laneOf[$0.order], $0.run.lowerBound) < (laneOf[$1.order], $1.run.lowerBound) }) {
+            let oids = Array(commits[order][run])
+            folded.formUnion(oids)
+            folds.append(Fold(lane: laneOf[order], row: rowsOf[order][run.lowerBound], oids: oids))
+        }
+
         var nodes: [Node] = []
         nodes.reserveCapacity(rows.count)
-        for row in rows {
+        for row in rows where !folded.contains(row.oid) {
             guard let order = owner[row.oid], let index = indexInLane[row.oid] else { continue }
             nodes.append(Node(oid: row.oid, lane: laneOf[order], row: rowsOf[order][index]))
         }
 
         return BranchMapLayout(
-            headers: headers, nodes: nodes, edges: edges, laneCount: laneOrder.count, rowCount: maxRow + 1)
+            headers: headers, nodes: nodes, edges: edges, folds: folds, laneCount: laneOrder.count,
+            rowCount: maxRow + 1)
     }
 
     private struct Group {

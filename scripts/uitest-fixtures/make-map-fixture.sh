@@ -20,6 +20,9 @@
 #   feature-deep  lane 27: "deep commit 1".."3", "deep tip commit" off
 #                 "map main 03" -- the farthest fork with commits of its own
 #   merged-old    lane 28, a stub at "map base 04", row 33 of map-main
+# #0427 folds map-main's quiet runs: "map main 06".."04" (3),
+# "map main 02".."map base 05" (22) and "map base 03".."01" (3), which
+# puts "map base 04" on row 10 and the map at 12 rows.
 set -euo pipefail
 repo="$1"
 rm -rf "$repo"
