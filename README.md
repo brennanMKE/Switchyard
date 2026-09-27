@@ -6,11 +6,12 @@ coding agent is a first-class user of the repository alongside a human.
 The name is a railyard: commits are cars, and the app's job is shunting them into a different order
 safely. **Every mutating operation is reversible.**
 
-> **Status: pre-alpha.** The repository currently holds a stock SwiftUI template, the design
-> documents in `docs/`, and the task breakdown in `issues/`. Nothing described below is built yet.
-> Work starts at [Milestone 0](docs/switchyard-development-guide.md#9-milestones), an engine spike
-> that settles libgit2 packaging, commit signing, graph performance, and reftable compatibility
-> before any app code is written.
+> **Status: pre-alpha.** The app runs: it opens a repository and shows its history, branches and
+> diffs, and it can edit history with journaled undo. The CLI's commands are built and tested in
+> the engine, but reaching the app from `switchyard` over XPC currently needs a signed build
+> (#0418 is making the unsigned local build work). Parts of this README describe the design in
+> `docs/`, not the build — [What works today](#what-works-today) and
+> [The command set](#the-command-set) are the current state.
 
 ## Two products, one engine
 
@@ -25,31 +26,29 @@ the app is not running, the CLI launches it and waits, so the first command afte
 works. What the CLI gives an agent is a structured, scriptable surface onto the same engine the human
 is looking at — not a second implementation that can drift from it.
 
-## The app
+## What works today
 
-**Window → Tabs → Git View.** Tabs are the default navigation model, built on
-[SlidingTabs](https://github.com/brennanMKE/SlidingTabs), and multiple windows are supported from
-the start — each window holds its own set of repository tabs.
+**Switchyard.app** opens a repository (File ▸ Open…, or the toolbar's Open button) into a window
+with a header — branch, ahead/behind its upstream, working-tree counts — over three panes:
 
-```
-┌────────────────────────────────────────────────────────┐
-│ [Switchyard ●] [Batty] [RemoteControl]            [+]  │
-├────────────┬─────────────────────┬─────────────────────┤
-│ Branches   │   ● main            │  diff of the        │
-│  main      │   │╲                │  selected commit    │
-│  feature/x │   ● ●               │                     │
-│            │   │╱                │  + hunks            │
-│ Worktrees  │   ●                 │  - lines            │
-│  agent-a   │   │                 │                     │
-│ Stashes    │   ●                 │                     │
-└────────────┴─────────────────────┴─────────────────────┘
-   Sidebar          Graph                 Detail
-```
+- **Sidebar** — local branches (current branch first, each with ahead/behind and merged state),
+  remotes, tags, worktrees, a stash count and recorded rerere resolutions.
+- **History** — the commit history drawn as a **branch map**: every branch tip on the top row under
+  its label, each branch's commits down its own lane; commits reachable only from remote-tracking
+  refs are dimmed. Clicking a branch in the sidebar scrolls to its tip.
+- **Detail** — the selected commit's metadata, trailers and diff, or the working tree's status.
+  **Show Changes** opens the commit's files and diffs in a window of its own.
 
-**One tab per repository, identified by `$GIT_COMMON_DIR`.** Opening a repository that is already
-open focuses its tab rather than duplicating it, and opening a linked worktree focuses its parent
-repository's tab and selects that worktree in the sidebar — so a project is always exactly one tab,
-however you arrive at it.
+The toolbar's **Filter** field narrows the sidebar's refs and matches History commits by message,
+ref name or hash prefix.
+
+**Editing history** from a commit's context menu (and the Commit menu): Edit Message, Fixup or
+Squash with Parent, Split, Swap with Parent or Child, Delete, Revert, Cherry-Pick, Merge into
+Current Branch, Rebase onto Here, Set Branch Tip, Add Tag, Create Branch, Edit Local Branch. Every
+one of them is journaled, and **Edit ▸ Undo / Redo** walks the journal.
+
+Not there yet: one tab per repository (in progress), staging and committing from the app, and
+network operations.
 
 ## What it is for
 
@@ -94,20 +93,17 @@ The CLI *is* the agent interface. Its contract:
   prompt. A command that needs the app and cannot reach it fails with exit code 3 naming what is
   missing — it never silently falls back, because an agent would then proceed without the human
   approval it was told to obtain.
-- **Every mutating command auto-checkpoints**, so `switchyard undo` works whether or not the caller
-  thought to ask.
-- **Provenance trailers.** `switchyard commit --agent <name> --model <id> --session <id>` records who
-  actually wrote a commit, following the `Co-authored-by` convention so existing tooling ignores it
-  gracefully. A *signed* commit carrying provenance trailers is a meaningfully stronger claim than
-  an unsigned one; no other client offers it.
+- **Every mutating command is journaled**, so it can be undone from the app whether or not the
+  caller thought to ask. (CLI `undo`/`redo` and provenance trailers on commits are designed in the
+  guide, not built.)
 
 ### Teaching an agent to use it
 
-Switchyard ships an **agent skill** — a markdown document describing the command set, the JSON
+Switchyard will ship an **agent skill** — a markdown document describing the command set, the JSON
 schemas, and the workflows worth knowing — packaged for [Claude
 Code](https://claude.com/claude-code) and [OpenCode](https://opencode.ai), with a plain-markdown
-form for anything else. It is generated from the same command metadata that produces `--help`, so it
-cannot drift from the binary.
+form for anything else. It will be generated from the same command metadata that produces `--help`
+(`switchyard schema` already emits it as JSON), so it cannot drift from the binary.
 
 **There is deliberately no MCP server.** An always-loaded MCP tool surface costs context in every
 session whether or not git comes up, while a skill costs approximately nothing until the agent needs
@@ -118,24 +114,27 @@ designed so an MCP wrapper would be a thin dispatch layer if that changes.
 
 ## The command set
 
-Full detail in the [development guide](docs/switchyard-development-guide.md#6-the-switchyard-cli). In brief:
+What `CommandRegistry.all` registers today (`switchyard schema` prints every command's flags, exit
+codes and payload). Every command answers with the JSON envelope on stdout.
 
 | Group | Commands |
 | --- | --- |
-| **Read** | `whereami`, `graph`, `log`, `status`, `hunks`, `conflicts`, `blame`, `verify` |
-| **Rewrite** | `commit`, `fixup`, `absorb`, `split`, `reword`, `reorder`, `drop`, `stage`, `unstage` |
-| **Undo** | `checkpoint`, `undo`, `redo`, `journal`, `restore` |
-| **Worktrees** | `wt list`, `wt new`, `wt rm`, `wt where`, `wt gc`, `wt repair` |
-| **Hooks** | `hooks install`, `hooks uninstall`, `hooks status` |
-| **Human-in-the-loop** *(needs the app)* | `review --wait`, `ask`, `resolve --interactive`, `watch` |
+| **Read** | `whereami`, `status`, `conflicts`, `hunks --staged\|--unstaged`, `log [<range>]`, `graph [--limit <n>]`, `verify <rev>`, `rewrite-diff <entry>`, `rerere status` |
+| **Rewrite** | `absorb [--dry-run]`, `split`, `reword`, `drop`, `reorder`, `rebase-onto`, `set-tip` |
+| **Integrate** | `revert`, `cherry-pick`, `merge --ff-only\|--no-ff` |
+| **Refs** | `tag`, `branch create\|rename\|delete\|upstream` |
+| **Worktrees** | `wt list`, `wt where` |
+| **Human-in-the-loop** *(needs the app)* | `review --wait`, `ask`, `resolve --wait`, `watch` |
+| **Local** | `--help`, `--version`, `schema`, `noop` |
 
-Three worth calling out. **`switchyard hunks`** returns stable hunk IDs, which is what makes precise
-agent-driven staging possible without `git add -p` — the interactive command agents cannot use.
-**`switchyard absorb`** distributes staged hunks into the correct prior commits by matching each hunk
-against the commit that last touched those lines; it is the highest-leverage way to clean up an
-agent's messy branch. And **`switchyard wt new --agent <id>`** creates an isolated worktree for an agent
-session, populated from a repo-level template — because a fresh worktree has the tracked files and
-nothing else, and an agent whose first command dies on a missing `node_modules` starts improvising.
+**`switchyard hunks`** returns stable hunk IDs, which is what makes precise agent-driven staging
+possible without `git add -p` — the interactive command agents cannot use. **`switchyard absorb`**
+distributes staged hunks into the prior commits that last touched those lines; it is the
+highest-leverage way to clean up an agent's messy branch.
+
+Until the CLI reaches an unsigned app (#0418), `swift run yard-engine <command>` in `YardKit/` runs
+the same engine commands in-process against the current directory — a development harness, not the
+shipping CLI, and without the four human-in-the-loop commands.
 
 ### Worktrees as the unit of agent isolation
 
@@ -183,14 +182,18 @@ the data path, and restarting it does not disturb an attached session.
 Requires Xcode 26 and macOS 26.
 
 ```sh
-# Unsigned compile check — the default for ordinary work
+# The app, unsigned — the default for ordinary work
 xcodebuild build -project Switchyard.xcodeproj -scheme Switchyard \
   -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO -quiet
 
-# Unit tests
-xcodebuild -project Switchyard.xcodeproj -scheme Switchyard \
-  -destination 'platform=macOS' -only-testing:SwitchyardTests test
+# The Swift package — engine, views, CLI — and its tests
+cd YardKit && swift build && swift test
+
+# The development harness: engine commands in-process, no app
+cd YardKit && swift run yard-engine whereami
 ```
+
+Or open `Switchyard.xcodeproj` in Xcode and Run the `Switchyard` scheme.
 
 No Developer ID certificate and no notarization are needed to build and run locally — a locally
 built app carries no `com.apple.quarantine` attribute, so Gatekeeper never evaluates it.
