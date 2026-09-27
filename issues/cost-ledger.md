@@ -468,6 +468,7 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-09-26 | open-issue audit | Opus audit of #0066-#0069, #0074, #0076, #0089, #0103, #0408, 82 s wall (O, measured) | 81,640 | — |
 | 2026-09-26 | #0419-#0422 | Opus planning subagent, four issues, 1,083 s wall (O, measured) | 205,612 | — |
 | 2026-09-26 | #0419 | round 1, Sonnet implementation, 123 s wall, passed (S, measured) | 69,088 | — |
+| 2026-09-26 | #0420 | round 1, Sonnet implementation, 332 s wall, passed pending review (S, measured) | 102,155 | — |
 | | | **Total measured** (tokens include 2026-09-22/23 rows; $ not updated for them) | **47,386,796** | **$437.24** |
 
 ## What this total does and does not cover
