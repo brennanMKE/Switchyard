@@ -33,7 +33,9 @@ public enum RepositoryOpener {
         path: String,
         store: RepositoryTabs = .shared
     ) -> RepositoryTabs.Outcome {
-        let outcome = store.open(path: path)
+        // #0416: through the window placement, so the repository is SHOWN --
+        // `store.open(path:)` alone only records a tab no window reads.
+        let outcome = store.openInWindow(path: path)
         if let message = refusalMessage(for: outcome) {
             presentRefusal(message)
         }
@@ -133,33 +135,78 @@ public enum RepositoryOpener {
     }
 }
 
-// MARK: - Entry point 4's model half: open into the frontmost window
+// MARK: - #0416: one repository per window
+
+/// Brings a window on screen by its `WindowID`. `show` is installed by
+/// `ContentView` when it appears -- `{ openWindow(value: $0) }` plus app
+/// activation -- because only a view can read SwiftUI's `openWindow`
+/// action, while the entry points that open repositories (the app
+/// delegate's `application(_:open:)`, XPC, the menu) are not views. Nil
+/// until the first window appears and in every test, so presenting is then
+/// a no-op: at launch the repository was placed in the window that is about
+/// to appear anyway (`WindowStore.place(_:)` picks the initial window).
+@MainActor
+public final class WindowPresenter {
+    public static let shared = WindowPresenter()
+
+    /// Shows the window for an id -- opens it, or focuses it when a window
+    /// for that id is already on screen (`openWindow(value:)` semantics).
+    public var show: ((WindowID) -> Void)?
+
+    public init() {}
+
+    public func present(_ id: WindowID) {
+        show?(id)
+    }
+}
+
+extension WindowStore {
+    /// The window whose model holds `tabID`, or nil.
+    public func window(showing tabID: UUID) -> WindowState? {
+        windows.first { $0.tabIDs.contains(tabID) }
+    }
+
+    /// #0416: the window `tab` is shown in -- one repository per window.
+    ///
+    /// 1. A window already holding the tab: that window (focus, never a
+    ///    duplicate).
+    /// 2. Otherwise the current window -- `activeWindowID`, or the first
+    ///    window before any window has been active -- when it holds no
+    ///    repository: the tab goes into it.
+    /// 3. Otherwise a new window holding just this tab.
+    @discardableResult
+    public func place(_ tab: RepositoryTab) -> WindowState {
+        if let existing = window(showing: tab.id) {
+            return existing
+        }
+        let current = activeWindowID.flatMap { windowState(for: $0) } ?? windows[0]
+        if current.tabIDs.isEmpty {
+            current.tabIDs = [tab.id]
+            return current
+        }
+        let added = addWindow()
+        added.tabIDs = [tab.id]
+        return added
+    }
+}
 
 extension RepositoryTabs {
-    /// #0084's XPC entry point. Opens `path` through `open(path:)` -- the
-    /// same focus-or-open rule as the other three entry points -- and, when
-    /// that open created a NEW tab, attaches the tab to the user's active
-    /// window. A focus outcome touches no window: the repository is already
-    /// open, in whatever window holds it. A refusal opens nothing.
-    ///
-    /// "Frontmost" at the model level is the window showing the selected
-    /// tab -- what the tab-bar binding commits into `WindowState.tabIDs` --
-    /// falling back to the first window when nothing is selected. Which
-    /// NSWindow that is, and bringing it forward, only the shell can see
-    /// (`NSApp.windows` order); that half is app-target code, checked by
-    /// #0054's manual script.
+    /// #0416: every entry point's open. Resolves `path` through
+    /// `open(path:)` -- the focus-or-open rule by `$GIT_COMMON_DIR` -- then
+    /// places the tab in a window (`WindowStore.place(_:)`) and presents
+    /// that window. A refusal places and presents nothing.
     @discardableResult
-    public func openInFrontmostWindow(
+    public func openInWindow(
         path: String,
-        windowStore: WindowStore = .shared
+        windowStore: WindowStore = .shared,
+        presenter: WindowPresenter = .shared
     ) -> Outcome {
-        let previousSelection = selectedTabID
         let outcome = open(path: path)
-        if case .opened(let tab) = outcome {
-            let frontmost = previousSelection.flatMap { selected in
-                windowStore.windows.first { $0.tabIDs.contains(selected) }
-            } ?? windowStore.windows[0]
-            frontmost.tabIDs.append(tab.id)
+        switch outcome {
+        case .opened(let tab), .focusedExisting(let tab, _):
+            presenter.present(windowStore.place(tab).id)
+        case .refused:
+            break
         }
         return outcome
     }

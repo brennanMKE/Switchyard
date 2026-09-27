@@ -425,7 +425,7 @@ public final class ReviewCenter {
             tabs.selectedTabID = existing.id
             outcome = .focusedExisting(tab: existing, selectedWorktreeName: existing.selectedWorktreeName)
         } else {
-            outcome = tabs.openInFrontmostWindow(
+            outcome = tabs.openInWindow(
                 path: context.topLevel ?? context.commonDir,
                 windowStore: windowStore)
         }
