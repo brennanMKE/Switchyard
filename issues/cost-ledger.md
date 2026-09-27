@@ -472,6 +472,7 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-09-26 | #0422 | round 1, Sonnet implementation, 303 s wall, passed pending review (S, measured) | 87,650 | — |
 | 2026-09-26 | #0421 | rounds 1-2, Sonnet implementation, 290 s wall, passed (S, measured) | 96,873 | — |
 | 2026-09-26 | branch-map design | Opus design subagent, four layout options plus an interactive demo page, 1,362 s wall (O, measured) | 171,443 | — |
+| 2026-09-26 | #0418, #0423 | Opus planning subagent: CLI over XPC root cause, with VM measurements, 2,298 s wall (O, measured) | 214,194 | — |
 | | | **Total measured** (tokens include 2026-09-22/23 rows; $ not updated for them) | **47,386,796** | **$437.24** |
 
 ## What this total does and does not cover
