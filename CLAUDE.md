@@ -13,6 +13,13 @@ Two design documents, both current, both in `docs/`:
 
 `issues/` holds the task breakdown. This file is the working agreement: rules, commands, and traps.
 
+## Priority, set 2026-09-26: milestones are suspended — move fast
+
+**Brennan, 2026-09-26:** *"Forget milestones at the moment. We are looking to move fast now!"*
+New issues carry `—` as their milestone. Guide §9 checklists and milestone reviews are not run
+and do not gate anything. Per-issue planning, dispatch, review and the verification rules still
+apply — speed comes from not running milestone rituals, not from skipping verification.
+
 ## Priority, set 2026-08-18: the app MVP comes before everything else
 
 **Brennan's instruction, in his words:** *"We can set aside some issues which are not essential to an
