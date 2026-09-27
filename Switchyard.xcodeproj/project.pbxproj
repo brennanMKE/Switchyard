@@ -11,7 +11,6 @@
 		26BA44853026752800DDB2E9 /* YardGit in Frameworks */ = {isa = PBXBuildFile; productRef = 26BA44843026752800DDB2E9 /* YardGit */; };
 		26BA44873026752800DDB2E9 /* YardKit in Frameworks */ = {isa = PBXBuildFile; productRef = 26BA44863026752800DDB2E9 /* YardKit */; };
 		26F2FB363055149700DC9B0B /* YardCommands in Frameworks */ = {isa = PBXBuildFile; productRef = CCCCCCCCCCCCCCCCCCCCCCCC /* YardCommands */; };
-		26F2FB373055149700DC9B0B /* SlidingTabs in Frameworks */ = {isa = PBXBuildFile; productRef = F9E8D7C6B5A4938271605F4E /* SlidingTabs */; };
 		2CA217801CFCB04B9FF511A2 /* YardKit in Frameworks */ = {isa = PBXBuildFile; productRef = A81B5573CF0B3AD6AD1C5675 /* YardKit */; };
 		A1B2C3D4E5F60001 /* YardUI in Frameworks */ = {isa = PBXBuildFile; productRef = A1B2C3D4E5F60000 /* YardUI */; };
 		E398814DF31922FD00FDEBAD /* BrokerAgent in Embed Broker Agent Executable */ = {isa = PBXBuildFile; fileRef = 297AF29631C6CF47EA378EF1 /* BrokerAgent */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
@@ -115,7 +114,6 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				26F2FB373055149700DC9B0B /* SlidingTabs in Frameworks */,
 				26F2FB363055149700DC9B0B /* YardCommands in Frameworks */,
 				26BA44853026752800DDB2E9 /* YardGit in Frameworks */,
 				26BA44873026752800DDB2E9 /* YardKit in Frameworks */,
@@ -215,7 +213,6 @@
 				26BA44843026752800DDB2E9 /* YardGit */,
 				26BA44863026752800DDB2E9 /* YardKit */,
 				CCCCCCCCCCCCCCCCCCCCCCCC /* YardCommands */,
-				F9E8D7C6B5A4938271605F4E /* SlidingTabs */,
 			);
 			productName = Switchyard;
 			productReference = 26B64D3430251BCE00EB4FD0 /* Switchyard.app */;
@@ -326,7 +323,6 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				26BA44803025CBFE00DDB2E9 /* XCLocalSwiftPackageReference "YardKit" */,
-				A1B2C3D4E5F6789012ABCDEF /* XCRemoteSwiftPackageReference "SlidingTabs" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 26B64D3530251BCE00EB4FD0 /* Products */;
@@ -863,17 +859,6 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
-/* Begin XCRemoteSwiftPackageReference section */
-		A1B2C3D4E5F6789012ABCDEF /* XCRemoteSwiftPackageReference "SlidingTabs" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/brennanMKE/SlidingTabs";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 1.0.0;
-			};
-		};
-/* End XCRemoteSwiftPackageReference section */
-
 /* Begin XCSwiftPackageProductDependency section */
 		26BA44843026752800DDB2E9 /* YardGit */ = {
 			isa = XCSwiftPackageProductDependency;
@@ -894,11 +879,6 @@
 		CCCCCCCCCCCCCCCCCCCCCCCC /* YardCommands */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = YardCommands;
-		};
-		F9E8D7C6B5A4938271605F4E /* SlidingTabs */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = A1B2C3D4E5F6789012ABCDEF /* XCRemoteSwiftPackageReference "SlidingTabs" */;
-			productName = SlidingTabs;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

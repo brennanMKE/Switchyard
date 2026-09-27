@@ -25,6 +25,19 @@ struct SwitchyardCommands: Commands {
     let store = RepositoryTabs.shared
 
     var body: some Commands {
+        // #0417: File ▸ New Tab (⌘T) replaces SwiftUI's File ▸ New Window.
+        // That item opens a window from the group's `defaultValue`, which is
+        // the launch window's id (`WindowStore.initialWindowID`), so it can
+        // never make a second, independent repository window. Every
+        // repository window is a tab (`RepositoryWindowTabbing`); Window ▸
+        // Move Tab to New Window and Merge All Windows come from AppKit.
+        CommandGroup(replacing: .newItem) {
+            Button("New Tab") {
+                RepositoryOpener.openNewTab()
+            }
+            .keyboardShortcut("t")
+        }
+
         CommandGroup(after: .newItem) {
             Button("Open…") {
                 RepositoryOpener.chooseAndOpen(store: store)

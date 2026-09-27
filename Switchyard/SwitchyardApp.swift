@@ -102,7 +102,11 @@ struct SwitchyardApp: App {
             // window makes CLI/XPC-delivered work land in an invisible
             // window while the visible one shows an empty model (#0078;
             // Batty hit this as its #0251).
-            WindowStore.shared.initialWindowID
+            //
+            // #0417: the launch window's id only until it has been shown;
+            // after that a new, empty window's, so the tab bar's "+" opens
+            // an empty tab instead of a second view of the launch window.
+            WindowStore.shared.idForWindowWithoutValue()
         }
         // Suppress SwiftUI's default behaviour of opening a new window for
         // OS-delivered URL events (switchyard://). Without this, a URL open
