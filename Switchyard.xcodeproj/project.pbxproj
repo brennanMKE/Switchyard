@@ -200,6 +200,7 @@
 				0050E00D0050E00D0050A001 /* Embed switchyard CLI */,
 				6B48FF2E294F42D830A8AC7C /* Embed Broker Agent Executable */,
 				59893A6AA309E3A9BC46E7F4 /* Embed Broker Agent Plist */,
+				0418A0000000000000000001 /* Ad-hoc seal (unsigned builds) */,
 			);
 			buildRules = (
 			);
@@ -365,6 +366,21 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		0418A0000000000000000001 /* Ad-hoc seal (unsigned builds) */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Ad-hoc seal (unsigned builds)";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "set -euo pipefail\n\n# #0418: an unsigned build (CODE_SIGNING_ALLOWED=NO) is only linker-signed,\n# and SMAppService refuses its broker plist with -67056. Seal it ad-hoc.\n# A signed build is left to Xcode's own CodeSign step.\nif [ \"${CODE_SIGNING_ALLOWED:-YES}\" != \"NO\" ]; then\n    echo \"note: code signing enabled; Xcode signs the bundle, ad-hoc seal skipped\"\n    exit 0\nfi\nif [ \"${ENABLE_PREVIEWS:-NO}\" = \"YES\" ] && [ -n \"${PREVIEW_FRAMEWORK_PATHS:-}\" ]; then\n    echo \"note: skipping ad-hoc seal for preview build\"\n    exit 0\nfi\n/bin/zsh \"$SRCROOT/scripts/adhoc-seal-app.sh\" \"$BUILT_PRODUCTS_DIR/$WRAPPER_NAME\"\n";
+		};
 		0050E00D0050E00D0050A001 /* Embed switchyard CLI */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;

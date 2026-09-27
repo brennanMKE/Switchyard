@@ -181,6 +181,16 @@ fi
 mv "$EXPORT_DIR/Switchyard.app" "$ARTIFACT"
 print "step: artifact staged at $ARTIFACT"
 
+# --- Ad-hoc seal (#0418) -----------------------------------------------------
+#
+# The app target's "Ad-hoc seal (unsigned builds)" phase already ran, but
+# `xcodebuild archive` strips the binaries AFTER it, which leaves "invalid
+# signature (code or signature have been modified)" — measured 2026-09-26.
+# Without a valid seal SMAppService refuses the broker plist (-67056) and the
+# CLI can never reach the app. Ad-hoc only: no identity, no keychain.
+zsh "$REPO_ROOT/scripts/adhoc-seal-app.sh" "$ARTIFACT" \
+  || die "ad-hoc seal failed for $ARTIFACT — see the codesign output above"
+
 # --- Verify the bundle -------------------------------------------------------
 
 fail=0
@@ -197,6 +207,13 @@ check_file "Contents/MacOS/Switchyard"
 check_file "Contents/MacOS/BrokerAgent"
 check_file "Contents/Library/LaunchAgents/co.sstools.Switchyard.broker.plist"
 check_file "Contents/Resources/bin/switchyard"
+
+if codesign --verify --deep --strict "$ARTIFACT" 2>/dev/null; then
+  print "verify: ok      bundle signature (ad-hoc, sealed)"
+else
+  print "verify: FAIL    bundle signature — codesign --verify --deep --strict rejects $ARTIFACT"
+  fail=1
+fi
 
 # Every Mach-O we ship must link only against system libraries — no
 # /opt/homebrew, no build-machine paths, no DerivedData. The paths the
