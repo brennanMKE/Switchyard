@@ -76,9 +76,25 @@ final class Spike0417RepositoryTabsUITests: XCTestCase {
 
         // The tab bar's own "+" (AppKit's `newWindowForTab:`, answered by
         // SwiftUI from the group's defaultValue) must also add an EMPTY tab.
-        app.tabGroups["tab bar"].buttons["new tab"].click()
-        let deadline = Date().addingTimeInterval(10)
-        while Date() < deadline, app.tabs.count < 4 { usleep(200_000) }
+        //
+        // #0432: macOS posts an "App Background Activity" banner at the top
+        // right of the screen, over the "+", some seconds after the app
+        // registers its broker (#0418) -- at no fixed time. A click that
+        // lands while the banner arrives is taken by the banner (it opens
+        // System Settings ▸ Login Items) and adds no tab. So a click that
+        // added nothing is retried once, with the app brought back to the
+        // front: the banner is gone once clicked, so the retry reaches the
+        // "+". A "+" that adds no tab fails both attempts; one that adds a
+        // tab late shows as five tabs below. Neither is masked.
+        let plus = app.tabGroups["tab bar"].buttons["new tab"]
+        for attempt in 1...2 {
+            app.activate()
+            plus.click()
+            let deadline = Date().addingTimeInterval(15)
+            while Date() < deadline, app.tabs.count < 4 { usleep(200_000) }
+            if app.tabs.count >= 4 { break }
+            attach(app, "repository-tabs-plus-missed-\(attempt)")
+        }
         attach(app, "repository-tabs-plus-button")
         XCTAssertEqual(app.tabs.count, 4, "the tab bar's + did not add a tab")
         XCTAssertEqual(app.windows.count, 1)
