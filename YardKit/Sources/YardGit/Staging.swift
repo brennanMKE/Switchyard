@@ -271,3 +271,44 @@ public func commitHunks(
 extension CommitHunksError: ExitClassCarrying {
     public var exitClass: ExitClass { .repositoryError }
 }
+
+// MARK: - Commit the index as it stands (#0440)
+
+/// Commits whatever the index holds, journaled — the app's Commit button
+/// (#0445). `CommitCreate.run` is the non-checkpointing primitive
+/// (`JournalCheckpoint.around`'s doc names it as one); this wraps it in
+/// exactly one `JournalCheckpoint.around(operation: "commit")`, the
+/// operation string `commitHunks` already writes, so Edit ▸ Undo after a
+/// commit reads "Undo Commit" and restores the branch and the index to
+/// before it.
+///
+/// Everything else is `CommitCreate.run`'s: `git commit -m`, so the
+/// repository's `pre-commit` and `commit-msg` hooks run (libgit2 would
+/// skip them); signing per `signing`, a signature that cannot be produced
+/// throwing `CommitCreate.Failure.signingFailed`; any other refusal — a
+/// hook exiting non-zero, nothing staged, an empty message — thrown as
+/// `GitProcess.Failure.exited` carrying git's stderr, which is where a
+/// hook's own output lands (measured, git 2.54.0: a `pre-commit` that
+/// echoes and exits 1 leaves its line on stderr, stdout empty).
+///
+/// The checkpoint is written before `git commit` runs and is kept when it
+/// throws (`around`'s documented rule), so a refused commit still leaves an
+/// entry whose undo is a no-op — the same as every other journaled action
+/// that fails after its checkpoint.
+public func commitStaged(
+    message: String,
+    signing: CommitCreate.Signing = .config,
+    at path: String,
+    git: GitProcess = GitProcess(),
+    extraEnvironment: [String: String] = [:]
+) throws -> CommitCreate {
+    try JournalCheckpoint.around(operation: "commit", at: path, git: git) { git in
+        try CommitCreate.run(
+            message: message,
+            signing: signing,
+            in: path,
+            git: git,
+            extraEnvironment: extraEnvironment
+        )
+    }
+}
