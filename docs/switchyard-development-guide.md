@@ -1480,6 +1480,51 @@ a feature at any milestone on the grounds that GitUp had it.
     Every default here is the demo's recommendation, adopted without objection; each is Brennan's
     to overrule by editing this entry and the matching child of #0425.
 
+30. **Staging and committing live in the Detail pane's Changes view, shown when no commit is
+    selected; every mutation is one journal entry.** Decided 2026-09-28 in the planning pass for
+    umbrella **#0437**, with high confidence; Brennan can overrule any bullet by editing this entry
+    and the matching child.
+
+    - **Where.** With no commit (and no rerere resolution) selected, the Detail pane shows the
+      Changes view. That is already the app's launch state: until now it showed a read-only
+      `StatusRow` list there. A pinned **Uncommitted Changes** row sits above the branch map at the
+      top of the History pane and clears the selection, so the view is one click from anywhere. It
+      is the working tree's place in the history, which is where Git clients generally put it. A
+      separate window or a sheet would cut the view off from the history it is about to change, and
+      a sidebar entry would put working-tree content in the refs index.
+    - **What it shows.** Two lists, **Staged Changes** and **Changes** (worktree edits and untracked
+      files), each file with a badge, a per-file Stage or Unstage button, and Stage All or Unstage
+      All on the section. Conflicted paths get their own section and no button: `git add` on one
+      would mark a file that may still hold conflict markers as resolved, and the header's Resolve
+      Conflicts… is the way through. Selecting a file shows its diff below the lists, with **Stage
+      Hunk** or **Unstage Hunk** on every hunk. That is cheap because `listHunks`, `stageHunks` and
+      `unstageHunks` already exist with stable ids. Below everything are a multi-line message editor
+      and **Commit** (⌘↩). Commit is disabled with a reason while there are conflicts, nothing is
+      staged, or the message is blank.
+    - **Engine.** Whole files go through two new path primitives, not through hunk ids. An untracked
+      file or a mode-only change has no hunks in `git diff`, so hunk ids cannot express "this file".
+      `stagePaths` is `git --literal-pathspecs add -A -- <paths>`. `unstagePaths` is `git
+      --literal-pathspecs reset -q -- <paths>`, not `restore --staged`, which fails on an unborn
+      branch. `--literal-pathspecs` is required: without it, a file named `*.txt` stages every
+      `.txt` file (measured). A staged rename is unstaged by passing both of its paths. The commit
+      is `commitStaged`, which is `CommitCreate.run` inside one checkpoint. It shells out to `git
+      commit -m`, so `pre-commit` and `commit-msg` hooks run and `commit.gpgsign` decides signing,
+      the same as every other commit the engine makes (#0036, #0038).
+    - **Undo.** Every stage, unstage and commit is exactly one `JournalCheckpoint.around` entry,
+      with operation `stage`, `unstage` or `commit`. Edit ▸ Undo reads "Undo Stage", "Undo Unstage"
+      or "Undo Commit" and restores the index, or the index and the branch. Stage All is one entry,
+      not one per file. A refused commit (a hook exits non-zero) still leaves its pre-commit entry,
+      whose undo is a no-op. That is `around`'s rule for every action that fails after its
+      checkpoint.
+    - **Errors.** A failure is presented as an alert titled "Couldn’t Stage", "Couldn’t Unstage" or
+      "Couldn’t Commit". A git refusal shows git's stderr, which is where a hook's output lands
+      (measured), without the argument vector, which would repeat the whole commit message. A
+      signing failure adds that nothing was committed. The message draft survives a failure.
+    - **Freshness.** The window refreshes in place whenever it becomes active, so edits made in an
+      editor show when the user switches back. There is no file watcher yet.
+    - **Out of scope, filed as questions in #0437:** amend, discarding worktree changes, line-level
+      (partial-hunk) staging, a signing override, and the `PATH` a Finder-launched app gives hooks.
+
 ### Still open
 
 **Is M1's criterion 5 closable as written, and should it be restated?** Raised by the twelfth M1
