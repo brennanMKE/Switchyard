@@ -44,14 +44,10 @@ public struct ContentView: View {
     /// The tab store `window.tabIDs` points into.
     private let tabs: RepositoryTabs
 
-    /// #0395 round 2's UI-test seam: shown when the window model holds no
-    /// repository. `nil` for every production caller.
-    private let initialRepositoryPath: String?
-
     /// The repository this window shows, or `nil` when it shows none.
     /// `.task(id:)` reloads whenever this changes.
     private var repositoryPath: String? {
-        Self.repositoryPath(window: window, tabs: tabs, fallback: initialRepositoryPath)
+        Self.repositoryPath(window: window, tabs: tabs)
     }
 
     /// The most recent successful load. `nil` while loading or after an
@@ -221,19 +217,17 @@ public struct ContentView: View {
     /// #0116 found on `WorktreeStatusEntry`, and one `@testable import` hides it
     /// because `@testable` grants internal access.
     ///
-    /// #0395 round 2: `initialRepositoryPath` seeds `repositoryPath` at
-    /// construction — the seam the `-uiTestRealSurfaces` launch hook uses so a
-    /// UI-test launch renders the REAL panes against a fixture repository
-    /// without an `NSOpenPanel`. `nil` (every existing caller) initialises
-    /// `repositoryPath` exactly as before, so no existing call site changes
-    /// behaviour.
+    /// #0435: there is no per-view repository seam. A window shows only what
+    /// its `window` model holds, so a launch-argument repository is opened
+    /// into the launch window's model (`RepositoryOpener.open(path:)`) like
+    /// any other open. The old `initialRepositoryPath` fallback made every
+    /// window of a `-uiTestRealSurfaces` launch show the launch repository.
     public init(
         transportStatus: TransportStatusModel? = nil,
         reviews: ReviewCenter? = nil,
         asks: AskCenter? = nil,
         resolves: ResolveCenter? = nil,
         onBeginInAppResolve: ((String) async -> Void)? = nil,
-        initialRepositoryPath: String? = nil,
         window: WindowState? = nil,
         tabs: RepositoryTabs = .shared
     ) {
@@ -242,22 +236,20 @@ public struct ContentView: View {
         self.asks = asks
         self.resolves = resolves
         self.onBeginInAppResolve = onBeginInAppResolve
-        self.initialRepositoryPath = initialRepositoryPath
         self.window = window
         self.tabs = tabs
     }
 
     /// #0416: the folder a window shows -- the working tree of the tab its
     /// model holds (the repository directory for a bare repository), else
-    /// `fallback`. Pure and public so the rule is tested at the access
-    /// level the app target sees.
+    /// nil. Pure and public so the rule is tested at the access level the
+    /// app target sees.
     public static func repositoryPath(
         window: WindowState?,
-        tabs: RepositoryTabs,
-        fallback: String?
+        tabs: RepositoryTabs
     ) -> String? {
         guard let tabID = window?.tabIDs.first, let tab = tabs.tab(for: tabID) else {
-            return fallback
+            return nil
         }
         return tab.context.topLevel ?? tab.context.commonDir
     }

@@ -328,10 +328,13 @@ tart exec "$CLONE" /bin/zsh -lc \
 # Which spikes to run: all four by default; the arguments filter by issue
 # number (e.g. `./run-ui-tests-vm.sh 0383` runs just that one) so a round
 # can spend its command budget one clone at a time.
+# An optional third argument suffixes the results label, so two classes under
+# one issue number keep separate results (#0435) instead of the second
+# overwriting the first's `spike-NNNN/` bundle and log.
 run_spike_if_selected() {
   local number="$1"; shift
   if [[ -z "$SPIKE_FILTER" ]] || [[ "$SPIKE_FILTER" == "$number" ]]; then
-    run_spike "$number" "spike-$number" SmokeUITests "$1"
+    run_spike "$number" "spike-$number${2:+-$2}" SmokeUITests "$1"
   fi
 }
 run_spike_if_selected 0382 Spike0382ContextKeysUITests
@@ -350,6 +353,8 @@ run_spike_if_selected 0417 Spike0417RepositoryTabsUITests
 run_spike_if_selected 0427 Spike0427BranchMapFoldUITests
 run_spike_if_selected 0429 Spike0429BranchMapRecencyUITests
 run_spike_if_selected 0430 Spike0430BranchMapMergedUITests
+run_spike_if_selected 0435 Spike0435LaunchArgumentOpenUITests launch-argument
+run_spike_if_selected 0435 Spike0435PlainLaunchOpenUITests plain
 
 print ""
 if (( TEST_RC == 0 )); then

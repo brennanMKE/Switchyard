@@ -26,10 +26,11 @@ struct SwitchyardApp: App {
     /// #0395 round 2: present when the launch arguments also carry
     /// `-uiTestRealSurfaces`. The UI-test window then renders the REAL
     /// `ContentView` — sidebar, history, the menus the spike questions are
-    /// about — fed the fixture repository through the `initialRepositoryPath`
-    /// seam, instead of the smoke test's minimal branch view. Round 1's smoke
-    /// test passes only `-uiTestRepository` and still gets the minimal view;
-    /// an ordinary launch sets neither argument and is unchanged.
+    /// about — showing the fixture repository `init()` opened into the launch
+    /// window's model (#0435), instead of the smoke test's minimal branch
+    /// view. Round 1's smoke test passes only `-uiTestRepository` and still
+    /// gets the minimal view; an ordinary launch sets neither argument and
+    /// is unchanged.
     static let uiTestRealSurfaces: Bool = ProcessInfo.processInfo.arguments
         .contains("-uiTestRealSurfaces")
 
@@ -69,8 +70,14 @@ struct SwitchyardApp: App {
                 // the real panes loaded from the fixture — the surfaces the
                 // four spike re-derivations drive. Without the flag the
                 // round-1 smoke view renders, unchanged.
+                //
+                // #0435: through the window model, like an ordinary launch.
+                // `init()` opened `path` into the launch window's model, so
+                // that window shows it and every later open shows its own
+                // repository. A per-view fallback made every window show
+                // the launch repository.
                 if Self.uiTestRealSurfaces {
-                    ContentView(initialRepositoryPath: path)
+                    ContentView(window: WindowStore.shared.windowState(for: windowID.wrappedValue))
                 } else {
                     UITestRepositoryView(path: path)
                 }
