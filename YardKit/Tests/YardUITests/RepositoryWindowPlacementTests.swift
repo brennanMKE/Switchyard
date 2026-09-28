@@ -169,7 +169,7 @@ func nonRepositoryIsRefusedWithoutAWindow() throws {
 }
 
 @MainActor
-@Test("A window shows the working tree of the tab its model holds, else the fallback")
+@Test("A window shows the working tree of the tab its model holds, and nothing otherwise")
 func contentViewShowsTheWindowModelsRepository() throws {
     let repo = try FixtureRepository.linear()
     defer { repo.destroy() }
@@ -178,13 +178,49 @@ func contentViewShowsTheWindowModelsRepository() throws {
     let (presenter, _) = spyPresenter()
     let window = windowStore.windows[0]
 
-    #expect(ContentView.repositoryPath(window: window, tabs: tabs, fallback: nil) == nil)
-    #expect(ContentView.repositoryPath(window: nil, tabs: tabs, fallback: "/fallback") == "/fallback")
+    #expect(ContentView.repositoryPath(window: window, tabs: tabs) == nil)
+    #expect(ContentView.repositoryPath(window: nil, tabs: tabs) == nil)
 
     let opened = try tab(of: tabs.openInWindow(
         path: repo.url.path, windowStore: windowStore, presenter: presenter))
     let expected = try #require(opened.context.topLevel)
-    #expect(ContentView.repositoryPath(window: window, tabs: tabs, fallback: "/fallback") == expected)
-    #expect(ContentView.repositoryPath(window: windowStore.addWindow(), tabs: tabs, fallback: nil) == nil,
+    #expect(ContentView.repositoryPath(window: window, tabs: tabs) == expected)
+    #expect(ContentView.repositoryPath(window: nil, tabs: tabs) == nil,
+            "a view with no window model shows nothing, whatever is open elsewhere")
+    #expect(ContentView.repositoryPath(window: windowStore.addWindow(), tabs: tabs) == nil,
             "another window shows nothing until something is opened in it")
+}
+
+@MainActor
+@Test("#0435: a launch-opened repository shows in the launch window, and a second open shows its own")
+func launchRepositoryThenSecondOpenEachShowTheirOwn() throws {
+    let repoA = try FixtureRepository.linear()
+    let repoB = try FixtureRepository.linear()
+    defer { repoA.destroy(); repoB.destroy() }
+    let windowStore = WindowStore()
+    let tabs = RepositoryTabs()
+    let (presenter, shown) = spyPresenter()
+
+    // SwitchyardApp.init(): the launch argument opens A before any scene.
+    let tabA = try tab(of: tabs.openInWindow(
+        path: repoA.url.path, windowStore: windowStore, presenter: presenter))
+    // The WindowGroup's defaultValue names the launch window, which appears.
+    let launchID = windowStore.idForWindowWithoutValue()
+    windowStore.noteShown(launchID)
+    windowStore.activeWindowID = launchID
+    let launchWindow = try #require(windowStore.windowState(for: launchID))
+    #expect(launchWindow.tabIDs == [tabA.id], "the launch window's model holds the launch repository")
+
+    // File ▸ Open… B.
+    let tabB = try tab(of: tabs.openInWindow(
+        path: repoB.url.path, windowStore: windowStore, presenter: presenter))
+    let presentedID = try #require(shown().last)
+    let presented = try #require(windowStore.windowState(for: presentedID))
+
+    #expect(presentedID != launchID, "B gets its own window")
+    #expect(presented.tabIDs == [tabB.id])
+    #expect(ContentView.repositoryPath(window: presented, tabs: tabs) == tabB.context.topLevel,
+            "the presented window shows B, not the launch repository")
+    #expect(ContentView.repositoryPath(window: launchWindow, tabs: tabs) == tabA.context.topLevel,
+            "the launch window keeps A")
 }
