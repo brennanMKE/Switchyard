@@ -763,31 +763,25 @@ invocation, and every path lookup goes through it. It exists from M1 for this re
 
 ## Current state
 
-**Updated 2026-08-18, end of session.** Suite baseline **1169 tests in 81 suites**
-(`docs/test-baseline.txt` is the number to trust, not prose here).
+**Updated 2026-09-28.** Full suite **2,063 tests** in six test runs (162 / 337 / 380 / 1048 / 14 /
+122), green on `main` at `bf0d9fe4`; the full VM UI run (`scripts/run-ui-tests-vm.sh`: a Debug
+launch smoke plus 18 spikes) reports `RESULT: TEST SUCCEEDED`.
 
-- **M0, M1 and M2 have zero open issues.** M1's criterion-5 hunt ran fourteen review passes; #0160's
-  umbrella closed on its fifteenth, at clean-review count 2. **Neither milestone has had its guide §9
-  *milestone* review**, which is a separate ritual from per-issue review and is paused — see the
-  priority section at the top of this file.
-- **M3 is the milestone in progress**, and the app is real. `open Switchyard.xcodeproj` and Run gives a
-  window that opens a repository through `NSOpenPanel` and shows: a `whereAmI` header; a sidebar of
-  branches, remotes, tags, worktrees and a stash count; a commit history with a **lane gutter** drawn
-  from `graphRows`; and a detail pane with the selected commit's metadata, trailers and diff.
-- **`yard-engine` is a development harness** (#0337) that links `YardCommands` in-process so engine
-  commands can be run from a terminal: `swift run yard-engine whereami`. **`switchyard` is still
-  `YardKit`-only and XPC-bound** by design — that layer does not exist yet, and neither does the
-  command registry for anything but `whereami` (#0225-#0228, #0115).
-- **`YardUI` is seven files**, all landed 2026-08-18: `ContentView`, `RepositoryLoader` (five
-  `@concurrent` loaders), `RepositoryHeaderView`, `StatusRow`, `CommitHistoryView`, `CommitDetailView`,
-  `FileDiffView`, `RepositorySidebarView`, plus `LaneGeometry`/`LaneGutterView` and `PaneLayout`.
-- **The app target is no longer a stock template**: `SwitchyardApp`, `AppDelegate`, `AppXPCServer` and
-  `AgentRegistrar`. It renders `ContentView()` from the package.
-
-**Two things a fresh context should not have to rediscover.** `YardUI` depends on `YardGit`, so **the
-app reaches its own engine directly — XPC is for the CLI, not for the UI**; that fact is what made the
-demo reachable at all. And `YardUI` sets `.defaultIsolation(MainActor.self)`, so every engine call from
-a view goes through a `@concurrent` loader and every plain value type it returns needs `nonisolated`.
+- **Milestones are suspended** (see the top of this file). Issues carry milestone `—`.
+- **The app works as a repository browser and history editor.** Every open path (File ▸ Open,
+  Open Recent, drag-drop, Dock, `switchyard://`, XPC) shows the repository in a window (#0416,
+  #0435); repositories are **native macOS window tabs** (#0417, guide decision 28). The History
+  pane is the **Option B branch map** (guide decision 29, #0425-#0431): staircase tree, one
+  connector per branch, "⋯ N" folds, a recency pop-up (2 weeks default), merged lanes dimmed.
+- **The CLI reaches the app over XPC in unsigned builds** (#0418): builds are sealed ad-hoc
+  (`scripts/adhoc-seal-app.sh`, a build phase plus `make-release.sh`). Debug bundles are sealed
+  without the hardened runtime (#0434). `--json` is accepted everywhere (#0420). The app sandbox
+  is off (#0423).
+- **Not built yet:** staging and committing from the app, network operations, the agent skill
+  (#0066-#0069).
+- **Known VM traps:** the golden image has SIP off, so the launch smoke re-enables library
+  validation explicitly (#0434); the "App Background Activity" banner can steal clicks at the top
+  right (#0432); concurrent VM runs can delete each other's clones until #0424 lands.
 
 **On 2026-08-16 `main` was reset** to recover from work done outside the workflow; see
 `docs/workflow-reset-2026-08-16.md` for what moved to which branch and what has to be re-done.
