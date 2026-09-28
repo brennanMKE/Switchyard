@@ -91,6 +91,9 @@ struct AdhocSealScriptTests {
         let bundle = try run("/usr/bin/codesign", ["-dv", app.path])
         #expect(bundle.output.contains("Sealed Resources version=2"), "bundle not sealed: \(bundle.output)")
         #expect(bundle.output.contains("Signature=adhoc"), "bundle not ad-hoc signed: \(bundle.output)")
+        // #0434: no dylib in Contents/MacOS (the Release shape), so the
+        // bundle keeps the hardened runtime #0418 measured.
+        #expect(bundle.output.contains("flags=0x10002(adhoc,runtime)"), "Release-shaped bundle lost the hardened runtime: \(bundle.output)")
 
         // `--deep` never reaches Contents/Resources/bin, so the CLI must be
         // re-signed explicitly; BrokerAgent likewise. Linker-signed means the
@@ -100,6 +103,66 @@ struct AdhocSealScriptTests {
             #expect(!info.output.contains("linker-signed"), "\(nested) left linker-signed: \(info.output)")
             #expect(info.output.contains("adhoc,runtime"), "\(nested) not ad-hoc with hardened runtime: \(info.output)")
         }
+    }
+
+    /// #0434: builds `<dir>/Fake.app` shaped like an unsigned **Debug**
+    /// build — a stub main executable that links
+    /// `@rpath/Fake.debug.dylib` in `Contents/MacOS`, the split Xcode makes
+    /// when `ENABLE_DEBUG_DYLIB = YES`. Both Mach-Os come straight from the
+    /// linker, as in the real build.
+    private func makeDebugDylibBundle(in dir: URL) throws -> URL {
+        let app = dir.appendingPathComponent("Fake.app")
+        let macOS = app.appendingPathComponent("Contents/MacOS")
+        try FileManager.default.createDirectory(at: macOS, withIntermediateDirectories: true)
+        let librarySource = dir.appendingPathComponent("lib.c")
+        try Data("int fake_debug_value(void) { return 7; }\n".utf8).write(to: librarySource)
+        let mainSource = dir.appendingPathComponent("main.c")
+        try Data("int fake_debug_value(void);\nint main(void) { return fake_debug_value() == 7 ? 0 : 1; }\n".utf8)
+            .write(to: mainSource)
+        let dylib = macOS.appendingPathComponent("Fake.debug.dylib")
+        let linkedLibrary = try run("/usr/bin/xcrun", [
+            "clang", "-dynamiclib", librarySource.path, "-o", dylib.path,
+            "-install_name", "@rpath/Fake.debug.dylib",
+        ])
+        try #require(linkedLibrary.status == 0, "clang -dynamiclib failed: \(linkedLibrary.output)")
+        let linkedMain = try run("/usr/bin/xcrun", [
+            "clang", mainSource.path, dylib.path, "-o", macOS.appendingPathComponent("Fake").path,
+            "-Wl,-rpath,@executable_path",
+        ])
+        try #require(linkedMain.status == 0, "clang failed: \(linkedMain.output)")
+        let info: [String: Any] = [
+            "CFBundleExecutable": "Fake",
+            "CFBundleIdentifier": "test.adhoc-seal.fake-debug",
+            "CFBundlePackageType": "APPL",
+        ]
+        let plist = try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+        try plist.write(to: app.appendingPathComponent("Contents/Info.plist"))
+        return app
+    }
+
+    /// #0434: sealing must leave a Debug-shaped bundle LAUNCHABLE, not just
+    /// verifiable. With `--options runtime` on the main executable, library
+    /// validation refuses the ad-hoc debug dylib and dyld aborts the process
+    /// (exit 134, "different Team IDs") while `codesign --verify` still
+    /// passes. The fixture's executable is a four-line C program, not the
+    /// app.
+    @Test func sealedDebugDylibBundleStillLaunches() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("adhoc-seal-debug-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let app = try makeDebugDylibBundle(in: dir)
+
+        let sealed = try run("/bin/zsh", [repoRoot.appendingPathComponent("scripts/adhoc-seal-app.sh").path, app.path])
+        #expect(sealed.status == 0, "adhoc-seal-app.sh failed: \(sealed.output)")
+
+        let launched = try run(app.appendingPathComponent("Contents/MacOS/Fake").path, [])
+        #expect(launched.status == 0, "sealed Debug-shaped bundle did not launch: \(launched.output)")
+        #expect(!launched.output.contains("Library not loaded"), "dyld refused the debug dylib: \(launched.output)")
+
+        let main = try run("/usr/bin/codesign", ["-dv", app.appendingPathComponent("Contents/MacOS/Fake").path])
+        #expect(main.output.contains("Signature=adhoc"), "main executable not ad-hoc signed: \(main.output)")
+        #expect(!main.output.contains("runtime"), "main executable kept the hardened runtime: \(main.output)")
     }
 
     @Test func refusesAPathThatIsNotABundle() throws {
