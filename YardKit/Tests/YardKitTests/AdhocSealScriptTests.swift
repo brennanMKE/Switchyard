@@ -165,6 +165,37 @@ struct AdhocSealScriptTests {
         #expect(!main.output.contains("runtime"), "main executable kept the hardened runtime: \(main.output)")
     }
 
+    /// #0436: `build-for-testing` of the Switchyard scheme creates the hosted
+    /// unit-test bundle's directories inside the app
+    /// (`Contents/PlugIns/SwitchyardTests.xctest/Contents/MacOS`, empty)
+    /// BEFORE the app's seal phase runs, and fills them only after the app
+    /// target finishes. codesign refuses that half-built nested bundle —
+    /// "bundle format unrecognized, invalid, or unsuitable / In subcomponent:
+    /// …/PlugIns/SwitchyardTests.xctest" — which failed the build. A test
+    /// host is left exactly as the linker made it.
+    @Test func leavesATestHostBundleUnsealed() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("adhoc-seal-testhost-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let app = try makeLinkerSignedBundle(in: dir)
+        // The exact shape Xcode leaves when the seal phase runs: the test
+        // target's MkDir steps have run, its Info.plist and binary have not.
+        try FileManager.default.createDirectory(
+            at: app.appendingPathComponent("Contents/PlugIns/FakeTests.xctest/Contents/MacOS"),
+            withIntermediateDirectories: true)
+
+        let sealed = try run("/bin/zsh", [repoRoot.appendingPathComponent("scripts/adhoc-seal-app.sh").path, app.path])
+        #expect(sealed.status == 0, "adhoc-seal-app.sh failed on a test host: \(sealed.output)")
+        #expect(!sealed.output.contains("bundle format unrecognized"), "codesign reached the half-built test bundle: \(sealed.output)")
+        #expect(sealed.output.contains("a test-host build is not sealed"), "no skip note: \(sealed.output)")
+
+        let bundle = try run("/usr/bin/codesign", ["-dv", app.path])
+        #expect(bundle.output.contains("Sealed Resources=none"), "test host was sealed: \(bundle.output)")
+        let broker = try run("/usr/bin/codesign", ["-dv", app.appendingPathComponent("Contents/MacOS/BrokerAgent").path])
+        #expect(broker.output.contains("linker-signed"), "nested code re-signed before the skip: \(broker.output)")
+    }
+
     @Test func refusesAPathThatIsNotABundle() throws {
         let result = try run("/bin/zsh", [
             repoRoot.appendingPathComponent("scripts/adhoc-seal-app.sh").path,

@@ -22,6 +22,19 @@ set -euo pipefail
 APP="${1:?usage: adhoc-seal-app.sh <path/to/App.app>}"
 [[ -d "$APP/Contents/MacOS" ]] || { print -u2 "adhoc-seal-app: not an app bundle: $APP"; exit 1; }
 
+# #0436: a hosted unit-test target (TEST_HOST = this app) builds its bundle
+# INTO Contents/PlugIns, and Xcode creates that bundle's directories before
+# this phase runs but fills them only after the app target finishes. The
+# half-built .xctest makes codesign fail ("bundle format unrecognized" in
+# subcomponent PlugIns/SwitchyardTests.xctest), and any seal made now would
+# be invalidated when the test bundle lands. A test host is not sealed —
+# hosted tests never needed the broker, and before #0418 no build was sealed.
+test_bundles=("$APP"/Contents/PlugIns/*.xctest(N))
+if (( ${#test_bundles} > 0 )); then
+  print "adhoc-seal-app: skipped $APP — it hosts ${test_bundles[1]:t}; a test-host build is not sealed"
+  exit 0
+fi
+
 for nested in "$APP/Contents/Resources/bin/switchyard" "$APP/Contents/MacOS/BrokerAgent"; do
   if [[ -f "$nested" ]]; then
     codesign --force --sign - --options runtime "$nested"
