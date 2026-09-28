@@ -74,6 +74,14 @@ public nonisolated enum JournalMenu {
         }
         return listing?.items.first { $0.entry.id == cursor }?.metadata?.operation
     }
+
+    /// #0448: whether Undo and Redo belong to text editing rather than the
+    /// journal — true only while an `NSText` view (a field editor, a
+    /// `TextEditor`) is the key window's first responder.
+    @MainActor
+    public static func routesToText(_ firstResponder: NSResponder?) -> Bool {
+        firstResponder is NSText
+    }
 }
 
 /// What the menu bar's Edit menu acts on: the focused window's journal
@@ -117,19 +125,23 @@ public struct JournalCommands: Commands {
     public init() {}
 
     public var body: some Commands {
-        // A text view owns ⌘Z while it is first responder, whatever the
-        // journal's state — so the enabled check yields to it.
-        let editingText = NSApp.keyWindow?.firstResponder is NSText
+        let editingText = JournalMenu.routesToText(NSApp.keyWindow?.firstResponder)
         CommandGroup(replacing: .undoRedo) {
+            // #0448: forward only while a text view is first responder.
+            // Sent unconditionally, `undo:` found a taker in the responder
+            // chain with no text view focused, and the journal never ran
+            // (measured in the VM, 2026-09-28).
             Button(target?.undoTitle ?? "Undo") {
-                if NSApp.sendAction(Selector(("undo:")), to: nil, from: nil) { return }
+                if JournalMenu.routesToText(NSApp.keyWindow?.firstResponder),
+                   NSApp.sendAction(Selector(("undo:")), to: nil, from: nil) { return }
                 target?.perform(.undo)
             }
             .keyboardShortcut("z", modifiers: .command)
             .disabled(!(target?.undoEnabled ?? false) && !editingText)
 
             Button(target?.redoTitle ?? "Redo") {
-                if NSApp.sendAction(Selector(("redo:")), to: nil, from: nil) { return }
+                if JournalMenu.routesToText(NSApp.keyWindow?.firstResponder),
+                   NSApp.sendAction(Selector(("redo:")), to: nil, from: nil) { return }
                 target?.perform(.redo)
             }
             .keyboardShortcut("z", modifiers: [.command, .shift])
