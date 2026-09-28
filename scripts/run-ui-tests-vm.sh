@@ -9,8 +9,9 @@
 # Per run:
 #   1. Preflight: Tart present, golden image present, disk free, memory
 #      requested through the generic memory-signal protocol when the host is
-#      short (the machine's observer frees what it can), stale
-#      `switchyard-uitest-*` clones swept.
+#      short (the machine's observer frees what it can), and clones left
+#      by DEAD runs swept — a clone whose owning run is still alive is never
+#      touched (#0424).
 #   2. Export a clean snapshot: `git archive HEAD` — never the live working
 #      copy. EXCEPTION, visible and loud: when build/uitest-overlay/ exists
 #      and is non-empty its tree is copied over the export — that is how a
@@ -180,25 +181,69 @@ if (( avail_bytes < need_bytes )); then
   (( avail_bytes >= need_bytes )) || fail "Observer signaled ready but memory is still short ($(( avail_bytes / 1073741824 )) GiB of $(( need_bytes / 1073741824 )) GiB)"
 fi
 
-# A SIGKILL (e.g. the OOM above) skips this script's trap, so sweep any
-# clones left behind by earlier runs. Only names shaped
-# `switchyard-uitest-<YYYYMMDD>-<HHMMSS>-<pid>` — this script's own run-id
-# shape — are swept, which structurally excludes the golden image; the
-# explicit golden check inside the loop is belt and braces after the
-# 2026-09-13 incident where a plain name-prefix match deleted the golden.
-stale=$(tart list | awk '$2 ~ /^switchyard-uitest-[0-9]{8}-[0-9]{6}-[0-9]+$/ { print $2 }' | grep -v -- "${CLONE:-__none__}" || true)
-foreign=$(tart list | awk '$2 ~ /^switchyard-uitest-/ && $2 !~ /^switchyard-uitest-[0-9]{8}-[0-9]{6}-[0-9]+$/ && $2 != "switchyard-uitest-golden" { print $2 }' || true)
-for old in ${=stale}; do
-  if [[ "$old" == "$GOLDEN" ]]; then
-    print -r -- "!! refusing to sweep the golden image — this is a script bug" >&2
-    continue
+# A SIGKILL (e.g. the OOM above) skips this script's trap, so sweep the
+# clones earlier runs left behind — but ONLY those whose owning run is dead.
+# Several sessions run this script at once (#0424: a second run's sweep used
+# to delete the first run's live clone mid-boot), so a clone's name carries
+# its owner: `switchyard-uitest-<YYYYMMDD>-<HHMMSS>-<pid>-<index>`, where
+# <pid> is the owning run's `$$` (see start_guest).
+#
+# A run is alive when `kill -0` reaches its pid AND that process is still
+# this script: pids recycle, and a recycled pid must not pin a dead run's
+# clone forever. The pre-#0424 name `…-<HHMMSS>-<pid*10+index>` cannot be
+# decoded, so such a clone is swept only once it is older than
+# UITEST_LEGACY_MAX_AGE_SECS — no clone lives that long (the longest, the
+# launch smoke's Debug build, is ~10 minutes). Everything else under
+# `switchyard-uitest-` — the golden, a planner's hand-named scratch clone —
+# is left alone, and nothing outside that prefix is even looked at, so
+# another project's VMs are never candidates.
+typeset -g UITEST_LEGACY_MAX_AGE_SECS=10800
+
+# 0 when <pid> is a live run of this script.
+uitest_run_is_live() {
+  local pid="$1"
+  kill -0 "$pid" 2>/dev/null || return 1
+  ps -p "$pid" -o command= 2>/dev/null | grep -q 'run-ui-tests-vm'
+}
+
+# Reads `tart list` on stdin and prints one line per `switchyard-uitest-*`
+# VM: `sweep <name> <why>` or `keep <name> <why>`. Decides only; deletes
+# nothing. <now> (epoch seconds) is a parameter so a test can pin it.
+uitest_classify_clones() {
+  local now="${1:-$(date +%s)}"
+  local src name rest born
+  while read -r src name rest; do
+    [[ "$name" == switchyard-uitest-* ]] || continue
+    if [[ "$name" == "$GOLDEN" || "$name" == switchyard-uitest-golden ]]; then
+      print -r -- "keep $name golden"
+    elif [[ "$name" =~ '^switchyard-uitest-[0-9]{8}-[0-9]{6}-([0-9]+)-[0-9]+$' ]]; then
+      if uitest_run_is_live "$match[1]"; then
+        print -r -- "keep $name owner-pid-$match[1]-alive"
+      else
+        print -r -- "sweep $name owner-pid-$match[1]-dead"
+      fi
+    elif [[ "$name" =~ '^switchyard-uitest-([0-9]{8})-([0-9]{6})-[0-9]+$' ]]; then
+      born=$(date -j -f '%Y%m%d%H%M%S' "$match[1]$match[2]" +%s 2>/dev/null) || born="$now"
+      if (( now - born > UITEST_LEGACY_MAX_AGE_SECS )); then
+        print -r -- "sweep $name legacy-name-older-than-${UITEST_LEGACY_MAX_AGE_SECS}s"
+      else
+        print -r -- "keep $name legacy-name-too-young-to-judge"
+      fi
+    else
+      print -r -- "keep $name not-a-run-clone"
+    fi
+  done
+}
+
+for verdict_line in ${(f)"$(tart list | uitest_classify_clones)"}; do
+  read -r verdict name why <<< "$verdict_line"
+  if [[ "$verdict" == sweep && "$name" != "$GOLDEN" ]]; then
+    log "Sweeping stale clone: $name ($why)"
+    tart stop "$name" >/dev/null 2>&1 || true
+    tart delete "$name" >/dev/null 2>&1 || true
+  else
+    log "Leaving clone alone: $name ($why)"
   fi
-  log "Sweeping stale clone: $old"
-  tart stop "$old" >/dev/null 2>&1 || true
-  tart delete "$old" >/dev/null 2>&1 || true
-done
-for other in ${=foreign}; do
-  log "Leaving non-run clone alone: $other"
 done
 
 # --- Export a clean snapshot ----------------------------------------------
@@ -237,9 +282,9 @@ typeset -g LEASE_ID=""
 # source in and generate both fixture repositories. Sets CLONE and LEASE_ID.
 start_guest() {
   local index="$1" label="$2"
-  # Run-id-shaped name: the stale sweep matches only
-  # `switchyard-uitest-<YYYYMMDD>-<HHMMSS>-<numeric>`, so the suffix stays
-  # purely numeric and every crashed run's clone is sweepable.
+  # Owner-stamped name, `switchyard-uitest-<YYYYMMDD>-<HHMMSS>-<pid>-<index>`:
+  # the stale sweep reads <pid> back and deletes the clone only once this run
+  # is dead (#0424), so a concurrent run never deletes it.
   # A lease per spike, not one for the whole run: the spikes are serial and a
   # full pass is ~20 minutes, which would shut every other repo out. Between
   # spikes another session can take the slot.
@@ -248,7 +293,7 @@ start_guest() {
     LEASE_ID=$(tart-lease acquire --label "switchyard-$label" --pid $$)
   fi
 
-  CLONE="switchyard-uitest-$(date +%Y%m%d-%H%M%S)-$(( $$ * 10 + index ))"
+  CLONE="switchyard-uitest-$(date +%Y%m%d-%H%M%S)-$$-$index"
   log "[$label] Cloning $GOLDEN → $CLONE"
   tart clone "$GOLDEN" "$CLONE"
   log "[$label] Booting $CLONE (headless, export mounted read-only)"
