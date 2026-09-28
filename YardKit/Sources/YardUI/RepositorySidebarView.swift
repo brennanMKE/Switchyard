@@ -175,6 +175,18 @@ public struct RepositorySidebarView: View {
         entry.name
     }
 
+    /// #0433: a local branch row's help text -- the full ref name
+    /// (`helpText`), then the full status text on a second line when there
+    /// is one. The row gives its width to the name and truncates the status,
+    /// so hover is where the whole status, baseline included, stays
+    /// readable. `nonisolated` on purpose, like `helpText` above.
+    public nonisolated static func branchHelpText(
+        for entry: RefSnapshot.Entry, status: String?
+    ) -> String {
+        guard let status else { return helpText(for: entry) }
+        return helpText(for: entry) + "\n" + status
+    }
+
     /// #0372: a local branch row's trailing status -- the A3 ahead/behind
     /// with the baseline named, then the M6 merged state, joined with a
     /// middle dot -- or `nil` when the status read has not landed, has no
@@ -403,7 +415,14 @@ public struct RepositorySidebarView: View {
     /// A branch row: the branch glyph (a filled checkmark for the current
     /// branch), the short name, and -- #0372 -- the trailing status text
     /// (`branchStatusText`): ahead/behind with the baseline named, then the
-    /// merged state. The full ref name stays the help text (#0371).
+    /// merged state.
+    ///
+    /// #0433: the name wins the row's width. It carries a higher layout
+    /// priority than the status, so the status truncates first and the name
+    /// only when the name alone is wider than the row. The help text is the
+    /// full ref name plus the full status (`branchHelpText`), so a status the
+    /// row truncates -- including decision 27's baseline name -- is still
+    /// readable on hover.
     private func branchRow(_ entry: RefSnapshot.Entry) -> some View {
         let name = String(entry.name.dropFirst(Self.headsPrefix.count))
         let isCurrent = !isDetached && name == currentBranchName
@@ -412,6 +431,8 @@ public struct RepositorySidebarView: View {
         return HStack(spacing: 8) {
             Label(name, systemImage: isCurrent ? "checkmark.circle.fill" : "arrow.triangle.branch")
                 .fontWeight(isCurrent ? .semibold : .regular)
+                .lineLimit(1)
+                .layoutPriority(1)
             if let status {
                 Spacer(minLength: 8)
                 Text(status)
@@ -420,7 +441,7 @@ public struct RepositorySidebarView: View {
                     .lineLimit(1)
             }
         }
-        .help(Self.helpText(for: entry))
+        .help(Self.branchHelpText(for: entry, status: status))
     }
 
     /// A remote or tag row: the ref name minus its prefix as the label, the
