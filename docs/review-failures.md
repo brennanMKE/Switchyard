@@ -126,10 +126,17 @@ failure. `[JUDGMENT]` checks require reading the issue.
 Checks read the **spec only** — everything above the first `## Review`, `## Work log`, or
 `## Sequencing` heading. Those sections discuss past defects on purpose.
 
+- **[JUDGMENT] Launch path.** If the issue changes signing, entitlements, build phases or anything
+  that affects how the app loads, does its verification `open` the **Debug** product built the way a
+  person builds it (`xcodebuild build -scheme Switchyard … CODE_SIGNING_ALLOWED=NO`) **in the VM**,
+  and check that it is still running 10 s later? An XCUITest pass or a Release-only check is not
+  that. (#0418 → #0434.)
+
 ### Mechanical — the script decides
 
 | # | Check | Hard? | Derived from |
 | #0399 | 1 | The VM suite failed 4 of 10 UI tests (0382, 0383, 0385 and 0399), each with `Failed to get matching snapshots: Timed out while evaluating UI query` after about 136 s. The round itself was faithful: the package suite was green and the UI-test target built. | **Two spec defects in my plan, neither measured before it was pasted.** (1) Removing every `Text` from a row carrying `.accessibilityElement(children: .combine)` plus an `.accessibilityLabel` **drops the element from the accessibility tree** for rows with nothing left to combine. The VM hierarchy showed chip-bearing rows keeping a `StaticText` and chipless rows showing only an empty `Cell`. That is a VoiceOver regression as well as a test break. (2) The helper change to `descendants(matching: .any)` with a `value CONTAINS` clause makes XCUITest evaluate `CONTAINS` against non-string values (disclosure triangles and splitters carry numbers) inside the app. It throws (the spindump shows Switchyard "swallowed at least one exception") and retries until the query times out. The analysis was done in the main loop from the result bundle's hierarchy and spindump, not by a separate learning subagent. | `spec-defect` |
+| #0418 | 1 (review) | Passed review and the VM, but the unsigned **Debug** build crashed at launch on the host: `Switchyard.debug.dylib` was not re-sealed while the executable got `--options runtime`, so library validation rejected it. The VM UI tests launch through XCUITest and the VM CLI check used the Release artifact, so nothing ever `open`ed a plain Debug build. Brennan hit it. | |
 |---|---|---|---|
 | 1 | Does it name a file inside an executable target? Nothing there can be unit-tested. | hard | #0085 |
 | 2 | Does it direct work to `/tmp`, `/var/tmp`, or `$TMPDIR`? The sandbox auto-rejects those. | hard | #0070 r2, #0098 r1 |
