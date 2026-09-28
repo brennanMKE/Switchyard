@@ -203,3 +203,45 @@ extension XCUIApplication {
             file: #filePath, line: #line)
     }
 }
+
+/// #0442: the Changes-view fixture scripts/uitest-fixtures/make-changes-fixture.sh
+/// generates inside the guest — keep the two in sync.
+enum UITestChangesFixture {
+    static let repositoryPath = "/Users/admin/uitest-changes-repo"
+    /// The fixture's one commit.
+    static let baseSubject = "changes base commit"
+    /// Two unstaged hunks (lines 2 and 18 edited).
+    static let tracked = "tracked.txt"
+    /// Modified and staged.
+    static let staged = "staged.txt"
+    /// Deleted, unstaged.
+    static let gone = "gone.txt"
+    /// Untracked.
+    static let untracked = "new.txt"
+}
+
+extension XCUIApplication {
+    /// Launches the app on the Changes-view fixture with the real panes.
+    @MainActor
+    func launchWithChangesFixture() {
+        launchArguments = [
+            "-uiTestRepository", UITestChangesFixture.repositoryPath,
+            "-uiTestRealSurfaces",
+        ]
+        launch()
+        let tree = debugDescription
+        XCTAssertTrue(
+            windows.firstMatch.waitForExistence(timeout: 60),
+            "The app launched but opened no window within 60 s — its element " +
+            "tree starts with: \(String(tree.prefix(1200)))",
+            file: #filePath, line: #line)
+    }
+
+    /// A Changes-view file name on one side — the `Text` the view tags
+    /// `changes-staged-<path>` / `changes-unstaged-<path>` (#0443).
+    @MainActor
+    func changesRow(_ path: String, staged: Bool) -> XCUIElement {
+        staticTexts.matching(
+            identifier: "changes-\(staged ? "staged" : "unstaged")-\(path)").firstMatch
+    }
+}
