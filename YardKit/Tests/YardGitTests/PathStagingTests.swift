@@ -82,3 +82,70 @@ func stagePathsWithNoPathsWritesNoEntry(format: FixtureRepository.RefFormat) thr
 
     #expect(try JournalAnchor.list(in: ctx).count == entriesBefore)
 }
+
+// MARK: - #0439 unstagePaths
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func unstagePathsUnstagesOnlyTheNamedPathsAndLeavesTheWorktree(
+    format: FixtureRepository.RefFormat
+) throws {
+    let repo = try dirtyRepo(format)
+    defer { repo.destroy() }
+    try stagePaths(["m.txt", "d.txt", "n.txt"], at: repo.url.path)
+
+    try unstagePaths(["m.txt", "n.txt"], at: repo.url.path)
+
+    let after = try xy(in: repo)
+    #expect(after["m.txt"] == ".M")
+    #expect(after["n.txt"] == "??")
+    #expect(after["d.txt"] == "D.", "a path that was not named must stay staged")
+    let contents = try String(
+        contentsOf: repo.url.appendingPathComponent("m.txt"), encoding: .utf8)
+    #expect(contents == "one\ntwo\n", "unstaging must not touch the worktree")
+}
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func unstagePathsWorksOnAnUnbornBranch(format: FixtureRepository.RefFormat) throws {
+    let repo = try FixtureRepository(refFormat: format)
+    defer { repo.destroy() }
+    try repo.writeUntracked(["a.txt": "a\n", "b.txt": "b\n"])
+    try stagePaths(["a.txt", "b.txt"], at: repo.url.path)
+    #expect(try xy(in: repo) == ["a.txt": "A.", "b.txt": "A."])
+
+    try unstagePaths(["a.txt"], at: repo.url.path)
+
+    #expect(try xy(in: repo) == ["a.txt": "??", "b.txt": "A."])
+}
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func unstagePathsUnstagesARenameGivenBothPaths(format: FixtureRepository.RefFormat) throws {
+    let repo = try dirtyRepo(format)
+    defer { repo.destroy() }
+    try GitProcess().run(["mv", "r.txt", "r2.txt"], workingDirectory: repo.url.path)
+    let renamed = try #require(try gitStatus(at: repo.url.path).entries.first { $0.path == "r2.txt" })
+    #expect(renamed.originalPath == "r.txt")
+
+    try unstagePaths(["r2.txt", "r.txt"], at: repo.url.path)
+
+    let after = try xy(in: repo)
+    #expect(after["r2.txt"] == "??")
+    #expect(after["r.txt"] == ".D")
+}
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func unstagePathsWritesOneEntryAndUndoRestagesThem(format: FixtureRepository.RefFormat) throws {
+    let repo = try dirtyRepo(format)
+    defer { repo.destroy() }
+    try stagePaths(["m.txt", "n.txt"], at: repo.url.path)
+    let ctx = try WorktreeContext.resolve(path: repo.url.path)
+    let staged = try xy(in: repo)
+    let entriesBefore = try JournalAnchor.list(in: ctx).count
+
+    try unstagePaths(["m.txt", "n.txt"], at: repo.url.path)
+    #expect(try JournalAnchor.list(in: ctx).count == entriesBefore + 1)
+    #expect(try xy(in: repo) != staged)
+
+    try JournalUndo.undo(in: ctx)
+
+    #expect(try xy(in: repo) == staged)
+}

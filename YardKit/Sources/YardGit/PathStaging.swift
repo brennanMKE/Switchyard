@@ -34,3 +34,37 @@ public func stagePaths(
         _ = try git.run(["--literal-pathspecs", "add", "-A", "--"] + paths, workingDirectory: path)
     }
 }
+
+/// Removes every staged change to `paths` from the index, leaving the
+/// worktree untouched — `git reset -q -- <paths>`.
+///
+/// `git reset`, not `git restore --staged`: restore resolves `HEAD` first
+/// and fails on an unborn branch (`fatal: could not resolve 'HEAD'`, exit
+/// 128), while `reset -q -- <path>` unstages there too, leaving a newly
+/// added file untracked (both measured, git 2.54.0, #0439). On a born
+/// branch the two agree. `-q` because without it git prints "Unstaged
+/// changes after reset:" — on stdout, exit 0, but noise.
+///
+/// **A staged rename needs both of its paths.** `git status` reports it as
+/// one `R.` record whose `path` is the new name and `originalPath` the old;
+/// resetting only the new path leaves the old one staged as a deletion
+/// (measured). Callers pass both — `WorkingChanges.unstagePaths(for:)`
+/// does (#0441).
+///
+/// `--literal-pathspecs`, for the reason `stagePaths` gives. An empty
+/// `paths` array is a no-op. A path the index and `HEAD` both lack is a
+/// silent no-op in git (exit 0, measured) and so here.
+///
+/// **Writes exactly one journal entry per call**, via
+/// `JournalCheckpoint.around(operation: "unstage")` — the string
+/// `unstageHunks` writes.
+public func unstagePaths(
+    _ paths: [String],
+    at path: String,
+    git: GitProcess = GitProcess()
+) throws {
+    guard !paths.isEmpty else { return }
+    try JournalCheckpoint.around(operation: "unstage", at: path, git: git) { git in
+        _ = try git.run(["--literal-pathspecs", "reset", "-q", "--"] + paths, workingDirectory: path)
+    }
+}
