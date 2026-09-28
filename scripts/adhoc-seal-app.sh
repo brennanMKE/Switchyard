@@ -27,6 +27,19 @@ for nested in "$APP/Contents/Resources/bin/switchyard" "$APP/Contents/MacOS/Brok
     codesign --force --sign - --options runtime "$nested"
   fi
 done
-codesign --force --sign - --options runtime "$APP"
+# #0434: a Debug build is split into a stub executable plus
+# Contents/MacOS/<name>.debug.dylib (ENABLE_DEBUG_DYLIB). Under the hardened
+# runtime, library validation makes dyld refuse any non-system library whose
+# Team ID differs from the executable's — and an ad-hoc signature has no Team
+# ID, so the dylib is refused ("different Team IDs") however it is signed:
+# linker-signed, ad-hoc, or ad-hoc with --options runtime all fail (measured
+# 2026-09-27). So a bundle that carries a dylib in Contents/MacOS is sealed
+# WITHOUT the hardened runtime. A Release build has none and keeps it.
+bundle_options=(--options runtime)
+debug_dylibs=("$APP"/Contents/MacOS/*.dylib(N))
+if (( ${#debug_dylibs} > 0 )); then
+  bundle_options=()
+fi
+codesign --force --sign - "${bundle_options[@]}" "$APP"
 codesign --verify --deep --strict "$APP"
 print "adhoc-seal-app: sealed $APP (ad-hoc)"

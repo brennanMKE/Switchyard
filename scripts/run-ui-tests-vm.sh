@@ -233,10 +233,10 @@ typeset -g TEST_RC=0
 typeset -g CLONE=""
 typeset -g LEASE_ID=""
 
-run_spike() {
-  local index="$1" label="$2"; shift 2
-  local tests="" t
-  for t in "$@"; do tests="$tests -only-testing:'SwitchyardUITests/$t'"; done
+# Lease a slot, clone the golden, boot it with the export mounted, copy the
+# source in and generate both fixture repositories. Sets CLONE and LEASE_ID.
+start_guest() {
+  local index="$1" label="$2"
   # Run-id-shaped name: the stale sweep matches only
   # `switchyard-uitest-<YYYYMMDD>-<HHMMSS>-<numeric>`, so the suffix stays
   # purely numeric and every crashed run's clone is sweepable.
@@ -290,6 +290,25 @@ tart exec "$CLONE" /bin/zsh -lc \
   actual_branch="$(tart exec "$CLONE" /bin/zsh -lc "git -C $GUEST_FIXTURE symbolic-ref --short HEAD" | tr -d '[:space:]')"
   [[ "$actual_branch" == "$GUEST_FIXTURE_BRANCH" ]] \
     || fail "[$label] guest fixture branch is '$actual_branch', expected '$GUEST_FIXTURE_BRANCH'"
+}
+
+# Stop and delete the clone, then give the lease back.
+stop_guest() {
+  tart stop "$CLONE" >/dev/null 2>&1 || true
+  tart delete "$CLONE" >/dev/null 2>&1 || true
+  CLONE=""
+
+  if [[ -n "${LEASE_ID:-}" ]]; then
+    tart-lease release --id "$LEASE_ID" 2>/dev/null || true
+    LEASE_ID=""
+  fi
+}
+
+run_spike() {
+  local index="$1" label="$2"; shift 2
+  local tests="" t
+  for t in "$@"; do tests="$tests -only-testing:'SwitchyardUITests/$t'"; done
+  start_guest "$index" "$label"
 
   log "[$label] Running UI tests in the guest (XCUITest inside the VM only)"
   # pipefail so the rc is xcodebuild's exit, not tee's. The smoke test is
@@ -315,14 +334,66 @@ tart exec "$CLONE" /bin/zsh -lc \
   grep -E 'Test Case .* (passed|failed)|TEST (SUCCEEDED|FAILED)' \
     "$out/xcodebuild-$label.log" | tail -6 || true
 
-  tart stop "$CLONE" >/dev/null 2>&1 || true
-  tart delete "$CLONE" >/dev/null 2>&1 || true
-  CLONE=""
+  stop_guest
+}
 
-  if [[ -n "${LEASE_ID:-}" ]]; then
-    tart-lease release --id "$LEASE_ID" 2>/dev/null || true
-    LEASE_ID=""
-  fi
+# #0434: the launch smoke. XCUITest is not how a person starts the app, and
+# it tolerated a Debug build that dies in dyld on an ordinary launch (see
+# issues/0434.md for why). So, in its own clone: build the `Switchyard`
+# scheme Debug and unsigned exactly as a person does, `open` it on the
+# fixture, and require the process alive 10 s later with no new crash report
+# in the guest's ~/Library/Logs/DiagnosticReports.
+run_launch_smoke() {
+  local label="launch-smoke"
+  start_guest 0 "$label"
+  log "[$label] Building the Debug Switchyard scheme unsigned and opening it"
+  set +e
+  local rc
+  tart exec "$CLONE" /bin/zsh -lc "
+    cd $GUEST_SRC
+    xcodebuild build -project Switchyard.xcodeproj -scheme Switchyard -destination 'platform=macOS' \
+      -derivedDataPath build/dd CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+      > $GUEST_RESULTS/xcodebuild-$label.log 2>&1 \
+      || { echo 'LAUNCH SMOKE FAILED: xcodebuild build failed'; exit 1; }
+    app=$GUEST_SRC/build/dd/Build/Products/Debug/Switchyard.app
+    # The golden image runs with SIP disabled, and a SIP-disabled Mac waives the
+    # library validation the hardened runtime implies: the #0434 build that died
+    # on the host launched fine here. An EXPLICIT library-validation flag is
+    # still enforced with SIP off (both measured 2026-09-27, issues/0434.md), so
+    # a hardened main executable is re-signed ad-hoc with it and the guest then
+    # refuses what a stock Mac refuses. Ad-hoc only: no identity, no keychain.
+    if codesign -dv \$app 2>&1 | grep -q '^CodeDirectory.*flags=.*runtime'; then
+      codesign --force --sign - --options library,runtime \$app \
+        || { echo 'LAUNCH SMOKE FAILED: could not add library-validation'; exit 1; }
+      echo 'hardened runtime present: library validation made explicit (SIP is off in the guest)'
+    fi
+    reports=\$HOME/Library/Logs/DiagnosticReports
+    mkdir -p \$reports
+    before=\$(ls \$reports | grep -c '^Switchyard')
+    open -n \$app --args -uiTestRealSurfaces -uiTestRepository $GUEST_FIXTURE
+    sleep 10
+    alive=\$(pgrep -x Switchyard)
+    after=\$(ls \$reports | grep -c '^Switchyard')
+    cp \$reports/Switchyard*(N) $GUEST_RESULTS/
+    pkill -x Switchyard
+    echo \"pid=\${alive:-none} crash-reports-before=\$before after=\$after\"
+    if [[ -n \$alive ]] && (( after == before )); then
+      echo 'LAUNCH SMOKE PASSED'
+    else
+      echo 'LAUNCH SMOKE FAILED: the app died or left a crash report'
+      exit 1
+    fi
+  " 2>&1 | tee "$EXPORT/launch-smoke.out"
+  rc=${pipestatus[1]}
+  set -e
+  (( rc > TEST_RC )) && TEST_RC=$rc
+
+  local out="$RESULTS_DIR/$label"
+  mkdir -p "$out"
+  cp "$EXPORT/launch-smoke.out" "$out/launch-smoke.out"
+  tart exec "$CLONE" /bin/zsh -lc "tar -C $GUEST_RESULTS -cf - ." | tar -x -C "$out"
+
+  stop_guest
 }
 
 # Which spikes to run: all four by default; the arguments filter by issue
@@ -334,6 +405,9 @@ run_spike_if_selected() {
     run_spike "$number" "spike-$number" SmokeUITests "$1"
   fi
 }
+if [[ -z "$SPIKE_FILTER" ]] || [[ "$SPIKE_FILTER" == "launch" ]]; then
+  run_launch_smoke
+fi
 run_spike_if_selected 0382 Spike0382ContextKeysUITests
 run_spike_if_selected 0383 Spike0383ArrowsUITests
 run_spike_if_selected 0385 Spike0385AlertLiveUpdateUITests
@@ -357,7 +431,11 @@ if (( TEST_RC == 0 )); then
 else
   log "RESULT: TEST FAILED (exit $TEST_RC)"
 fi
-for log_file in "$RESULTS_DIR"/spike-*/xcodebuild-*.log; do
+if [[ -f "$RESULTS_DIR/launch-smoke/launch-smoke.out" ]]; then
+  print -r -- "--- launch-smoke"
+  grep -E '^pid=|LAUNCH SMOKE|library validation' "$RESULTS_DIR/launch-smoke/launch-smoke.out" || true
+fi
+for log_file in "$RESULTS_DIR"/spike-*/xcodebuild-*.log(N); do
   [[ -f "$log_file" ]] || continue
   print -r -- "--- $(basename "$log_file")"
   grep -E 'Test Case .* (passed|failed)|TEST (SUCCEEDED|FAILED)' "$log_file" | tail -8 || true
