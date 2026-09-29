@@ -115,3 +115,50 @@ public enum AmendHead {
 extension AmendHead.Refusal: ExitClassCarrying {
     public var exitClass: ExitClass { .repositoryError }
 }
+
+// MARK: - Amend (#0464)
+
+extension AmendHead {
+
+    /// Amends `HEAD`: `git commit --amend -m <message>`, journaled as one
+    /// `amend` entry, so Edit ▸ Undo Amend puts back the old `HEAD` commit
+    /// and the index as it was before (the staged changes staged again).
+    ///
+    /// Everything else is `CommitCreate.run`'s: `pre-commit` and
+    /// `commit-msg` hooks run, signing follows `signing`, a signature that
+    /// cannot be produced throws `CommitCreate.Failure.signingFailed`, and
+    /// any other refusal throws `GitProcess.Failure.exited` with git's
+    /// stderr. Nothing staged is allowed — that is a message-only amend. The
+    /// author and author date stay `HEAD`'s (git's `--amend` rule); the
+    /// committer is the current user. A merge commit keeps both parents.
+    ///
+    /// - Throws: `Refusal` from `target(at:)` **before** the checkpoint, so
+    ///   a refused amend writes no entry. Git's own refusals come after the
+    ///   checkpoint and keep it (`around`'s rule): measured, git 2.54.0,
+    ///   `fatal: You are in the middle of a merge -- cannot amend.` (exit
+    ///   128) while a merge is in progress, and `You asked to amend the most
+    ///   recent commit, but doing so would make it empty.` (exit 1, on
+    ///   stderr) when the result would be an empty non-root commit.
+    @discardableResult
+    public static func run(
+        message: String,
+        signing: CommitCreate.Signing = .config,
+        at path: String,
+        git: GitProcess = GitProcess(),
+        extraEnvironment: [String: String] = [:]
+    ) throws -> CommitCreate {
+        if let refusal = try target(at: path, git: git, extraEnvironment: extraEnvironment).refusal {
+            throw refusal
+        }
+        return try JournalCheckpoint.around(operation: "amend", at: path, git: git) { git in
+            try CommitCreate.run(
+                message: message,
+                signing: signing,
+                amend: true,
+                in: path,
+                git: git,
+                extraEnvironment: extraEnvironment
+            )
+        }
+    }
+}
