@@ -419,3 +419,59 @@ private func writeOwnEntry(
     #expect(object["source"] as? String == "own")
     #expect(object["entryID"] as? String == id.string)
 }
+
+// MARK: - #0485: CRLF body lines and combining-mark subjects
+
+/// Two histories of the same three commits over a CRLF file: `c1` differs
+/// by one line, `c2` and `c3` are identical, and `c3`'s subject opens with a
+/// combining mark. Returns what `git range-diff --no-color` printed.
+private func crlfRangeDiff() throws -> String {
+    var repo = try FixtureRepository()
+    defer { repo.destroy() }
+    let git = GitProcess()
+    let path = repo.url.path
+    func run(_ arguments: [String]) throws {
+        try git.run(arguments, workingDirectory: path, extraEnvironment: hermetic)
+    }
+    func write(_ lines: [String]) throws {
+        try Data(lines.map { $0 + "\r\n" }.joined().utf8)
+            .write(to: repo.url.appendingPathComponent("f.txt"))
+    }
+    var lines = (1...20).map { "line \($0)" }
+    try write(lines)
+    try repo.build([.init("base", files: ["g.txt": "g\n"])])
+    let base = try repo.revParse("HEAD")
+    func history(seventh: String) throws -> String {
+        try run(["checkout", "-q", "--detach", base])
+        lines[4] = "line five"; lines[5] = "line six"; lines[6] = seventh
+        try write(lines)
+        try run(["commit", "-q", "-am", "c1"])
+        try Data("x\n".utf8).write(to: repo.url.appendingPathComponent("h.txt"))
+        try run(["add", "h.txt"])
+        try run(["commit", "-q", "-m", "c2"])
+        try run(["commit", "-q", "--allow-empty", "-m", "\u{301}x"])
+        lines = (1...20).map { "line \($0)" }
+        return try repo.revParse("HEAD")
+    }
+    let old = try history(seventh: "line seven")
+    let new = try history(seventh: "line SEVEN")
+    return try git.run(["range-diff", "--no-color", base, old, new],
+                       workingDirectory: path, extraEnvironment: hermetic).text
+}
+
+/// Two `Character` bugs, one fixture. A CRLF body line ends "\r\n", which
+/// Swift reads as one `Character`, so the "\n" Character split fused the
+/// body's last line with the `c2` row, and the fused line (it starts with a
+/// space) was skipped as body. And `c3`'s subject opens with U+0301, which
+/// fuses with the space before it, so the " " Character split left the new
+/// oid and the subject as one field, which is not hex (measured on `main`:
+/// throws `unparseableOutput("unrecognized pair fields in line: 3:  … ́x")`).
+@Test func aCRLFBodyLineDoesNotHideTheNextRow() throws {
+    let text = try crlfRangeDiff()
+    #expect(text.contains("\r\n"), "the fixture must put CRLF lines in the range-diff body")
+
+    let rows = try RewriteDiff.parseRows(text)
+
+    #expect(rows.map(\.status) == [.modified, .identical, .identical])
+    #expect(rows.map(\.subject) == ["c1", "c2", "\u{301}x"])
+}

@@ -210,11 +210,16 @@ extension RewriteDiff {
     /// - Throws: `.unparseableOutput` naming the offending line.
     public static func parseRows(_ text: String) throws -> [Row] {
         var rows: [Row] = []
-        for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
-            let raw = String(line)
-            guard !raw.hasPrefix(" "), !raw.hasPrefix("\t") else { continue }
-            let fields = raw.split(separator: " ", omittingEmptySubsequences: true)
-                .map(String.init)
+        // Lines and fields both split on *scalars*, not `Character`s: a CRLF
+        // body line's "\r\n" is one Character, which fused it with the next
+        // row; and a subject opening with a combining mark fuses with the
+        // space before it, which fused it into the oid field (#0485,
+        // measured).
+        for line in text.unicodeScalars.split(separator: "\n", omittingEmptySubsequences: true) {
+            let raw = String(Substring(line))
+            guard let first = raw.unicodeScalars.first, first != " ", first != "\t" else { continue }
+            let fields = raw.unicodeScalars.split(separator: " ", omittingEmptySubsequences: true)
+                .map { String(Substring($0)) }
             guard looksLikeRowCounter(fields[0]) else {
                 // Column-0 prose is not a row and not an error — the
                 // measured output carries none, but a prefix git could add
