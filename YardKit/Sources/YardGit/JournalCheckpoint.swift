@@ -60,6 +60,7 @@ public enum JournalCheckpoint {
                 index: try IndexSnapshot.capture(in: context, git: git),
                 worktree: try WorktreeSnapshot.capture(in: context, git: git),
                 sequencer: sequencer,
+                stash: try StashSnapshot.capture(in: context, git: git),
                 operation: operation,
                 label: label,
                 command: command,
@@ -87,6 +88,7 @@ public enum JournalCheckpoint {
         index: IndexSnapshot? = nil,
         worktree: WorktreeSnapshot? = nil,
         sequencer: SequencerSnapshot? = nil,
+        stash: StashSnapshot? = nil,
         operation: String,
         label: String? = nil,
         command: String? = nil,
@@ -135,6 +137,16 @@ public enum JournalCheckpoint {
         // (#0202), read from its own tree entry, not from where it lands
         // here relative to whatever else this list grows to hold.
         if let worktree { keepAlive.append(worktree.commit) }
+        // #0490: every stash commit, so a dropped stash stays reachable
+        // while an entry that listed it exists. `refs/stash` itself is
+        // already a captured ref; the older entries live only in its
+        // reflog, which a drop rewrites. Deduplicated against what is
+        // already here: `refs/stash`'s own tip is usually among the refs.
+        if let stash {
+            for oid in stash.entries.map(\.oid) where !keepAlive.contains(oid) {
+                keepAlive.append(oid)
+            }
+        }
         // NOT `keepAlive.append(contentsOf: sequencer.keepAlive)`, as this
         // issue's own literal text specified: `SequencerSnapshot.keepAlive`
         // returns TREE oids (the sequencer tree, and AUTO_MERGE's tree when
@@ -160,6 +172,19 @@ public enum JournalCheckpoint {
         case nil: break
         }
 
+        var stashBlob: String?
+        if let stash {
+            let hashedStash = try git.run(
+                ["hash-object", "-w", "--stdin"],
+                workingDirectory: base,
+                standardInput: stash.serialized())
+            guard let oid = hashedStash.lines.first, !oid.isEmpty else {
+                throw JournalAnchor.Error.malformedPlumbingOutput(
+                    command: "hash-object", line: "")
+            }
+            stashBlob = oid
+        }
+
         let contents = JournalAnchor.Contents(
             metadataJSON: try metadata.serialized(),
             refsBlob: refsBlob,
@@ -168,6 +193,7 @@ public enum JournalCheckpoint {
             untrackedTree: worktree?.untrackedTree,
             sequencerTree: sequencer?.tree,
             worktreeCommit: worktree?.commit,
+            stashBlob: stashBlob,
             keepAlive: keepAlive)
         return try JournalAnchor.write(contents, id: id, in: context, git: git)
     }

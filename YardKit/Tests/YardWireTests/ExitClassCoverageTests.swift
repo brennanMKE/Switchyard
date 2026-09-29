@@ -197,6 +197,9 @@ struct ExitClassCoverageTests {
             // repository, submodule, nothing unstaged).
             Row("DiscardChanges.Refusal", DiscardChanges.Refusal.conflicted(path: "c.txt"),
                 .repositoryError),
+            // #0490: an unparseable stash listing, the class
+            // RefSnapshot.Error's malformed ref line carries.
+            Row("StashSnapshot.Error", StashSnapshot.Error.malformedLine("bad line"), .repositoryError),
             // #0242: JournalObserved.Metadata gained a production
             // serialization path; its error carries the same class as
             // JournalEntryMetadata.SerializationError above.
