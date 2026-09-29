@@ -19,7 +19,7 @@ internal let encodingFailureEnvelope =
 /// all) is local too, but has no command name to put in a set — `runYard`
 /// and `isAnsweredLocally` each handle that case (`arguments.isEmpty`)
 /// directly.
-let localCommandNames: Set<String> = ["--help", "--version", "-v", "schema", "noop", "hook"]
+let localCommandNames: Set<String> = ["--help", "--version", "-v", "schema", "noop", "skill", "hook"]
 
 /// True when `dispatch` can answer `arguments` without reaching the app —
 /// either `arguments` is empty (bare invocation) or its first element is in
@@ -137,6 +137,17 @@ public func runYard(arguments: [String]) -> (stdout: String, stderr: String, exi
 
     case "noop":
         return (stdout: jsonString(Envelope()), stderr: "", exitCode: .success)
+
+    case "skill":
+        // #0067: the skill is documentation, printed as markdown like
+        // `--help` — guide §11 decision 31. Built from the registry at run
+        // time, so the binary carries it with no resource file.
+        guard arguments.count == 1 else {
+            let env = EnvelopeFail(code: .usage, message: "skill takes no arguments.")
+            let human = "[error] \(env.error.code.rawValue): \(env.error.message)\n"
+            return (stdout: jsonString(env), stderr: human, exitCode: .usage)
+        }
+        return (stdout: renderSkill(), stderr: "", exitCode: .success)
 
     case HookArm.commandName:
         // Answered by dispatch → `HookArm.run`, which reads stdin and

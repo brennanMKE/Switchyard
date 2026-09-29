@@ -12,7 +12,7 @@ public enum CommandRegistry {
 
     /// All known `yard` command specifications in the order they should be
     /// rendered in help output.
-    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, revertSpec, cherryPickSpec, mergeSpec, rewriteDiffSpec, rerereSpec, reviewSpec, askSpec, resolveSpec, watchSpec, tagSpec, branchSpec, rebaseOntoSpec, setTipSpec]
+    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, skillSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, revertSpec, cherryPickSpec, mergeSpec, rewriteDiffSpec, rerereSpec, reviewSpec, askSpec, resolveSpec, watchSpec, tagSpec, branchSpec, rebaseOntoSpec, setTipSpec]
 
     // MARK: - The switchyard spec — rendered by `yard --help`
 
@@ -43,6 +43,19 @@ public enum CommandRegistry {
             ExitCodeSpec(code: 1, meaning: "Invalid arguments or unknown subcommand."),
         ],
         schemaName: "noop"
+    )
+
+    // MARK: - The skill spec — prints the agent skill (#0067)
+
+    static let skillSpec = CommandSpec(
+        name: "skill",
+        summary: "Print the agent skill, skills/switchyard/SKILL.md, as markdown. Needs no app and no repository.",
+        flags: [],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The skill markdown was printed."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — skill takes no arguments."),
+        ],
+        schemaName: "skill"
     )
 
     // MARK: - The whereami spec — engine-backed, resolved by `YardCommands` (#0124)

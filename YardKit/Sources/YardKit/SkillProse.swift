@@ -27,7 +27,8 @@ nonisolated enum SkillProse {
 
         `switchyard` is the command-line companion to Switchyard.app, a macOS git client. The app owns \
         the repository engine; the CLI sends each command to it and prints the reply. Every rewrite it \
-        performs is recorded in the app's journal, so the human can undo it from the app.
+        performs is recorded in the app's journal, so the human can undo it from the app. \
+        `switchyard skill` prints this document.
 
         ## Before you start
 
@@ -36,9 +37,9 @@ nonisolated enum SkillProse {
         - Most commands launch Switchyard.app if it is not running. `review`, `ask`, `resolve` and \
         `watch` never launch it: they need a human already at the app, and exit 3 without one. Treat \
         exit 3 from those as "no human available" — do not proceed as if approved.
-        - A command's stdout is exactly one JSON envelope. The exceptions are `--help` and `--version`, \
-        which print text, and `watch`, which streams one JSON object per line. Parse `ok` and the exit \
-        code; do not scrape the human-readable stderr line.
+        - A command's stdout is exactly one JSON envelope. The exceptions are `--help`, `--version` and \
+        `switchyard skill`, which print text, and `watch`, which streams one JSON object per line. Parse \
+        `ok` and the exit code; do not scrape the human-readable stderr line.
         - Nothing is interactive. No editor or pager ever opens; messages are passed as flags.
         - Undo is not a CLI command in this build. A rewrite that went wrong is undone by the human \
         from the app's Edit menu.

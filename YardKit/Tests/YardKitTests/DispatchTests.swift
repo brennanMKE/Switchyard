@@ -75,7 +75,7 @@ struct DispatchTests {
     /// than being skipped by a loop that only checks the first mismatch.
     @Test(
         "local commands never call connect",
-        arguments: [["--help"], ["--version"], ["-v"], ["schema"], ["noop"], []]
+        arguments: [["--help"], ["--version"], ["-v"], ["schema"], ["noop"], ["skill"], []]
     )
     func localCommandsNeverCallConnect(arguments: [String]) async throws {
         let counter = ConnectCallCounter()
