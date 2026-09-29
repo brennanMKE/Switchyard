@@ -136,6 +136,85 @@ public nonisolated struct WorkingChanges: Equatable, Sendable {
     }
 }
 
+// MARK: - #0465: Amend (guide §11 decision 33)
+
+nonisolated extension WorkingChanges {
+
+    /// Why the Amend button is disabled, or `nil` when it is enabled.
+    /// Unlike Commit, nothing staged is fine: that is a message-only amend.
+    public func amendBlockedReason(message: String) -> String? {
+        if !conflicted.isEmpty { return "Resolve the conflicted files first" }
+        if message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return "Write a commit message"
+        }
+        return nil
+    }
+
+    /// Why the Amend checkbox is disabled, or `nil` when it is enabled.
+    /// `target` is `nil` while `loadAmendTarget` has not answered (or
+    /// failed). An operation in progress comes first: git refuses to amend
+    /// during a merge, and amending in the middle of a rebase, cherry-pick
+    /// or revert would rewrite the commit the sequencer just made.
+    public static func amendUnavailableReason(
+        target: AmendHead.Target?, whereAmI: WhereAmI
+    ) -> String? {
+        if whereAmI.isMidMerge { return "Finish or abort the merge first" }
+        if whereAmI.isMidRebase { return "Finish or abort the rebase first" }
+        if whereAmI.isMidCherryPick { return "Finish or abort the cherry-pick first" }
+        if whereAmI.isMidRevert { return "Finish or abort the revert first" }
+        guard let target else { return "Reading the last commit…" }
+        return target.refusal.map(\.description)
+    }
+}
+
+/// The Changes view's message editor and Amend checkbox, one value so the
+/// draft set aside while amending travels with the message (#0465). Owned
+/// by `ContentView`, so it survives selecting a commit and coming back.
+public nonisolated struct CommitDraft: Equatable, Sendable {
+    /// What the editor shows.
+    public var message: String
+    /// Whether the button amends `HEAD` instead of committing.
+    public private(set) var isAmending: Bool
+    /// The draft set aside when Amend was turned on, put back when it is
+    /// turned off.
+    private var setAside: String
+
+    public init(message: String = "") {
+        self.message = message
+        self.isAmending = false
+        self.setAside = ""
+    }
+
+    /// Turns Amend on or off. On sets the draft aside and shows
+    /// `headMessage`; off puts the draft back, discarding any edit to the
+    /// amend message. Setting the current value changes nothing.
+    public mutating func setAmending(_ amending: Bool, headMessage: String) {
+        guard amending != isAmending else { return }
+        if amending {
+            setAside = message
+            message = headMessage
+        } else {
+            message = setAside
+            setAside = ""
+        }
+        isAmending = amending
+    }
+
+    /// What the button sends.
+    public var change: WorkingChange {
+        isAmending ? .amend(message: message) : .commit(message: message)
+    }
+
+    /// Why the button is disabled, or `nil`. `amendUnavailable` is
+    /// `WorkingChanges.amendUnavailableReason`'s answer: amending stays
+    /// blocked if the checkbox is on when `HEAD` stops being amendable (a
+    /// push from the toolbar, say).
+    public func blockedReason(for changes: WorkingChanges, amendUnavailable: String?) -> String? {
+        guard isAmending else { return changes.commitBlockedReason(message: message) }
+        return amendUnavailable ?? changes.amendBlockedReason(message: message)
+    }
+}
+
 /// Both hunk listings the Changes view reads a file's diff from, loaded
 /// together so the two sides always describe the same index.
 public nonisolated struct WorkingDiffs: Equatable, Sendable {
@@ -163,6 +242,8 @@ public nonisolated enum WorkingChange: Equatable, Sendable {
     case stageHunk(id: String)
     case unstageHunk(id: String)
     case commit(message: String)
+    /// #0465: `git commit --amend -m` (guide §11 decision 33).
+    case amend(message: String)
 
     /// The header's progress line while this change runs.
     public var progressLabel: String {
@@ -170,6 +251,7 @@ public nonisolated enum WorkingChange: Equatable, Sendable {
         case .stageFiles, .stageHunk: "Staging…"
         case .unstageFiles, .unstageHunk: "Unstaging…"
         case .commit: "Committing…"
+        case .amend: "Amending…"
         }
     }
 
@@ -182,6 +264,7 @@ public nonisolated enum WorkingChange: Equatable, Sendable {
         case .stageFiles, .stageHunk: "Couldn’t Stage"
         case .unstageFiles, .unstageHunk: "Couldn’t Unstage"
         case .commit: "Couldn’t Commit"
+        case .amend: "Couldn’t Amend"
         }
         var message = String(describing: error)
         if case let .exited(_, stderr, _) = error as? GitProcess.Failure {
@@ -208,6 +291,14 @@ public func loadWorkingDiffs(at path: String) async throws -> WorkingDiffs {
     return WorkingDiffs(unstaged: unstaged, staged: staged)
 }
 
+/// #0465: what Amend would rewrite — `HEAD`, its message, and the
+/// engine's refusal. `@concurrent` because `AmendHead.target` blocks in up
+/// to three `git` subprocesses.
+@concurrent
+public func loadAmendTarget(at path: String) async throws -> AmendHead.Target {
+    try AmendHead.target(at: path)
+}
+
 /// Runs one Changes-view mutation. The engine calls are synchronous and
 /// block in git subprocesses (a commit may wait on a signing prompt);
 /// `@concurrent` keeps them off the main actor, as `performCommitAction`
@@ -226,5 +317,7 @@ public func performWorkingChange(_ change: WorkingChange, at path: String) async
         try unstageHunks(ids: [id], at: path)
     case let .commit(message):
         _ = try commitStaged(message: message, at: path)
+    case let .amend(message):
+        try AmendHead.run(message: message, at: path)
     }
 }

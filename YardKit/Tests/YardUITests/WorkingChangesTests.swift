@@ -112,3 +112,102 @@ func theLoaderAndPerformerStageAHunkAndCommitIt(format: FixtureRepository.RefFor
     #expect(try repo.revParse("HEAD~1") == head)
     #expect(try await loadWorkingDiffs(at: path).staged.isEmpty)
 }
+
+// MARK: - #0465: Amend (guide §11 decision 33)
+
+private func whereAmI(
+    merge: Bool = false, rebase: Bool = false, cherryPick: Bool = false, revert: Bool = false
+) -> WhereAmI {
+    WhereAmI(
+        branch: "main", upstream: nil, ahead: nil, behind: nil,
+        isMidRebase: rebase, isMidMerge: merge, isMidCherryPick: cherryPick,
+        isMidRevert: revert, stashCount: 0, untrackedCount: 0, unstagedCount: 0,
+        stagedCount: 0, hasConflicts: false, conflictCount: 0,
+        headOID: "a1b2c3d", rawHead: "a1b2c3d")
+}
+
+@Test func turningAmendOnShowsHeadsMessageAndTurningItOffRestoresTheDraft() {
+    var draft = CommitDraft(message: "half-written")
+    #expect(draft.change == .commit(message: "half-written"))
+
+    draft.setAmending(true, headMessage: "Last commit\n\nIts body.")
+    #expect(draft.isAmending)
+    #expect(draft.message == "Last commit\n\nIts body.")
+    draft.message += " Fixed."
+    #expect(draft.change == .amend(message: "Last commit\n\nIts body. Fixed."))
+
+    draft.setAmending(true, headMessage: "ignored")
+    #expect(draft.message == "Last commit\n\nIts body. Fixed.", "setting the current value changes nothing")
+
+    draft.setAmending(false, headMessage: "ignored")
+    #expect(!draft.isAmending)
+    #expect(draft.message == "half-written")
+    #expect(draft.change == .commit(message: "half-written"))
+}
+
+@Test func amendNeedsNoStagedChangeButIsBlockedByConflictsABlankMessageOrAnUnavailableHead() {
+    let clean = WorkingChanges(staged: [], unstaged: [], conflicted: [])
+    let conflicted = WorkingChanges(
+        staged: [], unstaged: [],
+        conflicted: [.init(side: .conflicted, path: "c.txt", state: .conflicted)])
+    var draft = CommitDraft()
+    draft.setAmending(true, headMessage: "Last commit")
+
+    #expect(draft.blockedReason(for: clean, amendUnavailable: nil) == nil, "a message-only amend")
+    #expect(draft.blockedReason(for: conflicted, amendUnavailable: nil) == "Resolve the conflicted files first")
+    #expect(draft.blockedReason(for: clean, amendUnavailable: "pushed") == "pushed")
+    draft.message = " \n"
+    #expect(draft.blockedReason(for: clean, amendUnavailable: nil) == "Write a commit message")
+
+    draft.setAmending(false, headMessage: "")
+    #expect(draft.blockedReason(for: clean, amendUnavailable: nil) == "Stage a change to commit")
+}
+
+@Test func theAmendCheckboxIsUnavailableDuringAnOperationWhileLoadingAndWhenRefused() {
+    let ok = AmendHead.Target(oid: "abc", message: "m", refusal: nil)
+    let pushed = AmendHead.Target(oid: "abc", message: "m", refusal: .pushed(remoteRef: "origin/main"))
+
+    #expect(WorkingChanges.amendUnavailableReason(target: ok, whereAmI: whereAmI()) == nil)
+    #expect(WorkingChanges.amendUnavailableReason(target: nil, whereAmI: whereAmI()) == "Reading the last commit…")
+    #expect(WorkingChanges.amendUnavailableReason(target: pushed, whereAmI: whereAmI())
+        == AmendHead.Refusal.pushed(remoteRef: "origin/main").description)
+    #expect(WorkingChanges.amendUnavailableReason(target: ok, whereAmI: whereAmI(merge: true))
+        == "Finish or abort the merge first")
+    #expect(WorkingChanges.amendUnavailableReason(target: ok, whereAmI: whereAmI(rebase: true))
+        == "Finish or abort the rebase first")
+    #expect(WorkingChanges.amendUnavailableReason(target: ok, whereAmI: whereAmI(cherryPick: true))
+        == "Finish or abort the cherry-pick first")
+    #expect(WorkingChanges.amendUnavailableReason(target: ok, whereAmI: whereAmI(revert: true))
+        == "Finish or abort the revert first")
+}
+
+@Test func amendHasItsOwnProgressLabelAlertTitleAndUndoTitle() {
+    #expect(WorkingChange.amend(message: "m").progressLabel == "Amending…")
+    let hook = GitProcess.Failure.exited(code: 1, stderr: "lint: no\n", arguments: ["commit", "--amend"])
+    let failure = WorkingChange.amend(message: "m").failure(for: hook)
+    #expect(failure.title == "Couldn’t Amend")
+    #expect(failure.message == "lint: no")
+    #expect(JournalMenuTitles.undo(operation: "amend") == "Undo Amend")
+    #expect(JournalMenuTitles.redo(operation: "amend") == "Redo Amend")
+}
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func theLoaderAndPerformAmendHead(format: FixtureRepository.RefFormat) async throws {
+    var repo = try FixtureRepository(refFormat: format)
+    defer { repo.destroy() }
+    try repo.build([
+        .init("base", files: ["a.txt": "one\n"]),
+        .init("second", files: ["b.txt": "bee\n"]),
+    ])
+    let path = repo.url.path
+    let parent = try repo.revParse("HEAD~1")
+
+    let target = try await loadAmendTarget(at: path)
+    #expect(target.oid == (try repo.revParse("HEAD")))
+    #expect(target.message == "second")
+    #expect(target.refusal == nil)
+
+    try await performWorkingChange(.amend(message: "second, amended"), at: path)
+    #expect(try repo.revParse("HEAD~1") == parent)
+    #expect(try await loadAmendTarget(at: path).message == "second, amended")
+}
