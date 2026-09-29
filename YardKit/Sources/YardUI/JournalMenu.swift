@@ -33,6 +33,10 @@ public nonisolated enum JournalMenuTitles {
         "branch-delete": "Delete Branch",
         "tag-create": "New Tag",
         "tag-delete": "Delete Tag",
+        // #0441: the Changes view's three operations (guide §11 decision 30).
+        "stage": "Stage",
+        "unstage": "Unstage",
+        "commit": "Commit",
     ]
 
     /// "Undo <title>" for a mapped operation, plain "Undo" for anything
