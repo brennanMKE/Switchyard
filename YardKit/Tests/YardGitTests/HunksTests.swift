@@ -1227,3 +1227,28 @@ func commitDiffOfAConflictedMergeShowsTheCombinedDiff(format: FixtureRepository.
     #expect(files.first?.hunks.map(\.body) == [[" a\r", "-b\r", "+B\r", " c\r"]])
     #expect(files.last?.hunks.map(\.body) == [[" x", "-y", "+Y"]])
 }
+
+// MARK: - #0482: a changed line that opens with a combining mark
+
+/// A body line is its marker scalar plus the file's line. When the file's
+/// line opens with a combining mark (U+0301), Swift fuses the marker and the
+/// mark into one `Character`, so `line.first` is `"-\u{301}"`, never `"-"`:
+/// the line consumed neither count, the hunk still wanted body when the next
+/// `@@` header arrived, and the second hunk was swallowed into the first
+/// (measured on `main`: `hunks.count == 1`).
+@Test func aChangedLineOpeningWithACombiningMarkLeavesTheNextHunkSeparate() throws {
+    var repo = try FixtureRepository()
+    defer { repo.destroy() }
+    var old = (1...20).map { "line \($0)" }
+    old[1] = "\u{301}b"
+    var new = old
+    new[1] = "\u{301}B"
+    new[17] = "LINE 18"
+    try repo.build([.init("base", files: ["a.txt": old.joined(separator: "\n") + "\n"])])
+    try repo.writeUntracked(["a.txt": new.joined(separator: "\n") + "\n"])
+
+    let file = try #require(try listHunks(at: repo.url.path, area: .unstaged).first)
+
+    #expect(file.hunks.count == 2)
+    #expect(file.hunks.first?.body == [" line 1", "-\u{301}b", "+\u{301}B", " line 3", " line 4", " line 5"])
+}

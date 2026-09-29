@@ -406,7 +406,11 @@ public struct HunkParser {
         /// marker: context consumes both sides, `-` the old side, `+` the
         /// new, `\` neither.
         private mutating func consumePlain(_ line: String) {
-            guard let marker = line.first else { return }
+            // The marker is the line's first *scalar*: a file line opening
+            // with a combining mark fuses with it into one `Character`, so
+            // `line.first` would be `"-\u{301}"` and consume neither count
+            // (#0482, measured).
+            guard let marker = line.unicodeScalars.first else { return }
             switch marker {
             case " ": remaining[0] -= 1; remaining[1] -= 1
             case "-": remaining[0] -= 1
