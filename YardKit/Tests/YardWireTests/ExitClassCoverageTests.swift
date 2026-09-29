@@ -184,6 +184,11 @@ struct ExitClassCoverageTests {
             // signing class is asserted in
             // RefManageTests.aSigningFailureIsTypedAndCreatesNothing.
             Row("RefManageError", RefManageError.messageRequired, .repositoryError),
+            // #0452: every RemoteSync.Refusal is decided before anything
+            // runs, from the repository's own state (detached HEAD, no
+            // upstream, no remote) — one class, asserted in
+            // RemoteSyncTests.everyRefusalIsARepositoryError.
+            Row("RemoteSync.Refusal", RemoteSync.Refusal.detachedHead, .repositoryError),
             // #0242: JournalObserved.Metadata gained a production
             // serialization path; its error carries the same class as
             // JournalEntryMetadata.SerializationError above.
