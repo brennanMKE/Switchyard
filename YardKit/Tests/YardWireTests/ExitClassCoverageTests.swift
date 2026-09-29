@@ -200,6 +200,10 @@ struct ExitClassCoverageTests {
             // #0490: an unparseable stash listing, the class
             // RefSnapshot.Error's malformed ref line carries.
             Row("StashSnapshot.Error", StashSnapshot.Error.malformedLine("bad line"), .repositoryError),
+            // #0491: Stash.Refusal is decided before anything runs, from
+            // the repository's own state (no commits, nothing to stash,
+            // conflicts, intent-to-add, a stash no longer listed).
+            Row("Stash.Refusal", Stash.Refusal.nothingToStash, .repositoryError),
             // #0242: JournalObserved.Metadata gained a production
             // serialization path; its error carries the same class as
             // JournalEntryMetadata.SerializationError above.
