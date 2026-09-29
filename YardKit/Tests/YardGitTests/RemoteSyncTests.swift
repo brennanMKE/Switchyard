@@ -212,3 +212,125 @@ func aDivergedPullRefusesWithGitsStderrAndLeavesTheBranch(
     }
     #expect(try fixture.journalOperations() == before)
 }
+
+// MARK: - Push (#0454)
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func pushSendsTheBranchToItsUpstreamAndWritesAPushEntryAfterward(
+    format: FixtureRepository.RefFormat
+) async throws {
+    let fixture = try Tracked(format)
+    defer { fixture.destroy() }
+    try fixture.commitLocally(file: "c.txt")
+    let head = try fixture.repo.revParse("HEAD")
+
+    let result = try await RemoteSync.push(at: fixture.path)
+
+    #expect(result == .init(remote: "origin", remoteRef: "refs/heads/main", setUpstream: false))
+    #expect(try fixture.remoteTip() == head)
+    #expect(try fixture.repo.revParse("refs/remotes/origin/main") == head)
+    #expect(try fixture.journalOperations().last == "push")
+    // The entry is the state AFTER the push: restoring it moves nothing.
+    try JournalUndo.undo(in: try await WorktreeContext.resolve(path: fixture.path))
+    #expect(try fixture.repo.revParse("refs/remotes/origin/main") == head)
+    #expect(try fixture.repo.revParse("HEAD") == head)
+}
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func theFirstPushOfABranchSetsItsUpstreamOnOrigin(format: FixtureRepository.RefFormat) async throws {
+    let fixture = try Tracked(format)
+    defer { fixture.destroy() }
+    try await GitProcess().run(["switch", "-q", "-c", "feature"], workingDirectory: fixture.path)
+    try fixture.commitLocally(file: "f.txt")
+    let head = try fixture.repo.revParse("HEAD")
+
+    let result = try await RemoteSync.push(at: fixture.path)
+
+    #expect(result == .init(remote: "origin", remoteRef: "refs/heads/feature", setUpstream: true))
+    #expect(try fixture.remoteTip("feature") == head)
+    let git = GitProcess()
+    #expect(try await git.run(["config", "branch.feature.remote"], workingDirectory: fixture.path).lines == ["origin"])
+    #expect(try await git.run(["config", "branch.feature.merge"], workingDirectory: fixture.path).lines == ["refs/heads/feature"])
+}
+
+@Test func pushSendsOnlyTheCurrentBranchWhateverPushDefaultSays() async throws {
+    let fixture = try Tracked(.files)
+    defer { fixture.destroy() }
+    // `other` exists on the remote and is ahead locally: `matching` would push it.
+    try await GitProcess().run(["switch", "-q", "-c", "other"], workingDirectory: fixture.path)
+    try await GitProcess().run(["push", "-q", "origin", "other"], workingDirectory: fixture.path)
+    try fixture.commitLocally(file: "o.txt")
+    let otherRemote = try fixture.remoteTip("other")
+    try await GitProcess().run(["switch", "-q", "main"], workingDirectory: fixture.path)
+    try fixture.commitLocally(file: "m.txt")
+    try await GitProcess().run(["config", "push.default", "matching"], workingDirectory: fixture.path)
+
+    try await RemoteSync.push(at: fixture.path)
+
+    #expect(try fixture.remoteTip() == (try fixture.repo.revParse("HEAD")))
+    #expect(try fixture.remoteTip("other") == otherRemote, "push must not send a branch that is not checked out")
+}
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func aRejectedPushThrowsGitsStderrAndWritesNoEntry(format: FixtureRepository.RefFormat) async throws {
+    let fixture = try Tracked(format)
+    defer { fixture.destroy() }
+    let remote = try fixture.advanceRemote(file: "b.txt")
+    try fixture.commitLocally(file: "c.txt")
+    let before = try fixture.journalOperations()
+
+    await #expect {
+        try await RemoteSync.push(at: fixture.path)
+    } throws: { error in
+        guard case let .exited(_, stderr, _) = error as? GitProcess.Failure else { return false }
+        return stderr.contains("[rejected]")
+    }
+    #expect(try fixture.remoteTip() == remote, "a rejected push is never forced")
+    #expect(try fixture.journalOperations() == before)
+}
+
+@Test func pushRefusesWithNoRemoteAndWithAnAmbiguousOne() async throws {
+    var repo = try FixtureRepository()
+    defer { repo.destroy() }
+    try repo.build([.init("base", files: ["a.txt": "one\n"])])
+    await #expect(throws: RemoteSync.Refusal.noRemote) {
+        try await RemoteSync.push(at: repo.url.path)
+    }
+    try await GitProcess().run(["remote", "add", "alpha", "/nonexistent/a.git"], workingDirectory: repo.url.path)
+    try await GitProcess().run(["remote", "add", "beta", "/nonexistent/b.git"], workingDirectory: repo.url.path)
+    await #expect(throws: RemoteSync.Refusal.ambiguousRemote(["alpha", "beta"])) {
+        try await RemoteSync.push(at: repo.url.path)
+    }
+}
+
+@Test func cancellingAPushStopsItAndWritesNoEntry() async throws {
+    let fixture = try Tracked(.files)
+    defer { fixture.destroy() }
+    try fixture.commitLocally(file: "c.txt")
+    let remote = try fixture.remoteTip()
+    let before = try fixture.journalOperations()
+    // A pre-push hook that announces itself, then blocks.
+    let hooks = try await GitProcess().run(
+        ["rev-parse", "--path-format=absolute", "--git-path", "hooks"],
+        workingDirectory: fixture.path
+    ).lines.first ?? ""
+    try FileManager.default.createDirectory(atPath: hooks, withIntermediateDirectories: true)
+    let marker = fixture.path + "/../pre-push-started-\(UUID().uuidString)"
+    let hook = hooks + "/pre-push"
+    try "#!/bin/sh\ntouch '\(marker)'\nsleep 60\n".write(toFile: hook, atomically: true, encoding: .utf8)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hook)
+    defer { try? FileManager.default.removeItem(atPath: marker) }
+
+    let path = fixture.path
+    let push = Task { try await RemoteSync.push(at: path) }
+    // Bounded wait for the hook to start: 600 × 100 ms.
+    for _ in 0..<600 where !FileManager.default.fileExists(atPath: marker) {
+        try await Task.sleep(for: .milliseconds(100))
+    }
+    #expect(FileManager.default.fileExists(atPath: marker), "the pre-push hook never started")
+    push.cancel()
+
+    await #expect(throws: CancellationError.self) { try await push.value }
+    #expect(try fixture.remoteTip() == remote)
+    #expect(try fixture.journalOperations() == before)
+}
