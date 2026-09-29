@@ -24,6 +24,11 @@ public enum StagingError: Error, Equatable, CustomStringConvertible, Sendable {
     /// the conflict, then stage the resolved content.
     case combinedHunkNotStageable(path: String)
 
+    /// #0476: a line selection names a body line of the hunk that is not a
+    /// `+` or `-` line — context, a `\ No newline` marker, or past the end.
+    /// Only changed lines can be staged, unstaged or discarded on their own.
+    case notAChangedLine(hunkID: String, line: Int)
+
     public var description: String {
         switch self {
         case let .unknownHunkIDs(ids, area):
@@ -34,6 +39,9 @@ public enum StagingError: Error, Equatable, CustomStringConvertible, Sendable {
             "hunk(s) of \(path) belong to a combined diff (`diff --cc`) — a "
                 + "conflicted file is not stageable by hunk; resolve the "
                 + "conflict, then stage the resolved content"
+        case let .notAChangedLine(hunkID, line):
+            "line \(line) of hunk \(hunkID) is not an added or removed line — "
+                + "only changed lines can be selected"
         }
     }
 }
