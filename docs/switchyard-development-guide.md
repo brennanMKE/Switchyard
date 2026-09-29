@@ -1773,6 +1773,79 @@ a feature at any milestone on the grounds that GitUp had it.
     - **Out of scope, filed as questions in #0474:** a selection across hunks or files, keyboard
       selection, and a CLI surface for line staging.
 
+36. **Stashes are listed in the sidebar and shown in the Detail pane; Stash Changes…, Apply, Pop
+    and Drop… are each one journal entry, and the journal captures the stash list itself.**
+    Decided 2026-09-29 in the planning pass for umbrella **#0489**, with high confidence; each
+    bullet is cheap to reverse, and #0489 carries the questions for Brennan.
+
+    - **The journal needs a new piece, because a stash is a reflog entry, not a ref.** `stash@{1}`
+      exists only as the second line of `refs/stash`'s reflog, and `RefSnapshot` records
+      `refs/stash`'s oid and nothing else. Measured on git 2.54.0: dropping `stash@{1}` leaves
+      `refs/stash` unchanged, so restoring refs brings nothing back; dropping `stash@{0}` and
+      writing `refs/stash` back with `update-ref` returns the oid as a new reflog line with an
+      **empty message** (`stash@{0}: `); and a stash pushed onto an empty list creates
+      `refs/stash`, which a restore leaves alone (decision 20), so the stash would survive its
+      own Undo. So every checkpoint also captures **`StashSnapshot`**: the list as `<oid>
+      <message>` lines, newest first, stored as a `stash` blob in the anchor tree, with every
+      stash oid a keep-alive parent so a dropped stash stays reachable. Restore compares it with
+      the live list and, when they differ, rebuilds the reflog: `update-ref -d refs/stash`
+      (removes the ref and its reflog), then one `update-ref --create-reflog -m <message>
+      refs/stash <oid>` per entry, oldest first. Not `git stash store`: it refuses a commit that
+      is not stash-like (exit 128), and a refusal halfway through would leave the list half
+      rebuilt. An empty list is an empty blob, which restore honours by deleting `refs/stash`; an
+      entry written before this change has no blob and leaves the list alone. Reflog timestamps
+      become the restore's; nothing shows them (the sidebar dates a stash by its commit). git
+      collapses a newline or tab in a stash message to a space when it writes the reflog
+      (measured), so the line format cannot be broken.
+    - **The stash list is repository-wide, and so is its restore.** `refs/stash` lives in the
+      common directory. Undo in one worktree puts the list back as the entry recorded it, which
+      also removes a stash a sibling worktree made since; Redo brings it back. This is decision
+      34's rule (Undo restores the whole snapshot) applied to the one piece every worktree
+      shares. #0489 question 1.
+    - **Engine: `Stash` in `YardGit/Stash.swift`, always `git stash`.** `list` (one `git stash
+      list --format`, parents and committer date included), `push(message:includeUntracked:)`,
+      `apply(oid:restoreIndex:)`, `pop(oid:restoreIndex:)`, `drop(oid:)`. A stash is named by its
+      **oid**; the `stash@{n}` index is looked up at the moment of the call, and an oid no longer
+      listed is refused rather than acting on a neighbour. Operation strings `stash`,
+      `stash-apply`, `stash-pop`, `stash-drop` (not `drop`, which is Delete Commit's); Edit ▸ Undo
+      reads **Undo Stash Changes**, **Undo Apply Stash**, **Undo Pop Stash**, **Undo Drop Stash**.
+    - **Refusals, before the checkpoint** (`Stash.Refusal`, exit class 6): no commits (git: "You
+      do not have the initial commit yet"), nothing to stash (git prints "No local changes to
+      save" and exits **0**, which would leave an entry for nothing), conflicted paths (git:
+      "could not write index" / "needs merge" for push and apply), an intent-to-add path (git:
+      "Entry '…' not uptodate. Cannot merge."), and an oid no longer listed. All measured.
+    - **Pop is `git stash pop`, one entry.** git applies, then drops only when the apply had no
+      conflict. **A conflict is an outcome, not an error**: git applies what it can, leaves
+      conflict markers and unmerged paths, keeps the stash ("The stash entry is kept in case you
+      need it again.", exit 1) and starts no operation, so there is no Continue or Abort. The
+      engine returns `.conflicted(paths:)`; the app says so in an informational alert and the
+      header's existing **Resolve Conflicts…** (#0394) is the way through. Undo Pop or Undo Apply
+      puts the tree and the list back as they were. Any other non-zero exit is thrown with git's
+      stderr: local changes to the same file ("would be overwritten by merge", nothing changed),
+      an untracked file in the way ("already exists, no checkout" — tracked changes **are**
+      applied first, measured, so the alert says Undo puts things back), `--index` failing
+      ("conflicts in index. Try without --index.", nothing changed).
+    - **Apply and Pop bring staged changes back unstaged, as git does; a Restore staged changes
+      checkbox passes `--index`.** Measured: without it a staged edit comes back unstaged and a
+      staged new file stays added; with it both come back staged.
+    - **Stash Changes… includes untracked files by default.** A button left of Amend in the
+      Changes view opens a sheet: an optional message, **Include untracked files** (on), Stash.
+      On by default because the Changes list shows untracked files and Stash Changes should empty
+      it; git's own default is off. Disabled with a reason while there are conflicts or no
+      changes. Works on a detached `HEAD` (git names it `(no branch)`).
+    - **Where the list lives.** The sidebar's Stashes section lists every stash: its message and
+      `stash@{n}` · its date. Clicking one shows it in the Detail pane like a commit: the
+      message, the base commit, whether it holds untracked files, and its files' diffs (tracked
+      changes against the base, then untracked files as new files), with **Apply**, **Pop** and
+      **Drop…** and the Restore staged changes checkbox. The row's context menu has the same
+      three. **Drop… asks first**: "Drop stash “<message>”?", saying Edit ▸ Undo Drop Stash
+      brings it back, destructive button **Drop** with no Return shortcut (#0359's rule).
+    - **Errors** are alerts titled "Couldn’t Stash Changes", "Couldn’t Apply Stash", "Couldn’t
+      Pop Stash" or "Couldn’t Drop Stash" with git's stderr, the shape of decision 30.
+    - **Out of scope, filed as questions in #0489:** `git stash branch`, stashing selected files
+      or hunks (`push -- <paths>`, `--staged`, `--patch`), `--keep-index`, renaming a stash, and
+      CLI verbs.
+
 ### Still open
 
 **Is M1's criterion 5 closable as written, and should it be restated?** Raised by the twelfth M1
