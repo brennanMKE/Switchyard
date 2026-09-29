@@ -180,8 +180,12 @@ public struct HunkParser {
             file = nil
         }
 
-        for lineSub in text.split(separator: "\n", omittingEmptySubsequences: false) {
-            let line = String(lineSub)
+        // Split on the newline *scalar*, not the `Character`: Swift reads
+        // "\r\n" as one Character, so a Character split leaves a CRLF
+        // file's lines joined and its hunk swallows every file after it
+        // (#0475, measured).
+        for lineSub in text.unicodeScalars.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = String(Substring(lineSub))
 
             if line.hasPrefix("diff --git ") {
                 closeFile()

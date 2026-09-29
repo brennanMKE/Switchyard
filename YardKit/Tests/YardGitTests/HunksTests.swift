@@ -1208,3 +1208,22 @@ func commitDiffOfAConflictedMergeShowsTheCombinedDiff(format: FixtureRepository.
     let failure = try #require(thrown)
     #expect(failure.exitClass == .repositoryError)
 }
+
+// MARK: - #0475: CRLF lines
+
+/// Swift reads "\r\n" as one `Character`, so a parser that splits on the
+/// "\n" Character never splits a CRLF line: the file's whole body became one
+/// line, its counts were never consumed, and the hunk swallowed every file
+/// after it (measured on `main`: `files.map(\.path) == ["a.txt"]`).
+@Test func aCRLFFileSplitsIntoItsLinesAndTheNextFileStillLists() throws {
+    var repo = try FixtureRepository()
+    defer { repo.destroy() }
+    try repo.build([.init("base", files: ["a.txt": "a\r\nb\r\nc\r\n", "b.txt": "x\ny\n"])])
+    try repo.writeUntracked(["a.txt": "a\r\nB\r\nc\r\n", "b.txt": "x\nY\n"])
+
+    let files = try listHunks(at: repo.url.path, area: .unstaged)
+
+    #expect(files.map(\.path) == ["a.txt", "b.txt"])
+    #expect(files.first?.hunks.map(\.body) == [[" a\r", "-b\r", "+B\r", " c\r"]])
+    #expect(files.last?.hunks.map(\.body) == [[" x", "-y", "+Y"]])
+}
