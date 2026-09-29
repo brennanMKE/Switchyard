@@ -179,3 +179,19 @@ struct JournalMenuDerivationTests {
                 == "Undo")
     }
 }
+
+/// #0459: a push is recorded but cannot be undone (guide §11 decision 32).
+@Suite("JournalMenu push")
+struct JournalMenuPushTests {
+    @Test func undoAfterAPushIsBlockedAndSaysSo() {
+        #expect(JournalMenu.undoBlocked(operation: "push"))
+        #expect(JournalMenuTitles.undo(operation: "push") == "Can’t Undo Push")
+    }
+
+    @Test func everyOtherOperationStaysUndoable() {
+        for operation in ["fetch", "pull", "commit", "stage", "merge", nil] as [String?] {
+            #expect(!JournalMenu.undoBlocked(operation: operation))
+        }
+        #expect(JournalMenuTitles.undo(operation: "pull") == "Undo Pull")
+    }
+}

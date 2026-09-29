@@ -926,7 +926,8 @@ public struct ContentView: View {
                 operation: JournalMenu.undoOperation(in: journalListing)),
             redoTitle: JournalMenuTitles.redo(
                 operation: JournalMenu.redoOperation(in: journalListing)),
-            undoEnabled: journalListing?.state.undoTarget != nil && !busy,
+            undoEnabled: journalListing?.state.undoTarget != nil && !busy
+                && !JournalMenu.undoBlocked(operation: JournalMenu.undoOperation(in: journalListing)),
             redoEnabled: journalListing?.state.redoTarget != nil && !busy,
             perform: { runJournal($0) })
     }

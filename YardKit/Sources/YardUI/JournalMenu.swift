@@ -47,7 +47,9 @@ public nonisolated enum JournalMenuTitles {
     /// else — an unknown operation string, or an entry whose metadata did
     /// not decode.
     public static func undo(operation: String?) -> String {
-        title("Undo", operation: operation)
+        // #0459: a push cannot be taken back, so the item says so.
+        if JournalMenu.undoBlocked(operation: operation) { return "Can’t Undo Push" }
+        return title("Undo", operation: operation)
     }
 
     /// "Redo <title>" for a mapped operation, plain "Redo" otherwise.
@@ -81,6 +83,14 @@ public nonisolated enum JournalMenu {
             return nil
         }
         return listing?.items.first { $0.entry.id == cursor }?.metadata?.operation
+    }
+
+    /// #0459: whether Undo must stay disabled for the entry it would
+    /// restore. Only a push: its entry is written after the push succeeds
+    /// (`RemoteSync.push`), the remote already has the commits, and no local
+    /// restore can take them back (guide §11 decision 32).
+    public static func undoBlocked(operation: String?) -> Bool {
+        operation == "push"
     }
 
     /// #0448: whether Undo and Redo belong to text editing rather than the
