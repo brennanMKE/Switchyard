@@ -562,6 +562,7 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-09-29 | #0488 | round 1, Sonnet implementation, 342 s wall, passed pending review (S, measured) | 102,794 | — |
 | 2026-09-29 | #0489-#0496 | Opus planning subagent: stash support (decision 36, umbrella + 7 children, StashSnapshot journal piece, VM spikes), 2,827 s wall (O, measured) | 417,433 | — |
 | 2026-09-29 | #0490 | round 1, Sonnet implementation, 421 s wall, passed pending review (S, measured) | 136,480 | — |
+| 2026-09-29 | #0491 | round 1, Sonnet implementation, passed pending review (S) | — | — |
 | | | **Total measured** (tokens include 2026-09-22/23 rows; $ not updated for them) | **47,386,796** | **$437.24** |
 
 ## What this total does and does not cover
