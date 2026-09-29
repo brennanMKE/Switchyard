@@ -265,6 +265,16 @@ public nonisolated struct DiscardConfirmation: Equatable, Sendable {
             + "Edit ▸ Undo Discard brings it back."
         change = .discardHunk(id: hunk.id)
     }
+
+    /// #0479: discarding the selected lines of one unstaged hunk. `lines`
+    /// are indices into `hunk.body`, as `DiffLineSelection` gives them.
+    public init(lines: [Int], of hunk: Hunk) {
+        title = lines.count == 1
+            ? "Discard 1 line of \(hunk.path)?" : "Discard \(lines.count) lines of \(hunk.path)?"
+        message = "The selected lines go back to the staged version. "
+            + "Edit ▸ Undo Discard brings them back."
+        change = .discardLines(hunkID: hunk.id, lines: lines)
+    }
 }
 
 /// Both hunk listings the Changes view reads a file's diff from, loaded
@@ -302,14 +312,32 @@ public nonisolated enum WorkingChange: Equatable, Sendable {
     /// #0470: discard one unstaged hunk.
     case discardHunk(id: String)
 
+    /// #0479: stage, unstage or discard the selected lines of one hunk
+    /// (guide §11 decision 35). `lines` are indices into the hunk's `body`.
+    case stageLines(hunkID: String, lines: [Int])
+    case unstageLines(hunkID: String, lines: [Int])
+    case discardLines(hunkID: String, lines: [Int])
+
+    /// #0479: what a diff hunk's Stage Hunk / Unstage Hunk button sends:
+    /// the whole hunk when none of its lines are selected, else the
+    /// selected lines (Stage Lines / Unstage Lines).
+    public static func stageOrUnstage(_ hunk: Hunk, lines: [Int], staged: Bool) -> WorkingChange {
+        switch (lines.isEmpty, staged) {
+        case (true, false): .stageHunk(id: hunk.id)
+        case (true, true): .unstageHunk(id: hunk.id)
+        case (false, false): .stageLines(hunkID: hunk.id, lines: lines)
+        case (false, true): .unstageLines(hunkID: hunk.id, lines: lines)
+        }
+    }
+
     /// The header's progress line while this change runs.
     public var progressLabel: String {
         switch self {
-        case .stageFiles, .stageHunk: "Staging…"
-        case .unstageFiles, .unstageHunk: "Unstaging…"
+        case .stageFiles, .stageHunk, .stageLines: "Staging…"
+        case .unstageFiles, .unstageHunk, .unstageLines: "Unstaging…"
         case .commit: "Committing…"
         case .amend: "Amending…"
-        case .discardFiles, .discardHunk: "Discarding…"
+        case .discardFiles, .discardHunk, .discardLines: "Discarding…"
         }
     }
 
@@ -319,11 +347,11 @@ public nonisolated enum WorkingChange: Equatable, Sendable {
     /// would repeat the whole message.
     public func failure(for error: any Error) -> CommitActionFailure {
         let title = switch self {
-        case .stageFiles, .stageHunk: "Couldn’t Stage"
-        case .unstageFiles, .unstageHunk: "Couldn’t Unstage"
+        case .stageFiles, .stageHunk, .stageLines: "Couldn’t Stage"
+        case .unstageFiles, .unstageHunk, .unstageLines: "Couldn’t Unstage"
         case .commit: "Couldn’t Commit"
         case .amend: "Couldn’t Amend"
-        case .discardFiles, .discardHunk: "Couldn’t Discard"
+        case .discardFiles, .discardHunk, .discardLines: "Couldn’t Discard"
         }
         var message = String(describing: error)
         if case let .exited(_, stderr, _) = error as? GitProcess.Failure {
@@ -382,5 +410,11 @@ public func performWorkingChange(_ change: WorkingChange, at path: String) async
         try DiscardChanges.discardPaths(paths, at: path)
     case let .discardHunk(id):
         try DiscardChanges.discardHunks(ids: [id], at: path)
+    case let .stageLines(hunkID, lines):
+        try stageLines(hunkID: hunkID, lines: lines, at: path)
+    case let .unstageLines(hunkID, lines):
+        try unstageLines(hunkID: hunkID, lines: lines, at: path)
+    case let .discardLines(hunkID, lines):
+        try DiscardChanges.discardLines(hunkID: hunkID, lines: lines, at: path)
     }
 }

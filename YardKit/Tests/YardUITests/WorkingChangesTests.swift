@@ -305,3 +305,64 @@ func performDiscardsAFileAndAHunk(format: FixtureRepository.RefFormat) async thr
     #expect(hunks.first?.body.contains("+line 18 edited") == true)
     #expect(try await loadWorkingDiffs(at: path).staged.isEmpty, "discard staged the hunk instead")
 }
+
+// MARK: - #0479: line actions (guide §11 decision 35)
+
+@Test func aLineDiscardConfirmationCountsTheLines() {
+    let hunk = Hunk(id: "abc123", path: "t.txt", oldStart: 1, oldCount: 2, newStart: 1,
+                    newCount: 2, header: "@@ -1,2 +1,2 @@", body: ["-a", "+A", " b"])
+    let one = DiscardConfirmation(lines: [1], of: hunk)
+    #expect(one.title == "Discard 1 line of t.txt?")
+    #expect(one.message == "The selected lines go back to the staged version. "
+        + "Edit ▸ Undo Discard brings them back.")
+    #expect(one.change == .discardLines(hunkID: "abc123", lines: [1]))
+    #expect(DiscardConfirmation(lines: [0, 1], of: hunk).title == "Discard 2 lines of t.txt?")
+}
+
+@Test func theHunkButtonSendsTheHunkOrItsSelectedLines() {
+    let hunk = Hunk(id: "abc123", path: "t.txt", oldStart: 1, oldCount: 1, newStart: 1,
+                    newCount: 1, header: "@@ -1 +1 @@", body: ["-a", "+A"])
+    #expect(WorkingChange.stageOrUnstage(hunk, lines: [], staged: false) == .stageHunk(id: "abc123"))
+    #expect(WorkingChange.stageOrUnstage(hunk, lines: [], staged: true) == .unstageHunk(id: "abc123"))
+    #expect(WorkingChange.stageOrUnstage(hunk, lines: [1], staged: false)
+        == .stageLines(hunkID: "abc123", lines: [1]))
+    #expect(WorkingChange.stageOrUnstage(hunk, lines: [0, 1], staged: true)
+        == .unstageLines(hunkID: "abc123", lines: [0, 1]))
+}
+
+@Test func lineActionsShareTheirHunkActionsLabelsAndTitles() {
+    let failure = GitProcess.Failure.exited(code: 1, stderr: "error: patch failed\n", arguments: ["apply"])
+    #expect(WorkingChange.stageLines(hunkID: "x", lines: [1]).progressLabel == "Staging…")
+    #expect(WorkingChange.unstageLines(hunkID: "x", lines: [1]).progressLabel == "Unstaging…")
+    #expect(WorkingChange.discardLines(hunkID: "x", lines: [1]).progressLabel == "Discarding…")
+    #expect(WorkingChange.stageLines(hunkID: "x", lines: [1]).failure(for: failure).title == "Couldn’t Stage")
+    #expect(WorkingChange.unstageLines(hunkID: "x", lines: [1]).failure(for: failure).title == "Couldn’t Unstage")
+    #expect(WorkingChange.discardLines(hunkID: "x", lines: [1]).failure(for: failure).title == "Couldn’t Discard")
+    #expect(WorkingChange.stageLines(hunkID: "x", lines: [1]).failure(for: failure).message == "error: patch failed")
+}
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func performStagesUnstagesAndDiscardsLines(format: FixtureRepository.RefFormat) async throws {
+    var repo = try FixtureRepository(refFormat: format)
+    defer { repo.destroy() }
+    try repo.build([.init("base", files: ["t.txt": "a\nb\nc\nd\ne\n"])])
+    // One hunk: [" a", " b", "-c", "+C", "+X", " d", " e"].
+    try repo.writeUntracked(["t.txt": "a\nb\nC\nX\nd\ne\n"])
+    let path = repo.url.path
+    let index = { try GitProcess().run(["show", ":t.txt"], workingDirectory: path).text }
+
+    let unstaged = try #require(try await loadWorkingDiffs(at: path).file("t.txt", staged: false)?.hunks.first)
+    try await performWorkingChange(.stageLines(hunkID: unstaged.id, lines: [2, 3]), at: path)
+    #expect(try index() == "a\nb\nC\nd\ne\n")
+
+    let staged = try #require(try await loadWorkingDiffs(at: path).file("t.txt", staged: true)?.hunks.first)
+    #expect(staged.body == [" a", " b", "-c", "+C", " d", " e"])
+    try await performWorkingChange(.unstageLines(hunkID: staged.id, lines: [3]), at: path)
+    #expect(try index() == "a\nb\nd\ne\n")
+
+    let rest = try #require(try await loadWorkingDiffs(at: path).file("t.txt", staged: false)?.hunks.first)
+    let x = try #require(rest.body.firstIndex(of: "+X"))
+    try await performWorkingChange(.discardLines(hunkID: rest.id, lines: [x]), at: path)
+    #expect(try String(contentsOf: repo.url.appendingPathComponent("t.txt"), encoding: .utf8)
+        == "a\nb\nC\nd\ne\n")
+}
