@@ -516,6 +516,7 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-09-29 | #0067 | round 1, Sonnet implementation, 567 s wall, passed pending review (S, measured) | 105,482 | — |
 | 2026-09-29 | #0068 | round 1, Sonnet implementation, 652 s wall, passed pending review (S, measured) | 89,640 | — |
 | 2026-09-29 | #0449 | Opus planning subagent: 30 verified usage strings, renderers, tests, 937 s wall (O, measured) | 165,434 | — |
+| 2026-09-29 | #0449 | round 1, Sonnet implementation, 852 s wall, passed pending review (S, measured) | 130,685 | — |
 | | | **Total measured** (tokens include 2026-09-22/23 rows; $ not updated for them) | **47,386,796** | **$437.24** |
 
 ## What this total does and does not cover
