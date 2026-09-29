@@ -696,6 +696,39 @@ private func commitDiffArguments(revision: String) -> [String] {
     return arguments
 }
 
+// MARK: - Stash diff (#0493)
+
+/// What a stash holds, for the stash detail pane (guide §11 decision 36):
+/// its tracked changes against the commit it was made on, then the
+/// untracked files `--include-untracked` saved, each as a new file.
+///
+/// A stash commit `W` has parents `B` (the base), `I` (the index) and, with
+/// `-u`, `U` — a root commit whose tree is exactly the untracked files
+/// (measured, #0493). `commitDiff` is wrong for it: `W` is a merge, so
+/// `--cc` prints only what differs from *every* parent. So the tracked half
+/// is `git diff B W` — the worktree state, staged and unstaged together,
+/// which is what `git stash show -p` prints — and the untracked half is
+/// `U` diffed against the empty tree with `diff-tree --root`, the root-commit
+/// shape `commitDiff` already measured. The same pinned flags as `listHunks`.
+public func stashDiff(
+    at path: String,
+    oid: String,
+    git: GitProcess = GitProcess()
+) async throws -> [FileDiff] {
+    var tracked = pinnedDiffConfigOverrides + ["diff"] + pinnedDiffFlags
+    tracked += [oid + "^1", oid]
+    var files = try HunkParser().parse(await git.run(tracked, workingDirectory: path).text)
+    let untrackedCommit = oid + "^3"
+    if try await git.capture(["rev-parse", "--verify", "-q", untrackedCommit + "^{commit}"],
+                             workingDirectory: path).exitCode == 0 {
+        var untracked = pinnedDiffConfigOverrides + ["diff-tree", "--root", "-p", "--no-commit-id"]
+        untracked += pinnedDiffFlags
+        untracked.append(untrackedCommit)
+        files += try HunkParser().parse(await git.run(untracked, workingDirectory: path).text)
+    }
+    return files
+}
+
 // MARK: - Wire encoding (#0132)
 
 /// `Hunk` is a `schemaVersion: 1` payload component: it encodes through
