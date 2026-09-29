@@ -589,6 +589,24 @@ public struct ContentView: View {
     /// states and actions come from `menuStates`/`perform` below, built
     /// from this pane's own graph rows and the summary's `WhereAmI`.
     private func historyPane(summary: RepositorySummary) -> some View {
+        VStack(spacing: 0) {
+            // #0446: the working tree's row, above the map. Selecting it
+            // clears every other selection, which is what makes the Detail
+            // pane show the Changes view (guide §11 decision 30).
+            WorkingChangesRow(
+                fileCount: summary.status.entries.count,
+                isSelected: selectedCommit == nil && selectedResolution == nil,
+                onSelect: {
+                    selectedCommit = nil
+                    selectedResolution = nil
+                    selectedRef = nil
+                })
+            Divider()
+            commitHistory(summary: summary)
+        }
+    }
+
+    private func commitHistory(summary: RepositorySummary) -> some View {
         CommitHistoryView(
             entries: history, graphRows: graphRows,
             headOid: summary.whereAmI.rawHead.isEmpty ? nil : summary.whereAmI.rawHead,
