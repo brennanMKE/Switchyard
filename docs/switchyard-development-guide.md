@@ -1560,6 +1560,72 @@ a feature at any milestone on the grounds that GitUp had it.
       (`switchyard skill > …/SKILL.md`) for OpenCode and any other agent; #0069's separate package is
       folded into #0068.
 
+32. **Fetch, Pull and Push are toolbar buttons for the current branch; Pull only fast-forwards,
+    Push never forces, and nothing ever prompts.** Decided 2026-09-29 in the planning pass for
+    umbrella **#0450**, with high confidence; each bullet is cheap to reverse, and #0450 carries the
+    questions for Brennan.
+
+    - **Where.** Three buttons in the window toolbar beside Open…: **Fetch**, **Pull**, **Push**.
+      Each is disabled with its reason as help text: no remotes (all three); detached `HEAD`, no
+      upstream, or an operation in progress (Pull); detached, no commits, an operation in progress,
+      or nothing ahead of the upstream (Push). While one runs, the header's progress line reads
+      "Fetching…", "Pulling…" or "Pushing…" with a **Cancel** button, and the three buttons are
+      disabled. When it finishes the window refreshes in place, so the header's ahead/behind count
+      and the history show the result.
+    - **Engine: `RemoteSync` in `YardGit/RemoteSync.swift`, always a `git` shell-out.** libgit2
+      runs no hooks and has no credential helpers. Fetch is `git fetch --all`, with no `--prune`, so
+      the user's `fetch.prune` config decides. **Pull is `git fetch <upstream remote>` then `git
+      merge --ff-only @{upstream}`, not `git pull`**: `pull.rebase`, `pull.ff` and
+      `branch.<name>.rebase` would each change what `git pull` does, and a fast-forward is the one
+      outcome that neither rewrites nor merges. A diverged branch fails with git's `fatal: Not
+      possible to fast-forward, aborting.` and an alert that offers nothing, destructive or
+      otherwise; merge and rebase are already in the history's context menu. **Push uses an
+      explicit refspec**, `refs/heads/<branch>:<upstream ref>`, so `push.default=matching` cannot
+      widen it (measured: a plain `git push` under `matching` sends every matching branch). A
+      branch with no upstream is pushed to the same name on `origin`, or on the only remote, with
+      `--set-upstream`. With several remotes and none named `origin` it refuses rather than guess.
+      Force-push is out of scope.
+    - **No prompts, ever.** `GitProcess` already sets `GIT_TERMINAL_PROMPT=0` and empties
+      `GIT_ASKPASS` and `SSH_ASKPASS`. **Measured 2026-09-29 by launching a script bundle through
+      Finder** on this Mac: the app's environment is `PATH=/usr/bin:/bin:/usr/sbin:/sbin`, `HOME`,
+      `USER`, `SHELL`, `TMPDIR` and **`SSH_AUTH_SOCK`**, which launchd sets for every GUI process
+      (`launchctl getenv SSH_AUTH_SOCK` returns the same socket). `ssh-add -l` in that environment
+      listed the agent's keys, `git config credential.helper` resolved `osxkeychain` from Xcode's
+      system gitconfig, and `tty` printed `not a tty`. So SSH keys in the agent and HTTPS
+      credentials in the keychain work with no environment repair, and `ssh` has no terminal to
+      prompt on. A missing credential fails fast: with `GIT_TERMINAL_PROMPT=0`, `git credential
+      fill` exits 128 with `fatal: could not read Username for 'https://…': terminal prompts
+      disabled` (measured). The failure is an alert with git's stderr, `hint:` lines removed, plus
+      one sentence saying where to add the credential. What the minimal `PATH` does break is a
+      helper or hook that is not on it, such as a non-absolute `gh auth git-credential` helper or
+      Git LFS's `pre-push` hook. That is #0437's question 3, and it stays open (#0450 question 1).
+    - **Cancel.** Fetch and push run through `GitProcess`'s async `run`, whose task cancellation
+      terminates the child (SIGTERM, then SIGKILL). Measured on a push blocked in a `pre-push` hook
+      that sleeps 60 s: cancelling returns `CancellationError` and the remote is unchanged. In Pull
+      **only the fetch is cancellable**. The merge runs through the synchronous `run`, which
+      cancellation does not reach, because a merge killed halfway through a checkout would leave the
+      worktree half-updated. A cancel presents no alert.
+    - **The journal.** Fetch and Pull each write one entry, `fetch` or `pull`, **before** they run
+      (`JournalCheckpoint.checkpoint`, the same rule as `around`). **Undo Fetch** puts the
+      remote-tracking refs back where they were. The fetched objects stay, the next Fetch brings the
+      refs forward again, and refs the fetch created are left alone (decision 20). **Undo Pull**
+      puts back the branch, the worktree and the remote-tracking refs (measured: the pulled file
+      leaves the worktree and `git status` is clean). The entry matters beyond Undo Fetch itself.
+      Every snapshot records `refs/remotes/*`, so without a `fetch` entry the next Undo of an
+      earlier operation would rewind the fetched remote-tracking refs as a side effect. Measured: commit, then an
+      unjournaled `git fetch` that moves `origin/main`, then Undo Commit — the undo succeeds and
+      `origin/main` is back at its pre-fetch value. With the entry, that rewind is its own step,
+      named Undo Fetch. **Push writes
+      its `push` entry after it succeeds, not before.** It records the state after the push, so
+      restoring it changes nothing. Edit ▸ Undo shows **"Can’t Undo Push"**, disabled, whenever the
+      entry Undo would restore is a push: the remote already has the commits and no local restore
+      can take them back. Undo stays blocked there until a later operation is journaled, which
+      makes the push a wall that Undo does not cross. A failed or cancelled push writes no entry,
+      so Undo still names the operation before it.
+    - **Tests never touch the network.** Every engine test uses a bare repository in a temporary
+      directory as the remote, and the VM fixture (`scripts/uitest-fixtures/make-remote-fixture.sh`)
+      builds its bare remotes inside the guest.
+
 ### Still open
 
 **Is M1's criterion 5 closable as written, and should it be restated?** Raised by the twelfth M1
