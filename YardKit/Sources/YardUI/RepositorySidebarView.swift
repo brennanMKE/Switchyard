@@ -51,7 +51,6 @@ import YardGit
 /// deliberately (#0371).
 public struct RepositorySidebarView: View {
     private let summary: RepositorySidebarSummary
-    private let stashCount: Int
 
     /// #0065: the selected recorded resolution's conflict id, routed to the
     /// Detail pane. `nil` when nothing is selected; the Detail pane's
@@ -65,6 +64,17 @@ public struct RepositorySidebarView: View {
     /// #0401: reports a click on a branch or remote row. The sidebar never
     /// writes the History selection itself.
     private let onSelectRef: ((RefSnapshot.Entry) -> Void)?
+    /// #0496: the oid of the stash row last clicked, owned by
+    /// `ContentView`; the matching row draws selected.
+    private let selectedStash: String?
+    /// #0496: reports a click on a stash row (guide §11 decision 36).
+    private let onSelectStash: ((Stash.Item) -> Void)?
+    /// #0496: a stash row's context menu: Apply and Pop run, Drop… asks
+    /// first, which `ContentView` owns.
+    private let onStashAction: ((StashAction) -> Void)?
+    private let onDropStash: ((Stash.Item) -> Void)?
+    /// #0496: disables the context menu's items while anything runs.
+    private let isBusy: Bool
 
     /// #0371: the ref sections' initial expansion state. Branches opens so
     /// the current branch is visible without a click; Remotes and Tags start
@@ -100,18 +110,27 @@ public struct RepositorySidebarView: View {
     @Binding private var refFilter: String
 
     public init(
-        summary: RepositorySidebarSummary, stashCount: Int,
+        summary: RepositorySidebarSummary,
         selectedResolution: Binding<String?>,
         refFilter: Binding<String> = .constant(""),
         selectedRef: String? = nil,
-        onSelectRef: ((RefSnapshot.Entry) -> Void)? = nil
+        onSelectRef: ((RefSnapshot.Entry) -> Void)? = nil,
+        selectedStash: String? = nil,
+        onSelectStash: ((Stash.Item) -> Void)? = nil,
+        onStashAction: ((StashAction) -> Void)? = nil,
+        onDropStash: ((Stash.Item) -> Void)? = nil,
+        isBusy: Bool = false
     ) {
         self.summary = summary
-        self.stashCount = stashCount
         self._selectedResolution = selectedResolution
         self._refFilter = refFilter
         self.selectedRef = selectedRef
         self.onSelectRef = onSelectRef
+        self.selectedStash = selectedStash
+        self.onSelectStash = onSelectStash
+        self.onStashAction = onStashAction
+        self.onDropStash = onDropStash
+        self.isBusy = isBusy
     }
 
     // `nonisolated`: inert String constants, read by the `nonisolated`
@@ -376,9 +395,16 @@ public struct RepositorySidebarView: View {
                         }
                     }
                 }
+                // #0496: every stash, `stash@{0}` first (guide §11
+                // decision 36).
                 Section("Stashes") {
-                    Text(stashCount == 1 ? "1 stash" : "\(stashCount) stashes")
-                        .foregroundStyle(.secondary)
+                    if summary.stashes.isEmpty {
+                        Text("No stashes")
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(summary.stashes) { item in
+                        stashRow(item)
+                    }
                 }
             }
         }
@@ -476,6 +502,37 @@ public struct RepositorySidebarView: View {
         }
     }
 
+    /// #0496: a stash row -- its message without git's `On <branch>: `
+    /// prefix, and `stash@{n}` with its date beneath, the worktree row's
+    /// two-line shape. A tap selects it, the way a branch row selects (a
+    /// tap gesture, so the label stays the static text the VM tests find);
+    /// the context menu offers Apply, Pop and Drop….
+    private func stashRow(_ item: Stash.Item) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Label(StashRowText.label(for: item), systemImage: "tray.full")
+                .lineLimit(1)
+            Text(StashRowText.caption(for: item))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .help(item.message)
+        .contentShape(Rectangle())
+        .onTapGesture { onSelectStash?(item) }
+        .listRowBackground(
+            selectedStash == item.oid
+                ? RoundedRectangle(cornerRadius: 5).fill(Color.accentColor.opacity(0.25))
+                : nil)
+        .contextMenu {
+            Button("Apply") { onStashAction?(.apply(oid: item.oid, restoreIndex: false)) }
+                .disabled(isBusy)
+            Button("Pop") { onStashAction?(.pop(oid: item.oid, restoreIndex: false)) }
+                .disabled(isBusy)
+            Divider()
+            Button("Drop…") { onDropStash?(item) }
+                .disabled(isBusy)
+        }
+    }
+
     /// A recorded rerere resolution row (#0065): the attributed path when
     /// one is live, else "Recorded resolution", with the short conflict id
     /// beneath — the worktree row's two-line shape. Tapping routes the
@@ -533,9 +590,13 @@ public struct RepositorySidebarView: View {
                         paths: ["f.txt"],
                         replayedPaths: [])
                 ]
-            )
+            ),
+            stashes: [
+                Stash.Item(
+                    index: 0, oid: "d4e5f6a", baseOID: "a1b2c3d", includesUntracked: true,
+                    date: 1_700_000_000, message: "On main: half done")
+            ]
         ),
-        stashCount: 2,
         selectedResolution: $selectedResolution
     )
 }

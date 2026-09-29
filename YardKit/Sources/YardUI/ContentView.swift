@@ -158,6 +158,21 @@ public struct ContentView: View {
     /// guard `runningAction` gives the commit actions.
     @State private var runningWorkingChange: WorkingChange?
 
+    /// #0496: the stash selected in the sidebar, by oid (guide §11
+    /// decision 36). Selecting one clears every other selection, and the
+    /// Detail pane shows it; a pop or drop that removes it lets the pane
+    /// fall back to the Changes view.
+    @State private var selectedStash: String?
+    /// #0496: `loadStashDiff`'s result for `selectedStash`; `nil` while
+    /// loading.
+    @State private var selectedStashDiff: [FileDiff]?
+    @State private var selectedStashDiffError: String?
+    /// #0496: the stash action running right now, folded into `isBusy`
+    /// and the Edit menu's busy check like `runningWorkingChange`.
+    @State private var runningStash: StashAction?
+    /// #0496: the Drop… confirmation on screen; `nil` when none is.
+    @State private var pendingStashDrop: StashDropConfirmation?
+
     /// #0457: the toolbar's network operation running right now, `nil` when
     /// none. Folded into `isBusy` and the Edit menu's busy check, the same
     /// guard `runningWorkingChange` gives the Changes view.
@@ -416,6 +431,11 @@ public struct ContentView: View {
         .task(id: selectedResolution) {
             await reloadSelectedResolution()
         }
+        .task(id: selectedStash) {
+            await reloadSelectedStashDiff()
+        }
+        // #0496: Drop… asks first (guide §11 decision 36).
+        .modifier(StashDropDialog(pending: $pendingStashDrop) { runStashAction($0) })
         // #0055: the pending review for the repository this view shows,
         // presented as a sheet. The centre removes a decided model — which
         // clears the binding and dismisses — and a timed-out or superseded
@@ -563,7 +583,7 @@ public struct ContentView: View {
             // take seconds and may raise a pinentry or agent prompt the
             // user must be able to reach.
             if let progress = runningAction?.progressLabel ?? runningWorkingChange?.progressLabel
-                ?? runningRemote?.progressLabel {
+                ?? runningRemote?.progressLabel ?? runningStash?.progressLabel {
                 HStack(spacing: 6) {
                     ProgressView()
                         .controlSize(.small)
@@ -604,7 +624,7 @@ public struct ContentView: View {
         Group {
             if let sidebar {
                 RepositorySidebarView(
-                    summary: sidebar, stashCount: summary.whereAmI.stashCount,
+                    summary: sidebar,
                     selectedResolution: Binding(
                         get: { selectedResolution },
                         set: { newValue in
@@ -612,16 +632,30 @@ public struct ContentView: View {
                             // Picking a resolution last is what the Detail
                             // pane shows; a stale commit selection would
                             // only keep the pane's commit branch alive.
-                            if newValue != nil { selectedCommit = nil }
+                            if newValue != nil {
+                                selectedCommit = nil
+                                selectedStash = nil
+                            }
                         }),
                     refFilter: $filterText,
                     selectedRef: selectedRef,
                     onSelectRef: { entry in
                         selectedRef = entry.name
                         selectedResolution = nil
+                        selectedStash = nil
                         selectedCommit = entry.oid
                         historyScrollRequest = HistoryScrollRequest(oid: entry.oid)
-                    })
+                    },
+                    selectedStash: selectedStash,
+                    onSelectStash: { item in
+                        selectedStash = item.oid
+                        selectedCommit = nil
+                        selectedResolution = nil
+                        selectedRef = nil
+                    },
+                    onStashAction: { runStashAction($0) },
+                    onDropStash: { pendingStashDrop = StashDropConfirmation(item: $0) },
+                    isBusy: isBusy || journalRunning)
             } else {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -642,11 +676,12 @@ public struct ContentView: View {
             // pane show the Changes view (guide §11 decision 30).
             WorkingChangesRow(
                 fileCount: summary.status.entries.count,
-                isSelected: selectedCommit == nil && selectedResolution == nil,
+                isSelected: selectedCommit == nil && selectedResolution == nil && selectedStash == nil,
                 onSelect: {
                     selectedCommit = nil
                     selectedResolution = nil
                     selectedRef = nil
+                    selectedStash = nil
                 })
             Divider()
             commitHistory(summary: summary)
@@ -673,6 +708,7 @@ public struct ContentView: View {
                     if newValue != nil {
                         selectedResolution = nil
                         selectedRef = nil
+                        selectedStash = nil
                     }
                 }))
     }
@@ -685,7 +721,17 @@ public struct ContentView: View {
     /// working-tree status list unchanged.
     private func detailPane(summary: RepositorySummary) -> some View {
         Group {
-            if let selectedResolutionEntry {
+            // #0496: a selected stash, while the list still holds it.
+            if let selectedStash,
+               let item = sidebar?.stashes.first(where: { $0.oid == selectedStash }) {
+                StashDetailView(
+                    item: item,
+                    files: selectedStashDiff,
+                    diffError: selectedStashDiffError,
+                    isBusy: isBusy || journalRunning,
+                    perform: { runStashAction($0) },
+                    onDrop: { pendingStashDrop = StashDropConfirmation(item: item) })
+            } else if let selectedResolutionEntry {
                 RerereDetailView(
                     repositoryPath: repositoryPath ?? "",
                     entry: selectedResolutionEntry,
@@ -791,6 +837,7 @@ public struct ContentView: View {
         selectedResolutionEntry = nil
         selectedResolutionDiff = nil
         selectedResolutionDiffError = nil
+        selectedStash = nil
         selectedCommitDiff = nil
         selectedCommitDiffError = nil
         journalListing = nil
@@ -859,6 +906,19 @@ public struct ContentView: View {
         }
     }
 
+    /// #0496: loads the selected stash's files, keyed by `.task(id:)` the
+    /// way `reloadSelectedCommitDiff` is.
+    private func reloadSelectedStashDiff() async {
+        selectedStashDiffError = nil
+        selectedStashDiff = nil
+        guard let repositoryPath, let selectedStash else { return }
+        do {
+            selectedStashDiff = try await loadStashDiff(at: repositoryPath, oid: selectedStash)
+        } catch {
+            selectedStashDiffError = String(describing: error)
+        }
+    }
+
     /// #0065: after a successful forget, reload the sidebar so the
     /// forgotten entry leaves the Rerere section. The full reload is not
     /// needed — a forget touches the rr-cache only — and the detail pane
@@ -877,7 +937,7 @@ public struct ContentView: View {
     /// `conflictActionRunning`.
     private var isBusy: Bool {
         runningAction != nil || conflictActionRunning || runningWorkingChange != nil
-            || runningRemote != nil
+            || runningRemote != nil || runningStash != nil
     }
 
     /// The owners map the row gutter colours with, which the Merge into
@@ -922,7 +982,7 @@ public struct ContentView: View {
     private var journalMenuTarget: JournalMenuTarget? {
         guard repositoryPath != nil else { return nil }
         let busy = runningAction != nil || journalRunning || runningWorkingChange != nil
-            || runningRemote != nil
+            || runningRemote != nil || runningStash != nil
         return JournalMenuTarget(
             undoTitle: JournalMenuTitles.undo(
                 operation: JournalMenu.undoOperation(in: journalListing)),
@@ -1071,7 +1131,7 @@ public struct ContentView: View {
     /// current after the chain moves.
     private func runJournal(_ kind: JournalMenuTarget.Kind) {
         guard let repositoryPath, runningAction == nil, runningWorkingChange == nil,
-              runningRemote == nil, !journalRunning
+              runningRemote == nil, runningStash == nil, !journalRunning
         else { return }
         journalRunning = true
         Task {
@@ -1130,6 +1190,32 @@ public struct ContentView: View {
                 actionFailure = change.failure(for: error)
             }
             await refreshAfterMutation { _, _ in nil }
+        }
+    }
+
+    // MARK: - #0496: the stash (guide §11 decision 36)
+
+    /// #0496: runs one stash action — one journal checkpoint in the engine,
+    /// so Edit ▸ Undo reverts it — then refreshes in place. A conflict is a
+    /// notice, not a failure: git applied the stash with conflict markers
+    /// and the header's Resolve Conflicts… takes over. A pop or drop that
+    /// removed the selected stash clears the selection, so the Detail pane
+    /// shows the Changes view.
+    private func runStashAction(_ action: StashAction) {
+        guard let repositoryPath, !isBusy, !journalRunning else { return }
+        runningStash = action
+        Task {
+            defer { runningStash = nil }
+            do {
+                let outcome = try await performStashAction(action, at: repositoryPath)
+                actionFailure = action.conflictNotice(for: outcome)
+            } catch {
+                actionFailure = action.failure(for: error)
+            }
+            await refreshAfterMutation { _, _ in nil }
+            if let selectedStash, sidebar?.stashes.contains(where: { $0.oid == selectedStash }) != true {
+                self.selectedStash = nil
+            }
         }
     }
 
@@ -1270,6 +1356,7 @@ public struct ContentView: View {
             workingTreeRevision += 1
             if let newSelection = select(newRows, newSummary.whereAmI.rawHead) {
                 selectedResolution = nil
+                selectedStash = nil
                 selectedCommit = newSelection
             }
         } catch {

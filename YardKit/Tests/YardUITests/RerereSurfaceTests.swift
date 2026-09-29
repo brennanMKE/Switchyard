@@ -285,7 +285,7 @@ func rerereViewsArePubliclyConstructible() throws {
             ]))
     var selected: String?
     let sidebar = RepositorySidebarView(
-        summary: summary, stashCount: 0,
+        summary: summary,
         selectedResolution: Binding(get: { selected }, set: { selected = $0 }))
     _ = sidebar
 
