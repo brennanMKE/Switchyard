@@ -59,5 +59,6 @@
   ],
   "schemaName" : "noop",
   "schemaVersion" : 1,
-  "summary" : "A no-op command that returns a success envelope."
+  "summary" : "A no-op command that returns a success envelope.",
+  "usage" : "noop [--help]"
 }

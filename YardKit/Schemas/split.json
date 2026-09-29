@@ -85,5 +85,6 @@
   ],
   "schemaName" : "split",
   "schemaVersion" : 1,
-  "summary" : "Split one commit into two commits along a hunk boundary."
+  "summary" : "Split one commit into two commits along a hunk boundary.",
+  "usage" : "split <commit> <hunkID> [--first <message>] [--second <message>] [--sign | --no-sign]"
 }

@@ -67,5 +67,6 @@
   ],
   "schemaName" : "watch",
   "schemaVersion" : 1,
-  "summary" : "Stream repository and app events as newline-delimited JSON until detached."
+  "summary" : "Stream repository and app events as newline-delimited JSON until detached.",
+  "usage" : "watch [<repository-path>] [--timeout <seconds>]"
 }

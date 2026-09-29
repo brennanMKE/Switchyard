@@ -81,5 +81,6 @@
   ],
   "schemaName" : "tag",
   "schemaVersion" : 1,
-  "summary" : "Create a lightweight or annotated tag at a commit."
+  "summary" : "Create a lightweight or annotated tag at a commit.",
+  "usage" : "tag <name> <commit> [--annotate] [--message <message>] [--sign | --no-sign]"
 }

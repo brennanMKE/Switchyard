@@ -19,6 +19,7 @@ public enum CommandRegistry {
     static let switchyardSpec = CommandSpec(
         name: "switchyard",
         summary: "\(ServiceNames.cliName) CLI — version, help, and command schema.",
+        usage: "[--help | --version | <command> [<arguments>]]",
         flags: [
             FlagSpec(long: "help", short: "h", argument: nil, help: "Show this help text and exit."),
             FlagSpec(long: "version", short: "v", argument: nil, help: "Print the CLI version and exit."),
@@ -35,6 +36,7 @@ public enum CommandRegistry {
     static let noopSpec = CommandSpec(
         name: "noop",
         summary: "A no-op command that returns a success envelope.",
+        usage: "noop [--help]",
         flags: [
             FlagSpec(long: "help", short: "h", argument: nil, help: "Show this command's help and exit."),
         ],
@@ -50,6 +52,7 @@ public enum CommandRegistry {
     static let skillSpec = CommandSpec(
         name: "skill",
         summary: "Print the agent skill, skills/switchyard/SKILL.md, as markdown. Needs no app and no repository.",
+        usage: "skill",
         flags: [],
         exitCodes: [
             ExitCodeSpec(code: 0, meaning: "The skill markdown was printed."),
@@ -63,6 +66,7 @@ public enum CommandRegistry {
     static let whereamiSpec = CommandSpec(
         name: "whereami",
         summary: "Report branch, upstream, ahead/behind, and worktree status in one call.",
+        usage: "whereami",
         flags: [],
         exitCodes: [
             ExitCodeSpec(code: 0, meaning: "The command completed and returned repository status."),
@@ -110,6 +114,7 @@ public enum CommandRegistry {
     static let statusSpec = CommandSpec(
         name: "status",
         summary: "Report the per-file worktree status, as `git status --porcelain=v2` sees it.",
+        usage: "status",
         flags: [],
         exitCodes: [
             ExitCodeSpec(code: 0, meaning: "The command completed and returned the worktree status."),
@@ -129,6 +134,7 @@ public enum CommandRegistry {
     static let conflictsSpec = CommandSpec(
         name: "conflicts",
         summary: "Report every conflicted path in the index, with the blob id and mode of each stage.",
+        usage: "conflicts",
         flags: [],
         exitCodes: [
             ExitCodeSpec(code: 0, meaning: "The command completed and returned the conflicts surface: the conflicted paths, plus rerereReplayed — the paths where a recorded rerere resolution has been replayed into the working file during the live conflict (#0065)."),
@@ -160,6 +166,7 @@ public enum CommandRegistry {
     static let wtSpec = CommandSpec(
         name: "wt",
         summary: "Report the repository's worktrees, as `git worktree list --porcelain` sees them.",
+        usage: "wt list",
         flags: [],
         exitCodes: [
             ExitCodeSpec(code: 0, meaning: "The command completed and returned the worktree list."),
@@ -188,6 +195,7 @@ public enum CommandRegistry {
     static let wtWhereSpec = CommandSpec(
         name: "wt where",
         summary: "Report the current worktree's name, path, git dir, common dir, and the main worktree's path.",
+        usage: "wt where",
         flags: [],
         exitCodes: [
             ExitCodeSpec(code: 0, meaning: "The command completed and returned the worktree context."),
@@ -209,6 +217,7 @@ public enum CommandRegistry {
     static let hunksSpec = CommandSpec(
         name: "hunks",
         summary: "Report the per-file diff hunks for one area, staged or unstaged.",
+        usage: "hunks (--staged | --unstaged)",
         flags: [
             FlagSpec(long: "staged", argument: nil, help: "Diff HEAD against the index, as `git diff --cached` sees it."),
             FlagSpec(long: "unstaged", argument: nil, help: "Diff the index against the worktree."),
@@ -234,6 +243,7 @@ public enum CommandRegistry {
     static let logSpec = CommandSpec(
         name: "log",
         summary: "List the commit history reachable from HEAD (or a given range), newest first.",
+        usage: "log [<range>...]",
         flags: [],
         exitCodes: [
             ExitCodeSpec(code: 0, meaning: "The command completed and returned the commit log."),
@@ -257,6 +267,7 @@ public enum CommandRegistry {
     static let graphSpec = CommandSpec(
         name: "graph",
         summary: "List the commit DAG as lane-assigned rows, one per commit, newest first.",
+        usage: "graph [--limit <n>]",
         flags: [
             FlagSpec(long: "limit", argument: "n", help: "Cap the number of rows, newest first (git rev-list --max-count)."),
         ],
@@ -282,6 +293,7 @@ public enum CommandRegistry {
     static let verifySpec = CommandSpec(
         name: "verify",
         summary: "Report git's verification verdict for the signature on one commit (default HEAD).",
+        usage: "verify <revision>",
         flags: [],
         exitCodes: [
             ExitCodeSpec(code: 0, meaning: "The command completed and returned the verification verdict. A bad or missing signature is still a completed command — the verdict is in the payload."),
@@ -306,6 +318,7 @@ public enum CommandRegistry {
     static let absorbSpec = CommandSpec(
         name: "absorb",
         summary: "Distribute the staged hunks into the commits that last touched their lines.",
+        usage: "absorb [--dry-run]",
         flags: [
             FlagSpec(long: "dry-run", argument: nil, help: "Report the planned distribution without touching anything."),
         ],
@@ -331,6 +344,7 @@ public enum CommandRegistry {
     static let splitSpec = CommandSpec(
         name: "split",
         summary: "Split one commit into two commits along a hunk boundary.",
+        usage: "split <commit> <hunkID> [--first <message>] [--second <message>] [--sign | --no-sign]",
         flags: [
             FlagSpec(long: "first", argument: "message", help: "The first half's commit message (default: the original commit's)."),
             FlagSpec(long: "second", argument: "message", help: "The second half's commit message (default: the original commit's)."),
@@ -359,6 +373,7 @@ public enum CommandRegistry {
     static let rewordSpec = CommandSpec(
         name: "reword",
         summary: "Rewrite one commit's message without invoking an editor.",
+        usage: "reword <commit> --message <message> [--sign | --no-sign]",
         flags: [
             FlagSpec(long: "message", argument: "message", help: "The commit's new message, passed as a flag — GIT_EDITOR is never invoked."),
             FlagSpec(long: "sign", argument: nil, help: "Sign the rebuilt commit and the replayed descendants, even when commit.gpgsign is false."),
@@ -385,6 +400,7 @@ public enum CommandRegistry {
     static let dropSpec = CommandSpec(
         name: "drop",
         summary: "Remove one commit from the branch, its changes and all.",
+        usage: "drop <commit> [--sign | --no-sign]",
         flags: [
             FlagSpec(long: "sign", argument: nil, help: "Sign the replayed descendants, even when commit.gpgsign is false."),
             FlagSpec(long: "no-sign", argument: nil, help: "Never sign, even when commit.gpgsign is true."),
@@ -404,6 +420,7 @@ public enum CommandRegistry {
     static let reorderSpec = CommandSpec(
         name: "reorder",
         summary: "Move one commit to immediately before or after another commit on the branch.",
+        usage: "reorder <commit> (--before <ref> | --after <ref>) [--sign | --no-sign]",
         flags: [
             FlagSpec(long: "before", argument: "ref", help: "Move the commit to immediately before this reference commit."),
             FlagSpec(long: "after", argument: "ref", help: "Move the commit to immediately after this reference commit."),
@@ -425,6 +442,7 @@ public enum CommandRegistry {
     static let revertSpec = CommandSpec(
         name: "revert",
         summary: "Apply the inverse of one commit to the current branch as a new commit.",
+        usage: "revert <commit> [--sign | --no-sign]",
         flags: [
             FlagSpec(long: "sign", argument: nil, help: "Sign the inverse commit, even when commit.gpgsign is false."),
             FlagSpec(long: "no-sign", argument: nil, help: "Never sign, even when commit.gpgsign is true."),
@@ -444,6 +462,7 @@ public enum CommandRegistry {
     static let cherryPickSpec = CommandSpec(
         name: "cherry-pick",
         summary: "Replay one commit from elsewhere onto the current branch as a new commit.",
+        usage: "cherry-pick <commit> [--sign | --no-sign]",
         flags: [
             FlagSpec(long: "sign", argument: nil, help: "Sign the replayed commit, even when commit.gpgsign is false."),
             FlagSpec(long: "no-sign", argument: nil, help: "Never sign, even when commit.gpgsign is true."),
@@ -462,6 +481,7 @@ public enum CommandRegistry {
     static let mergeSpec = CommandSpec(
         name: "merge",
         summary: "Merge a branch into the current branch, stating the fast-forward intent explicitly.",
+        usage: "merge <branch> (--ff-only | --no-ff) [--message <message>] [--allow-unrelated] [--sign | --no-sign]",
         flags: [
             FlagSpec(long: "ff-only", argument: nil, help: "Refuse unless the target can be reached by fast-forward; never creates a merge commit."),
             FlagSpec(long: "no-ff", argument: nil, help: "Always create a merge commit, even when a fast-forward is possible."),
@@ -490,6 +510,7 @@ public enum CommandRegistry {
     static let tagSpec = CommandSpec(
         name: "tag",
         summary: "Create a lightweight or annotated tag at a commit.",
+        usage: "tag <name> <commit> [--annotate] [--message <message>] [--sign | --no-sign]",
         flags: [
             FlagSpec(long: "annotate", argument: nil, help: "Create an annotated tag (implied by --message). Requires a message."),
             FlagSpec(long: "message", argument: "message", help: "The tag's message, passed as a flag — implies an annotated tag; GIT_EDITOR is never invoked."),
@@ -518,6 +539,7 @@ public enum CommandRegistry {
     static let branchSpec = CommandSpec(
         name: "branch",
         summary: "Create, rename, or delete a local branch, or set its upstream.",
+        usage: "branch (create <name> [<start>] | rename <old> <new> | delete <name> [--force] | upstream <name> <upstream>)",
         flags: [
             FlagSpec(long: "force", argument: nil, help: "With delete: delete an unmerged branch, whose commits would otherwise be lost (the journal records the deletion)."),
         ],
@@ -534,6 +556,7 @@ public enum CommandRegistry {
     static let rebaseOntoSpec = CommandSpec(
         name: "rebase-onto",
         summary: "Replay the current branch's commits onto the named base commit.",
+        usage: "rebase-onto <commit> [--sign | --no-sign]",
         flags: [
             FlagSpec(long: "sign", argument: nil, help: "Sign the replayed commits, even when commit.gpgsign is false."),
             FlagSpec(long: "no-sign", argument: nil, help: "Never sign, even when commit.gpgsign is true."),
@@ -558,6 +581,7 @@ public enum CommandRegistry {
     static let setTipSpec = CommandSpec(
         name: "set-tip",
         summary: "Move the current branch's tip to the named commit without replaying anything.",
+        usage: "set-tip <commit>",
         flags: [],
         exitCodes: [
             ExitCodeSpec(code: 0, meaning: "The tip was set; the payload carries the branch's new head oid. The branch ref moved transactionally inside one journal checkpoint; the index and working tree were not touched, and undo restores the pre-state exactly."),
@@ -575,6 +599,7 @@ public enum CommandRegistry {
     static let rewriteDiffSpec = CommandSpec(
         name: "rewrite-diff",
         summary: "Compare one journal entry's rewritten commits against their originals with git range-diff.",
+        usage: "rewrite-diff <journal-entry-id>",
         flags: [],
         exitCodes: [
             ExitCodeSpec(code: 0, meaning: "The diff computed; the payload carries the entry id, which storage shape served the mapping, the ranges compared, and the parsed pair rows (identical, modified, dropped, added). Read-only: nothing was touched."),
@@ -597,6 +622,7 @@ public enum CommandRegistry {
     static let rerereSpec = CommandSpec(
         name: "rerere",
         summary: "Report what git rerere has recorded: the repository's recorded conflict resolutions and whether rerere is enabled.",
+        usage: "rerere status [--json]",
         flags: [
             FlagSpec(long: "json", argument: nil, help: "Accepted for command-line consistency; the default output is already the JSON envelope payload, so this changes nothing."),
         ],
@@ -625,6 +651,7 @@ public enum CommandRegistry {
     static let reviewSpec = CommandSpec(
         name: "review",
         summary: "Push a diff to the app and block until the human decides, returning the decision as structured data.",
+        usage: "review (<range> | --staged) --wait [--timeout <seconds>]",
         flags: [
             FlagSpec(long: "staged", argument: nil, help: "Review the staged changes (HEAD against the index) instead of a range."),
             FlagSpec(long: "wait", argument: nil, help: "Block until the human decides. Required in this build; a non-blocking form does not exist yet."),
@@ -663,6 +690,7 @@ public enum CommandRegistry {
     static let askSpec = CommandSpec(
         name: "ask",
         summary: "Ask the human a question in the app and block until they pick an option, decline, or the wait times out.",
+        usage: "ask <question> --options <a,b,c> [--timeout <seconds>]",
         flags: [
             FlagSpec(long: "options", argument: "a,b,c", help: "The answer options, comma-separated, presented in this order. Required; an empty list or an empty option is a usage refusal."),
             FlagSpec(long: "timeout", argument: "seconds", help: "Give up the wait after this many seconds (default 3600). On expiry the CLI exits 10 with a typed timeout outcome — never a decline. A queued ask's timer starts when it reaches the head of its repository's queue."),
@@ -700,6 +728,7 @@ public enum CommandRegistry {
     static let resolveSpec = CommandSpec(
         name: "resolve",
         summary: "Open the three-way merge UI for the repository's conflicts and block until the human resolves them, cancels, or the wait times out.",
+        usage: "resolve [<pathspec>] --wait [--timeout <seconds>]",
         flags: [
             FlagSpec(long: "wait", argument: nil, help: "Block until the human resolves or cancels. Required in this build; a non-blocking form does not exist yet."),
             FlagSpec(long: "timeout", argument: "seconds", help: "Give up the wait after this many seconds (default 3600). On expiry the CLI exits 10 with a typed timeout outcome — never a cancellation."),
@@ -738,6 +767,7 @@ public enum CommandRegistry {
     static let watchSpec = CommandSpec(
         name: "watch",
         summary: "Stream repository and app events as newline-delimited JSON until detached.",
+        usage: "watch [<repository-path>] [--timeout <seconds>]",
         flags: [
             FlagSpec(long: "timeout", argument: "seconds", help: "Detach after this many seconds, exiting 0. Without it the session runs until the CLI detaches (Ctrl-C) or the app ends it."),
         ],

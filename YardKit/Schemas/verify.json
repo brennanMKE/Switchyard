@@ -58,5 +58,6 @@
   ],
   "schemaName" : "verify",
   "schemaVersion" : 1,
-  "summary" : "Report git's verification verdict for the signature on one commit (default HEAD)."
+  "summary" : "Report git's verification verdict for the signature on one commit (default HEAD).",
+  "usage" : "verify <revision>"
 }

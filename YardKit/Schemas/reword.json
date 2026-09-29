@@ -79,5 +79,6 @@
   ],
   "schemaName" : "reword",
   "schemaVersion" : 1,
-  "summary" : "Rewrite one commit's message without invoking an editor."
+  "summary" : "Rewrite one commit's message without invoking an editor.",
+  "usage" : "reword <commit> --message <message> [--sign | --no-sign]"
 }

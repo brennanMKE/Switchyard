@@ -58,5 +58,6 @@
   ],
   "schemaName" : "log",
   "schemaVersion" : 1,
-  "summary" : "List the commit history reachable from HEAD (or a given range), newest first."
+  "summary" : "List the commit history reachable from HEAD (or a given range), newest first.",
+  "usage" : "log [<range>...]"
 }

@@ -23,6 +23,12 @@ public nonisolated func renderHelp(for spec: CommandSpec) -> String {
         lines.append(spec.name)
     }
 
+    // Usage (#0449): the synopsis, positionals included.
+    if !spec.usage.isEmpty {
+        lines.append("")
+        lines.append("Usage: \(ServiceNames.cliName) \(spec.usage)")
+    }
+
     // Flags.
     if !spec.flags.isEmpty {
         lines.append("")

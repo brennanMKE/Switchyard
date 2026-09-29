@@ -73,5 +73,6 @@
   ],
   "schemaName" : "cherry-pick",
   "schemaVersion" : 1,
-  "summary" : "Replay one commit from elsewhere onto the current branch as a new commit."
+  "summary" : "Replay one commit from elsewhere onto the current branch as a new commit.",
+  "usage" : "cherry-pick <commit> [--sign | --no-sign]"
 }

@@ -91,5 +91,6 @@
   ],
   "schemaName" : "review",
   "schemaVersion" : 1,
-  "summary" : "Push a diff to the app and block until the human decides, returning the decision as structured data."
+  "summary" : "Push a diff to the app and block until the human decides, returning the decision as structured data.",
+  "usage" : "review (<range> | --staged) --wait [--timeout <seconds>]"
 }

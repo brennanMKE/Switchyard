@@ -63,5 +63,6 @@
   ],
   "schemaName" : "branch",
   "schemaVersion" : 1,
-  "summary" : "Create, rename, or delete a local branch, or set its upstream."
+  "summary" : "Create, rename, or delete a local branch, or set its upstream.",
+  "usage" : "branch (create <name> [<start>] | rename <old> <new> | delete <name> [--force] | upstream <name> <upstream>)"
 }

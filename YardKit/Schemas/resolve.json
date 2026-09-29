@@ -89,5 +89,6 @@
   ],
   "schemaName" : "resolve",
   "schemaVersion" : 1,
-  "summary" : "Open the three-way merge UI for the repository's conflicts and block until the human resolves them, cancels, or the wait times out."
+  "summary" : "Open the three-way merge UI for the repository's conflicts and block until the human resolves them, cancels, or the wait times out.",
+  "usage" : "resolve [<pathspec>] --wait [--timeout <seconds>]"
 }

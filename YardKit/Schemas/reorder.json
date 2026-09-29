@@ -85,5 +85,6 @@
   ],
   "schemaName" : "reorder",
   "schemaVersion" : 1,
-  "summary" : "Move one commit to immediately before or after another commit on the branch."
+  "summary" : "Move one commit to immediately before or after another commit on the branch.",
+  "usage" : "reorder <commit> (--before <ref> | --after <ref>) [--sign | --no-sign]"
 }

@@ -81,5 +81,6 @@
   ],
   "schemaName" : "ask",
   "schemaVersion" : 1,
-  "summary" : "Ask the human a question in the app and block until they pick an option, decline, or the wait times out."
+  "summary" : "Ask the human a question in the app and block until they pick an option, decline, or the wait times out.",
+  "usage" : "ask <question> --options <a,b,c> [--timeout <seconds>]"
 }

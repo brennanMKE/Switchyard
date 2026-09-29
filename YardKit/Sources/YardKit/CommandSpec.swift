@@ -40,6 +40,14 @@ import Foundation
 public struct CommandSpec: Sendable, Equatable {
     public let name: String
     public let summary: String
+
+    /// The synopsis after the program name, starting with `name` — e.g.
+    /// `reword <commit> --message <message> [--sign | --no-sign]` (#0449).
+    /// Positionals are `<angle-bracketed>`, optional parts `[bracketed]`,
+    /// alternatives `(a | b)`, and every `--flag` in it is one of `flags`.
+    /// Empty only for a hand-built spec in a test; every entry in
+    /// `CommandRegistry.all` carries one, which `CommandUsageTests` enforces.
+    public let usage: String
     public let flags: [FlagSpec]
     public let exitCodes: [ExitCodeSpec]
     public let schemaName: String
@@ -48,6 +56,7 @@ public struct CommandSpec: Sendable, Equatable {
     public init(
         name: String,
         summary: String,
+        usage: String = "",
         flags: [FlagSpec],
         exitCodes: [ExitCodeSpec],
         schemaName: String,
@@ -55,6 +64,7 @@ public struct CommandSpec: Sendable, Equatable {
     ) {
         self.name = name
         self.summary = summary
+        self.usage = usage
         self.flags = flags
         self.exitCodes = exitCodes
         self.schemaName = schemaName
