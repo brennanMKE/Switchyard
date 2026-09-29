@@ -153,6 +153,11 @@ public struct ContentView: View {
     /// rather than an empty list in that window.
     @State private var sidebar: RepositorySidebarSummary?
 
+    /// #0443: the Changes view's mutation running right now, `nil` when
+    /// none. Folded into `isBusy` and the Edit menu's busy check, the same
+    /// guard `runningAction` gives the commit actions.
+    @State private var runningWorkingChange: WorkingChange?
+
     /// #0393: the journal listing for the open repository — the chain state
     /// the Edit menu's Undo and Redo titles and enabled flags read. `nil`
     /// while loading or with no repository open, which leaves both items
@@ -511,11 +516,11 @@ public struct ContentView: View {
             // #0359: the running action's progress line. No modal and no
             // Cancel button — signing can take seconds and may raise a
             // pinentry or agent prompt the user must be able to reach.
-            if let runningAction {
+            if let progress = runningAction?.progressLabel ?? runningWorkingChange?.progressLabel {
                 HStack(spacing: 6) {
                     ProgressView()
                         .controlSize(.small)
-                    Text(runningAction.progressLabel)
+                    Text(progress)
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -623,14 +628,14 @@ public struct ContentView: View {
                     diffError: selectedCommitDiffError,
                     onShowChanges: { openChanges(for: entry.oid) }
                 )
-            } else if summary.status.entries.isEmpty {
-                Text("Working tree clean")
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else {
-                List(summary.status.entries, id: \.path) { entry in
-                    StatusRow(entry: entry)
-                }
+            } else if let repositoryPath {
+                // #0443: guide §11 decision 30 — with no commit selected
+                // the Detail pane is the Changes view.
+                WorkingChangesView(
+                    changes: WorkingChanges(status: summary.status),
+                    repositoryPath: repositoryPath,
+                    isBusy: isBusy || journalRunning,
+                    perform: { runWorkingChange($0) })
             }
         }
     }
@@ -791,7 +796,9 @@ public struct ContentView: View {
     /// running" — so a second action is dropped rather than queued. #0394:
     /// the header's conflict actions take the same guard through
     /// `conflictActionRunning`.
-    private var isBusy: Bool { runningAction != nil || conflictActionRunning }
+    private var isBusy: Bool {
+        runningAction != nil || conflictActionRunning || runningWorkingChange != nil
+    }
 
     /// The owners map the row gutter colours with, which the Merge into
     /// Current Branch and Edit Local Branch rules read: the branch that
@@ -834,7 +841,7 @@ public struct ContentView: View {
     /// timeout.
     private var journalMenuTarget: JournalMenuTarget? {
         guard repositoryPath != nil else { return nil }
-        let busy = runningAction != nil || journalRunning
+        let busy = runningAction != nil || journalRunning || runningWorkingChange != nil
         return JournalMenuTarget(
             undoTitle: JournalMenuTitles.undo(
                 operation: JournalMenu.undoOperation(in: journalListing)),
@@ -981,7 +988,8 @@ public struct ContentView: View {
     /// on every path through `refreshAfterMutation`, so the titles stay
     /// current after the chain moves.
     private func runJournal(_ kind: JournalMenuTarget.Kind) {
-        guard let repositoryPath, runningAction == nil, !journalRunning else { return }
+        guard let repositoryPath, runningAction == nil, runningWorkingChange == nil, !journalRunning
+        else { return }
         journalRunning = true
         Task {
             defer { journalRunning = false }
@@ -995,8 +1003,10 @@ public struct ContentView: View {
                         "Undone, but “\(branch)” is checked out in another worktree and was left as it is."
                 }
                 await refreshAfterMutation { rows, newHead in
-                    if let selected = selectedCommit,
-                       rows.contains(where: { $0.oid == selected }) {
+                    // #0443: with nothing selected the Detail pane is the
+                    // Changes view — Undo Stage or Undo Commit keeps it.
+                    guard let selected = selectedCommit else { return nil }
+                    if rows.contains(where: { $0.oid == selected }) {
                         return selected
                     }
                     return newHead.isEmpty ? nil : newHead
@@ -1010,6 +1020,28 @@ public struct ContentView: View {
                 // honest if the journal moved while the menu was open.
                 journalListing = try? await loadJournalListing(at: repositoryPath)
             }
+        }
+    }
+
+    // MARK: - #0443: the Changes view
+
+    /// #0443: runs one Changes-view mutation — each is one journal
+    /// checkpoint in the engine, so Edit ▸ Undo reverts it — then refreshes
+    /// in place without touching the selection, which is `nil` while the
+    /// Changes view shows. A failure presents the alert; the refresh runs
+    /// anyway, because a refused commit may still have run hooks that
+    /// changed files.
+    private func runWorkingChange(_ change: WorkingChange) {
+        guard let repositoryPath, !isBusy, !journalRunning else { return }
+        runningWorkingChange = change
+        Task {
+            defer { runningWorkingChange = nil }
+            do {
+                try await performWorkingChange(change, at: repositoryPath)
+            } catch {
+                actionFailure = change.failure(for: error)
+            }
+            await refreshAfterMutation { _, _ in nil }
         }
     }
 

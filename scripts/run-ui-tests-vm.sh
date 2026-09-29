@@ -478,6 +478,7 @@ run_spike_if_selected 0430 Spike0430BranchMapMergedUITests
 run_spike_if_selected 0435 Spike0435LaunchArgumentOpenUITests launch-argument
 run_spike_if_selected 0435 Spike0435PlainLaunchOpenUITests plain
 run_spike_if_selected 0448 Spike0448UndoReachesJournalUITests
+run_spike_if_selected 0443 Spike0443ChangesListUITests
 
 print ""
 if (( TEST_RC == 0 )); then
