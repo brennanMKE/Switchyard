@@ -17,25 +17,42 @@ public struct FileDiffView: View {
     /// #0472: a second button, left of `hunkAction` — the Changes view's
     /// Discard Hunk… on an unstaged hunk. `nil` draws none.
     private let discardAction: HunkAction?
+    /// #0480: the Changes view's selected lines. Non-nil makes `+` and `-`
+    /// lines selectable by click, shift-click, ⌘-click and drag (guide §11
+    /// decision 35); `nil` (every other caller) leaves the diff read-only.
+    private let lineSelection: Binding<DiffLineSelection>?
 
     /// One per-hunk button: its title, whether it is enabled, and what it
     /// does with the hunk it sits on.
     public struct HunkAction {
         public let title: String
+        /// #0480: the title while lines of this hunk are selected, such as
+        /// "Stage Lines"; `nil` keeps `title`.
+        public let linesTitle: String?
         public let isEnabled: Bool
-        public let perform: (Hunk) -> Void
+        /// The hunk, and its selected lines (indices into `body`) — empty
+        /// when none are, which means the whole hunk.
+        public let perform: (Hunk, [Int]) -> Void
 
-        public init(title: String, isEnabled: Bool, perform: @escaping (Hunk) -> Void) {
+        public init(
+            title: String, linesTitle: String? = nil, isEnabled: Bool,
+            perform: @escaping (Hunk, [Int]) -> Void
+        ) {
             self.title = title
+            self.linesTitle = linesTitle
             self.isEnabled = isEnabled
             self.perform = perform
         }
     }
 
-    public init(file: FileDiff, hunkAction: HunkAction? = nil, discardAction: HunkAction? = nil) {
+    public init(
+        file: FileDiff, hunkAction: HunkAction? = nil, discardAction: HunkAction? = nil,
+        lineSelection: Binding<DiffLineSelection>? = nil
+    ) {
         self.file = file
         self.hunkAction = hunkAction
         self.discardAction = discardAction
+        self.lineSelection = lineSelection
     }
 
     public var body: some View {
@@ -54,7 +71,8 @@ public struct FileDiffView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(file.hunks, id: \.id) { hunk in
-                    HunkView(hunk: hunk, action: hunkAction, discard: discardAction)
+                    HunkView(hunk: hunk, action: hunkAction, discard: discardAction,
+                             selection: lineSelection)
                 }
             }
         }
@@ -66,6 +84,16 @@ private struct HunkView: View {
     let hunk: Hunk
     let action: FileDiffView.HunkAction?
     let discard: FileDiffView.HunkAction?
+    let selection: Binding<DiffLineSelection>?
+    /// #0480: where each line sits, for mapping a drag to a line. A class,
+    /// so `onGeometryChange` writing it invalidates nothing: only the drag
+    /// gesture reads it, never `body`.
+    @State private var frames = LineFrames()
+
+    /// The coordinate space line frames and drag locations share.
+    private var space: String { "hunk-\(hunk.id)" }
+
+    private var selectedLines: [Int] { selection?.wrappedValue.selectedLines(in: hunk) ?? [] }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -74,25 +102,74 @@ private struct HunkView: View {
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
                 if action != nil || discard != nil { Spacer() }
-                if let discard {
-                    Button(discard.title) { discard.perform(hunk) }
-                        .buttonStyle(.borderless)
-                        .controlSize(.small)
-                        .disabled(!discard.isEnabled)
-                }
-                if let action {
-                    Button(action.title) { action.perform(hunk) }
-                        .buttonStyle(.borderless)
-                        .controlSize(.small)
-                        .disabled(!action.isEnabled)
-                }
+                if let discard { button(discard) }
+                if let action { button(action) }
             }
             .padding(.vertical, 2)
-            ForEach(Array(hunk.body.enumerated()), id: \.offset) { _, line in
-                DiffLineView(line: line)
+            ForEach(Array(hunk.body.enumerated()), id: \.offset) { offset, line in
+                if let selection {
+                    DiffLineView(line: line, isSelected: selection.wrappedValue.isSelected(offset, in: hunk))
+                        .contentShape(Rectangle())
+                        .onGeometryChange(for: CGRect.self) { [space] proxy in proxy.frame(in: .named(space)) } action: {
+                            frames.rows[offset] = $0
+                        }
+                        .gesture(clicks(offset, selection))
+                } else {
+                    DiffLineView(line: line, isSelected: false)
+                }
             }
         }
+        .simultaneousGesture(drag, isEnabled: selection != nil)
+        .coordinateSpace(.named(space))
         .padding(.bottom, 8)
+    }
+
+    /// A header button, titled for the selected lines when this hunk has any.
+    private func button(_ action: FileDiffView.HunkAction) -> some View {
+        let lines = selectedLines
+        return Button(lines.isEmpty ? action.title : action.linesTitle ?? action.title) {
+            action.perform(hunk, lines)
+        }
+        .buttonStyle(.borderless)
+        .controlSize(.small)
+        .disabled(!action.isEnabled)
+    }
+
+    /// Shift-click, then ⌘-click, then a plain click: the first whose
+    /// modifier is held wins.
+    private func clicks(_ offset: Int, _ selection: Binding<DiffLineSelection>) -> some Gesture {
+        TapGesture().modifiers(.shift).onEnded { selection.wrappedValue.click(offset, in: hunk, modifier: .shift) }
+            .exclusively(before: TapGesture().modifiers(.command).onEnded {
+                selection.wrappedValue.click(offset, in: hunk, modifier: .command)
+            })
+            .exclusively(before: TapGesture().onEnded {
+                selection.wrappedValue.click(offset, in: hunk)
+            })
+    }
+
+    /// A drag over the hunk selects the changed lines between the line it
+    /// started on and the line under the pointer. One gesture on the whole
+    /// hunk, beside the lines' own tap gestures; a drag shorter than 3
+    /// points is left to them as a click.
+    private var drag: some Gesture {
+        DragGesture(minimumDistance: 3, coordinateSpace: .named(space)).onChanged { value in
+            guard let selection,
+                  let start = frames.line(at: value.startLocation.y),
+                  let end = frames.line(at: value.location.y) else { return }
+            selection.wrappedValue.drag(from: start, to: end, in: hunk)
+        }
+    }
+}
+
+/// Each body line's frame in its hunk's coordinate space (#0480).
+private final class LineFrames {
+    var rows: [Int: CGRect] = [:]
+
+    /// The line at `y`: the one whose frame holds it, else the nearest —
+    /// a drag past the hunk's first or last line selects up to that line.
+    func line(at y: CGFloat) -> Int? {
+        if let hit = rows.first(where: { $0.value.minY <= y && y < $0.value.maxY }) { return hit.key }
+        return rows.min { abs($0.value.midY - y) < abs($1.value.midY - y) }?.key
     }
 }
 
@@ -103,11 +180,14 @@ private struct HunkView: View {
 /// adapt to light and dark automatically, not a fixed RGB literal.
 private struct DiffLineView: View {
     let line: String
+    /// #0480: selected in the Changes view; drawn with the accent color.
+    let isSelected: Bool
 
     private var marker: Character? { line.first }
 
     private var backgroundTint: Color {
-        switch marker {
+        if isSelected { return Color.accentColor.opacity(0.35) }
+        return switch marker {
         case "+": Color.green.opacity(0.12)
         case "-": Color.red.opacity(0.12)
         default: Color.clear
@@ -121,6 +201,7 @@ private struct DiffLineView: View {
             .padding(.horizontal, 4)
             .background(backgroundTint)
             .foregroundStyle(marker == "\\" ? .secondary : .primary)
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 
