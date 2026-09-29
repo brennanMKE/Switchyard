@@ -1,0 +1,10 @@
+{
+  "name": "switchyard",
+  "description": "Teaches a coding agent to drive the Switchyard git client through its switchyard CLI.",
+  "author": {
+    "name": "Brennan Stehling"
+  },
+  "homepage": "https://github.com/brennanMKE/Switchyard",
+  "repository": "https://github.com/brennanMKE/Switchyard",
+  "license": "MIT"
+}
