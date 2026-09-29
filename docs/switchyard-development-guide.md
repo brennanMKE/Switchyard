@@ -1678,6 +1678,61 @@ a feature at any milestone on the grounds that GitUp had it.
       it empty" text on stderr (measured); `--allow-empty` is not passed. Both arrive as a
       "Couldn’t Amend" alert with git's stderr, the same shape as "Couldn’t Commit".
 
+34. **Discard is per file (and per hunk) in the Changes view, confirmed by a dialog naming what it
+    throws away, and Edit ▸ Undo Discard brings it back byte for byte from the journal.** Decided
+    2026-09-29 in the planning pass for umbrella **#0467** (#0437's question 2), with high
+    confidence; each bullet is cheap to reverse, and #0467 carries the questions for Brennan.
+
+    - **Undo needs no new journal machinery.** #0437 deferred discard because "the journal would
+      need a worktree snapshot". It already has one: every `JournalCheckpoint.checkpoint` captures
+      `WorktreeSnapshot` — every tracked file's worktree bytes and mode (a copy of the index plus
+      `add -u`, deleted files included as absences) and every untracked, non-ignored file — and
+      every restore applies it. Measured on the planning prototype (#0468's tests): discard, then
+      `JournalUndo.undo`, returns text, a binary file with NUL bytes, an executable bit, a symlink
+      that had been replaced by a regular file, a deleted file, an untracked file, a file named
+      `*.txt` and an untracked directory byte for byte, and `git status` is identical. So a discard
+      is one `JournalCheckpoint.around(operation: "discard")`, and the Edit menu reads **Undo
+      Discard**.
+    - **Where.** Each row in the **Changes** list gets a **Discard Changes…** context-menu item, and
+      the section header a **Discard All…** button beside Stage All. In the selected file's diff,
+      each unstaged hunk gets **Discard Hunk…** beside Stage Hunk. Staged rows and staged hunks
+      offer no discard.
+    - **Every discard asks first.** A confirmation dialog titled "Discard changes to <file>?" or
+      "Discard changes to N files?", naming the files (the first ten, then "and N more"), saying that
+      untracked files are deleted when any are, and that Edit ▸ Undo Discard brings them back. The
+      destructive button is **Discard**, with no Return shortcut (#0359's rule for Delete Commit).
+    - **Staged changes are never touched.** A tracked file goes back to its *index* version with
+      `git --literal-pathspecs restore --worktree --`, whose source is the index. A file with staged
+      and unstaged edits keeps the staged ones. Throwing a staged change away is Unstage, then
+      Discard. Restore works on an unborn branch (measured).
+    - **Untracked files are deleted, not moved to the Trash.** `git --literal-pathspecs clean -f -q
+      --` removes exactly the untracked, non-ignored files the snapshot captured. An ignored file
+      inside an untracked directory stays, where a recursive delete would destroy something no
+      snapshot holds (measured: `dir/a.o` survives `clean -f -- dir/`). The Trash was rejected. Undo
+      would then leave a second copy in the Trash, and a trashed directory would take its ignored
+      files with it. The journal is already the recovery path for every other operation.
+      Pruning is manual (`journal prune`), so a discarded file stays recoverable until the user
+      prunes.
+    - **The engine refuses, before the checkpoint,** a conflicted path (resolve it instead), an
+      intent-to-add path (`git restore` empties it: measured, `ita.txt` becomes 0 bytes), an
+      untracked directory that is its own repository (`git clean -f` skips it silently at exit 0,
+      and `update-index` "Ignoring path" means no snapshot holds it), a submodule, and a path with
+      no unstaged change. `DiscardChanges.Refusal`, exit class 6. The UI offers no discard on
+      conflicted or intent-to-add rows. The other refusals arrive as a "Couldn’t Discard" alert.
+    - **A hunk** is `git apply --reverse` of the patch `stageHunks` already builds (`selectPatch`
+      over the unstaged listing), with no `--cached`. It is the same atomic apply, aimed at the
+      worktree.
+    - **Byte for byte has one exception: content filters.** The snapshot stores the *clean* form
+      (it goes through `git add`), and restore writes it back through smudge. Under
+      `core.autocrlf=input` a CRLF file comes back with LF (measured). The same applies to
+      `.gitattributes` `eol`/`text` and to Git LFS. With no filters, which is the default on macOS,
+      it is exact. This is true of every Undo, not only Discard's. #0467 question 2.
+    - **Undo Discard restores the whole worktree to the moment before the discard, like every
+      Undo.** Measured: discard `a.txt`, then edit `b.txt` and create `c.txt`, then Undo. `b.txt` is back to its
+      old content and `c.txt` is gone. Redo brings them back, because the undo writes its own
+      pre-restore entry. This is the journal's existing contract, not something discard adds. It
+      matters more here, because a discard invites editing afterwards. #0467 question 1.
+
 ### Still open
 
 **Is M1's criterion 5 closable as written, and should it be restated?** Raised by the twelfth M1
