@@ -306,11 +306,16 @@ public final class ReviewSheetModel: Identifiable {
         var choices: [LineChoice] = []
         var newLine = hunk.newStart
         for body in hunk.body {
-            guard let marker = body.first else { continue }
+            // The marker is the line's first *scalar*: a line opening with a
+            // combining mark fuses with it into one `Character`, so
+            // `body.first` would be `"+\u{301}"` and the line would be
+            // skipped (#0487, measured).
+            guard let marker = body.unicodeScalars.first else { continue }
             switch marker {
             case " ", "+":
                 choices.append(
-                    LineChoice(number: newLine, label: "\(newLine)  \(body.dropFirst())"))
+                    LineChoice(number: newLine,
+                               label: "\(newLine)  \(Substring(body.unicodeScalars.dropFirst()))"))
                 newLine += 1
             default:
                 // "-" occupies no new-side line; "\" marks a "\ No newline"

@@ -308,6 +308,26 @@ struct ReviewSheetTests {
         #expect(choices.map(\.label) == ["3  keep", "4  added", "5  tail"])
     }
 
+    // MARK: - #0487: a body line opening with a combining mark
+
+    /// A body line is its marker scalar plus the file's line. When the file's
+    /// line opens with U+0301, Swift fuses the marker and the mark into one
+    /// `Character`, so `body.first` was `"+\u{301}"`: the line was not
+    /// offered, and every later line was numbered one short (measured on
+    /// `main`: numbers `[3, 4]`, labels `["3  keep", "4  tail"]`).
+    @Test func aLineOpeningWithACombiningMarkIsOfferedAndNumbered() {
+        let hunk = Hunk(
+            id: "h", path: "f.txt",
+            oldStart: 2, oldCount: 2, newStart: 3, newCount: 3,
+            header: "@@ -2,2 +3,3 @@",
+            body: [" keep", "+\u{301}x", " tail"])
+
+        let choices = ReviewSheetModel.lineChoices(for: hunk)
+
+        #expect(choices.map(\.number) == [3, 4, 5])
+        #expect(choices.map(\.label) == ["3  keep", "4  \u{301}x", "5  tail"])
+    }
+
     /// A comment composed with a picked line rides the wire on
     /// `ReviewComment.line` — the per-line affordance feeds the same
     /// structured data the issue pins.
