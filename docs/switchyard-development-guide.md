@@ -139,7 +139,7 @@ Switchyard.xcodeproj
 │   ├── switchyard       CLI executable
 │   └── Tests
 ├── Support/             Info.plist, entitlements, agent launchd plist
-├── skills/yard/         SKILL.md (generated) + hand-written workflow prose, and the
+├── skills/switchyard/   SKILL.md (generated from CommandRegistry + SkillProse.swift), and the
 │                        per-client packaging for Claude Code and OpenCode
 ├── scripts/             make-release.sh, generate-skill.sh
 ├── docs/                this guide, the git-internals companion, and design notes —
@@ -587,7 +587,7 @@ tool. The skill is the document.
   schemas. Hand-write the short workflow narratives — how to go from a messy branch to a clean one,
   when to checkpoint, what to do when `undo` refuses. Keep the two clearly separated in the source
   so a regeneration never clobbers the prose.
-- **One source, packaged per client.** `skills/yard/SKILL.md` is canonical. A Claude Code plugin and
+- **One source, packaged per client.** `skills/switchyard/SKILL.md` is canonical. A Claude Code plugin and
   an OpenCode package wrap it. Never maintain parallel copies of the content.
 - **Ship it from M1 onward.** The skill is not a milestone; it is a deliverable of every milestone
   that changes the command surface. A command lands with its documentation or it does not land.

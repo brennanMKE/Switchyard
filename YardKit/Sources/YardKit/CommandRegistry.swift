@@ -547,7 +547,7 @@ public enum CommandRegistry {
         summary: "Move the current branch's tip to the named commit without replaying anything.",
         flags: [],
         exitCodes: [
-            ExitCodeSpec(code: 0, meaning: "The tip was set; the payload carries the branch's new head oid. The branch ref moved transactionally inside one journal checkpoint; the index and working tree were not touched, and yard undo restores the pre-state exactly."),
+            ExitCodeSpec(code: 0, meaning: "The tip was set; the payload carries the branch's new head oid. The branch ref moved transactionally inside one journal checkpoint; the index and working tree were not touched, and undo restores the pre-state exactly."),
             ExitCodeSpec(code: 1, meaning: "Invalid arguments — set-tip requires exactly one positional argument <commit> and takes no flags."),
             ExitCodeSpec(code: 4, meaning: "The tip could not be set for a reason the other codes do not name — an unknown commit, a detached HEAD, a tip that already names the target, or a target no local branch names among them."),
         ],
