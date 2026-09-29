@@ -107,6 +107,8 @@ public func runEngineCommand(
         return runStage(arguments: arguments, workingDirectory: workingDirectory)
     case "commit":
         return runCommit(arguments: arguments, workingDirectory: workingDirectory)
+    case "discard":
+        return runDiscard(arguments: arguments, workingDirectory: workingDirectory)
     case "rewrite-diff":
         // One required positional, no flags: `switchyard rewrite-diff
         // <journal-entry-id>` arrives as `["rewrite-diff", "<id>"]`. The arm

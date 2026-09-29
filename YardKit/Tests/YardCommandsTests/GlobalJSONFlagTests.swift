@@ -49,6 +49,7 @@ struct GlobalJSONFlagTests {
         "stage": ["stage", "a.txt"],
         "unstage": ["unstage", "a.txt"],
         "commit": ["commit", "--message", "m"],
+        "discard": ["discard", "a.txt"],
     ]
 
     static let dispatchArgv: [String: [String]] = [

@@ -627,4 +627,21 @@ Usage: `switchyard commit [--message <message>] [--amend] [--sign | --no-sign]`
 | `amended` | bool | True when --amend replaced HEAD rather than adding a child of it. |
 | `oid` | string | The new commit's full object id. |
 
+### `switchyard discard`
+
+Throw away unstaged changes to whole paths, or unstaged hunks by id. Staged changes are kept.
+
+Usage: `switchyard discard (<path>... | --hunk <id>...)`
+
+| Flag | Meaning |
+|---|---|
+| `--hunk <id>` | Discard this unstaged hunk, by the id `switchyard hunks --unstaged` prints. Repeatable; not combinable with paths. |
+
+| Exit | Meaning |
+|---|---|
+| 0 | The changes were discarded: tracked paths went back to their index version, untracked paths were deleted, hunks were reverse-applied. One journal entry, operation discard; `switchyard undo` brings every byte back. |
+| 1 | Invalid arguments — no path and no --hunk, both paths and --hunk, --hunk without an id, or an unknown flag. A path that starts with - goes after --. |
+| 4 | The request failed for a reason the other codes do not name. |
+| 6 | Not a repository; a path that is conflicted, intent-to-add, a nested repository, a submodule, or has no unstaged change; or a hunk id that is unknown or stale. Nothing was discarded. |
+
 <!-- END GENERATED -->

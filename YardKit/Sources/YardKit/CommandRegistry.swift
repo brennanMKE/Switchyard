@@ -12,7 +12,7 @@ public enum CommandRegistry {
 
     /// All known `yard` command specifications in the order they should be
     /// rendered in help output.
-    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, skillSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, revertSpec, cherryPickSpec, mergeSpec, rewriteDiffSpec, rerereSpec, reviewSpec, askSpec, resolveSpec, watchSpec, tagSpec, branchSpec, rebaseOntoSpec, setTipSpec, stageSpec, unstageSpec, commitSpec]
+    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, skillSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, revertSpec, cherryPickSpec, mergeSpec, rewriteDiffSpec, rerereSpec, reviewSpec, askSpec, resolveSpec, watchSpec, tagSpec, branchSpec, rebaseOntoSpec, setTipSpec, stageSpec, unstageSpec, commitSpec, discardSpec]
 
     // MARK: - The switchyard spec — rendered by `yard --help`
 
@@ -658,6 +658,25 @@ public enum CommandRegistry {
             PayloadField(name: "oid", type: .string, description: "The new commit's full object id."),
             PayloadField(name: "amended", type: .bool, description: "True when --amend replaced HEAD rather than adding a child of it."),
         ])
+    )
+
+    // MARK: - The discard spec — engine-backed, resolved by `YardCommands` (guide §11 decision 37)
+
+    static let discardSpec = CommandSpec(
+        name: "discard",
+        summary: "Throw away unstaged changes to whole paths, or unstaged hunks by id. Staged changes are kept.",
+        usage: "discard (<path>... | --hunk <id>...)",
+        flags: [
+            FlagSpec(long: "hunk", argument: "id", help: "Discard this unstaged hunk, by the id `switchyard hunks --unstaged` prints. Repeatable; not combinable with paths."),
+        ],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The changes were discarded: tracked paths went back to their index version, untracked paths were deleted, hunks were reverse-applied. One journal entry, operation discard; `switchyard undo` brings every byte back."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — no path and no --hunk, both paths and --hunk, --hunk without an id, or an unknown flag. A path that starts with - goes after --."),
+            ExitCodeSpec(code: 4, meaning: "The request failed for a reason the other codes do not name."),
+            ExitCodeSpec(code: 6, meaning: "Not a repository; a path that is conflicted, intent-to-add, a nested repository, a submodule, or has no unstaged change; or a hunk id that is unknown or stale. Nothing was discarded."),
+        ],
+        schemaName: "discard",
+        payload: nil
     )
 
     // MARK: - The rewrite-diff spec — engine-backed, resolved by `YardCommands` (#0064)
