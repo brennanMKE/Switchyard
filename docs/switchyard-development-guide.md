@@ -1641,6 +1641,43 @@ a feature at any milestone on the grounds that GitUp had it.
       directory as the remote, and the VM fixture (`scripts/uitest-fixtures/make-remote-fixture.sh`)
       builds its bare remotes inside the guest.
 
+33. **Amend is a toggle beside Commit in the Changes view; it never rewrites a pushed commit.**
+    Decided 2026-09-29 in the planning pass for umbrella **#0462** (#0437's question 1), with high
+    confidence; each bullet is cheap to reverse, and #0462 carries the questions for Brennan.
+
+    - **Where.** An **Amend** checkbox left of **Commit** under the message editor. Turning it on
+      sets the draft aside and fills the editor with `HEAD`'s full message; turning it off puts the
+      draft back. While it is on the button reads **Amend** (still ⌘↩) and the caption reads
+      "Amending <short oid> · N files staged". A successful amend clears the editor and turns the
+      checkbox off. The checkbox is disabled, with its reason as help text, when the branch has no
+      commits, when `HEAD` is already on a remote-tracking branch, or while a merge, rebase,
+      cherry-pick or revert is in progress. The button is disabled while conflicted paths remain or
+      the message is blank. **Nothing staged is allowed**: that is a message-only amend.
+    - **Engine: `AmendHead` in `YardGit/AmendHead.swift`.** `AmendHead.target(at:)` reads `HEAD`'s
+      oid, its full message (`git log -1 --no-show-signature --format=%B`) and the refusal, if any.
+      `AmendHead.run` is `git commit --amend -m <message>` through `CommitCreate.run(amend: true)`,
+      so hooks run and `commit.gpgsign` decides signing, as for every commit (decision 30). It is
+      one `JournalCheckpoint.around(operation: "amend")` entry: Edit ▸ **Undo Amend** puts back the
+      old commit and the index, with the staged changes staged again (measured). The author and
+      author date stay `HEAD`'s, which is git's `--amend` rule.
+    - **Pushed means any remote-tracking ref contains `HEAD`**, not only `@{upstream}`: `git
+      for-each-ref --contains HEAD refs/remotes/`, symbolic refs such as `origin/HEAD` skipped. A
+      branch just cut from `main` has no upstream yet but sits on `origin/main`'s commit, and
+      amending that rewrites published history as surely. The refusal names the upstream when it is
+      one of the containing refs, else the first. Rewriting it could only reach the remote by a
+      force-push, which the app never does (decision 32). **The engine refuses too**, before the
+      checkpoint, for every caller (`AmendHead.Refusal`, exit class 6), the lesson of #0461: a guard
+      that lives only in a disabled control is not a guard. A stale remote-tracking ref can make a
+      commit read as pushed when the remote has since dropped it; Fetch corrects that.
+    - **A merge commit may be amended.** `git commit --amend` keeps both parents (measured), and the
+      journal undoes it like any amend. The history's rewrites refuse merges because a replay would
+      lose the second parent; an amend replays nothing.
+    - **Git's own refusals are shown, not pre-empted.** During a merge git refuses with `fatal: You
+      are in the middle of a merge -- cannot amend.` (measured); the checkbox is disabled then
+      anyway. An amend whose result would be an empty non-root commit fails with git's "would make
+      it empty" text on stderr (measured); `--allow-empty` is not passed. Both arrive as a
+      "Couldn’t Amend" alert with git's stderr, the same shape as "Couldn’t Commit".
+
 ### Still open
 
 **Is M1's criterion 5 closable as written, and should it be restated?** Raised by the twelfth M1
