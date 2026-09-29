@@ -1,0 +1,107 @@
+{
+  "command" : "commit",
+  "envelope" : {
+    "failure" : {
+      "error" : {
+        "code" : {
+          "enum" : [
+            "app_unavailable",
+            "blocked_on_conflicts",
+            "broker_unreachable",
+            "human_declined",
+            "ok",
+            "repository_error",
+            "request_failed",
+            "session_terminated",
+            "signing_failed",
+            "timed_out",
+            "usage"
+          ],
+          "type" : "string"
+        },
+        "hint" : {
+          "optional" : true,
+          "type" : "string"
+        },
+        "message" : {
+          "type" : "string"
+        }
+      },
+      "ok" : false,
+      "schemaVersion" : 1
+    },
+    "success" : {
+      "ok" : true,
+      "result" : {
+        "fields" : [
+          {
+            "description" : "True when --amend replaced HEAD rather than adding a child of it.",
+            "name" : "amended",
+            "optional" : false,
+            "type" : "bool"
+          },
+          {
+            "description" : "The new commit's full object id.",
+            "name" : "oid",
+            "optional" : false,
+            "type" : "string"
+          }
+        ],
+        "optional" : true
+      },
+      "schemaVersion" : 1
+    }
+  },
+  "exitCodes" : [
+    {
+      "code" : 0,
+      "meaning" : "The commit was created; the payload carries its full oid and whether it amended HEAD. Hooks ran. One journal entry, operation commit or amend."
+    },
+    {
+      "code" : 1,
+      "meaning" : "Invalid arguments — no --message without --amend, a positional argument, a duplicated or value-missing flag, an unknown flag, or both --sign and --no-sign."
+    },
+    {
+      "code" : 4,
+      "meaning" : "The request failed for a reason the other codes do not name."
+    },
+    {
+      "code" : 6,
+      "meaning" : "Not a repository; git refused the commit (nothing staged, a hook exited non-zero, unresolved conflicts, an empty message); or --amend was refused (no commits yet, or HEAD is already on a remote-tracking branch)."
+    },
+    {
+      "code" : 9,
+      "meaning" : "Signing failed (signing_failed); no commit was written."
+    }
+  ],
+  "flags" : [
+    {
+      "argument" : null,
+      "help" : "Replace HEAD with a commit of the index and the message. Refused when a remote-tracking branch already contains HEAD.",
+      "long" : "amend",
+      "short" : null
+    },
+    {
+      "argument" : "message",
+      "help" : "The commit message, passed as a flag — GIT_EDITOR is never invoked. Required unless --amend, which otherwise keeps HEAD's message.",
+      "long" : "message",
+      "short" : null
+    },
+    {
+      "argument" : null,
+      "help" : "Never sign, even when commit.gpgsign is true.",
+      "long" : "no-sign",
+      "short" : null
+    },
+    {
+      "argument" : null,
+      "help" : "Sign the commit, even when commit.gpgsign is false.",
+      "long" : "sign",
+      "short" : null
+    }
+  ],
+  "schemaName" : "commit",
+  "schemaVersion" : 1,
+  "summary" : "Commit the index as it stands, or amend HEAD, without invoking an editor.",
+  "usage" : "commit [--message <message>] [--amend] [--sign | --no-sign]"
+}
