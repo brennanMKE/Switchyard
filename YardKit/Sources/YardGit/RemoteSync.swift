@@ -112,3 +112,64 @@ extension RemoteSync {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
+
+// MARK: - Pull (#0453)
+
+public extension RemoteSync {
+
+    /// What a pull did.
+    enum PullResult: Equatable, Sendable {
+        /// The branch already contained its upstream. Nothing moved.
+        case upToDate
+        /// The branch fast-forwarded from `from` to `to`, worktree included.
+        case fastForwarded(from: String, to: String)
+    }
+
+    /// Pulls the current branch's upstream, fast-forward only: `git fetch
+    /// <remote>` then `git merge --ff-only @{upstream}`, journaled as one
+    /// `pull` entry written before the fetch.
+    ///
+    /// Not `git pull`: `pull.rebase`, `pull.ff` and `branch.<name>.rebase`
+    /// would each change what it does, and a fast-forward is the one
+    /// outcome that never rewrites or merges anything. A branch that has
+    /// diverged from its upstream fails with git's own stderr (`fatal: Not
+    /// possible to fast-forward, aborting.`) and nothing but the fetch has
+    /// happened.
+    ///
+    /// **Only the fetch is cancellable.** The merge runs through the
+    /// synchronous `GitProcess.run`, which a task cancellation does not
+    /// reach, because a merge killed halfway through updating the worktree
+    /// would leave it half-checked-out. A cancel that lands during the
+    /// fetch stops before the merge starts.
+    ///
+    /// Undo Pull restores the entry: the branch, the index and the
+    /// remote-tracking refs as they were before the pull.
+    @discardableResult
+    static func pull(at path: String, git: GitProcess = GitProcess()) async throws -> PullResult {
+        let context = try await WorktreeContext.resolve(path: path, git: git)
+        let branch = try currentBranch(at: path, git: git)
+        guard let remote = try configValue("branch.\(branch).remote", at: path, git: git),
+              try configValue("branch.\(branch).merge", at: path, git: git) != nil
+        else { throw Refusal.noUpstream(branch: branch) }
+
+        try JournalCheckpoint.checkpoint(operation: "pull", in: context, git: git)
+        try await git.run(["fetch", remote], workingDirectory: path)
+        try Task.checkCancellation()
+
+        return try fastForwardToUpstream(at: path, git: git)
+    }
+}
+
+extension RemoteSync {
+
+    /// `git merge --ff-only @{upstream}` through the synchronous
+    /// `GitProcess.run`, which task cancellation does not reach — the
+    /// reason this is its own non-`async` function: inside `pull` the
+    /// compiler would pick the async overload.
+    static func fastForwardToUpstream(at path: String, git: GitProcess) throws -> PullResult {
+        let before = try headOID(at: path, git: git)
+        try git.run(["merge", "--ff-only", "@{upstream}"], workingDirectory: path)
+        let after = try headOID(at: path, git: git)
+        return before == after ? .upToDate : .fastForwarded(from: before, to: after)
+    }
+}
