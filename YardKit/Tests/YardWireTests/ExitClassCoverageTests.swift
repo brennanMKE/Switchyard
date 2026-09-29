@@ -192,6 +192,11 @@ struct ExitClassCoverageTests {
             // #0463: AmendHead.Refusal is decided before anything runs, from
             // the repository's own state (no commits, HEAD already pushed).
             Row("AmendHead.Refusal", AmendHead.Refusal.noCommits, .repositoryError),
+            // #0468: DiscardChanges.Refusal is decided before anything runs,
+            // from `git status` (conflicted, intent-to-add, nested
+            // repository, submodule, nothing unstaged).
+            Row("DiscardChanges.Refusal", DiscardChanges.Refusal.conflicted(path: "c.txt"),
+                .repositoryError),
             // #0242: JournalObserved.Metadata gained a production
             // serialization path; its error carries the same class as
             // JournalEntryMetadata.SerializationError above.
