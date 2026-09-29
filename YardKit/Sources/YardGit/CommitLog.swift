@@ -372,10 +372,15 @@ public enum CommitLog {
     /// paragraph earlier in the body must not be mistaken for the block and
     /// must not hide a real trailer block that follows it).
     static func parseTrailerBlock(from commitBody: String) -> [Trailer] {
-        let lines = commitBody.split(separator: "\n", omittingEmptySubsequences: false)
+        // Split on the newline *scalar*, not the `Character`: Swift reads
+        // "\r\n" as one Character, so a CRLF message would be one line
+        // (#0484, measured). A CRLF blank line is then "\r", which
+        // `.whitespaces` does not contain, hence `.whitespacesAndNewlines`.
+        let lines = commitBody.unicodeScalars.split(separator: "\n", omittingEmptySubsequences: false)
+            .map(Substring.init)
 
         func isBlank(_ line: Substring) -> Bool {
-            line.trimmingCharacters(in: .whitespaces).isEmpty
+            line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
 
         // `%B` commonly ends with its own trailing newline, which
@@ -425,7 +430,10 @@ extension CommitLogEntry {
     /// First non-empty line of the commit message, used as the human-readable
     /// identifier when the hash is not needed.
     public var subject: String {
-        let firstLine = message.split(separator: "\n").first.map(String.init) ?? ""
+        // The newline scalar, so a CRLF message's subject is its first line
+        // (#0484, measured).
+        let firstLine = message.unicodeScalars.split(separator: "\n").first
+            .map { String(Substring($0)) } ?? ""
         return firstLine.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             ? "(commit \(shortOid))"
             : firstLine.trimmingCharacters(in: .whitespacesAndNewlines)
