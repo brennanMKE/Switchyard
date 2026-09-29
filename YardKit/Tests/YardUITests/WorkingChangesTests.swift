@@ -211,3 +211,97 @@ func theLoaderAndPerformAmendHead(format: FixtureRepository.RefFormat) async thr
     #expect(try repo.revParse("HEAD~1") == parent)
     #expect(try await loadAmendTarget(at: path).message == "second, amended")
 }
+
+// MARK: - #0470: Discard (guide §11 decision 34)
+
+@Test func discardIsOfferedOnUnstagedRowsExceptIntentToAdd() {
+    let changes = WorkingChanges(status: WorktreeStatus(entries: [
+        entry("both.txt", .modified, .modified),
+        entry("new.txt", .unmodified, .untracked),
+        entry("ita.txt", .unmodified, .added),
+        entry("gone.txt", .unmodified, .deleted),
+        entry("staged.txt", .added, .unmodified),
+        entry("fight.txt", .conflicted, .unmerged),
+    ]))
+
+    #expect(changes.discardableRows.map(\.path) == ["both.txt", "new.txt", "gone.txt"])
+    #expect(!WorkingChanges.canDiscard(changes.staged[0]), "a staged row offers no discard")
+    #expect(!WorkingChanges.canDiscard(changes.conflicted[0]), "a conflicted row offers no discard")
+}
+
+@Test func aFileDiscardConfirmationNamesTheFilesAndSaysWhatHappens() {
+    let modified = WorkingChanges.Row(side: .unstaged, path: "a.txt", state: .modified)
+    let untracked = WorkingChanges.Row(side: .unstaged, path: "new.txt", state: .untracked)
+
+    let one = DiscardConfirmation(rows: [modified])
+    #expect(one.title == "Discard changes to a.txt?")
+    #expect(one.message == "a.txt\n\nUnstaged changes are thrown away. "
+        + "Staged changes stay. Edit ▸ Undo Discard brings them back.")
+    #expect(one.change == .discardFiles(["a.txt"]))
+
+    let two = DiscardConfirmation(rows: [modified, untracked])
+    #expect(two.title == "Discard changes to 2 files?")
+    #expect(two.message == "a.txt\nnew.txt\n\nUnstaged changes are thrown away and untracked "
+        + "files are deleted. Staged changes stay. Edit ▸ Undo Discard brings them back.")
+    #expect(two.change == .discardFiles(["a.txt", "new.txt"]))
+}
+
+@Test func aLongDiscardListNamesTenFilesAndCountsTheRest() {
+    let rows = (1...12).map {
+        WorkingChanges.Row(side: .unstaged, path: "f\($0).txt", state: .modified)
+    }
+    let confirmation = DiscardConfirmation(rows: rows)
+    #expect(confirmation.title == "Discard changes to 12 files?")
+    #expect(confirmation.message.hasPrefix((1...10).map { "f\($0).txt" }.joined(separator: "\n")
+        + "\nand 2 more\n\n"))
+    #expect(!confirmation.message.contains("f11.txt"))
+    #expect(confirmation.change == .discardFiles(rows.map(\.path)))
+}
+
+@Test func aHunkDiscardConfirmationNamesTheFileAndTheLine() {
+    let hunk = Hunk(id: "abc123", path: "t.txt", oldStart: 20, oldCount: 1, newStart: 18,
+                    newCount: 1, header: "@@ -20 +18 @@", body: ["-line 18", "+line 18 edited"])
+    let confirmation = DiscardConfirmation(hunk: hunk)
+    #expect(confirmation.title == "Discard this change to t.txt?")
+    #expect(confirmation.message == "The change at line 18 goes back to the staged version. "
+        + "Edit ▸ Undo Discard brings it back.")
+    #expect(confirmation.change == .discardHunk(id: "abc123"))
+}
+
+@Test func discardHasItsOwnProgressLabelAlertTitleAndUndoTitle() {
+    let refusal = DiscardChanges.Refusal.nestedRepository(path: "inner/")
+    #expect(WorkingChange.discardFiles(["a"]).progressLabel == "Discarding…")
+    #expect(WorkingChange.discardHunk(id: "x").progressLabel == "Discarding…")
+    let failure = WorkingChange.discardFiles(["inner/"]).failure(for: refusal)
+    #expect(failure.title == "Couldn’t Discard")
+    #expect(failure.message == refusal.description)
+    #expect(WorkingChange.discardHunk(id: "x").failure(for: refusal).title == "Couldn’t Discard")
+    #expect(JournalMenuTitles.undo(operation: "discard") == "Undo Discard")
+    #expect(JournalMenuTitles.redo(operation: "discard") == "Redo Discard")
+}
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func performDiscardsAFileAndAHunk(format: FixtureRepository.RefFormat) async throws {
+    var repo = try FixtureRepository(refFormat: format)
+    defer { repo.destroy() }
+    let lines = (1...20).map { String(format: "line %02d\n", $0) }
+    try repo.build([.init("base", files: ["t.txt": lines.joined(), "a.txt": "a\n"])])
+    var edited = lines
+    edited[1] = "line 02 edited\n"
+    edited[17] = "line 18 edited\n"
+    try repo.writeUntracked(["t.txt": edited.joined(), "a.txt": "a edited\n", "new.txt": "new\n"])
+    let path = repo.url.path
+
+    try await performWorkingChange(.discardFiles(["a.txt", "new.txt"]), at: path)
+    let afterFiles = WorkingChanges(status: try await gitStatus(at: path))
+    #expect(afterFiles.unstaged.map(\.path) == ["t.txt"])
+    #expect(afterFiles.staged.isEmpty, "discard staged the files instead")
+    #expect(try String(contentsOf: repo.url.appendingPathComponent("a.txt"), encoding: .utf8) == "a\n")
+
+    let first = try #require(try await loadWorkingDiffs(at: path).file("t.txt", staged: false)?.hunks.first)
+    try await performWorkingChange(.discardHunk(id: first.id), at: path)
+    let hunks = try #require(try await loadWorkingDiffs(at: path).file("t.txt", staged: false)?.hunks)
+    #expect(hunks.count == 1)
+    #expect(hunks.first?.body.contains("+line 18 edited") == true)
+    #expect(try await loadWorkingDiffs(at: path).staged.isEmpty, "discard staged the hunk instead")
+}

@@ -215,6 +215,58 @@ public nonisolated struct CommitDraft: Equatable, Sendable {
     }
 }
 
+// MARK: - #0470: Discard (guide §11 decision 34)
+
+nonisolated extension WorkingChanges {
+
+    /// Whether `row` offers Discard: an unstaged row that is not
+    /// intent-to-add (`git add -N`, badge "A" on the unstaged side), which
+    /// the engine refuses because restoring it would empty the file.
+    public static func canDiscard(_ row: Row) -> Bool {
+        row.side == .unstaged && row.state != .added
+    }
+
+    /// What Discard All… discards: every unstaged row that `canDiscard`.
+    public var discardableRows: [Row] { unstaged.filter(Self.canDiscard) }
+}
+
+/// A Discard confirmation: what the dialog says, and what its Discard
+/// button sends (#0470). Every discard asks first; the dialog names what
+/// goes and how to get it back.
+public nonisolated struct DiscardConfirmation: Equatable, Sendable {
+    public let title: String
+    public let message: String
+    public let change: WorkingChange
+
+    /// How many file names the message lists before "and N more".
+    static let listedNames = 10
+
+    /// Discarding whole files: `rows` are unstaged rows.
+    public init(rows: [WorkingChanges.Row]) {
+        let paths = rows.map(\.path)
+        title = paths.count == 1
+            ? "Discard changes to \(paths[0])?" : "Discard changes to \(paths.count) files?"
+        var names = paths.prefix(Self.listedNames).joined(separator: "\n")
+        if paths.count > Self.listedNames {
+            names += "\nand \(paths.count - Self.listedNames) more"
+        }
+        let lost = rows.contains { $0.state == .untracked }
+            ? "Unstaged changes are thrown away and untracked files are deleted."
+            : "Unstaged changes are thrown away."
+        message = names + "\n\n" + lost
+            + " Staged changes stay. Edit ▸ Undo Discard brings them back."
+        change = .discardFiles(paths)
+    }
+
+    /// Discarding one unstaged hunk.
+    public init(hunk: Hunk) {
+        title = "Discard this change to \(hunk.path)?"
+        message = "The change at line \(hunk.newStart) goes back to the staged version. "
+            + "Edit ▸ Undo Discard brings it back."
+        change = .discardHunk(id: hunk.id)
+    }
+}
+
 /// Both hunk listings the Changes view reads a file's diff from, loaded
 /// together so the two sides always describe the same index.
 public nonisolated struct WorkingDiffs: Equatable, Sendable {
@@ -244,6 +296,11 @@ public nonisolated enum WorkingChange: Equatable, Sendable {
     case commit(message: String)
     /// #0465: `git commit --amend -m` (guide §11 decision 33).
     case amend(message: String)
+    /// #0470: discard every unstaged change to these paths (guide §11
+    /// decision 34).
+    case discardFiles([String])
+    /// #0470: discard one unstaged hunk.
+    case discardHunk(id: String)
 
     /// The header's progress line while this change runs.
     public var progressLabel: String {
@@ -252,6 +309,7 @@ public nonisolated enum WorkingChange: Equatable, Sendable {
         case .unstageFiles, .unstageHunk: "Unstaging…"
         case .commit: "Committing…"
         case .amend: "Amending…"
+        case .discardFiles, .discardHunk: "Discarding…"
         }
     }
 
@@ -265,6 +323,7 @@ public nonisolated enum WorkingChange: Equatable, Sendable {
         case .unstageFiles, .unstageHunk: "Couldn’t Unstage"
         case .commit: "Couldn’t Commit"
         case .amend: "Couldn’t Amend"
+        case .discardFiles, .discardHunk: "Couldn’t Discard"
         }
         var message = String(describing: error)
         if case let .exited(_, stderr, _) = error as? GitProcess.Failure {
@@ -319,5 +378,9 @@ public func performWorkingChange(_ change: WorkingChange, at path: String) async
         _ = try commitStaged(message: message, at: path)
     case let .amend(message):
         try AmendHead.run(message: message, at: path)
+    case let .discardFiles(paths):
+        try DiscardChanges.discardPaths(paths, at: path)
+    case let .discardHunk(id):
+        try DiscardChanges.discardHunks(ids: [id], at: path)
     }
 }
