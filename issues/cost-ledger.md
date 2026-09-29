@@ -559,6 +559,7 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-09-29 | #0480 | round 1, Sonnet implementation, 740 s wall, passed pending review (S, measured) | 129,665 | — |
 | 2026-09-29 | #0487 | round 1, Sonnet implementation, 414 s wall, passed pending review (S, measured) | 84,613 | — |
 | 2026-09-29 | #0488 | Opus planning subagent: combining-mark reads in line staging, 6 sites reproduced, 526 s wall (O, measured) | 107,174 | — |
+| 2026-09-29 | #0488 | round 1, Sonnet implementation, passed pending review (S) | — | — |
 | | | **Total measured** (tokens include 2026-09-22/23 rows; $ not updated for them) | **47,386,796** | **$437.24** |
 
 ## What this total does and does not cover
