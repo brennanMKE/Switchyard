@@ -230,8 +230,17 @@ func pushSendsTheBranchToItsUpstreamAndWritesAPushEntryAfterward(
     #expect(try fixture.remoteTip() == head)
     #expect(try fixture.repo.revParse("refs/remotes/origin/main") == head)
     #expect(try fixture.journalOperations().last == "push")
-    // The entry is the state AFTER the push: restoring it moves nothing.
-    try JournalUndo.undo(in: try await WorktreeContext.resolve(path: fixture.path))
+    // #0461: undo refuses at the push entry and writes nothing, so
+    // origin/main is never rewound locally behind the remote's back.
+    let entries = try fixture.journalOperations()
+    let context = try await WorktreeContext.resolve(path: fixture.path)
+    #expect {
+        try JournalUndo.undo(in: context)
+    } throws: { error in
+        guard case .pushNotUndoable(_, 1, 0) = error as? JournalUndo.Error else { return false }
+        return true
+    }
+    #expect(try fixture.journalOperations() == entries)
     #expect(try fixture.repo.revParse("refs/remotes/origin/main") == head)
     #expect(try fixture.repo.revParse("HEAD") == head)
 }

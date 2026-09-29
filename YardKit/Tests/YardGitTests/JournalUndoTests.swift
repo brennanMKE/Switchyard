@@ -689,3 +689,62 @@ struct JournalUndoTests {
         #expect(try #require(thrown) == .nothingToUndo(requested: 1, available: 0))
     }
 }
+
+/// #0461: undo never restores a `push` entry, so no caller — the app's
+/// Edit menu, `ConflictHandoff`, or a future `switchyard undo` — can rewind
+/// a remote-tracking ref past a push (guide §11 decision 32). No network:
+/// `JournalCheckpoint.checkpoint(operation: JournalUndo.pushOperation)` writes
+/// the same entry `RemoteSync.push` writes after a push succeeds.
+@Suite("JournalUndo push")
+struct JournalUndoPushTests {
+
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func undoAtAPushRefusesTypedAndWritesNothing(format: FixtureRepository.RefFormat) throws {
+        var repo = try FixtureRepository.linear(refFormat: format)
+        defer { repo.destroy() }
+        let ctx = try WorktreeContext.resolve(path: repo.url.path)
+        try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+        try repo.branch("before-push")
+        let push = try JournalCheckpoint.checkpoint(operation: JournalUndo.pushOperation, in: ctx)
+        let countBefore = try JournalAnchor.list(in: ctx).count
+        let stateBefore = try RefSnapshot.capture(in: ctx)
+
+        let thrown = #expect(throws: JournalUndo.Error.self) { try JournalUndo.undo(in: ctx) }
+        let error = try #require(thrown)
+        #expect(error == .pushNotUndoable(entry: push.id, requested: 1, available: 0))
+        #expect(error.description.contains(push.id.description))
+        #expect(error.exitClass == .repositoryError)
+        #expect(try JournalAnchor.list(in: ctx).count == countBefore)
+        #expect(try RefSnapshot.capture(in: ctx) == stateBefore)
+    }
+
+    @Test(arguments: FixtureRepository.RefFormat.supported())
+    func undoStepsCrossingAPushRefuseWholeAndSingleStepsStopAtIt(
+        format: FixtureRepository.RefFormat
+    ) throws {
+        var repo = try FixtureRepository.linear(refFormat: format)
+        defer { repo.destroy() }
+        let ctx = try WorktreeContext.resolve(path: repo.url.path)
+        try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+        try repo.branch("before-push")
+        let push = try JournalCheckpoint.checkpoint(operation: JournalUndo.pushOperation, in: ctx)
+        let after = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+        try repo.branch("after-push")
+        let countBefore = try JournalAnchor.list(in: ctx).count
+        let stateBefore = try RefSnapshot.capture(in: ctx)
+
+        // `undo --steps 2` would restore `after`, then the push: refused
+        // whole, in planning — the first step is not taken either.
+        let crossing = #expect(throws: JournalUndo.Error.self) { try JournalUndo.undo(steps: 2, in: ctx) }
+        #expect(try #require(crossing) == .pushNotUndoable(entry: push.id, requested: 2, available: 1))
+        #expect(try JournalAnchor.list(in: ctx).count == countBefore)
+        #expect(try RefSnapshot.capture(in: ctx) == stateBefore)
+
+        // One step back to the push is allowed; the next one is refused.
+        #expect(try JournalUndo.undo(in: ctx).map(\.entry.id) == [after.id])
+        let stopped = #expect(throws: JournalUndo.Error.self) { try JournalUndo.undo(in: ctx) }
+        #expect(try #require(stopped) == .pushNotUndoable(entry: push.id, requested: 1, available: 0))
+        // Redo is untouched: it walks back to the present.
+        #expect(try JournalUndo.redo(in: ctx).count == 1)
+    }
+}
