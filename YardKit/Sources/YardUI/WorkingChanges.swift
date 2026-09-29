@@ -277,6 +277,25 @@ public nonisolated struct DiscardConfirmation: Equatable, Sendable {
     }
 }
 
+// MARK: - #0494: Stash Changes… (guide §11 decision 36)
+
+nonisolated extension WorkingChanges {
+
+    /// Why Stash Changes… is disabled, or `nil` when it is enabled. Staged
+    /// and unstaged rows can always be stashed; untracked-only changes need
+    /// the sheet's Include untracked files, which is on by default, so they
+    /// enable the button too. `Stash.push` refuses the rest.
+    public var stashBlockedReason: String? {
+        if !conflicted.isEmpty { return "Resolve the conflicted files first" }
+        if staged.isEmpty && unstaged.isEmpty { return "There are no changes to stash" }
+        return nil
+    }
+
+    /// Whether any change is an untracked file: the sheet says what Include
+    /// untracked files would take.
+    public var hasUntracked: Bool { unstaged.contains { $0.state == .untracked } }
+}
+
 /// Both hunk listings the Changes view reads a file's diff from, loaded
 /// together so the two sides always describe the same index.
 public nonisolated struct WorkingDiffs: Equatable, Sendable {
@@ -317,6 +336,9 @@ public nonisolated enum WorkingChange: Equatable, Sendable {
     case stageLines(hunkID: String, lines: [Int])
     case unstageLines(hunkID: String, lines: [Int])
     case discardLines(hunkID: String, lines: [Int])
+    /// #0494: Stash Changes… (guide §11 decision 36). `message` is `nil`
+    /// or blank for git's own "WIP on <branch>" name.
+    case stash(message: String?, includeUntracked: Bool)
 
     /// #0479: what a diff hunk's Stage Hunk / Unstage Hunk button sends:
     /// the whole hunk when none of its lines are selected, else the
@@ -338,6 +360,7 @@ public nonisolated enum WorkingChange: Equatable, Sendable {
         case .commit: "Committing…"
         case .amend: "Amending…"
         case .discardFiles, .discardHunk, .discardLines: "Discarding…"
+        case .stash: "Stashing…"
         }
     }
 
@@ -352,6 +375,7 @@ public nonisolated enum WorkingChange: Equatable, Sendable {
         case .commit: "Couldn’t Commit"
         case .amend: "Couldn’t Amend"
         case .discardFiles, .discardHunk, .discardLines: "Couldn’t Discard"
+        case .stash: "Couldn’t Stash Changes"
         }
         var message = String(describing: error)
         if case let .exited(_, stderr, _) = error as? GitProcess.Failure {
@@ -416,5 +440,7 @@ public func performWorkingChange(_ change: WorkingChange, at path: String) async
         try unstageLines(hunkID: hunkID, lines: lines, at: path)
     case let .discardLines(hunkID, lines):
         try DiscardChanges.discardLines(hunkID: hunkID, lines: lines, at: path)
+    case let .stash(message, includeUntracked):
+        try Stash.push(message: message, includeUntracked: includeUntracked, at: path)
     }
 }

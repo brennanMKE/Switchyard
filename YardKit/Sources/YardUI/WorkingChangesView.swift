@@ -47,6 +47,8 @@ public struct WorkingChangesView: View {
     /// changed (a staged line, an edit) drops out of the selection by
     /// itself, and one that did not keeps its selected lines.
     @State private var lineSelection = DiffLineSelection()
+    /// #0494: whether the Stash Changes sheet is up.
+    @State private var showingStashSheet = false
 
     public init(
         changes: WorkingChanges, repositoryPath: String, revision: Int, isBusy: Bool,
@@ -101,6 +103,17 @@ public struct WorkingChangesView: View {
             Button("Cancel", role: .cancel) {}
         } message: { confirmation in
             Text(confirmation.message)
+        }
+        // #0494: Stash Changes… (guide §11 decision 36). The sheet goes away
+        // before the stash runs, so the progress line is not behind it.
+        .sheet(isPresented: $showingStashSheet) {
+            StashChangesSheet(
+                hasUntracked: changes.hasUntracked,
+                onStash: { change in
+                    showingStashSheet = false
+                    perform(change)
+                },
+                onCancel: { showingStashSheet = false })
         }
     }
 
@@ -290,6 +303,19 @@ public struct WorkingChangesView: View {
             target: amendTarget, whereAmI: whereAmI)
         let blocked = draft.blockedReason(for: changes, amendUnavailable: amendUnavailable)
         return VStack(alignment: .leading, spacing: 6) {
+            // #0494: Stash Changes… (guide §11 decision 36), on its own row
+            // above the editor: beside Amend and Commit it truncated and
+            // pushed "Amend" onto two lines in a narrow Detail pane
+            // (measured in the VM).
+            HStack {
+                Spacer()
+                Button("Stash Changes…") { showingStashSheet = true }
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .disabled(changes.stashBlockedReason != nil || isBusy)
+                    .help(changes.stashBlockedReason ?? "Save the changes as a stash and clean the working tree")
+                    .accessibilityIdentifier("stash-changes")
+            }
             TextEditor(text: $draft.message)
                 .font(.body)
                 .frame(minHeight: 56, maxHeight: 120)
