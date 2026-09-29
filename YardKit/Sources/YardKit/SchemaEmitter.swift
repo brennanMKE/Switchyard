@@ -30,6 +30,7 @@ public nonisolated func renderSchema(for spec: CommandSpec) throws -> String {
         "schemaName": spec.schemaName,
         "schemaVersion": EnvelopeSchema.v1.rawValue,
         "summary": spec.summary,
+        "usage": spec.usage,
     ]
 
     let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])

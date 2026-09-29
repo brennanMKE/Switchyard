@@ -54,5 +54,6 @@
   ],
   "schemaName" : "conflicts",
   "schemaVersion" : 1,
-  "summary" : "Report every conflicted path in the index, with the blob id and mode of each stage."
+  "summary" : "Report every conflicted path in the index, with the blob id and mode of each stage.",
+  "usage" : "conflicts"
 }

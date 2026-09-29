@@ -71,6 +71,8 @@ Every command prints one JSON envelope on stdout: `{"schemaVersion":1,"ok":true,
 
 switchyard CLI — version, help, and command schema.
 
+Usage: `switchyard [--help | --version | <command> [<arguments>]]`
+
 | Flag | Meaning |
 |---|---|
 | `-h, --help` | Show this help text and exit. |
@@ -85,6 +87,8 @@ switchyard CLI — version, help, and command schema.
 
 A no-op command that returns a success envelope.
 
+Usage: `switchyard noop [--help]`
+
 | Flag | Meaning |
 |---|---|
 | `-h, --help` | Show this command's help and exit. |
@@ -98,6 +102,8 @@ A no-op command that returns a success envelope.
 
 Print the agent skill, skills/switchyard/SKILL.md, as markdown. Needs no app and no repository.
 
+Usage: `switchyard skill`
+
 | Exit | Meaning |
 |---|---|
 | 0 | The skill markdown was printed. |
@@ -106,6 +112,8 @@ Print the agent skill, skills/switchyard/SKILL.md, as markdown. Needs no app and
 ### `switchyard whereami`
 
 Report branch, upstream, ahead/behind, and worktree status in one call.
+
+Usage: `switchyard whereami`
 
 | Exit | Meaning |
 |---|---|
@@ -135,6 +143,8 @@ Report branch, upstream, ahead/behind, and worktree status in one call.
 
 Report the per-file worktree status, as `git status --porcelain=v2` sees it.
 
+Usage: `switchyard status`
+
 | Exit | Meaning |
 |---|---|
 | 0 | The command completed and returned the worktree status. |
@@ -144,6 +154,8 @@ Report the per-file worktree status, as `git status --porcelain=v2` sees it.
 
 Report every conflicted path in the index, with the blob id and mode of each stage.
 
+Usage: `switchyard conflicts`
+
 | Exit | Meaning |
 |---|---|
 | 0 | The command completed and returned the conflicts surface: the conflicted paths, plus rerereReplayed — the paths where a recorded rerere resolution has been replayed into the working file during the live conflict (#0065). |
@@ -152,6 +164,8 @@ Report every conflicted path in the index, with the blob id and mode of each sta
 ### `switchyard wt`
 
 Report the repository's worktrees, as `git worktree list --porcelain` sees them.
+
+Usage: `switchyard wt list`
 
 | Exit | Meaning |
 |---|---|
@@ -163,6 +177,8 @@ Report the repository's worktrees, as `git worktree list --porcelain` sees them.
 
 Report the current worktree's name, path, git dir, common dir, and the main worktree's path.
 
+Usage: `switchyard wt where`
+
 | Exit | Meaning |
 |---|---|
 | 0 | The command completed and returned the worktree context. |
@@ -171,6 +187,8 @@ Report the current worktree's name, path, git dir, common dir, and the main work
 ### `switchyard hunks`
 
 Report the per-file diff hunks for one area, staged or unstaged.
+
+Usage: `switchyard hunks (--staged | --unstaged)`
 
 | Flag | Meaning |
 |---|---|
@@ -187,6 +205,8 @@ Report the per-file diff hunks for one area, staged or unstaged.
 
 List the commit history reachable from HEAD (or a given range), newest first.
 
+Usage: `switchyard log [<range>...]`
+
 | Exit | Meaning |
 |---|---|
 | 0 | The command completed and returned the commit log. |
@@ -196,6 +216,8 @@ List the commit history reachable from HEAD (or a given range), newest first.
 ### `switchyard graph`
 
 List the commit DAG as lane-assigned rows, one per commit, newest first.
+
+Usage: `switchyard graph [--limit <n>]`
 
 | Flag | Meaning |
 |---|---|
@@ -211,6 +233,8 @@ List the commit DAG as lane-assigned rows, one per commit, newest first.
 
 Report git's verification verdict for the signature on one commit (default HEAD).
 
+Usage: `switchyard verify <revision>`
+
 | Exit | Meaning |
 |---|---|
 | 0 | The command completed and returned the verification verdict. A bad or missing signature is still a completed command — the verdict is in the payload. |
@@ -220,6 +244,8 @@ Report git's verification verdict for the signature on one commit (default HEAD)
 ### `switchyard absorb`
 
 Distribute the staged hunks into the commits that last touched their lines.
+
+Usage: `switchyard absorb [--dry-run]`
 
 | Flag | Meaning |
 |---|---|
@@ -235,6 +261,8 @@ Distribute the staged hunks into the commits that last touched their lines.
 ### `switchyard split`
 
 Split one commit into two commits along a hunk boundary.
+
+Usage: `switchyard split <commit> <hunkID> [--first <message>] [--second <message>] [--sign | --no-sign]`
 
 | Flag | Meaning |
 |---|---|
@@ -254,6 +282,8 @@ Split one commit into two commits along a hunk boundary.
 
 Rewrite one commit's message without invoking an editor.
 
+Usage: `switchyard reword <commit> --message <message> [--sign | --no-sign]`
+
 | Flag | Meaning |
 |---|---|
 | `--message <message>` | The commit's new message, passed as a flag — GIT_EDITOR is never invoked. |
@@ -271,6 +301,8 @@ Rewrite one commit's message without invoking an editor.
 
 Remove one commit from the branch, its changes and all.
 
+Usage: `switchyard drop <commit> [--sign | --no-sign]`
+
 | Flag | Meaning |
 |---|---|
 | `--no-sign` | Never sign, even when commit.gpgsign is true. |
@@ -286,6 +318,8 @@ Remove one commit from the branch, its changes and all.
 ### `switchyard reorder`
 
 Move one commit to immediately before or after another commit on the branch.
+
+Usage: `switchyard reorder <commit> (--before <ref> | --after <ref>) [--sign | --no-sign]`
 
 | Flag | Meaning |
 |---|---|
@@ -305,6 +339,8 @@ Move one commit to immediately before or after another commit on the branch.
 
 Apply the inverse of one commit to the current branch as a new commit.
 
+Usage: `switchyard revert <commit> [--sign | --no-sign]`
+
 | Flag | Meaning |
 |---|---|
 | `--no-sign` | Never sign, even when commit.gpgsign is true. |
@@ -321,6 +357,8 @@ Apply the inverse of one commit to the current branch as a new commit.
 
 Replay one commit from elsewhere onto the current branch as a new commit.
 
+Usage: `switchyard cherry-pick <commit> [--sign | --no-sign]`
+
 | Flag | Meaning |
 |---|---|
 | `--no-sign` | Never sign, even when commit.gpgsign is true. |
@@ -336,6 +374,8 @@ Replay one commit from elsewhere onto the current branch as a new commit.
 ### `switchyard merge`
 
 Merge a branch into the current branch, stating the fast-forward intent explicitly.
+
+Usage: `switchyard merge <branch> (--ff-only | --no-ff) [--message <message>] [--allow-unrelated] [--sign | --no-sign]`
 
 | Flag | Meaning |
 |---|---|
@@ -357,6 +397,8 @@ Merge a branch into the current branch, stating the fast-forward intent explicit
 
 Compare one journal entry's rewritten commits against their originals with git range-diff.
 
+Usage: `switchyard rewrite-diff <journal-entry-id>`
+
 | Exit | Meaning |
 |---|---|
 | 0 | The diff computed; the payload carries the entry id, which storage shape served the mapping, the ranges compared, and the parsed pair rows (identical, modified, dropped, added). Read-only: nothing was touched. |
@@ -366,6 +408,8 @@ Compare one journal entry's rewritten commits against their originals with git r
 ### `switchyard rerere`
 
 Report what git rerere has recorded: the repository's recorded conflict resolutions and whether rerere is enabled.
+
+Usage: `switchyard rerere status [--json]`
 
 | Flag | Meaning |
 |---|---|
@@ -380,6 +424,8 @@ Report what git rerere has recorded: the repository's recorded conflict resoluti
 ### `switchyard review`
 
 Push a diff to the app and block until the human decides, returning the decision as structured data.
+
+Usage: `switchyard review (<range> | --staged) --wait [--timeout <seconds>]`
 
 | Flag | Meaning |
 |---|---|
@@ -401,6 +447,8 @@ Push a diff to the app and block until the human decides, returning the decision
 
 Ask the human a question in the app and block until they pick an option, decline, or the wait times out.
 
+Usage: `switchyard ask <question> --options <a,b,c> [--timeout <seconds>]`
+
 | Flag | Meaning |
 |---|---|
 | `--options <a,b,c>` | The answer options, comma-separated, presented in this order. Required; an empty list or an empty option is a usage refusal. |
@@ -418,6 +466,8 @@ Ask the human a question in the app and block until they pick an option, decline
 ### `switchyard resolve`
 
 Open the three-way merge UI for the repository's conflicts and block until the human resolves them, cancels, or the wait times out.
+
+Usage: `switchyard resolve [<pathspec>] --wait [--timeout <seconds>]`
 
 | Flag | Meaning |
 |---|---|
@@ -439,6 +489,8 @@ Open the three-way merge UI for the repository's conflicts and block until the h
 
 Stream repository and app events as newline-delimited JSON until detached.
 
+Usage: `switchyard watch [<repository-path>] [--timeout <seconds>]`
+
 | Flag | Meaning |
 |---|---|
 | `--timeout <seconds>` | Detach after this many seconds, exiting 0. Without it the session runs until the CLI detaches (Ctrl-C) or the app ends it. |
@@ -453,6 +505,8 @@ Stream repository and app events as newline-delimited JSON until detached.
 ### `switchyard tag`
 
 Create a lightweight or annotated tag at a commit.
+
+Usage: `switchyard tag <name> <commit> [--annotate] [--message <message>] [--sign | --no-sign]`
 
 | Flag | Meaning |
 |---|---|
@@ -471,6 +525,8 @@ Create a lightweight or annotated tag at a commit.
 
 Create, rename, or delete a local branch, or set its upstream.
 
+Usage: `switchyard branch (create <name> [<start>] | rename <old> <new> | delete <name> [--force] | upstream <name> <upstream>)`
+
 | Flag | Meaning |
 |---|---|
 | `--force` | With delete: delete an unmerged branch, whose commits would otherwise be lost (the journal records the deletion). |
@@ -484,6 +540,8 @@ Create, rename, or delete a local branch, or set its upstream.
 ### `switchyard rebase-onto`
 
 Replay the current branch's commits onto the named base commit.
+
+Usage: `switchyard rebase-onto <commit> [--sign | --no-sign]`
 
 | Flag | Meaning |
 |---|---|
@@ -500,6 +558,8 @@ Replay the current branch's commits onto the named base commit.
 ### `switchyard set-tip`
 
 Move the current branch's tip to the named commit without replaying anything.
+
+Usage: `switchyard set-tip <commit>`
 
 | Exit | Meaning |
 |---|---|

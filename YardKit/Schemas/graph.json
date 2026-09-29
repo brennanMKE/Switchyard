@@ -63,5 +63,6 @@
   ],
   "schemaName" : "graph",
   "schemaVersion" : 1,
-  "summary" : "List the commit DAG as lane-assigned rows, one per commit, newest first."
+  "summary" : "List the commit DAG as lane-assigned rows, one per commit, newest first.",
+  "usage" : "graph [--limit <n>]"
 }

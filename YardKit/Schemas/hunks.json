@@ -69,5 +69,6 @@
   ],
   "schemaName" : "hunks",
   "schemaVersion" : 1,
-  "summary" : "Report the per-file diff hunks for one area, staged or unstaged."
+  "summary" : "Report the per-file diff hunks for one area, staged or unstaged.",
+  "usage" : "hunks (--staged | --unstaged)"
 }

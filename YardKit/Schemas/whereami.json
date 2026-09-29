@@ -151,5 +151,6 @@
   ],
   "schemaName" : "whereami",
   "schemaVersion" : 1,
-  "summary" : "Report branch, upstream, ahead\/behind, and worktree status in one call."
+  "summary" : "Report branch, upstream, ahead\/behind, and worktree status in one call.",
+  "usage" : "whereami"
 }

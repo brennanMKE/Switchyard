@@ -54,5 +54,6 @@
   ],
   "schemaName" : "wt-where",
   "schemaVersion" : 1,
-  "summary" : "Report the current worktree's name, path, git dir, common dir, and the main worktree's path."
+  "summary" : "Report the current worktree's name, path, git dir, common dir, and the main worktree's path.",
+  "usage" : "wt where"
 }

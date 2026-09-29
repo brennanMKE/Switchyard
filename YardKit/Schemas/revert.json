@@ -73,5 +73,6 @@
   ],
   "schemaName" : "revert",
   "schemaVersion" : 1,
-  "summary" : "Apply the inverse of one commit to the current branch as a new commit."
+  "summary" : "Apply the inverse of one commit to the current branch as a new commit.",
+  "usage" : "revert <commit> [--sign | --no-sign]"
 }

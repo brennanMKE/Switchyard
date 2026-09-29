@@ -58,5 +58,6 @@
   ],
   "schemaName" : "set-tip",
   "schemaVersion" : 1,
-  "summary" : "Move the current branch's tip to the named commit without replaying anything."
+  "summary" : "Move the current branch's tip to the named commit without replaying anything.",
+  "usage" : "set-tip <commit>"
 }

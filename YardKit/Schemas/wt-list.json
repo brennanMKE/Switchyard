@@ -58,5 +58,6 @@
   ],
   "schemaName" : "wt-list",
   "schemaVersion" : 1,
-  "summary" : "Report the repository's worktrees, as `git worktree list --porcelain` sees them."
+  "summary" : "Report the repository's worktrees, as `git worktree list --porcelain` sees them.",
+  "usage" : "wt list"
 }

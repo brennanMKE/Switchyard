@@ -63,5 +63,6 @@
   ],
   "schemaName" : "rerere-status",
   "schemaVersion" : 1,
-  "summary" : "Report what git rerere has recorded: the repository's recorded conflict resolutions and whether rerere is enabled."
+  "summary" : "Report what git rerere has recorded: the repository's recorded conflict resolutions and whether rerere is enabled.",
+  "usage" : "rerere status [--json]"
 }

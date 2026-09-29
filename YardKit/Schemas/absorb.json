@@ -67,5 +67,6 @@
   ],
   "schemaName" : "absorb",
   "schemaVersion" : 1,
-  "summary" : "Distribute the staged hunks into the commits that last touched their lines."
+  "summary" : "Distribute the staged hunks into the commits that last touched their lines.",
+  "usage" : "absorb [--dry-run]"
 }

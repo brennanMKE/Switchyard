@@ -97,5 +97,6 @@
   ],
   "schemaName" : "merge",
   "schemaVersion" : 1,
-  "summary" : "Merge a branch into the current branch, stating the fast-forward intent explicitly."
+  "summary" : "Merge a branch into the current branch, stating the fast-forward intent explicitly.",
+  "usage" : "merge <branch> (--ff-only | --no-ff) [--message <message>] [--allow-unrelated] [--sign | --no-sign]"
 }

@@ -54,5 +54,6 @@
   ],
   "schemaName" : "skill",
   "schemaVersion" : 1,
-  "summary" : "Print the agent skill, skills\/switchyard\/SKILL.md, as markdown. Needs no app and no repository."
+  "summary" : "Print the agent skill, skills\/switchyard\/SKILL.md, as markdown. Needs no app and no repository.",
+  "usage" : "skill"
 }

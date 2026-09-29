@@ -37,12 +37,16 @@ let skillGeneratedBeginMarker =
     "<!-- BEGIN GENERATED from CommandRegistry.all — edit YardKit/Sources/YardKit/CommandRegistry.swift, then run scripts/generate-skill.sh -->"
 let skillGeneratedEndMarker = "<!-- END GENERATED -->"
 
-/// One command's section: heading, summary, flags, exit codes, result fields.
+/// One command's section: heading, summary, usage, flags, exit codes, result fields.
 nonisolated func renderSkillSection(for spec: CommandSpec) -> String {
     let invocation = spec.name == ServiceNames.cliName
         ? ServiceNames.cliName
         : "\(ServiceNames.cliName) \(spec.name)"
     var lines: [String] = ["### `\(invocation)`", "", spec.summary]
+
+    if !spec.usage.isEmpty {
+        lines += ["", "Usage: `\(ServiceNames.cliName) \(spec.usage)`"]
+    }
 
     if !spec.flags.isEmpty {
         lines += ["", "| Flag | Meaning |", "|---|---|"]

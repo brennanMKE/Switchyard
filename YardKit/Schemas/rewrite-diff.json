@@ -58,5 +58,6 @@
   ],
   "schemaName" : "rewrite-diff",
   "schemaVersion" : 1,
-  "summary" : "Compare one journal entry's rewritten commits against their originals with git range-diff."
+  "summary" : "Compare one journal entry's rewritten commits against their originals with git range-diff.",
+  "usage" : "rewrite-diff <journal-entry-id>"
 }

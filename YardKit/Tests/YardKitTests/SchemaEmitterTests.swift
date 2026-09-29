@@ -80,6 +80,7 @@ struct SchemaEmitterTests {
             "exitCodes": [],
             "command": Self.sampleSpec.name,
             "schemaName": Self.sampleSpec.schemaName,
+            "usage": Self.sampleSpec.usage,
         ]
 
         let data = try! JSONSerialization.data(withJSONObject: reversePayload, options: [.prettyPrinted, .sortedKeys])
@@ -158,6 +159,7 @@ struct SchemaEmitterTests {
             "exitCodes": [],
             "command": Self.sampleSpec.name,
             "schemaName": Self.sampleSpec.schemaName,
+            "usage": Self.sampleSpec.usage,
         ]
 
         // Use sortedKeys option — the only way this could emit unsorted output is if our
@@ -346,7 +348,7 @@ struct SchemaEmitterTests {
 
         // Verify keys are sorted at top level.
         let keys = Array(decoded.keys).sorted()
-        #expect(keys == ["command", "envelope", "exitCodes", "flags", "schemaName", "schemaVersion", "summary"])
+        #expect(keys == ["command", "envelope", "exitCodes", "flags", "schemaName", "schemaVersion", "summary", "usage"])
 
         // Verify top-level fields.
         #expect(decoded["command"] as? String == "diff")

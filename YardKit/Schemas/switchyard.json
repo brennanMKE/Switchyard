@@ -65,5 +65,6 @@
   ],
   "schemaName" : "switchyard",
   "schemaVersion" : 1,
-  "summary" : "switchyard CLI — version, help, and command schema."
+  "summary" : "switchyard CLI — version, help, and command schema.",
+  "usage" : "[--help | --version | <command> [<arguments>]]"
 }

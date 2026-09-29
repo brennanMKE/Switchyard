@@ -73,5 +73,6 @@
   ],
   "schemaName" : "drop",
   "schemaVersion" : 1,
-  "summary" : "Remove one commit from the branch, its changes and all."
+  "summary" : "Remove one commit from the branch, its changes and all.",
+  "usage" : "drop <commit> [--sign | --no-sign]"
 }

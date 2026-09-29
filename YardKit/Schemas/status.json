@@ -54,5 +54,6 @@
   ],
   "schemaName" : "status",
   "schemaVersion" : 1,
-  "summary" : "Report the per-file worktree status, as `git status --porcelain=v2` sees it."
+  "summary" : "Report the per-file worktree status, as `git status --porcelain=v2` sees it.",
+  "usage" : "status"
 }

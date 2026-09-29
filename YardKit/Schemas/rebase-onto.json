@@ -73,5 +73,6 @@
   ],
   "schemaName" : "rebase-onto",
   "schemaVersion" : 1,
-  "summary" : "Replay the current branch's commits onto the named base commit."
+  "summary" : "Replay the current branch's commits onto the named base commit.",
+  "usage" : "rebase-onto <commit> [--sign | --no-sign]"
 }
