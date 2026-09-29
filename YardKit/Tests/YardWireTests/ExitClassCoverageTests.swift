@@ -324,9 +324,11 @@ struct ExitClassCoverageTests {
         // arbitrary error with `as? any ExitClassCarrying` — a usage, not
         // an adoption, so it is accounted as a cast site. Pinning the count
         // keeps the category explicit: the next cast line updates this
-        // assertion rather than passing unnoticed.
+        // assertion rather than passing unnoticed. Guide §11 decision 37:
+        // EngineServing.swift's `engineFailure` is the second, converting
+        // the carried class into the CLI's exit code.
         #expect(
-            scan.castSites.count == 1,
+            scan.castSites.count == 2,
             "expected exactly one ExitClassCarrying cast site, found \(scan.castSites.joined(separator: ", "))")
         #expect(
             scan.unrecognized.isEmpty,
