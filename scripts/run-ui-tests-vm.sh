@@ -528,6 +528,7 @@ run_spike_if_selected 0458 Spike0458CancelPushUITests
 run_spike_if_selected 0459 Spike0459PushUITests
 run_spike_if_selected 0466 Spike0466AmendUITests amend
 run_spike_if_selected 0466 Spike0466AmendPushedUITests pushed
+run_spike_if_selected 0471 Spike0471DiscardFilesUITests
 
 print ""
 if (( TEST_RC == 0 )); then

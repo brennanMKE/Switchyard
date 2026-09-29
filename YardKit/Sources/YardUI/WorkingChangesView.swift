@@ -39,6 +39,8 @@ public struct WorkingChangesView: View {
     /// #0466: what Amend would rewrite; `nil` until `loadAmendTarget`
     /// answers, and after it fails.
     @State private var amendTarget: AmendHead.Target?
+    /// #0471: the Discard confirmation on screen; `nil` when none is.
+    @State private var pendingDiscard: DiscardConfirmation?
 
     public init(
         changes: WorkingChanges, repositoryPath: String, revision: Int, isBusy: Bool,
@@ -76,6 +78,22 @@ public struct WorkingChangesView: View {
             // push), so the checkbox's message and refusal are re-read too.
             amendTarget = try? await loadAmendTarget(at: repositoryPath)
         }
+        // #0471: every discard asks first (guide §11 decision 34). Return
+        // does nothing: the destructive button has no default-action
+        // shortcut, #0359's rule for Delete Commit….
+        .confirmationDialog(
+            pendingDiscard?.title ?? "",
+            isPresented: Binding(
+                get: { pendingDiscard != nil },
+                set: { if !$0 { pendingDiscard = nil } }),
+            titleVisibility: .visible,
+            presenting: pendingDiscard
+        ) { confirmation in
+            Button("Discard", role: .destructive) { perform(confirmation.change) }
+            Button("Cancel", role: .cancel) {}
+        } message: { confirmation in
+            Text(confirmation.message)
+        }
     }
 
     // MARK: - #0443: the file lists
@@ -110,7 +128,8 @@ public struct WorkingChangesView: View {
             } header: {
                 sectionHeader(
                     "Changes (\(changes.unstaged.count))", button: "Stage All",
-                    enabled: !changes.unstaged.isEmpty
+                    enabled: !changes.unstaged.isEmpty,
+                    discardAll: { pendingDiscard = DiscardConfirmation(rows: changes.discardableRows) }
                 ) {
                     perform(.stageFiles(changes.unstaged.map(\.path)))
                 }
@@ -118,12 +137,22 @@ public struct WorkingChangesView: View {
         }
     }
 
+    /// `discardAll`, when given, adds #0471's Discard All… left of the
+    /// section's button.
     private func sectionHeader(
-        _ title: String, button: String, enabled: Bool, action: @escaping () -> Void
+        _ title: String, button: String, enabled: Bool,
+        discardAll: (() -> Void)? = nil, action: @escaping () -> Void
     ) -> some View {
         HStack {
             Text(title)
             Spacer()
+            if let discardAll {
+                Button("Discard All…", action: discardAll)
+                    .buttonStyle(.borderless)
+                    .controlSize(.small)
+                    .disabled(changes.discardableRows.isEmpty || isBusy)
+                    .accessibilityIdentifier("discard-all")
+            }
             Button(button, action: action)
                 .buttonStyle(.borderless)
                 .controlSize(.small)
@@ -162,6 +191,16 @@ public struct WorkingChangesView: View {
                 .controlSize(.small)
                 .disabled(isBusy)
                 .accessibilityIdentifier("\(action.lowercased())-file-\(row.path)")
+            }
+        }
+        // #0471: Discard Changes… on an unstaged row. A staged or
+        // conflicted row's menu is empty, and SwiftUI shows none.
+        .contextMenu {
+            if WorkingChanges.canDiscard(row) {
+                Button("Discard Changes…") {
+                    pendingDiscard = DiscardConfirmation(rows: [row])
+                }
+                .disabled(isBusy)
             }
         }
     }
