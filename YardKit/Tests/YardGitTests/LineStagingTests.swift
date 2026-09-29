@@ -263,3 +263,121 @@ private let lineCases: [LineCase] = [
 func everySelectionAppliesToExactlyTheSelectedChanges(_ lineCase: LineCase) throws {
     #expect(try applyEverySelection(base: lineCase.base, edited: lineCase.edited) == lineCase.selections)
 }
+
+// MARK: - #0477 stageLines / unstageLines
+
+private let fiveLines = "a\nb\nc\nd\ne\n"
+/// `c` replaced by `C`, `X` added after it: body
+/// `[" a", " b", "-c", "+C", "+X", " d", " e"]`.
+private let fiveEdited = "a\nb\nC\nX\nd\ne\n"
+
+private func entryCount(_ repo: FixtureRepository) throws -> Int {
+    try JournalAnchor.list(in: try WorktreeContext.resolve(path: repo.url.path)).count
+}
+
+@Test func stageLinesStagesOnlyTheSelectedLine() throws {
+    let repo = try editedRepo(base: fiveLines, edited: fiveEdited)
+    defer { repo.destroy() }
+    let hunk = try #require(try onlyFile(repo, area: .unstaged).hunks.first)
+    let entries = try entryCount(repo)
+
+    try stageLines(hunkID: hunk.id, lines: [4], at: repo.url.path)
+
+    #expect(try indexBytes(repo) == "a\nb\nc\nX\nd\ne\n")
+    #expect(try worktreeBytes(repo) == fiveEdited)
+    #expect(try entryCount(repo) == entries + 1)
+}
+
+@Test func unstageLinesUnstagesOnlyTheSelectedLine() throws {
+    let repo = try editedRepo(base: fiveLines, edited: fiveEdited)
+    defer { repo.destroy() }
+    try GitProcess().run(["add", "f"], workingDirectory: repo.url.path)
+    let hunk = try #require(try onlyFile(repo, area: .staged).hunks.first)
+    let entries = try entryCount(repo)
+
+    // Unstage the removal of `c` only: `c` is back in the index, `C` and `X` stay.
+    try unstageLines(hunkID: hunk.id, lines: [2], at: repo.url.path)
+
+    #expect(try indexBytes(repo) == "a\nb\nc\nC\nX\nd\ne\n")
+    #expect(try worktreeBytes(repo) == fiveEdited)
+    #expect(try entryCount(repo) == entries + 1)
+}
+
+@Test func undoStageLinesPutsTheIndexBack() throws {
+    let repo = try editedRepo(base: fiveLines, edited: fiveEdited)
+    defer { repo.destroy() }
+    let hunk = try #require(try onlyFile(repo, area: .unstaged).hunks.first)
+
+    try stageLines(hunkID: hunk.id, lines: [2, 3], at: repo.url.path)
+    #expect(try indexBytes(repo) == "a\nb\nC\nd\ne\n")
+    try JournalUndo.undo(in: try WorktreeContext.resolve(path: repo.url.path))
+
+    #expect(try indexBytes(repo) == fiveLines)
+    #expect(try worktreeBytes(repo) == fiveEdited)
+}
+
+@Test func stageLinesWithAStaleHunkIDStagesNothing() throws {
+    let repo = try editedRepo(base: fiveLines, edited: fiveEdited)
+    defer { repo.destroy() }
+    let hunk = try #require(try onlyFile(repo, area: .unstaged).hunks.first)
+    try repo.writeUntracked(["f": "a\nb\nC\nY\nd\ne\n"])  // the hunk's lines changed
+
+    #expect(throws: StagingError.unknownHunkIDs(ids: [hunk.id], area: .unstaged)) {
+        try stageLines(hunkID: hunk.id, lines: [4], at: repo.url.path)
+    }
+    #expect(try indexBytes(repo) == fiveLines)
+}
+
+@Test func stageLinesRefusesAContextLineAndStagesNothing() throws {
+    let repo = try editedRepo(base: fiveLines, edited: fiveEdited)
+    defer { repo.destroy() }
+    let hunk = try #require(try onlyFile(repo, area: .unstaged).hunks.first)
+
+    #expect(throws: StagingError.notAChangedLine(hunkID: hunk.id, line: 0)) {
+        try stageLines(hunkID: hunk.id, lines: [0, 4], at: repo.url.path)
+    }
+    #expect(try indexBytes(repo) == fiveLines)
+}
+
+@Test func noSelectedLinesWritesNoEntry() throws {
+    let repo = try editedRepo(base: fiveLines, edited: fiveEdited)
+    defer { repo.destroy() }
+    let hunk = try #require(try onlyFile(repo, area: .unstaged).hunks.first)
+    let entries = try entryCount(repo)
+
+    try stageLines(hunkID: hunk.id, lines: [], at: repo.url.path)
+    try unstageLines(hunkID: hunk.id, lines: [], at: repo.url.path)
+
+    #expect(try entryCount(repo) == entries)
+}
+
+@Test func unstageLinesOfAStagedNewFileKeepsTheRestStaged() throws {
+    var repo = try FixtureRepository()
+    defer { repo.destroy() }
+    try repo.build([.init("base", files: ["keep": "k\n"])])
+    try repo.writeUntracked(["f": "a\nb\nc\n"])
+    try GitProcess().run(["add", "f"], workingDirectory: repo.url.path)
+    let hunk = try #require(try onlyFile(repo, area: .staged).hunks.first)
+
+    try unstageLines(hunkID: hunk.id, lines: [1], at: repo.url.path)
+
+    // Measured without the header rewrite: git exits 128, "new file f
+    // depends on old contents"; with only the mode line dropped, it exits
+    // 0 and removes `f` from the index altogether.
+    #expect(try indexBytes(repo) == "a\nc\n")
+    #expect(try worktreeBytes(repo) == "a\nb\nc\n")
+}
+
+@Test func stageLinesOfADeletedFileStagesOnlyThoseRemovals() throws {
+    var repo = try FixtureRepository()
+    defer { repo.destroy() }
+    try repo.build([.init("base", files: ["f": "a\nb\nc\n"])])
+    try FileManager.default.removeItem(at: repo.url.appendingPathComponent("f"))
+    let hunk = try #require(try onlyFile(repo, area: .unstaged).hunks.first)
+
+    try stageLines(hunkID: hunk.id, lines: [0, 2], at: repo.url.path)
+
+    // Measured without the header rewrite: exit 128, "deleted file f still
+    // has contents".
+    #expect(try indexBytes(repo) == "b\n")
+}

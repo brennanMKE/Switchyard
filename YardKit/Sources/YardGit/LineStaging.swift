@@ -158,3 +158,58 @@ func selectLinePatch(
     }
     throw StagingError.unknownHunkIDs(ids: [hunkID], area: area)
 }
+
+// MARK: - Journaled entry points (#0477)
+
+/// Stages the selected lines of one unstaged hunk: the index gains exactly
+/// those `+` and `-` lines. `hunkID` comes from `listHunks(at:area:
+/// .unstaged)` and `lines` are indices into that hunk's `body`.
+///
+/// Like `stageHunks`, the listing is re-taken inside the call, so the patch
+/// is built from fresh headers. A hunk id names its body exactly (it is a
+/// hash of path and body), so the same id means the same lines at the same
+/// indices; a hunk whose lines changed since it was listed has a new id and
+/// is refused as `StagingError.unknownHunkIDs`. A selected index that is
+/// not a changed line throws `StagingError.notAChangedLine`. Both are
+/// thrown before `git apply` runs, so nothing is staged; the checkpoint is
+/// already written by then, as for `stageHunks`, and its undo is a no-op.
+///
+/// An empty `lines` is a no-op with no entry. **Writes exactly one journal
+/// entry per call**, operation `stage`, so Edit ▸ Undo reads "Undo Stage".
+public func stageLines(
+    hunkID: String,
+    lines: [Int],
+    at path: String,
+    git: GitProcess = GitProcess()
+) throws {
+    guard !lines.isEmpty else { return }
+    try JournalCheckpoint.around(operation: "stage", at: path, git: git) { git in
+        let files = try listHunks(at: path, area: .unstaged, git: git)
+        let patch = try selectLinePatch(
+            hunkID: hunkID, lines: Set(lines), from: files, area: .unstaged, direction: .forward)
+        try applyPatchToIndex(patch, at: path, git: git)
+    }
+}
+
+/// Unstages the selected lines of one staged hunk: the index loses exactly
+/// those `+` and `-` lines, the worktree is untouched. `hunkID` comes from
+/// `listHunks(at:area: .staged)`. The patch is applied with `git apply
+/// --cached --reverse`, the mechanism `unstageHunks` uses. Refusals, the
+/// empty no-op and the single entry (operation `unstage`) are as for
+/// `stageLines`.
+public func unstageLines(
+    hunkID: String,
+    lines: [Int],
+    at path: String,
+    git: GitProcess = GitProcess()
+) throws {
+    guard !lines.isEmpty else { return }
+    try JournalCheckpoint.around(operation: "unstage", at: path, git: git) { git in
+        let files = try listHunks(at: path, area: .staged, git: git)
+        let patch = try selectLinePatch(
+            hunkID: hunkID, lines: Set(lines), from: files, area: .staged, direction: .reverse)
+        try git.run(["apply", "--cached", "--reverse"],
+                    workingDirectory: path,
+                    standardInput: Data(patch.utf8))
+    }
+}
