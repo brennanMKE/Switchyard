@@ -231,6 +231,12 @@ public struct WorkingChangesView: View {
                             ) { hunk in
                                 perform(selection.staged
                                     ? .unstageHunk(id: hunk.id) : .stageHunk(id: hunk.id))
+                            },
+                            // #0472: Discard Hunk… on the unstaged side only.
+                            discardAction: selection.staged ? nil : FileDiffView.HunkAction(
+                                title: "Discard Hunk…", isEnabled: !isBusy
+                            ) { hunk in
+                                pendingDiscard = DiscardConfirmation(hunk: hunk)
                             })
                         .padding()
                         .frame(maxWidth: .infinity, alignment: .leading)
