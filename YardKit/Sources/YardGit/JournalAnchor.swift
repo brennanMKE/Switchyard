@@ -167,6 +167,10 @@ public enum JournalAnchor {
     /// (#0202). A gitlink entry confers no reachability of its own; the
     /// commit is *also* a `keepAlive` parent for that reason, unchanged.
     public static let worktreeCommitTreeEntryName = "worktree-commit"
+    /// Blob OID of the stash list (`StashSnapshot.serialized()`), if
+    /// captured (#0490). An entry written before #0490 has no such entry,
+    /// and a restore of it leaves the stash list alone.
+    public static let stashTreeEntryName = "stash"
 
     /// What one entry stores. Piece OIDs are produced by the snapshot
     /// primitives (#0027, #0151, #0152) and arrive here opaque; `write`
@@ -190,6 +194,8 @@ public enum JournalAnchor {
         /// named gitlink entry (`worktreeCommitTreeEntryName`) rather than
         /// inferred from `keepAlive`'s order (#0202).
         public var worktreeCommit: String?
+        /// Blob OID of the stash list, if captured (#0490).
+        public var stashBlob: String?
         /// Commit OIDs the entry must keep reachable — the stash commit and
         /// captured history tips. Written as the snapshot commit's parents.
         public var keepAlive: [String]
@@ -202,6 +208,7 @@ public enum JournalAnchor {
             untrackedTree: String? = nil,
             sequencerTree: String? = nil,
             worktreeCommit: String? = nil,
+            stashBlob: String? = nil,
             keepAlive: [String] = []
         ) {
             self.metadataJSON = metadataJSON
@@ -211,6 +218,7 @@ public enum JournalAnchor {
             self.untrackedTree = untrackedTree
             self.sequencerTree = sequencerTree
             self.worktreeCommit = worktreeCommit
+            self.stashBlob = stashBlob
             self.keepAlive = keepAlive
         }
     }
@@ -301,6 +309,9 @@ public enum JournalAnchor {
         }
         if let oid = contents.worktreeCommit {
             treeLines += "160000 commit \(oid)\t\(worktreeCommitTreeEntryName)\n"
+        }
+        if let oid = contents.stashBlob {
+            treeLines += "100644 blob \(oid)\t\(stashTreeEntryName)\n"
         }
         let tree = try singleOID(
             of: try git.run(["mktree"], workingDirectory: base,

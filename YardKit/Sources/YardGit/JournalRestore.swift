@@ -65,6 +65,10 @@ public enum JournalRestore {
     /// A piece of repository state a journal entry can carry.
     public enum Piece: String, Sendable, Equatable, CaseIterable {
         case refs, head, index, worktree, untracked, sequencer
+        /// The stash list (#0490). Reported only when the restore changed
+        /// it; an entry written before #0490 carries none and leaves the
+        /// list alone.
+        case stash
     }
 
     /// Why a piece was not restored. The distinction is the honesty contract
@@ -288,6 +292,7 @@ public enum JournalRestore {
         let currentIndex = try IndexSnapshot.capture(in: context, git: git)
         let currentWorktree = try WorktreeSnapshot.capture(in: context, git: git)
         let currentSequencer = try SequencerSnapshot.capture(in: context, git: git)
+        let currentStash = try StashSnapshot.capture(in: context, git: git)
 
         // Hoisted above `applied`: both the head-detach transformation below
         // and the disturbance check (step 5) need the same worktree listing,
@@ -400,6 +405,7 @@ public enum JournalRestore {
             index: currentIndex,
             worktree: currentWorktree,
             sequencer: currentSequencer,
+            stash: currentStash,
             operation: operation,
             command: command,
             agent: agent,
@@ -475,6 +481,18 @@ public enum JournalRestore {
             // already captured this live sequencer (#0200) — the
             // mid-rebase state stays recoverable by restoring it.
             restored.append(.sequencer)
+        }
+
+        // 8d. The stash list (#0490), after the refs: `toApply.restore`
+        // may just have written `refs/stash`, which adds a reflog line the
+        // rebuild below then replaces. Absent from entries written before
+        // #0490, which leave the list alone.
+        if let blob = slots[JournalAnchor.stashTreeEntryName] {
+            let recorded = try StashSnapshot(serialized: git.run(
+                ["cat-file", "blob", blob], workingDirectory: base).standardOutput)
+            if try recorded.restore(in: context, git: git) {
+                restored.append(.stash)
+            }
         }
 
         // 9. Report honestly — only what was NOT put back, what HEAD gave up
