@@ -138,6 +138,34 @@ public enum DiscardChanges {
             }
         }
     }
+
+    /// Discards the unstaged hunks with the given ids: the worktree loses
+    /// exactly those changes, the index is untouched. Ids come from
+    /// `listHunks(at:area: .unstaged)`, as for `stageHunks`, and are
+    /// resolved against a listing re-taken inside the call.
+    ///
+    /// The patch is `selectPatch`'s, the one `stageHunks` builds, applied
+    /// with `git apply --reverse` and no `--cached`: the same atomic apply,
+    /// aimed at the worktree instead of the index. An unknown id throws
+    /// `StagingError.unknownHunkIDs` and a conflicted file's combined hunk
+    /// `StagingError.combinedHunkNotStageable`, both before `git apply`
+    /// runs, so nothing is discarded; the checkpoint is already written by
+    /// then, as for `stageHunks`, and its undo is a no-op.
+    ///
+    /// An empty `ids` is a no-op with no entry. **Writes exactly one journal
+    /// entry per call**, operation `discard`.
+    public static func discardHunks(
+        ids: [String],
+        at path: String,
+        git: GitProcess = GitProcess()
+    ) throws {
+        guard !ids.isEmpty else { return }
+        try JournalCheckpoint.around(operation: operation, at: path, git: git) { git in
+            let files = try listHunks(at: path, area: .unstaged, git: git)
+            let patch = try selectPatch(ids: ids, from: files, area: .unstaged)
+            try git.run(["apply", "--reverse"], workingDirectory: path, standardInput: Data(patch.utf8))
+        }
+    }
 }
 
 // MARK: - §6 exit class (#0141)

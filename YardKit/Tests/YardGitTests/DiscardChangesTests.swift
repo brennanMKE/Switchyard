@@ -244,3 +244,98 @@ func planSplitsTrackedFromUntracked() throws {
 
     #expect(plan == .init(tracked: ["m.txt", "d.txt", "l"], untracked: ["dir/"]))
 }
+
+// MARK: - #0469 discardHunks
+
+/// One commit holding `t.txt`, twenty lines; then lines 2 and 18 edited,
+/// unstaged — two hunks, far enough apart that git keeps them separate.
+private func twoHunkRepo(_ format: FixtureRepository.RefFormat) throws -> FixtureRepository {
+    var repo = try FixtureRepository(refFormat: format)
+    let lines = (1...20).map { String(format: "line %02d\n", $0) }
+    try repo.build([.init("base", files: ["t.txt": lines.joined()])])
+    var edited = lines
+    edited[1] = "line 02 edited\n"
+    edited[17] = "line 18 edited\n"
+    try repo.writeUntracked(["t.txt": edited.joined()])
+    return repo
+}
+
+private func text(_ path: String, in repo: FixtureRepository) throws -> String {
+    try String(contentsOf: repo.url.appendingPathComponent(path), encoding: .utf8)
+}
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func discardHunksRemovesOnlyTheNamedHunk(format: FixtureRepository.RefFormat) throws {
+    let repo = try twoHunkRepo(format)
+    defer { repo.destroy() }
+    let hunks = try listHunks(at: repo.url.path, area: .unstaged).flatMap(\.hunks)
+    #expect(hunks.count == 2)
+
+    try DiscardChanges.discardHunks(ids: [hunks[0].id], at: repo.url.path)
+
+    let after = try text("t.txt", in: repo)
+    #expect(after.contains("line 02\n"), "the first hunk was not discarded")
+    #expect(after.contains("line 18 edited\n"), "the second hunk was discarded too")
+    #expect(try listHunks(at: repo.url.path, area: .staged).isEmpty, "discard staged something")
+}
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func discardHunksLeavesTheIndexAlone(format: FixtureRepository.RefFormat) throws {
+    let repo = try twoHunkRepo(format)
+    defer { repo.destroy() }
+    let first = try listHunks(at: repo.url.path, area: .unstaged).flatMap(\.hunks)[0]
+    try stageHunks(ids: [first.id], at: repo.url.path)
+    let staged = try listHunks(at: repo.url.path, area: .staged)
+    let second = try listHunks(at: repo.url.path, area: .unstaged).flatMap(\.hunks)
+    #expect(second.count == 1)
+
+    try DiscardChanges.discardHunks(ids: [second[0].id], at: repo.url.path)
+
+    #expect(try listHunks(at: repo.url.path, area: .staged) == staged, "the staged hunk moved")
+    #expect(try listHunks(at: repo.url.path, area: .unstaged).isEmpty)
+    #expect(try text("t.txt", in: repo).contains("line 02 edited\n"),
+            "the worktree lost the staged hunk's line")
+}
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func undoDiscardHunkBringsTheLinesBack(format: FixtureRepository.RefFormat) throws {
+    let repo = try twoHunkRepo(format)
+    defer { repo.destroy() }
+    let ctx = try WorktreeContext.resolve(path: repo.url.path)
+    let before = try text("t.txt", in: repo)
+    let entriesBefore = try JournalAnchor.list(in: ctx).count
+    let ids = try listHunks(at: repo.url.path, area: .unstaged).flatMap(\.hunks).map(\.id)
+
+    try DiscardChanges.discardHunks(ids: ids, at: repo.url.path)
+    #expect(try JournalAnchor.list(in: ctx).count == entriesBefore + 1)
+    #expect(try text("t.txt", in: repo) != before)
+
+    try JournalUndo.undo(in: ctx)
+
+    #expect(try text("t.txt", in: repo) == before)
+}
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func discardHunksWithAnUnknownIDChangesNothing(format: FixtureRepository.RefFormat) throws {
+    let repo = try twoHunkRepo(format)
+    defer { repo.destroy() }
+    let before = try text("t.txt", in: repo)
+    let first = try listHunks(at: repo.url.path, area: .unstaged).flatMap(\.hunks)[0]
+
+    #expect(throws: StagingError.unknownHunkIDs(ids: ["000000000000"], area: .unstaged)) {
+        try DiscardChanges.discardHunks(ids: [first.id, "000000000000"], at: repo.url.path)
+    }
+    #expect(try text("t.txt", in: repo) == before)
+}
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func discardHunksWithNoIDsWritesNoEntry(format: FixtureRepository.RefFormat) throws {
+    let repo = try twoHunkRepo(format)
+    defer { repo.destroy() }
+    let ctx = try WorktreeContext.resolve(path: repo.url.path)
+    let entriesBefore = try JournalAnchor.list(in: ctx).count
+
+    try DiscardChanges.discardHunks(ids: [], at: repo.url.path)
+
+    #expect(try JournalAnchor.list(in: ctx).count == entriesBefore)
+}
