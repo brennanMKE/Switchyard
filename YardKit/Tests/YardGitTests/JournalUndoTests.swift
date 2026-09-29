@@ -748,3 +748,34 @@ struct JournalUndoPushTests {
         #expect(try JournalUndo.redo(in: ctx).count == 1)
     }
 }
+
+// MARK: - Content filters (#0473)
+
+extension JournalUndoTests {
+
+    /// The whole path, not only the primitive: a checkpoint, a change, and
+    /// an undo must hand back the bytes the user had — here a secret a
+    /// clean filter strips, which pre-#0473 undo deleted (measured).
+    @Test func undoRestoresACleanFilteredFileByteForByte() throws {
+        var repo = try FixtureRepository()
+        defer { repo.destroy() }
+        try git.run(["config", "filter.strip.clean", "sed -e 's/^SECRET=.*/SECRET=/'"],
+                    workingDirectory: repo.url.path)
+        try git.run(["config", "filter.strip.smudge", "cat"],
+                    workingDirectory: repo.url.path)
+        try repo.build([FixtureRepository.Commit("base", files: [
+            ".gitattributes": "*.env filter=strip\n",
+            "app.env": "SECRET=\nNAME=x\n",
+        ])])
+        let ctx = try context(of: repo)
+        let file = repo.url.appendingPathComponent("app.env")
+        let secret = Data("SECRET=hunter2\nNAME=x\n".utf8)
+        try secret.write(to: file)
+
+        let c1 = try JournalCheckpoint.checkpoint(operation: "checkpoint", in: ctx)
+        try Data("changed\n".utf8).write(to: file)
+
+        #expect(try JournalUndo.undo(in: ctx).map(\.entry.id) == [c1.id])
+        #expect(try Data(contentsOf: file) == secret)
+    }
+}

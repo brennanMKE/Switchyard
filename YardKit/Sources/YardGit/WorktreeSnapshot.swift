@@ -34,6 +34,19 @@ import Foundation
 /// everything, always" affordable, and build outputs must not ride the
 /// journal.
 ///
+/// **Both objects hold raw worktree bytes (#0473).** `add -u` and
+/// `update-index --add` hash through git's clean filter (`core.autocrlf`,
+/// `text`/`eol`, `filter=`, `ident`, `working-tree-encoding`), and
+/// `checkout-index` writes through the smudge filter, so a file whose bytes
+/// are not a fixed point of `smudge(clean(x))` used to come back changed.
+/// Capture re-hashes every path a conversion could touch with
+/// `hash-object --no-filters`; restore re-hashes what `checkout-index`
+/// wrote and overwrites any file that differs with the blob's raw bytes. A
+/// path no conversion touches is stored exactly as before. The commit
+/// carries a `Switchyard-Worktree-Bytes: raw` trailer; a commit without it
+/// predates #0473, holds clean-filter output, and restores through the
+/// smudge filter as it always did.
+///
 /// Capture never touches the real index, the worktree, or any ref. Every
 /// index-mutating command aims at a temporary index via `GIT_INDEX_FILE` —
 /// and the copy is load-bearing, not hygiene: `add -u` against the real
@@ -90,6 +103,8 @@ public struct WorktreeSnapshot: Sendable, Equatable {
         case malformedPlumbingOutput(command: String)
         /// Restore could not delete a file that did not exist at capture.
         case worktreeFileUnremovable(path: String, detail: String)
+        /// Restore could not write a file's captured raw bytes (#0473).
+        case worktreeFileUnwritable(path: String, detail: String)
         /// The repository is bare: there is no worktree to capture or
         /// restore.
         case noWorktree(gitDir: String)
@@ -102,6 +117,8 @@ public struct WorktreeSnapshot: Sendable, Equatable {
                 "\(command) printed no object id"
             case let .worktreeFileUnremovable(path, detail):
                 "cannot remove worktree file \(path): \(detail)"
+            case let .worktreeFileUnwritable(path, detail):
+                "cannot write worktree file \(path): \(detail)"
             case let .noWorktree(gitDir):
                 "repository at \(gitDir) has no worktree"
             }
@@ -152,6 +169,7 @@ public struct WorktreeSnapshot: Sendable, Equatable {
         let trackedEnvironment = ["GIT_INDEX_FILE": trackedIndex.path]
         try git.run(["add", "-u"],
                     workingDirectory: base, extraEnvironment: trackedEnvironment)
+        try overlayRawBytes(base: base, environment: trackedEnvironment, git: git)
         let tree = try singleOID(
             of: try git.run(["write-tree"],
                             workingDirectory: base,
@@ -159,7 +177,8 @@ public struct WorktreeSnapshot: Sendable, Equatable {
             command: "write-tree")
         let commit = try singleOID(
             of: try git.run(["commit-tree", tree,
-                             "-m", "switchyard worktree snapshot"],
+                             "-m", "switchyard worktree snapshot",
+                             "-m", Self.rawBytesTrailer],
                             workingDirectory: base,
                             extraEnvironment: Self.commitEnvironment),
             command: "commit-tree")
@@ -178,6 +197,7 @@ public struct WorktreeSnapshot: Sendable, Equatable {
                         workingDirectory: base,
                         standardInput: others.standardOutput,
                         extraEnvironment: untrackedEnvironment)
+            try overlayRawBytes(base: base, environment: untrackedEnvironment, git: git)
         }
         let untracked = try singleOID(
             of: try git.run(["write-tree"],
@@ -241,6 +261,10 @@ public struct WorktreeSnapshot: Sendable, Equatable {
         try git.run(["checkout-index", "-a", "-f"],
                     workingDirectory: base, extraEnvironment: environment)
 
+        if try Self.holdsRawBytes(commit: commit, base: base, git: git) {
+            try Self.rewriteRawBytes(base: base, environment: environment, git: git)
+        }
+
         // Delete what the capture did not contain. A path listed by the
         // real index but already gone from disk is a no-op, caught by the
         // not-found catch rather than a pre-check so a broken symlink is
@@ -259,6 +283,225 @@ public struct WorktreeSnapshot: Sendable, Equatable {
                 throw Error.worktreeFileUnremovable(
                     path: absolute, detail: String(describing: error))
             }
+        }
+    }
+
+    // MARK: - Raw bytes (#0473)
+
+    /// The trailer on a snapshot commit whose blobs hold raw worktree bytes.
+    /// A commit without it was captured before #0473, through the clean
+    /// filter; restore leaves those to `checkout-index` alone, exactly as
+    /// they were restored when they were written.
+    static let rawBytesTrailer = "Switchyard-Worktree-Bytes: raw"
+
+    /// Every attribute git's conversion layer consults (`crlf` is the legacy
+    /// spelling of `text`). A path with all of these unspecified or unset,
+    /// under `core.autocrlf` off, is stored byte-for-byte by `add` already.
+    static let conversionAttributes =
+        ["crlf", "ident", "filter", "eol", "text", "working-tree-encoding"]
+
+    /// One stage-0 regular-file entry of a temporary index. The path stays
+    /// as bytes so it round-trips into `update-index` unchanged.
+    private struct Entry {
+        let mode: String
+        let oid: String
+        let path: Data
+    }
+
+    /// Capture half: `add -u` and `update-index --add` hash through the
+    /// clean filter. For every path a conversion could apply to, re-hash the
+    /// file with `--no-filters` and point the temporary index at that blob
+    /// instead. A path no conversion touches is never re-read, so its blob —
+    /// and the tree — is exactly what it was before #0473.
+    private static func overlayRawBytes(
+        base: String, environment: [String: String], git: GitProcess
+    ) throws {
+        let entries = try regularFileEntries(
+            base: base, environment: environment, git: git)
+        guard !entries.isEmpty else { return }
+        let candidates = try conversionCandidates(
+            entries.map(\.path), base: base, environment: environment, git: git)
+        let hashed = entries.filter { candidates.contains($0.path) }
+        guard !hashed.isEmpty else { return }
+        let raw = try rawHashes(
+            of: hashed.map(\.path), write: true, base: base, git: git)
+        var info = Data()
+        for (entry, oid) in zip(hashed, raw) where oid != entry.oid {
+            info.append(Data("\(entry.mode) \(oid) 0\t".utf8))
+            info.append(entry.path)
+            info.append(0)
+        }
+        guard !info.isEmpty else { return }
+        try git.run(["update-index", "-z", "--index-info"],
+                    workingDirectory: base,
+                    standardInput: info,
+                    extraEnvironment: environment)
+    }
+
+    /// Restore half: `checkout-index` wrote every file through the smudge
+    /// filter. Re-hash every regular file it wrote with `--no-filters` and
+    /// overwrite the ones whose bytes are not the captured blob. Every file,
+    /// not only conversion candidates: the attributes in force now need not
+    /// be the ones in force at capture.
+    private static func rewriteRawBytes(
+        base: String, environment: [String: String], git: GitProcess
+    ) throws {
+        let entries = try regularFileEntries(
+            base: base, environment: environment, git: git)
+        guard !entries.isEmpty else { return }
+        let written = try rawHashes(
+            of: entries.map(\.path), write: false, base: base, git: git)
+        let stale = zip(entries, written).filter { $0.1 != $0.0.oid }.map(\.0)
+        guard !stale.isEmpty else { return }
+        let request = Data(stale.map { "\($0.oid)\n" }.joined().utf8)
+        let batch = try git.run(["cat-file", "--batch"],
+                                workingDirectory: base,
+                                standardInput: request).standardOutput
+        // `--batch` output: `<oid> blob <size>` LF, the bytes, LF — in
+        // request order.
+        var cursor = batch.startIndex
+        for entry in stale {
+            guard let newline = batch[cursor...].firstIndex(of: 0x0A) else {
+                throw Error.malformedPlumbingOutput(command: "cat-file --batch")
+            }
+            let header = String(decoding: batch[cursor..<newline], as: UTF8.self)
+                .split(separator: " ")
+            let start = batch.index(after: newline)
+            guard header.count == 3, header[1] == "blob",
+                  let size = Int(header[2]),
+                  batch.distance(from: start, to: batch.endIndex) > size else {
+                throw Error.malformedPlumbingOutput(command: "cat-file --batch")
+            }
+            let end = batch.index(start, offsetBy: size)
+            let path = base + "/" + String(decoding: entry.path, as: UTF8.self)
+            try overwrite(path, with: Data(batch[start..<end]))
+            cursor = batch.index(after: end)
+        }
+    }
+
+    /// Whether `commit` was captured with raw bytes: its message carries
+    /// `rawBytesTrailer`.
+    private static func holdsRawBytes(
+        commit: String, base: String, git: GitProcess
+    ) throws -> Bool {
+        try git.run(["cat-file", "commit", commit], workingDirectory: base)
+            .text.contains("\n\(rawBytesTrailer)\n")
+    }
+
+    /// Stage-0 `100644`/`100755` entries of the index `environment` names.
+    /// Symlinks and gitlinks are skipped: neither has filterable content,
+    /// and hashing a symlink's path would read its target.
+    private static func regularFileEntries(
+        base: String, environment: [String: String], git: GitProcess
+    ) throws -> [Entry] {
+        let listing = try git.run(["ls-files", "-s", "-z"],
+                                  workingDirectory: base,
+                                  extraEnvironment: environment).standardOutput
+        return listing.split(separator: 0).compactMap { record in
+            guard let tab = record.firstIndex(of: 0x09) else { return nil }
+            let fields = String(decoding: record[record.startIndex..<tab], as: UTF8.self)
+                .split(separator: " ")
+            guard fields.count == 3, fields[2] == "0",
+                  fields[0] == "100644" || fields[0] == "100755" else { return nil }
+            return Entry(mode: String(fields[0]), oid: String(fields[1]),
+                         path: Data(record[record.index(after: tab)...]))
+        }
+    }
+
+    /// The subset of `paths` a content conversion could change: any
+    /// conversion attribute set, or `core.autocrlf` on and the path not
+    /// marked binary.
+    private static func conversionCandidates(
+        _ paths: [Data], base: String, environment: [String: String],
+        git: GitProcess
+    ) throws -> Set<Data> {
+        var input = Data()
+        for path in paths {
+            input.append(path)
+            input.append(0)
+        }
+        let output = try git.run(["check-attr", "-z", "--stdin"] + conversionAttributes,
+                                 workingDirectory: base,
+                                 standardInput: input,
+                                 extraEnvironment: environment).standardOutput
+        // `-z` output: path NUL attribute NUL value NUL, once per attribute.
+        let fields = output.split(separator: 0, omittingEmptySubsequences: false)
+        var attributes: [Data: [String: String]] = [:]
+        for i in stride(from: 0, to: fields.count - 2, by: 3) {
+            attributes[Data(fields[i]), default: [:]][
+                String(decoding: fields[i + 1], as: UTF8.self)] =
+                String(decoding: fields[i + 2], as: UTF8.self)
+        }
+        let autocrlf = try autocrlfEnabled(base: base, git: git)
+        return Set(paths.filter {
+            needsRawCapture(attributes[$0] ?? [:], autocrlf: autocrlf)
+        })
+    }
+
+    /// The conversion predicate, over `check-attr` values (`set`, `unset`,
+    /// `unspecified`, or a value). Conservative: an attribute git would
+    /// ignore still counts, because a false positive costs one extra hash
+    /// and a false negative is the #0473 bug.
+    static func needsRawCapture(_ attributes: [String: String], autocrlf: Bool) -> Bool {
+        let active = conversionAttributes.contains {
+            let value = attributes[$0] ?? "unspecified"
+            return value != "unspecified" && value != "unset"
+        }
+        if active { return true }
+        let binary = attributes["text"] == "unset" || attributes["crlf"] == "unset"
+        return autocrlf && !binary
+    }
+
+    /// `core.autocrlf` as git reads it: `input` or any true boolean is on;
+    /// absent or any false boolean is off.
+    private static func autocrlfEnabled(base: String, git: GitProcess) throws -> Bool {
+        let result = try git.capture(["config", "--get", "core.autocrlf"],
+                                     workingDirectory: base)
+        guard result.exitCode == 0 else { return false }
+        let value = result.text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return !["false", "no", "off", "0", ""].contains(value)
+    }
+
+    /// The raw-byte blob oid of each path, via one `hash-object --no-filters
+    /// --stdin-paths`. Every path is C-quoted, which that command unquotes,
+    /// so a newline, quote, backslash or trailing CR in a name survives.
+    private static func rawHashes(
+        of paths: [Data], write: Bool, base: String, git: GitProcess
+    ) throws -> [String] {
+        var input = Data()
+        for path in paths {
+            input.append(0x22)
+            for byte in path {
+                switch byte {
+                case 0x22: input.append(contentsOf: [0x5C, 0x22])
+                case 0x5C: input.append(contentsOf: [0x5C, 0x5C])
+                case 0x0A: input.append(contentsOf: [0x5C, 0x6E])
+                default: input.append(byte)
+                }
+            }
+            input.append(contentsOf: [0x22, 0x0A])
+        }
+        let arguments = ["hash-object", "--no-filters", "--stdin-paths"]
+            + (write ? ["-w"] : [])
+        let lines = try git.run(arguments, workingDirectory: base,
+                                standardInput: input).lines
+        guard lines.count == paths.count else {
+            throw Error.malformedPlumbingOutput(command: "hash-object")
+        }
+        return lines
+    }
+
+    /// Overwrites an existing regular file in place — same inode, so the
+    /// mode `checkout-index` just set is kept.
+    private static func overwrite(_ path: String, with bytes: Data) throws {
+        do {
+            let handle = try FileHandle(forWritingTo: URL(fileURLWithPath: path))
+            defer { try? handle.close() }
+            try handle.truncate(atOffset: 0)
+            try handle.write(contentsOf: bytes)
+        } catch {
+            throw Error.worktreeFileUnwritable(
+                path: path, detail: String(describing: error))
         }
     }
 
