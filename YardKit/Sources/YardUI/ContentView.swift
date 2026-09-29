@@ -167,6 +167,11 @@ public struct ContentView: View {
     /// three toolbar buttons. Loaded with the summary and on every refresh.
     @State private var remoteNames: [String] = []
 
+    /// #0458: the running network operation's engine call, so the progress
+    /// line's Cancel can cancel it. Cancelling terminates the `git` child;
+    /// it never cancels the refresh that follows.
+    @State private var remoteTask: Task<Void, any Error>?
+
     /// #0444: bumped after every in-place refresh, so the Changes view
     /// reloads its diffs even when the status kept its shape.
     @State private var workingTreeRevision = 0
@@ -552,9 +557,10 @@ public struct ContentView: View {
                 onAbort: { runAbort() })
                 .padding()
             Divider()
-            // #0359: the running action's progress line. No modal and no
-            // Cancel button — signing can take seconds and may raise a
-            // pinentry or agent prompt the user must be able to reach.
+            // #0359: the running action's progress line. No modal. Only a
+            // network operation has a Cancel button (#0458) — signing can
+            // take seconds and may raise a pinentry or agent prompt the
+            // user must be able to reach.
             if let progress = runningAction?.progressLabel ?? runningWorkingChange?.progressLabel
                 ?? runningRemote?.progressLabel {
                 HStack(spacing: 6) {
@@ -563,6 +569,14 @@ public struct ContentView: View {
                     Text(progress)
                         .font(.callout)
                         .foregroundStyle(.secondary)
+                    // #0458: only a network operation can be cancelled.
+                    // The other engine calls are synchronous, and signing
+                    // may raise a prompt the user must be able to reach.
+                    if let remoteTask {
+                        Button("Cancel") { remoteTask.cancel() }
+                            .controlSize(.small)
+                            .accessibilityIdentifier("remote-cancel")
+                    }
                 }
                 .padding(.horizontal)
                 .padding(.vertical, 4)
@@ -1128,13 +1142,20 @@ public struct ContentView: View {
     private func runRemote(_ operation: RemoteOperation) {
         guard let repositoryPath, !isBusy, !journalRunning else { return }
         runningRemote = operation
+        // #0458: the engine call is its own task so Cancel reaches it and
+        // nothing else: the refresh below must still run after a cancel.
+        let work = Task { try await performRemoteOperation(operation, at: repositoryPath) }
+        remoteTask = work
         Task {
             defer { runningRemote = nil }
             do {
-                try await performRemoteOperation(operation, at: repositoryPath)
+                try await work.value
             } catch {
                 actionFailure = operation.failure(for: error)
             }
+            // Cancel goes away with the engine call; the refresh below is
+            // not cancellable, so the button must not outlive the call.
+            remoteTask = nil
             await refreshAfterMutation { _, _ in nil }
         }
     }
