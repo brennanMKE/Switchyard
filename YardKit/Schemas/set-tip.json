@@ -42,7 +42,7 @@
   "exitCodes" : [
     {
       "code" : 0,
-      "meaning" : "The tip was set; the payload carries the branch's new head oid. The branch ref moved transactionally inside one journal checkpoint; the index and working tree were not touched, and yard undo restores the pre-state exactly."
+      "meaning" : "The tip was set; the payload carries the branch's new head oid. The branch ref moved transactionally inside one journal checkpoint; the index and working tree were not touched, and undo restores the pre-state exactly."
     },
     {
       "code" : 1,
