@@ -176,9 +176,10 @@ public struct ContentView: View {
     /// reloads its diffs even when the status kept its shape.
     @State private var workingTreeRevision = 0
 
-    /// #0445: the Changes view's draft commit message. Held here, not in
-    /// the view, so it survives selecting a commit and coming back.
-    @State private var commitMessage = ""
+    /// #0445: the Changes view's draft commit message; #0466: with its
+    /// Amend checkbox. Held here, not in the view, so it survives selecting
+    /// a commit and coming back.
+    @State private var commitDraft = CommitDraft()
 
     /// #0393: the journal listing for the open repository — the chain state
     /// the Edit menu's Undo and Redo titles and enabled flags read. `nil`
@@ -708,7 +709,8 @@ public struct ContentView: View {
                     repositoryPath: repositoryPath,
                     revision: workingTreeRevision,
                     isBusy: isBusy || journalRunning,
-                    message: $commitMessage,
+                    whereAmI: summary.whereAmI,
+                    draft: $commitDraft,
                     perform: { runWorkingChange($0) })
             }
         }
@@ -1111,7 +1113,8 @@ public struct ContentView: View {
     /// in place without touching the selection, which is `nil` while the
     /// Changes view shows. A failure presents the alert; the refresh runs
     /// anyway, because a refused commit may still have run hooks that
-    /// changed files. #0445: a commit that succeeded clears the message.
+    /// changed files. #0445: a commit that succeeded clears the message;
+    /// #0466: so does an amend, which also turns the checkbox off.
     private func runWorkingChange(_ change: WorkingChange) {
         guard let repositoryPath, !isBusy, !journalRunning else { return }
         runningWorkingChange = change
@@ -1119,7 +1122,10 @@ public struct ContentView: View {
             defer { runningWorkingChange = nil }
             do {
                 try await performWorkingChange(change, at: repositoryPath)
-                if case .commit = change { commitMessage = "" }
+                switch change {
+                case .commit, .amend: commitDraft = CommitDraft()
+                default: break
+                }
             } catch {
                 actionFailure = change.failure(for: error)
             }

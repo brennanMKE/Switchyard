@@ -18,6 +18,8 @@ public struct WorkingChangesView: View {
     /// when the status did not change shape (a hunk staged in an `MM` file).
     private let revision: Int
     private let isBusy: Bool
+    /// #0466: the operation-in-progress flags the Amend checkbox reads.
+    private let whereAmI: WhereAmI
     private let perform: (WorkingChange) -> Void
 
     /// Which file's diff the lower half shows: a path on one side.
@@ -30,19 +32,24 @@ public struct WorkingChangesView: View {
     /// #0444: both hunk listings; `nil` while loading.
     @State private var diffs: WorkingDiffs?
     @State private var diffError: String?
-    /// #0445: the draft commit message, owned by `ContentView` so it
-    /// survives selecting a commit and coming back.
-    @Binding private var message: String
+    /// #0445, #0466: the draft commit message and the Amend checkbox,
+    /// owned by `ContentView` so they survive selecting a commit and coming
+    /// back.
+    @Binding private var draft: CommitDraft
+    /// #0466: what Amend would rewrite; `nil` until `loadAmendTarget`
+    /// answers, and after it fails.
+    @State private var amendTarget: AmendHead.Target?
 
     public init(
         changes: WorkingChanges, repositoryPath: String, revision: Int, isBusy: Bool,
-        message: Binding<String>, perform: @escaping (WorkingChange) -> Void
+        whereAmI: WhereAmI, draft: Binding<CommitDraft>, perform: @escaping (WorkingChange) -> Void
     ) {
         self.changes = changes
         self.repositoryPath = repositoryPath
         self.revision = revision
         self.isBusy = isBusy
-        self._message = message
+        self.whereAmI = whereAmI
+        self._draft = draft
         self.perform = perform
     }
 
@@ -63,7 +70,12 @@ public struct WorkingChangesView: View {
             Divider()
             commitArea
         }
-        .task(id: revision) { await reloadDiffs() }
+        .task(id: revision) {
+            await reloadDiffs()
+            // #0466: HEAD may have moved (a commit, an amend, an undo, a
+            // push), so the checkbox's message and refusal are re-read too.
+            amendTarget = try? await loadAmendTarget(at: repositoryPath)
+        }
     }
 
     // MARK: - #0443: the file lists
@@ -215,16 +227,18 @@ public struct WorkingChangesView: View {
         }
     }
 
-    // MARK: - #0445: the commit message and Commit
+    // MARK: - #0445: the commit message and Commit; #0466: Amend
 
     private var commitArea: some View {
-        let blocked = changes.commitBlockedReason(message: message)
+        let amendUnavailable = WorkingChanges.amendUnavailableReason(
+            target: amendTarget, whereAmI: whereAmI)
+        let blocked = draft.blockedReason(for: changes, amendUnavailable: amendUnavailable)
         return VStack(alignment: .leading, spacing: 6) {
-            TextEditor(text: $message)
+            TextEditor(text: $draft.message)
                 .font(.body)
                 .frame(minHeight: 56, maxHeight: 120)
                 .overlay(alignment: .topLeading) {
-                    if message.isEmpty {
+                    if draft.message.isEmpty {
                         Text("Commit message")
                             .foregroundStyle(.tertiary)
                             .padding(.leading, 5)
@@ -233,19 +247,36 @@ public struct WorkingChangesView: View {
                 }
                 .accessibilityIdentifier("commit-message")
             HStack {
-                Text(changes.staged.count == 1 ? "1 file staged" : "\(changes.staged.count) files staged")
+                Text(caption)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 Spacer()
-                Button("Commit") {
-                    perform(.commit(message: message))
+                // A checkbox that is on stays enabled while Amend is
+                // unavailable, so it can always be turned off.
+                Toggle("Amend", isOn: Binding(
+                    get: { draft.isAmending },
+                    set: { draft.setAmending($0, headMessage: amendTarget?.message ?? "") }))
+                    .toggleStyle(.checkbox)
+                    .disabled(isBusy || (amendUnavailable != nil && !draft.isAmending))
+                    .help(amendUnavailable ?? "Replace the last commit with the staged changes and this message")
+                    .accessibilityIdentifier("amend-checkbox")
+                Button(draft.isAmending ? "Amend" : "Commit") {
+                    perform(draft.change)
                 }
                 .keyboardShortcut(.return, modifiers: .command)
                 .disabled(blocked != nil || isBusy)
-                .help(blocked ?? "Commit the staged changes (⌘↩)")
+                .help(blocked ?? (draft.isAmending
+                    ? "Amend the last commit (⌘↩)" : "Commit the staged changes (⌘↩)"))
                 .accessibilityIdentifier("commit-button")
             }
         }
         .padding(8)
+    }
+
+    /// "N files staged", prefixed while amending with the commit it replaces.
+    private var caption: String {
+        let staged = changes.staged.count == 1 ? "1 file staged" : "\(changes.staged.count) files staged"
+        guard draft.isAmending, let oid = amendTarget?.oid else { return staged }
+        return "Amending \(oid.prefix(7)) · \(staged)"
     }
 }
