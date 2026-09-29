@@ -339,3 +339,82 @@ func discardHunksWithNoIDsWritesNoEntry(format: FixtureRepository.RefFormat) thr
 
     #expect(try JournalAnchor.list(in: ctx).count == entriesBefore)
 }
+
+// MARK: - #0478 discardLines
+
+/// `t.txt` = a…e committed, then `c` replaced by `C` and `X` added, unstaged:
+/// one hunk, body `[" a", " b", "-c", "+C", "+X", " d", " e"]`.
+private func pairRepo(_ format: FixtureRepository.RefFormat) throws -> FixtureRepository {
+    var repo = try FixtureRepository(refFormat: format)
+    try repo.build([.init("base", files: ["t.txt": "a\nb\nc\nd\ne\n"])])
+    try repo.writeUntracked(["t.txt": "a\nb\nC\nX\nd\ne\n"])
+    return repo
+}
+
+private func stagedText(_ path: String, in repo: FixtureRepository) throws -> String {
+    try GitProcess().run(["show", ":" + path], workingDirectory: repo.url.path).text
+}
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func discardLinesRemovesOnlyTheSelectedAddition(format: FixtureRepository.RefFormat) throws {
+    let repo = try pairRepo(format)
+    defer { repo.destroy() }
+    let hunk = try #require(try listHunks(at: repo.url.path, area: .unstaged).first?.hunks.first)
+
+    try DiscardChanges.discardLines(hunkID: hunk.id, lines: [4], at: repo.url.path)
+
+    #expect(try text("t.txt", in: repo) == "a\nb\nC\nd\ne\n")
+    #expect(try stagedText("t.txt", in: repo) == "a\nb\nc\nd\ne\n", "discard touched the index")
+}
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func discardLinesBringsBackOnlyTheSelectedRemoval(format: FixtureRepository.RefFormat) throws {
+    let repo = try pairRepo(format)
+    defer { repo.destroy() }
+    let hunk = try #require(try listHunks(at: repo.url.path, area: .unstaged).first?.hunks.first)
+
+    try DiscardChanges.discardLines(hunkID: hunk.id, lines: [2], at: repo.url.path)
+
+    #expect(try text("t.txt", in: repo) == "a\nb\nc\nC\nX\nd\ne\n")
+}
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func undoDiscardLinesBringsTheLineBack(format: FixtureRepository.RefFormat) throws {
+    let repo = try pairRepo(format)
+    defer { repo.destroy() }
+    let ctx = try WorktreeContext.resolve(path: repo.url.path)
+    let entriesBefore = try JournalAnchor.list(in: ctx).count
+    let hunk = try #require(try listHunks(at: repo.url.path, area: .unstaged).first?.hunks.first)
+
+    try DiscardChanges.discardLines(hunkID: hunk.id, lines: [3, 4], at: repo.url.path)
+    #expect(try JournalAnchor.list(in: ctx).count == entriesBefore + 1)
+    #expect(try text("t.txt", in: repo) == "a\nb\nd\ne\n")
+
+    try JournalUndo.undo(in: ctx)
+
+    #expect(try text("t.txt", in: repo) == "a\nb\nC\nX\nd\ne\n")
+}
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func discardLinesWithAnUnknownIDChangesNothing(format: FixtureRepository.RefFormat) throws {
+    let repo = try pairRepo(format)
+    defer { repo.destroy() }
+
+    #expect(throws: StagingError.unknownHunkIDs(ids: ["000000000000"], area: .unstaged)) {
+        try DiscardChanges.discardLines(hunkID: "000000000000", lines: [4], at: repo.url.path)
+    }
+    #expect(try text("t.txt", in: repo) == "a\nb\nC\nX\nd\ne\n")
+}
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func discardLinesWithNoLinesWritesNoEntry(format: FixtureRepository.RefFormat) throws {
+    let repo = try pairRepo(format)
+    defer { repo.destroy() }
+    let ctx = try WorktreeContext.resolve(path: repo.url.path)
+    let entriesBefore = try JournalAnchor.list(in: ctx).count
+    let hunk = try #require(try listHunks(at: repo.url.path, area: .unstaged).first?.hunks.first)
+
+    try DiscardChanges.discardLines(hunkID: hunk.id, lines: [], at: repo.url.path)
+
+    #expect(try JournalAnchor.list(in: ctx).count == entriesBefore)
+}
