@@ -541,7 +541,7 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-09-29 | #0473 | Opus planning subagent: filter-safe worktree snapshot, 4 reproductions, fix + perf, 1,335 s wall (O, measured) | 170,767 | — |
 | 2026-09-29 | #0469 | round 1, Sonnet implementation, 272 s wall, passed pending review (S, measured) | 92,316 | — |
 | 2026-09-29 | #0473 | round 1, Sonnet implementation, 634 s wall, passed pending review (S, measured) | 140,453 | — |
-| 2026-09-29 | #0470 | round 1, Sonnet implementation, passed pending review (S) | — | — |
+| 2026-09-29 | #0470 | round 1, Sonnet implementation, 383 s wall, passed pending review (S, measured) | 97,415 | — |
 | | | **Total measured** (tokens include 2026-09-22/23 rows; $ not updated for them) | **47,386,796** | **$437.24** |
 
 ## What this total does and does not cover
