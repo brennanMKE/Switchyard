@@ -68,6 +68,9 @@ public struct CommitCreate: Equatable, Sendable {
     ///   before writing the object, so a signature covers the trailers by
     ///   construction; appending them afterwards would mean rewriting the
     ///   commit and invalidating it.
+    /// - Parameter amend: `--amend`: replace `HEAD`'s commit instead of
+    ///   adding a child of it (#0464). Callers go through `AmendHead.run`,
+    ///   which refuses a pushed or unborn `HEAD` first.
     /// - Parameter extraEnvironment: merged over the process environment for
     ///   every invocation. Tests use it to neutralize global and system config
     ///   scope; production callers leave it empty.
@@ -84,11 +87,12 @@ public struct CommitCreate: Equatable, Sendable {
         message: String,
         signing: Signing = .config,
         trailers: [Trailer] = [],
+        amend: Bool = false,
         in workingDirectory: String,
         git: GitProcess = GitProcess(),
         extraEnvironment: [String: String] = [:]
     ) throws -> CommitCreate {
-        let args = ["commit", "-m", message]
+        let args = ["commit"] + (amend ? ["--amend"] : []) + ["-m", message]
             + trailers.flatMap { ["--trailer", $0.description] }
             + arguments(for: signing)
         // Bounded only when a signature will actually be attempted (#0163).
