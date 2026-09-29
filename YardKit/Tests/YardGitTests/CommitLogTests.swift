@@ -942,4 +942,27 @@ struct CommitLogTests {
         #expect(entry.hasProvenance)
     }
 
+    // MARK: - #0484: a CRLF message
+
+    /// `git commit --cleanup=verbatim` keeps a message's CRs (measured: the
+    /// default `strip` cleanup removes them, `verbatim` does not). Swift reads
+    /// "\r\n" as one `Character`, so the "\n" Character split saw the whole
+    /// message as one line: no trailer block, and a subject that was the
+    /// whole message (measured on `main`: `trailers == []`,
+    /// `subject == "s\r\n\r\nAgent-Name: bot"`).
+    @Test func aCRLFMessageParsesItsSubjectAndTrailers() throws {
+        var repo = try FixtureRepository()
+        defer { repo.destroy() }
+        try repo.build([.init("base")])
+        try GitProcess().run(
+            ["commit", "-q", "--allow-empty", "--cleanup=verbatim", "-m", "s\r\n\r\nAgent-Name: bot\r\n"],
+            workingDirectory: repo.url.path)
+
+        let entry = try #require(try CommitLog.run(path: repo.url.path, rangeArguments: ["-1"]).first)
+
+        #expect(entry.message == "s\r\n\r\nAgent-Name: bot\r\n")
+        #expect(entry.subject == "s")
+        #expect(entry.trailers == [Trailer(key: "Agent-Name", value: "bot")])
+    }
+
 }
