@@ -158,7 +158,7 @@ public struct SplitCommitSheet: View {
                                 Text(hunk.header)
                                     .font(.system(.caption, design: .monospaced))
                                     .foregroundStyle(.secondary)
-                                ForEach(previewLines(of: hunk), id: \.offset) { line in
+                                ForEach(Self.previewLines(of: hunk), id: \.offset) { line in
                                     Text(line.element)
                                         .font(.system(.caption, design: .monospaced))
                                         .lineLimit(1)
@@ -175,10 +175,13 @@ public struct SplitCommitSheet: View {
     /// The first three `+`/`-` lines of the hunk's body, with their
     /// offsets as stable `ForEach` ids — context and `\ No newline` lines
     /// are not the change the row previews.
-    private func previewLines(of hunk: Hunk) -> [(offset: Int, element: String)] {
+    /// The marker is the first *scalar*: a line opening with a combining
+    /// mark fuses with it into one `Character`, so `hasPrefix("+")` is
+    /// false for `"+\u{301}x"` (#0488).
+    nonisolated static func previewLines(of hunk: Hunk) -> [(offset: Int, element: String)] {
         Array(
             hunk.body.enumerated()
-                .filter { $0.element.hasPrefix("+") || $0.element.hasPrefix("-") }
+                .filter { $0.element.unicodeScalars.first == "+" || $0.element.unicodeScalars.first == "-" }
                 .prefix(3))
     }
 

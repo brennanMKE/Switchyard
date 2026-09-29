@@ -178,12 +178,20 @@ private final class LineFrames {
 /// prints (` `, `-`, `+`, or `\` for "No newline at end of file") --
 /// `.green`/`.red` are SwiftUI's context-dependent system colors, which
 /// adapt to light and dark automatically, not a fixed RGB literal.
-private struct DiffLineView: View {
+struct DiffLineView: View {
     let line: String
     /// #0480: selected in the Changes view; drawn with the accent color.
     let isSelected: Bool
 
-    private var marker: Character? { line.first }
+    private var marker: Unicode.Scalar? { Self.marker(of: line) }
+
+    /// The marker git printed: the line's first *scalar*. A line opening
+    /// with a combining mark fuses with its marker into one `Character`, so
+    /// `line.first` would be `"+\u{301}"` and the line would go untinted
+    /// (#0488).
+    nonisolated static func marker(of line: String) -> Unicode.Scalar? {
+        line.unicodeScalars.first
+    }
 
     private var backgroundTint: Color {
         if isSelected { return Color.accentColor.opacity(0.35) }

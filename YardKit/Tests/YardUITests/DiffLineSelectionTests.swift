@@ -76,3 +76,39 @@ private let other = Hunk(
     selection.drag(from: 0, to: 0, in: hunk)
     #expect(selection.selectedLines(in: hunk) == [1, 2, 3, 5], "a drag over context changes nothing")
 }
+
+// MARK: - #0488: a changed line that opens with a combining mark
+
+/// `"+\u{301}B".first` is the one `Character` `"+\u{301}"`, never `"+"`, so
+/// a Character read of the marker made these lines unselectable. Measured on
+/// `main` at `b00ddbeb`: `isSelectable` was `[]` for this hunk, and a click
+/// on line 1 left the selection empty.
+@Test func aChangedLineOpeningWithACombiningMarkIsSelectable() {
+    let marked = Hunk(
+        id: "h3", path: "f", oldStart: 1, oldCount: 2, newStart: 1, newCount: 2,
+        header: "@@ -1,2 +1,2 @@", body: ["-\u{301}b", "+\u{301}B", " \u{301}c"])
+    #expect((0..<3).filter { DiffLineSelection.isSelectable($0, in: marked) } == [0, 1])
+    var selection = DiffLineSelection()
+    selection.click(1, in: marked)
+    #expect(selection.selectedLines(in: marked) == [1])
+}
+
+/// The diff pane tints a line by `DiffLineView.marker(of:)`. With the
+/// `line.first` read on `main` at `b00ddbeb`, `"+\u{301}B"` and
+/// `"-\u{301}b"` had no `+`/`-` marker and were drawn untinted.
+@Test func theDiffPaneReadsTheMarkerOfALineOpeningWithACombiningMark() {
+    #expect(DiffLineView.marker(of: "+\u{301}B") == "+")
+    #expect(DiffLineView.marker(of: "-\u{301}b") == "-")
+    #expect(DiffLineView.marker(of: " \u{301}c") == " ")
+    #expect(DiffLineView.marker(of: "") == nil)
+}
+
+/// The Split sheet previews a hunk's first three changed lines. With the
+/// `hasPrefix("+")` filter on `main` at `b00ddbeb`, the two marked lines
+/// were skipped and the preview was `[3]`.
+@Test func theSplitPreviewKeepsALineOpeningWithACombiningMark() {
+    let marked = Hunk(
+        id: "h4", path: "f", oldStart: 1, oldCount: 2, newStart: 1, newCount: 3,
+        header: "@@ -1,2 +1,3 @@", body: [" a", "-\u{301}b", "+\u{301}B", "+X", "+Y"])
+    #expect(SplitCommitSheet.previewLines(of: marked).map(\.offset) == [1, 2, 3])
+}

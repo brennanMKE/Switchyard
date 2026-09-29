@@ -381,3 +381,31 @@ private func entryCount(_ repo: FixtureRepository) throws -> Int {
     // has contents".
     #expect(try indexBytes(repo) == "b\n")
 }
+
+// MARK: - #0488: a changed line that opens with a combining mark
+
+/// A body line is its marker scalar plus the file's line. When the file's
+/// line opens with a combining mark (U+0301), Swift fuses the marker and the
+/// mark into one `Character`, so `line.first` is `"+\u{301}"`, never `"+"`.
+/// Measured on `main` at `b00ddbeb`: `stageLines` threw
+/// `notAChangedLine(line: 2)` for the `+\u{301}B` line, and nothing was
+/// staged. The text after the marker must keep the mark too: with only the
+/// marker read fixed, `raw.dropFirst()` dropped the mark with the marker and
+/// `git apply` refused the patch (`error: patch failed: f:1`).
+@Test func stageLinesStagesALineThatOpensWithACombiningMark() throws {
+    var old = (1...20).map { "line \($0)" }
+    old[1] = "\u{301}b"
+    var new = old
+    new[1] = "\u{301}B"
+    let repo = try editedRepo(
+        base: old.joined(separator: "\n") + "\n", edited: new.joined(separator: "\n") + "\n")
+    defer { repo.destroy() }
+    let hunk = try #require(try onlyFile(repo, area: .unstaged).hunks.first)
+    #expect(hunk.body == [" line 1", "-\u{301}b", "+\u{301}B", " line 3", " line 4", " line 5"])
+
+    try stageLines(hunkID: hunk.id, lines: [2], at: repo.url.path)
+
+    var staged = old
+    staged.insert("\u{301}B", at: 2)
+    #expect(try indexBytes(repo) == staged.joined(separator: "\n") + "\n")
+}
