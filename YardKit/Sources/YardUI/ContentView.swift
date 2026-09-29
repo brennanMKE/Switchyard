@@ -158,6 +158,15 @@ public struct ContentView: View {
     /// guard `runningAction` gives the commit actions.
     @State private var runningWorkingChange: WorkingChange?
 
+    /// #0457: the toolbar's network operation running right now, `nil` when
+    /// none. Folded into `isBusy` and the Edit menu's busy check, the same
+    /// guard `runningWorkingChange` gives the Changes view.
+    @State private var runningRemote: RemoteOperation?
+
+    /// #0457: the repository's configured remote names. Empty disables all
+    /// three toolbar buttons. Loaded with the summary and on every refresh.
+    @State private var remoteNames: [String] = []
+
     /// #0444: bumped after every in-place refresh, so the Changes view
     /// reloads its diffs even when the status kept its shape.
     @State private var workingTreeRevision = 0
@@ -340,6 +349,22 @@ public struct ContentView: View {
                     chooseFolder()
                 } label: {
                     Label("Open…", systemImage: "folder")
+                }
+            }
+            // #0457: Fetch, Pull and Push (guide §11 decision 32). Each is
+            // disabled with its reason as help text, and all three while
+            // anything else runs.
+            ToolbarItemGroup {
+                ForEach(RemoteOperation.allCases, id: \.self) { operation in
+                    let reason = remoteDisabledReason(operation)
+                    Button {
+                        runRemote(operation)
+                    } label: {
+                        Label(operation.title, systemImage: operation.systemImage)
+                    }
+                    .help(reason ?? operation.title)
+                    .disabled(reason != nil || isBusy || journalRunning)
+                    .accessibilityIdentifier("toolbar-\(operation.rawValue)")
                 }
             }
         }
@@ -530,7 +555,8 @@ public struct ContentView: View {
             // #0359: the running action's progress line. No modal and no
             // Cancel button — signing can take seconds and may raise a
             // pinentry or agent prompt the user must be able to reach.
-            if let progress = runningAction?.progressLabel ?? runningWorkingChange?.progressLabel {
+            if let progress = runningAction?.progressLabel ?? runningWorkingChange?.progressLabel
+                ?? runningRemote?.progressLabel {
                 HStack(spacing: 6) {
                     ProgressView()
                         .controlSize(.small)
@@ -769,6 +795,9 @@ public struct ContentView: View {
             // a listing that fails (or a repository that never checkpointed)
             // leaves the menu disabled with its plain titles, not an error.
             journalListing = try? await loadJournalListing(at: repositoryPath)
+            // #0457: the toolbar's remotes. A failed read disables the
+            // three buttons rather than failing the window.
+            remoteNames = (try? await loadRemoteNames(at: repositoryPath)) ?? []
         } catch {
             errorMessage = String(describing: error)
         }
@@ -832,6 +861,7 @@ public struct ContentView: View {
     /// `conflictActionRunning`.
     private var isBusy: Bool {
         runningAction != nil || conflictActionRunning || runningWorkingChange != nil
+            || runningRemote != nil
     }
 
     /// The owners map the row gutter colours with, which the Merge into
@@ -876,6 +906,7 @@ public struct ContentView: View {
     private var journalMenuTarget: JournalMenuTarget? {
         guard repositoryPath != nil else { return nil }
         let busy = runningAction != nil || journalRunning || runningWorkingChange != nil
+            || runningRemote != nil
         return JournalMenuTarget(
             undoTitle: JournalMenuTitles.undo(
                 operation: JournalMenu.undoOperation(in: journalListing)),
@@ -1022,7 +1053,8 @@ public struct ContentView: View {
     /// on every path through `refreshAfterMutation`, so the titles stay
     /// current after the chain moves.
     private func runJournal(_ kind: JournalMenuTarget.Kind) {
-        guard let repositoryPath, runningAction == nil, runningWorkingChange == nil, !journalRunning
+        guard let repositoryPath, runningAction == nil, runningWorkingChange == nil,
+              runningRemote == nil, !journalRunning
         else { return }
         journalRunning = true
         Task {
@@ -1075,6 +1107,33 @@ public struct ContentView: View {
                 if case .commit = change { commitMessage = "" }
             } catch {
                 actionFailure = change.failure(for: error)
+            }
+            await refreshAfterMutation { _, _ in nil }
+        }
+    }
+
+    // MARK: - #0457: Fetch, Pull and Push
+
+    /// #0457: why `operation`'s toolbar button is disabled, or nil when it
+    /// is enabled. With no repository loaded there is nothing to act on.
+    private func remoteDisabledReason(_ operation: RemoteOperation) -> String? {
+        guard let summary else { return "No repository is open." }
+        return operation.disabledReason(for: summary.whereAmI, remotes: remoteNames)
+    }
+
+    /// #0457: runs one network operation, then refreshes in place so the
+    /// header's ahead/behind count and the history show the result. A
+    /// failure presents the alert; the refresh runs anyway, because a pull
+    /// that failed to fast-forward has still fetched.
+    private func runRemote(_ operation: RemoteOperation) {
+        guard let repositoryPath, !isBusy, !journalRunning else { return }
+        runningRemote = operation
+        Task {
+            defer { runningRemote = nil }
+            do {
+                try await performRemoteOperation(operation, at: repositoryPath)
+            } catch {
+                actionFailure = operation.failure(for: error)
             }
             await refreshAfterMutation { _, _ in nil }
         }
@@ -1173,7 +1232,9 @@ public struct ContentView: View {
             // so the Edit menu's titles and enabled flags track the chain —
             // a commit action wrote a checkpoint the menu must now see.
             let newJournal = try? await loadJournalListing(at: repositoryPath)
+            let newRemotes = (try? await loadRemoteNames(at: repositoryPath)) ?? []
             summary = newSummary
+            remoteNames = newRemotes
             history = newHistory
             graphRows = newRows
             sidebar = newSidebar
