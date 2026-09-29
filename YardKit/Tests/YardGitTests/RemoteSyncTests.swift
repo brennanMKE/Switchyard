@@ -132,3 +132,83 @@ func undoAfterFetchPutsTheRemoteTrackingRefBack(format: FixtureRepository.RefFor
     try await GitProcess().run(["remote", "remove", "origin"], workingDirectory: fixture.path)
     #expect(try await RemoteSync.remoteNames(at: fixture.path) == [])
 }
+
+// MARK: - Pull (#0453)
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func pullFastForwardsTheBranchAndTheWorktree(format: FixtureRepository.RefFormat) async throws {
+    let fixture = try Tracked(format)
+    defer { fixture.destroy() }
+    let old = try fixture.repo.revParse("HEAD")
+    let newTip = try fixture.advanceRemote(file: "b.txt")
+
+    let result = try await RemoteSync.pull(at: fixture.path)
+
+    #expect(result == .fastForwarded(from: old, to: newTip))
+    #expect(try fixture.repo.revParse("HEAD") == newTip)
+    #expect(FileManager.default.fileExists(atPath: fixture.path + "/b.txt"))
+    #expect(try await gitStatus(at: fixture.path).entries.isEmpty)
+    #expect(try fixture.journalOperations().last == "pull")
+}
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func undoAfterPullPutsTheBranchTheWorktreeAndTheTrackingRefBack(
+    format: FixtureRepository.RefFormat
+) async throws {
+    let fixture = try Tracked(format)
+    defer { fixture.destroy() }
+    let old = try fixture.repo.revParse("HEAD")
+    try fixture.advanceRemote(file: "b.txt")
+
+    try await RemoteSync.pull(at: fixture.path)
+    try JournalUndo.undo(in: try await WorktreeContext.resolve(path: fixture.path))
+
+    #expect(try fixture.repo.revParse("HEAD") == old)
+    #expect(try fixture.repo.revParse("refs/remotes/origin/main") == old)
+    #expect(!FileManager.default.fileExists(atPath: fixture.path + "/b.txt"),
+            "undo must take the pulled file back out of the worktree")
+    #expect(try await gitStatus(at: fixture.path).entries.isEmpty)
+}
+
+@Test func pullWhenUpToDateReportsUpToDate() async throws {
+    let fixture = try Tracked(.files)
+    defer { fixture.destroy() }
+    #expect(try await RemoteSync.pull(at: fixture.path) == .upToDate)
+}
+
+@Test(arguments: FixtureRepository.RefFormat.supported())
+func aDivergedPullRefusesWithGitsStderrAndLeavesTheBranch(
+    format: FixtureRepository.RefFormat
+) async throws {
+    let fixture = try Tracked(format)
+    defer { fixture.destroy() }
+    try fixture.advanceRemote(file: "b.txt")
+    try fixture.commitLocally(file: "c.txt")
+    let local = try fixture.repo.revParse("HEAD")
+    // A `git pull` would rebase with this set; the pull must not.
+    try await GitProcess().run(["config", "pull.rebase", "true"], workingDirectory: fixture.path)
+
+    await #expect {
+        try await RemoteSync.pull(at: fixture.path)
+    } throws: { error in
+        guard case let .exited(_, stderr, _) = error as? GitProcess.Failure else { return false }
+        return stderr.contains("Not possible to fast-forward")
+    }
+    #expect(try fixture.repo.revParse("HEAD") == local)
+}
+
+@Test func pullRefusesADetachedHeadAndABranchWithNoUpstreamWritingNothing() async throws {
+    let fixture = try Tracked(.files)
+    defer { fixture.destroy() }
+    let before = try fixture.journalOperations()
+
+    try await GitProcess().run(["switch", "-q", "-c", "loner"], workingDirectory: fixture.path)
+    await #expect(throws: RemoteSync.Refusal.noUpstream(branch: "loner")) {
+        try await RemoteSync.pull(at: fixture.path)
+    }
+    try fixture.repo.checkoutDetached(try fixture.repo.revParse("HEAD"))
+    await #expect(throws: RemoteSync.Refusal.detachedHead) {
+        try await RemoteSync.pull(at: fixture.path)
+    }
+    #expect(try fixture.journalOperations() == before)
+}
