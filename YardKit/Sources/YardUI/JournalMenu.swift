@@ -45,6 +45,12 @@ public nonisolated enum JournalMenuTitles {
         "amend": "Amend",
         // #0470: the Changes view's Discard (guide §11 decision 34).
         "discard": "Discard",
+        // #0494: the stash (guide §11 decision 36). Not "drop", which is
+        // Delete Commit's.
+        "stash": "Stash Changes",
+        "stash-apply": "Apply Stash",
+        "stash-pop": "Pop Stash",
+        "stash-drop": "Drop Stash",
     ]
 
     /// "Undo <title>" for a mapped operation, plain "Undo" for anything
