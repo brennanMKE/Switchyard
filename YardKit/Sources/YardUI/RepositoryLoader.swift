@@ -161,16 +161,22 @@ public nonisolated struct RepositorySidebarSummary: Sendable {
     /// and filters nothing, rather than the sidebar failing to load.
     public var branchTips: BranchTipDates.Report?
 
+    /// #0495: every stash, `stash@{0}` first (guide §11 decision 36).
+    /// Empty by default so existing callers (and previews) still compile.
+    public var stashes: [Stash.Item]
+
     public init(
         refs: RefSnapshot, worktrees: [WorktreeEntry], currentWorktreePath: String?,
         rerere: Rerere.Status = Rerere.Status(enabled: false, entries: []),
-        branchTips: BranchTipDates.Report? = nil
+        branchTips: BranchTipDates.Report? = nil,
+        stashes: [Stash.Item] = []
     ) {
         self.refs = refs
         self.worktrees = worktrees
         self.currentWorktreePath = currentWorktreePath
         self.rerere = rerere
         self.branchTips = branchTips
+        self.stashes = stashes
     }
 }
 
@@ -207,9 +213,12 @@ public func loadRepositorySidebar(at path: String) async throws -> RepositorySid
     // #0428: `try?` on purpose -- the map's inputs are a refinement, and a
     // failed read must not take the sidebar down with it.
     let branchTips = try? await BranchTipDates.read(at: path)
+    // #0495: the stash list throws like the other sections' reads: a list
+    // that silently came back empty would hide stashes Undo can drop.
+    let stashes = try await Stash.list(at: path)
     return RepositorySidebarSummary(
         refs: refs, worktrees: worktrees, currentWorktreePath: context.topLevel, rerere: rerere,
-        branchTips: branchTips)
+        branchTips: branchTips, stashes: stashes)
 }
 
 /// Loads one recorded rerere resolution — the cached conflict preimage, the
