@@ -533,7 +533,7 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-09-29 | #0461 | planning (Opus, 380 s, 129,779 tokens) + round 1 (Sonnet, 294 s, 89,486 tokens), measured | 219,265 | — |
 | 2026-09-29 | #0462-#0466 | Opus planning subagent: amend (decision 33, umbrella + 4 children, prototype, VM spikes), 1,685 s wall (O, measured) | 226,836 | — |
 | 2026-09-29 | #0463 | round 1, Sonnet implementation, 323 s wall, passed pending review (S, measured) | 108,673 | — |
-| 2026-09-29 | #0464 | round 1, Sonnet implementation, passed pending review (S) | — | — |
+| 2026-09-29 | #0464 | round 1, Sonnet implementation, 407 s wall, passed pending review (S, measured) | 102,215 | — |
 | | | **Total measured** (tokens include 2026-09-22/23 rows; $ not updated for them) | **47,386,796** | **$437.24** |
 
 ## What this total does and does not cover
