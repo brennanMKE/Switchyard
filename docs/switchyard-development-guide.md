@@ -1733,6 +1733,45 @@ a feature at any milestone on the grounds that GitUp had it.
       pre-restore entry. This is the journal's existing contract, not something discard adds. It
       matters more here, because a discard invites editing afterwards. #0467 question 1.
 
+35. **Lines inside a hunk are selected in the Changes view's diff and staged, unstaged or discarded
+    with a patch that holds only those lines.** Decided 2026-09-29 in the planning pass for umbrella
+    **#0474** (#0437's question 5, #0467's question 6), with high confidence; each bullet is cheap to
+    reverse, and #0474 carries the questions for Brennan.
+
+    - **Where.** In the selected file's diff, `+` and `-` lines are selectable: a click selects one
+      line, shift-click extends from the last click, ⌘-click adds or removes a line, and a drag
+      selects the changed lines it crosses. Selected lines are drawn with the accent color. A
+      selection lives in one hunk; a click in another hunk starts a new one. A plain click on a
+      context line, or on the only selected line, clears it. While a hunk has selected lines its
+      header buttons read **Stage Lines** (**Unstage Lines** on the staged side) and **Discard
+      Lines…**; with none they are Stage Hunk and Discard Hunk…, so no new control appears. The
+      selection clears after every refresh and when another file is selected. Discard Lines… asks
+      first with the same dialog as Discard Hunk… ("Discard 2 lines of t.txt?"), decision 34's rule.
+    - **Engine: `YardGit/LineStaging.swift`.** `stageLines(hunkID:lines:)`,
+      `unstageLines(hunkID:lines:)` and `DiscardChanges.discardLines(hunkID:lines:)` take a hunk id
+      from a fresh listing and indices into its `body`. The id is a hash of the body, so a live id
+      names the same lines; a stale one is refused as `StagingError.unknownHunkIDs`, and an index
+      that is not a `+`/`-` line as `StagingError.notAChangedLine`. Each is one journal entry,
+      operation `stage`, `unstage` or `discard`, so Undo reads as it does for a hunk.
+    - **The patch.** The side `git apply` matches against is kept whole; only the other side loses
+      the unselected changes. Staging (`git apply --cached`): an unselected `-` line becomes
+      context, an unselected `+` line is dropped. Unstaging (`--cached --reverse`) and discarding
+      (`--reverse`, worktree): the other way round. Counts are recounted; starts are kept. Two
+      corrections, both measured against git 2.54.0, and both cases where git would otherwise
+      damage a file with exit 0: a `\ No newline at end of file` line that the selection puts
+      lines after is split into `-L` / `+L` (git otherwise joins `b` and `c` into `bc`), and a
+      partial new or deleted file drops its `new file mode` / `deleted file mode` line and
+      replaces `/dev/null` with the path (dropping only the mode line makes git remove the whole
+      file from the index). Every non-empty selection of twelve fixture cases, in all three
+      directions, was checked against `git apply` (#0476).
+    - **CRLF.** `HunkParser` now splits on the newline scalar. Swift reads `"\r\n"` as one
+      Character, so the old split left a CRLF file's body as one line that swallowed every file
+      after it (measured on `main`; #0475).
+    - **Not `git apply --recount`, and not `stagePatch`.** Computing the counts keeps the patch
+      exact and testable as text; `stagePatch` applies forward only and writes its own entry.
+    - **Out of scope, filed as questions in #0474:** a selection across hunks or files, keyboard
+      selection, and a CLI surface for line staging.
+
 ### Still open
 
 **Is M1's criterion 5 closable as written, and should it be restated?** Raised by the twelfth M1
