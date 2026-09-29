@@ -100,11 +100,31 @@ The CLI *is* the agent interface. Its contract:
 
 ### Teaching an agent to use it
 
-Switchyard will ship an **agent skill** — a markdown document describing the command set, the JSON
-schemas, and the workflows worth knowing — packaged for [Claude
-Code](https://claude.com/claude-code) and [OpenCode](https://opencode.ai), with a plain-markdown
-form for anything else. It will be generated from the same command metadata that produces `--help`
-(`switchyard schema` already emits it as JSON), so it cannot drift from the binary.
+Switchyard ships an **agent skill**, [`skills/switchyard/SKILL.md`](skills/switchyard/SKILL.md): the
+command set, exit codes and result fields, plus the workflows worth knowing. It is generated from the
+same command metadata as `--help` and `switchyard schema`, so it cannot drift from the binary, and
+`switchyard skill` prints it.
+
+**Claude Code** — this repository is a plugin marketplace. In a session:
+
+```
+/plugin marketplace add brennanMKE/Switchyard
+/plugin install switchyard@switchyard
+```
+
+or from a shell, `claude plugin marketplace add brennanMKE/Switchyard` then
+`claude plugin install switchyard@switchyard`. Remove it with `claude plugin uninstall switchyard`
+and `claude plugin marketplace remove switchyard`.
+
+**OpenCode, or any agent that reads `SKILL.md` files** — write the skill where the agent looks:
+
+```sh
+mkdir -p ~/.config/opencode/skills/switchyard
+switchyard skill > ~/.config/opencode/skills/switchyard/SKILL.md
+```
+
+Re-run the second line after updating Switchyard. An agent with no skill system can run
+`switchyard skill` itself and read the output.
 
 **There is deliberately no MCP server.** An always-loaded MCP tool surface costs context in every
 session whether or not git comes up, while a skill costs approximately nothing until the agent needs

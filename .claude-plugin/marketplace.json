@@ -1,0 +1,14 @@
+{
+  "name": "switchyard",
+  "description": "The Switchyard agent skill, served from the Switchyard repository.",
+  "owner": {
+    "name": "Brennan Stehling"
+  },
+  "plugins": [
+    {
+      "name": "switchyard",
+      "source": "./skills/switchyard",
+      "description": "Teaches a coding agent to drive the Switchyard git client through its switchyard CLI."
+    }
+  ]
+}
