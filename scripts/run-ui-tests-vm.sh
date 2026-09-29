@@ -48,6 +48,7 @@ GUEST_FIXTURE_BRANCH="uitest-main"
 GUEST_MAP_FIXTURE="/Users/$GUEST_USER/uitest-map-repo"
 GUEST_CHANGES_FIXTURE="/Users/$GUEST_USER/uitest-changes-repo"
 GUEST_REMOTE_FIXTURE="/Users/$GUEST_USER/uitest-remote"
+GUEST_STASH_FIXTURE="/Users/$GUEST_USER/uitest-stash-repo"
 RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"
 # Optional spike filter: pass an issue number (e.g. `0383`) to run just that
 # spike's clone; with no argument all four run, each in its own clone.
@@ -342,7 +343,7 @@ start_guest() {
     sleep 5
   done
   log "[$label] Guest reachable; copying source, generating the fixture"
-  tart exec "$CLONE" /bin/zsh -lc "rm -rf $GUEST_SRC $GUEST_RESULTS $GUEST_FIXTURE $GUEST_MAP_FIXTURE $GUEST_CHANGES_FIXTURE $GUEST_REMOTE_FIXTURE && mkdir -p $GUEST_RESULTS"
+  tart exec "$CLONE" /bin/zsh -lc "rm -rf $GUEST_SRC $GUEST_RESULTS $GUEST_FIXTURE $GUEST_MAP_FIXTURE $GUEST_CHANGES_FIXTURE $GUEST_REMOTE_FIXTURE $GUEST_STASH_FIXTURE && mkdir -p $GUEST_RESULTS"
   tart exec "$CLONE" /bin/zsh -lc "cp -R '/Volumes/My Shared Files/run/src' $GUEST_SRC"
 # The fixture the spike re-derivations (#0395 round 2) drive:
 #   - four commits with distinctive subjects (History rows to select;
@@ -373,6 +374,8 @@ tart exec "$CLONE" /bin/zsh -lc \
   tart exec "$CLONE" /bin/zsh -lc "zsh $GUEST_SRC/scripts/uitest-fixtures/make-changes-fixture.sh $GUEST_CHANGES_FIXTURE"
   # #0455: the Fetch/Pull/Push fixture — a bare remote and four clones.
   tart exec "$CLONE" /bin/zsh -lc "zsh $GUEST_SRC/scripts/uitest-fixtures/make-remote-fixture.sh $GUEST_REMOTE_FIXTURE"
+  # #0496: the stash fixture — two stashes and a clean tree.
+  tart exec "$CLONE" /bin/zsh -lc "zsh $GUEST_SRC/scripts/uitest-fixtures/make-stash-fixture.sh $GUEST_STASH_FIXTURE"
   local actual_branch
   actual_branch="$(tart exec "$CLONE" /bin/zsh -lc "git -C $GUEST_FIXTURE symbolic-ref --short HEAD" | tr -d '[:space:]')"
   [[ "$actual_branch" == "$GUEST_FIXTURE_BRANCH" ]] \
@@ -532,6 +535,7 @@ run_spike_if_selected 0471 Spike0471DiscardFilesUITests
 run_spike_if_selected 0472 Spike0472DiscardHunkUITests
 run_spike_if_selected 0480 Spike0480StageLinesUITests
 run_spike_if_selected 0494 Spike0494StashChangesUITests
+run_spike_if_selected 0496 Spike0496StashListUITests
 
 print ""
 if (( TEST_RC == 0 )); then

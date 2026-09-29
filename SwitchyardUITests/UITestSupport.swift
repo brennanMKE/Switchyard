@@ -246,6 +246,38 @@ extension XCUIApplication {
     }
 }
 
+/// #0496: the stash fixture scripts/uitest-fixtures/make-stash-fixture.sh
+/// generates inside the guest — keep the two in sync.
+enum UITestStashFixture {
+    static let repositoryPath = "/Users/admin/uitest-stash-repo"
+    /// `stash@{0}`: notes.txt edited, and the untracked todo.txt.
+    static let newer = "newer stash"
+    /// `stash@{1}`: notes.txt edited.
+    static let older = "older stash"
+    /// The tracked file both stashes change.
+    static let notes = "notes.txt"
+    /// The untracked file `newer` holds.
+    static let todo = "todo.txt"
+}
+
+extension XCUIApplication {
+    /// Launches the app on the stash fixture with the real panes.
+    @MainActor
+    func launchWithStashFixture() {
+        launchArguments = [
+            "-uiTestRepository", UITestStashFixture.repositoryPath,
+            "-uiTestRealSurfaces",
+        ]
+        launch()
+        let tree = debugDescription
+        XCTAssertTrue(
+            windows.firstMatch.waitForExistence(timeout: 60),
+            "The app launched but opened no window within 60 s — its element " +
+            "tree starts with: \(String(tree.prefix(1200)))",
+            file: #filePath, line: #line)
+    }
+}
+
 /// #0455: the Fetch/Pull/Push fixture scripts/uitest-fixtures/make-remote-fixture.sh
 /// generates inside the guest — keep the two in sync. Every clone is on
 /// `remote-main` tracking `origin/remote-main` except `pushRepository`.
