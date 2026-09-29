@@ -1622,6 +1622,21 @@ a feature at any milestone on the grounds that GitUp had it.
       can take them back. Undo stays blocked there until a later operation is journaled, which
       makes the push a wall that Undo does not cross. A failed or cancelled push writes no entry,
       so Undo still names the operation before it.
+    - **Addendum 2026-09-29 (#0461): the engine enforces the wall, for every caller.** The menu
+      alone left `JournalUndo.undo` itself willing to restore the push marker (a no-op) and then
+      the entry before it, rewinding `origin/<branch>` locally while the remote keeps the commits.
+      That is reachable from any non-menu caller, and from the CLI's `undo [--steps N]` once it
+      exists. So `JournalUndo.undo` refuses, in planning and before anything is written, whenever a
+      step would restore an entry whose `operation` is `JournalUndo.pushOperation` (`"push"`):
+      `JournalUndo.Error.pushNotUndoable(entry:requested:available:)`, exit class 6
+      (`repositoryError`, the class every journal refusal carries), message naming the push entry.
+      `undo --steps N` that would cross a push is refused whole, like one that asks for more steps
+      than exist. Redo is not blocked (it only walks back toward the present), and restore-by-id
+      is a different verb, not covered here. The app keeps its disabled "Can’t Undo Push" item, so
+      a user never meets the error. This is the one place a decision is made by matching
+      `operation`, a deliberate exception to #0034 decision 7: a push entry is a normal entry by
+      every structural test. Decided by the orchestrator with high confidence; answers #0450
+      question 5.
     - **Tests never touch the network.** Every engine test uses a bare repository in a temporary
       directory as the remote, and the VM fixture (`scripts/uitest-fixtures/make-remote-fixture.sh`)
       builds its bare remotes inside the guest.
