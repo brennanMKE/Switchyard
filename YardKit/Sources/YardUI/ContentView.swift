@@ -372,6 +372,12 @@ public struct ContentView: View {
             if isActive, let window {
                 WindowStore.shared.activeWindowID = window.id
             }
+            // #0447: files edited in another app show when the user comes
+            // back. In place, selection untouched, and never over a running
+            // mutation — that one refreshes when it finishes.
+            if isActive, summary != nil, !isBusy, !journalRunning {
+                Task { await refreshAfterMutation { _, _ in nil } }
+            }
         }
         .task(id: selectedCommit) {
             await reloadSelectedCommitDiff()
