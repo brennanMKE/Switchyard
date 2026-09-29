@@ -102,6 +102,9 @@ public func runEngineCommand(
         // grammar — so a malformed tail is a usage envelope with exit 1,
         // never a default guess and never a silent ignore (#0363).
         return runRefManage(arguments: arguments, workingDirectory: workingDirectory)
+    case "stage", "unstage":
+        // Paths or hunk ids, never both (guide §11 decision 37).
+        return runStage(arguments: arguments, workingDirectory: workingDirectory)
     case "rewrite-diff":
         // One required positional, no flags: `switchyard rewrite-diff
         // <journal-entry-id>` arrives as `["rewrite-diff", "<id>"]`. The arm

@@ -32,12 +32,12 @@ func registryHasAtLeastTwoEntries() {
     }
 }
 
-@Test("registry reports exactly thirty entries")
-func registryHasExactlyThirtyEntries() {
-    #expect(CommandRegistry.all.count == 30)
+@Test("registry reports exactly thirty-two entries")
+func registryHasExactlyThirtyTwoEntries() {
+    #expect(CommandRegistry.all.count == 32)
 
     let names: [String] = CommandRegistry.all.map(\.name)
-    #expect(Set(names).count == 30, "Names must be distinct so lookup returns the right spec.")
+    #expect(Set(names).count == 32, "Names must be distinct so lookup returns the right spec.")
     // The three #0063 rewrites are registered beside their split sibling.
     #expect(names.contains("reword"))
     #expect(names.contains("drop"))
@@ -59,6 +59,9 @@ func registryHasExactlyThirtyEntries() {
     #expect(names.contains("rerere"))
     // The #0067 skill printer.
     #expect(names.contains("skill"))
+    // Guide §11 decision 37.
+    #expect(names.contains("stage"))
+    #expect(names.contains("unstage"))
 }
 
 @Test("registry lookup by name returns the matching spec")
