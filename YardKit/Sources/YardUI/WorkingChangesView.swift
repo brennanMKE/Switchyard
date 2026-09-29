@@ -41,6 +41,12 @@ public struct WorkingChangesView: View {
     @State private var amendTarget: AmendHead.Target?
     /// #0471: the Discard confirmation on screen; `nil` when none is.
     @State private var pendingDiscard: DiscardConfirmation?
+    /// #0480: the selected lines in the diff (guide §11 decision 35).
+    /// Cleared when another file is selected. A refresh keeps it: it names
+    /// a hunk by id, and an id is a hash of the hunk's lines, so a hunk that
+    /// changed (a staged line, an edit) drops out of the selection by
+    /// itself, and one that did not keeps its selected lines.
+    @State private var lineSelection = DiffLineSelection()
 
     public init(
         changes: WorkingChanges, repositoryPath: String, revision: Int, isBusy: Bool,
@@ -67,6 +73,8 @@ public struct WorkingChangesView: View {
                         .frame(minHeight: 120, maxHeight: .infinity)
                     diffPane
                         .frame(minHeight: 120, maxHeight: .infinity)
+                        // #0480: a selection belongs to the file it was made in.
+                        .onChange(of: selection) { lineSelection = DiffLineSelection() }
                 }
             }
             Divider()
@@ -227,17 +235,20 @@ public struct WorkingChangesView: View {
                             file: file,
                             hunkAction: FileDiffView.HunkAction(
                                 title: selection.staged ? "Unstage Hunk" : "Stage Hunk",
+                                linesTitle: selection.staged ? "Unstage Lines" : "Stage Lines",
                                 isEnabled: !isBusy
-                            ) { hunk in
-                                perform(selection.staged
-                                    ? .unstageHunk(id: hunk.id) : .stageHunk(id: hunk.id))
+                            ) { hunk, lines in
+                                perform(.stageOrUnstage(hunk, lines: lines, staged: selection.staged))
                             },
-                            // #0472: Discard Hunk… on the unstaged side only.
+                            // #0472: Discard Hunk… on the unstaged side only;
+                            // #0480: Discard Lines… while lines are selected.
                             discardAction: selection.staged ? nil : FileDiffView.HunkAction(
-                                title: "Discard Hunk…", isEnabled: !isBusy
-                            ) { hunk in
-                                pendingDiscard = DiscardConfirmation(hunk: hunk)
-                            })
+                                title: "Discard Hunk…", linesTitle: "Discard Lines…", isEnabled: !isBusy
+                            ) { hunk, lines in
+                                pendingDiscard = lines.isEmpty
+                                    ? DiscardConfirmation(hunk: hunk) : DiscardConfirmation(lines: lines, of: hunk)
+                            },
+                            lineSelection: $lineSelection)
                         .padding()
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
