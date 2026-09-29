@@ -14,6 +14,9 @@ public struct FileDiffView: View {
     /// #0444: a button on every hunk's header line — the Changes view's
     /// Stage Hunk / Unstage Hunk. `nil` (every other caller) draws none.
     private let hunkAction: HunkAction?
+    /// #0472: a second button, left of `hunkAction` — the Changes view's
+    /// Discard Hunk… on an unstaged hunk. `nil` draws none.
+    private let discardAction: HunkAction?
 
     /// One per-hunk button: its title, whether it is enabled, and what it
     /// does with the hunk it sits on.
@@ -29,9 +32,10 @@ public struct FileDiffView: View {
         }
     }
 
-    public init(file: FileDiff, hunkAction: HunkAction? = nil) {
+    public init(file: FileDiff, hunkAction: HunkAction? = nil, discardAction: HunkAction? = nil) {
         self.file = file
         self.hunkAction = hunkAction
+        self.discardAction = discardAction
     }
 
     public var body: some View {
@@ -50,7 +54,7 @@ public struct FileDiffView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(file.hunks, id: \.id) { hunk in
-                    HunkView(hunk: hunk, action: hunkAction)
+                    HunkView(hunk: hunk, action: hunkAction, discard: discardAction)
                 }
             }
         }
@@ -61,6 +65,7 @@ public struct FileDiffView: View {
 private struct HunkView: View {
     let hunk: Hunk
     let action: FileDiffView.HunkAction?
+    let discard: FileDiffView.HunkAction?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -68,8 +73,14 @@ private struct HunkView: View {
                 Text(hunk.header)
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
+                if action != nil || discard != nil { Spacer() }
+                if let discard {
+                    Button(discard.title) { discard.perform(hunk) }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                        .disabled(!discard.isEnabled)
+                }
                 if let action {
-                    Spacer()
                     Button(action.title) { action.perform(hunk) }
                         .buttonStyle(.borderless)
                         .controlSize(.small)
