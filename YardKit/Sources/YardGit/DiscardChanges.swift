@@ -166,6 +166,32 @@ public enum DiscardChanges {
             try git.run(["apply", "--reverse"], workingDirectory: path, standardInput: Data(patch.utf8))
         }
     }
+
+    /// Discards the selected lines of one unstaged hunk: the worktree loses
+    /// exactly those `+` and `-` lines (an added line goes, a removed line
+    /// comes back), the index is untouched. `hunkID` and `lines` are as for
+    /// `stageLines`; the patch is `selectLinePatch`'s reverse patch, applied
+    /// with `git apply --reverse` and no `--cached`, as `discardHunks` does.
+    ///
+    /// An unknown id or an index that is not a changed line throws
+    /// (`StagingError`) before `git apply` runs, so nothing is discarded; the
+    /// checkpoint is already written, as for `discardHunks`. An empty `lines`
+    /// is a no-op with no entry. **Writes exactly one journal entry per
+    /// call**, operation `discard`.
+    public static func discardLines(
+        hunkID: String,
+        lines: [Int],
+        at path: String,
+        git: GitProcess = GitProcess()
+    ) throws {
+        guard !lines.isEmpty else { return }
+        try JournalCheckpoint.around(operation: operation, at: path, git: git) { git in
+            let files = try listHunks(at: path, area: .unstaged, git: git)
+            let patch = try selectLinePatch(
+                hunkID: hunkID, lines: Set(lines), from: files, area: .unstaged, direction: .reverse)
+            try git.run(["apply", "--reverse"], workingDirectory: path, standardInput: Data(patch.utf8))
+        }
+    }
 }
 
 // MARK: - §6 exit class (#0141)
