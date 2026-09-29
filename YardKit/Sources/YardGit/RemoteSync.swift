@@ -173,3 +173,69 @@ extension RemoteSync {
         return before == after ? .upToDate : .fastForwarded(from: before, to: after)
     }
 }
+
+// MARK: - Push (#0454)
+
+public extension RemoteSync {
+
+    /// Where a push went.
+    struct PushResult: Equatable, Sendable {
+        /// The remote pushed to, e.g. `origin`.
+        public let remote: String
+        /// The ref updated on the remote, e.g. `refs/heads/main`.
+        public let remoteRef: String
+        /// True when this push also set the branch's upstream (the first
+        /// push of a branch that had none).
+        public let setUpstream: Bool
+    }
+
+    /// Pushes the current branch to its upstream, or — when it has none —
+    /// to a branch of the same name on `origin` (or the only remote),
+    /// setting the upstream (`--set-upstream`).
+    ///
+    /// The refspec is always explicit, `refs/heads/<branch>:<remote ref>`,
+    /// so `push.default` (`matching` pushes every branch) cannot widen it.
+    /// Never forced: a rejected push fails with git's stderr.
+    ///
+    /// **Journaled after it succeeds, not before.** A push changes the
+    /// remote, which no local restore can take back, so its entry is a
+    /// marker of the state *after* the push: the Edit menu reads it as
+    /// "Can't Undo Push" (#0459), and restoring it changes nothing. A push
+    /// that fails or is cancelled writes no entry at all, so Undo still
+    /// names the operation before it.
+    @discardableResult
+    static func push(at path: String, git: GitProcess = GitProcess()) async throws -> PushResult {
+        let context = try await WorktreeContext.resolve(path: path, git: git)
+        let branch = try currentBranch(at: path, git: git)
+
+        let result: PushResult
+        if let remote = try configValue("branch.\(branch).remote", at: path, git: git),
+           let merge = try configValue("branch.\(branch).merge", at: path, git: git) {
+            guard remote != "." else { throw Refusal.localUpstream(branch: branch) }
+            result = PushResult(remote: remote, remoteRef: merge, setUpstream: false)
+        } else {
+            let remote = try defaultRemote(at: path, git: git)
+            result = PushResult(remote: remote, remoteRef: "refs/heads/\(branch)", setUpstream: true)
+        }
+
+        var arguments = ["push"]
+        if result.setUpstream { arguments.append("--set-upstream") }
+        arguments += [result.remote, "refs/heads/\(branch):\(result.remoteRef)"]
+        try await git.run(arguments, workingDirectory: path)
+
+        try JournalCheckpoint.checkpoint(operation: "push", in: context, git: git)
+        return result
+    }
+}
+
+extension RemoteSync {
+
+    /// `origin` when it exists, else the only remote; a refusal otherwise.
+    static func defaultRemote(at path: String, git: GitProcess) throws -> String {
+        let names = try git.run(["remote"], workingDirectory: path).lines.filter { !$0.isEmpty }
+        if names.contains("origin") { return "origin" }
+        if names.count == 1 { return names[0] }
+        if names.isEmpty { throw Refusal.noRemote }
+        throw Refusal.ambiguousRemote(names)
+    }
+}
