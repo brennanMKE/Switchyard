@@ -502,6 +502,19 @@ struct ResolvePaneTests {
         #expect(lines.contains(" <<<<<<< HEAD"), "conflict markers stay visible in the render source")
     }
 
+    // MARK: - #0486: a CRLF side
+
+    /// A conflict side is file content, and a CRLF file's "\r\n" is one
+    /// `Character`, so the "\n" Character split left the whole side as one
+    /// body line (measured on `main`: `body == [" a\r\nb\r\n"]`).
+    @Test func aCRLFSideSplitsIntoOneBodyLinePerLine() throws {
+        let diff = ResolveCardView.sideDiff(label: "Ours", path: "f.txt", text: "a\r\nb\r\n")
+        let hunk = try #require(diff.hunks.first)
+
+        #expect(hunk.body == [" a\r", " b\r", " "])
+        #expect(hunk.oldCount == 3)
+    }
+
     // MARK: - Helpers
 
     /// Bounded wait for the box's outcome, returning the moment it lands.

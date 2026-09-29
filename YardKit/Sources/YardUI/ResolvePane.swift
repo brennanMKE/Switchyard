@@ -879,7 +879,10 @@ public struct ResolveCardView: View {
     /// verbatim — conflict markers included). Public so a no-`@testable`
     /// test can assert the render source carries the text uninterpreted.
     public static func sideDiff(label: String, path: String, text: String) -> FileDiff {
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map { " \($0)" }
+        // The newline *scalar*: a CRLF side's "\r\n" is one `Character`, so
+        // a Character split left the whole side as one line (#0486, measured).
+        let lines = text.unicodeScalars.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { " \(Substring($0))" }
         return FileDiff(
             path: path,
             oldMode: nil,
