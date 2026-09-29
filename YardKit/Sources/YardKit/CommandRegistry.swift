@@ -12,7 +12,7 @@ public enum CommandRegistry {
 
     /// All known `yard` command specifications in the order they should be
     /// rendered in help output.
-    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, skillSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, revertSpec, cherryPickSpec, mergeSpec, rewriteDiffSpec, rerereSpec, reviewSpec, askSpec, resolveSpec, watchSpec, tagSpec, branchSpec, rebaseOntoSpec, setTipSpec, stageSpec, unstageSpec]
+    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, skillSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, revertSpec, cherryPickSpec, mergeSpec, rewriteDiffSpec, rerereSpec, reviewSpec, askSpec, resolveSpec, watchSpec, tagSpec, branchSpec, rebaseOntoSpec, setTipSpec, stageSpec, unstageSpec, commitSpec]
 
     // MARK: - The switchyard spec — rendered by `yard --help`
 
@@ -632,6 +632,32 @@ public enum CommandRegistry {
         ],
         schemaName: "unstage",
         payload: nil
+    )
+
+    // MARK: - The commit spec — engine-backed, resolved by `YardCommands` (guide §11 decision 37)
+
+    static let commitSpec = CommandSpec(
+        name: "commit",
+        summary: "Commit the index as it stands, or amend HEAD, without invoking an editor.",
+        usage: "commit [--message <message>] [--amend] [--sign | --no-sign]",
+        flags: [
+            FlagSpec(long: "message", argument: "message", help: "The commit message, passed as a flag — GIT_EDITOR is never invoked. Required unless --amend, which otherwise keeps HEAD's message."),
+            FlagSpec(long: "amend", argument: nil, help: "Replace HEAD with a commit of the index and the message. Refused when a remote-tracking branch already contains HEAD."),
+            FlagSpec(long: "sign", argument: nil, help: "Sign the commit, even when commit.gpgsign is false."),
+            FlagSpec(long: "no-sign", argument: nil, help: "Never sign, even when commit.gpgsign is true."),
+        ],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The commit was created; the payload carries its full oid and whether it amended HEAD. Hooks ran. One journal entry, operation commit or amend."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — no --message without --amend, a positional argument, a duplicated or value-missing flag, an unknown flag, or both --sign and --no-sign."),
+            ExitCodeSpec(code: 4, meaning: "The request failed for a reason the other codes do not name."),
+            ExitCodeSpec(code: 6, meaning: "Not a repository; git refused the commit (nothing staged, a hook exited non-zero, unresolved conflicts, an empty message); or --amend was refused (no commits yet, or HEAD is already on a remote-tracking branch)."),
+            ExitCodeSpec(code: 9, meaning: "Signing failed (signing_failed); no commit was written."),
+        ],
+        schemaName: "commit",
+        payload: PayloadShape(fields: [
+            PayloadField(name: "oid", type: .string, description: "The new commit's full object id."),
+            PayloadField(name: "amended", type: .bool, description: "True when --amend replaced HEAD rather than adding a child of it."),
+        ])
     )
 
     // MARK: - The rewrite-diff spec — engine-backed, resolved by `YardCommands` (#0064)

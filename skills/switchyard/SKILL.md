@@ -601,4 +601,30 @@ Usage: `switchyard unstage (<path>... | --hunk <id>...)`
 | 4 | The request failed for a reason the other codes do not name. |
 | 6 | Not a repository, or a hunk id that is unknown or stale; nothing was unstaged. |
 
+### `switchyard commit`
+
+Commit the index as it stands, or amend HEAD, without invoking an editor.
+
+Usage: `switchyard commit [--message <message>] [--amend] [--sign | --no-sign]`
+
+| Flag | Meaning |
+|---|---|
+| `--amend` | Replace HEAD with a commit of the index and the message. Refused when a remote-tracking branch already contains HEAD. |
+| `--message <message>` | The commit message, passed as a flag — GIT_EDITOR is never invoked. Required unless --amend, which otherwise keeps HEAD's message. |
+| `--no-sign` | Never sign, even when commit.gpgsign is true. |
+| `--sign` | Sign the commit, even when commit.gpgsign is false. |
+
+| Exit | Meaning |
+|---|---|
+| 0 | The commit was created; the payload carries its full oid and whether it amended HEAD. Hooks ran. One journal entry, operation commit or amend. |
+| 1 | Invalid arguments — no --message without --amend, a positional argument, a duplicated or value-missing flag, an unknown flag, or both --sign and --no-sign. |
+| 4 | The request failed for a reason the other codes do not name. |
+| 6 | Not a repository; git refused the commit (nothing staged, a hook exited non-zero, unresolved conflicts, an empty message); or --amend was refused (no commits yet, or HEAD is already on a remote-tracking branch). |
+| 9 | Signing failed (signing_failed); no commit was written. |
+
+| Result field | Type | Meaning |
+|---|---|---|
+| `amended` | bool | True when --amend replaced HEAD rather than adding a child of it. |
+| `oid` | string | The new commit's full object id. |
+
 <!-- END GENERATED -->

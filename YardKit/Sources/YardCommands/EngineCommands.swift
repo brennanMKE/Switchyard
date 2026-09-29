@@ -105,6 +105,8 @@ public func runEngineCommand(
     case "stage", "unstage":
         // Paths or hunk ids, never both (guide §11 decision 37).
         return runStage(arguments: arguments, workingDirectory: workingDirectory)
+    case "commit":
+        return runCommit(arguments: arguments, workingDirectory: workingDirectory)
     case "rewrite-diff":
         // One required positional, no flags: `switchyard rewrite-diff
         // <journal-entry-id>` arrives as `["rewrite-diff", "<id>"]`. The arm

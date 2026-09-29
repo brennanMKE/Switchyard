@@ -48,6 +48,7 @@ struct GlobalJSONFlagTests {
         "set-tip": ["set-tip", "HEAD"],
         "stage": ["stage", "a.txt"],
         "unstage": ["unstage", "a.txt"],
+        "commit": ["commit", "--message", "m"],
     ]
 
     static let dispatchArgv: [String: [String]] = [
