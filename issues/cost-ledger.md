@@ -514,6 +514,7 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-09-29 | #0066-#0069 | Opus planning subagent: agent skill (decision 31), 3 plans + #0069 wontfix verdict, 1,737 s wall (O, measured) | 214,669 | — |
 | 2026-09-29 | #0066 | round 1, Sonnet implementation, 483 s wall, passed pending review (S, measured) | 100,984 | — |
 | 2026-09-29 | #0067 | round 1, Sonnet implementation, 567 s wall, passed pending review (S, measured) | 105,482 | — |
+| 2026-09-29 | #0068 | round 1, Sonnet implementation, 652 s wall, passed pending review (S, measured) | 89,640 | — |
 | | | **Total measured** (tokens include 2026-09-22/23 rows; $ not updated for them) | **47,386,796** | **$437.24** |
 
 ## What this total does and does not cover
