@@ -66,6 +66,12 @@ public enum JournalUndo {
         /// tail (logically: the entries stay listed and restorable by id,
         /// #0034 decision 2), or `steps` asked for more than remain.
         case nothingToRedo(requested: Int, available: Int)
+        /// #0461: the walk would restore `entry`, a `push` entry. A push
+        /// changed the remote, which no local restore can take back, and
+        /// restoring anything older would rewind the remote-tracking ref
+        /// while the remote keeps the commits (guide §11 decision 32).
+        /// `available` is how many steps could be undone before the push.
+        case pushNotUndoable(entry: JournalEntryID, requested: Int, available: Int)
 
         public var description: String {
             switch self {
@@ -73,9 +79,19 @@ public enum JournalUndo {
                 "nothing to undo: \(requested) step(s) requested, \(available) available"
             case let .nothingToRedo(requested, available):
                 "nothing to redo: \(requested) step(s) requested, \(available) available"
+            case let .pushNotUndoable(entry, requested, available):
+                "can't undo past push \(entry): the remote already has the pushed commits; "
+                    + "\(requested) step(s) requested, \(available) available before the push"
             }
         }
     }
+
+    /// The `operation` `RemoteSync.push` records, and the one entry kind
+    /// undo refuses to restore (#0461, guide §11 decision 32). The single
+    /// deliberate exception to "never decide by matching `operation`"
+    /// (#0034 decision 7): a push is a normal entry by every structural
+    /// test, and only its operation says the remote moved.
+    public static let pushOperation = "push"
 
     /// Undoes `steps` operations on this worktree's chain, returning one
     /// restore report per step, oldest target last. `command` and `agent`
@@ -148,10 +164,12 @@ public enum JournalUndo {
             // `JournalWorktreeScope`; this used to filter the same
             // comparison locally, which is what #0252 folded away.
             var nodes: [JournalWorktreeScope.Node] = []
+            var operations: [JournalEntryID: String] = [:]
             for entry in try JournalAnchor.list(in: context, git: git) {
                 let metadata = try JournalEntryMetadata(
                     serialized: JournalAnchor.metadata(for: entry.id, in: context, git: git))
                 nodes.append(.init(node: metadata.chainNode, worktree: metadata.worktree.name))
+                operations[entry.id] = metadata.operation
             }
 
             // Plan the whole walk before mutating anything. The synthetic
@@ -164,6 +182,12 @@ public enum JournalUndo {
             while planned.count < steps {
                 let state = try JournalWorktreeScope.state(of: simulated, in: context.worktreeName)
                 guard let traversal = nextTraversal(direction, state: state) else { break }
+                // #0461: undo never restores a push entry, so it never walks
+                // past one. Refused here, in planning, so nothing is written.
+                if direction == .undo, operations[traversal.restored] == pushOperation {
+                    throw Error.pushNotUndoable(
+                        entry: traversal.restored, requested: steps, available: planned.count)
+                }
                 simulated.append(.init(
                     node: .init(
                         id: JournalEntryID.generate(after: simulated.last?.node.id),

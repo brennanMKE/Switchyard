@@ -90,7 +90,7 @@ public nonisolated enum JournalMenu {
     /// (`RemoteSync.push`), the remote already has the commits, and no local
     /// restore can take them back (guide §11 decision 32).
     public static func undoBlocked(operation: String?) -> Bool {
-        operation == "push"
+        operation == JournalUndo.pushOperation
     }
 
     /// #0448: whether Undo and Redo belong to text editing rather than the

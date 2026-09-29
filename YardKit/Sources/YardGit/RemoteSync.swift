@@ -223,7 +223,7 @@ public extension RemoteSync {
         arguments += [result.remote, "refs/heads/\(branch):\(result.remoteRef)"]
         try await git.run(arguments, workingDirectory: path)
 
-        try JournalCheckpoint.checkpoint(operation: "push", in: context, git: git)
+        try JournalCheckpoint.checkpoint(operation: JournalUndo.pushOperation, in: context, git: git)
         return result
     }
 }
