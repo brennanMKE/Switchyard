@@ -60,6 +60,15 @@ public enum Stash {
         }
     }
 
+    /// What `apply` and `pop` did. A conflict is not an error: git applied
+    /// what it could, left conflict markers and unmerged paths, and kept
+    /// the stash (measured, #0492). The caller hands off to Resolve
+    /// Conflicts….
+    public enum Outcome: Sendable, Equatable {
+        case applied
+        case conflicted(paths: [String])
+    }
+
     /// Why the engine will not run a stash command, decided before the
     /// checkpoint, so a refusal writes no entry and changes nothing.
     public enum Refusal: Swift.Error, Equatable, Sendable, CustomStringConvertible {
@@ -166,6 +175,84 @@ public enum Stash {
         try JournalCheckpoint.around(operation: pushOperation, at: path, git: git) { git in
             _ = try git.run(arguments, workingDirectory: top)
         }
+    }
+
+    // MARK: - Apply, pop, drop
+
+    /// Apply: `git stash apply`, keeping the stash. `restoreIndex` passes
+    /// `--index`, which puts staged changes back staged; without it they
+    /// come back unstaged, except new files, which stay added (measured).
+    /// `--index` refuses when the staged changes no longer apply ("conflicts
+    /// in index. Try without --index.", nothing changed, measured); that
+    /// arrives as the thrown `GitProcess.Failure`.
+    ///
+    /// **Writes exactly one journal entry**, operation `stash-apply`.
+    @discardableResult
+    public static func apply(
+        oid: String, restoreIndex: Bool = false, at path: String, git: GitProcess = GitProcess()
+    ) throws -> Outcome {
+        try applying(oid: oid, verb: "apply", operation: applyOperation,
+                     restoreIndex: restoreIndex, at: path, git: git)
+    }
+
+    /// Pop: `git stash pop`, which is apply, then drop **only if the apply
+    /// had no conflict** — on a conflict git keeps the stash ("The stash
+    /// entry is kept in case you need it again.", exit 1, measured). One
+    /// journal entry for both halves, operation `stash-pop`: Undo Pop puts
+    /// back the worktree and the stash together.
+    @discardableResult
+    public static func pop(
+        oid: String, restoreIndex: Bool = false, at path: String, git: GitProcess = GitProcess()
+    ) throws -> Outcome {
+        try applying(oid: oid, verb: "pop", operation: popOperation,
+                     restoreIndex: restoreIndex, at: path, git: git)
+    }
+
+    /// Drop: `git stash drop`. The stash commit stays reachable from the
+    /// entry this writes (`StashSnapshot`), so Undo Drop brings it back.
+    ///
+    /// **Writes exactly one journal entry**, operation `stash-drop`.
+    public static func drop(oid: String, at path: String, git: GitProcess = GitProcess()) throws {
+        let context = try WorktreeContext.resolve(path: path, git: git)
+        let top = context.topLevel ?? path
+        let index = try index(of: oid, at: top, git: git)
+        try JournalCheckpoint.around(operation: dropOperation, at: path, git: git) { git in
+            _ = try git.run(["stash", "drop", "-q", "stash@{\(index)}"], workingDirectory: top)
+        }
+    }
+
+    private static func applying(
+        oid: String, verb: String, operation: String, restoreIndex: Bool,
+        at path: String, git: GitProcess
+    ) throws -> Outcome {
+        let context = try WorktreeContext.resolve(path: path, git: git)
+        let top = context.topLevel ?? path
+        let index = try index(of: oid, at: top, git: git)
+        try refuseConflicts(in: gitStatus(at: top, git: git))
+        var arguments = ["stash", verb, "-q"]
+        if restoreIndex { arguments.append("--index") }
+        arguments.append("stash@{\(index)}")
+        return try JournalCheckpoint.around(operation: operation, at: path, git: git) { git in
+            let result = try git.capture(arguments, workingDirectory: top)
+            guard result.exitCode != 0 else { return .applied }
+            // A non-zero exit with unmerged paths is a conflict; the index
+            // had none before (refused above), so every one is this
+            // apply's. Anything else is git refusing — local changes in
+            // the way, an untracked file in the way, `--index` failing.
+            let unmerged = try git.run(
+                ["diff", "--name-only", "--diff-filter=U", "-z"], workingDirectory: top)
+                .text.split(separator: "\0").map(String.init)
+            guard unmerged.isEmpty else { return .conflicted(paths: unmerged) }
+            throw GitProcess.Failure.exited(
+                code: result.exitCode, stderr: result.standardError, arguments: arguments)
+        }
+    }
+
+    private static func index(of oid: String, at top: String, git: GitProcess) throws -> Int {
+        guard let item = try list(at: top, git: git).first(where: { $0.oid == oid }) else {
+            throw Refusal.notFound(oid: oid)
+        }
+        return item.index
     }
 
     private static func refuseConflicts(in status: WorktreeStatus) throws {
