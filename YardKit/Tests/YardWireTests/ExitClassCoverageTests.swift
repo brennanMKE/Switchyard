@@ -189,6 +189,9 @@ struct ExitClassCoverageTests {
             // upstream, no remote) — one class, asserted in
             // RemoteSyncTests.everyRefusalIsARepositoryError.
             Row("RemoteSync.Refusal", RemoteSync.Refusal.detachedHead, .repositoryError),
+            // #0463: AmendHead.Refusal is decided before anything runs, from
+            // the repository's own state (no commits, HEAD already pushed).
+            Row("AmendHead.Refusal", AmendHead.Refusal.noCommits, .repositoryError),
             // #0242: JournalObserved.Metadata gained a production
             // serialization path; its error carries the same class as
             // JournalEntryMetadata.SerializationError above.
