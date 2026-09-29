@@ -41,6 +41,8 @@ public nonisolated enum JournalMenuTitles {
         "fetch": "Fetch",
         "pull": "Pull",
         "push": "Push",
+        // #0465: the Changes view's Amend (guide §11 decision 33).
+        "amend": "Amend",
     ]
 
     /// "Undo <title>" for a mapped operation, plain "Undo" for anything
