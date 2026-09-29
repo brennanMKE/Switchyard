@@ -682,3 +682,16 @@ xcodebuild -project Switchyard.xcodeproj -scheme Switchyard \
 
 `YardKit/` exists with four targets — `YardGit`, `YardKit`, `YardUI` and the `switchyard`
 executable — and five test targets. See CLAUDE.md's Current state section for the suite baseline.
+
+## Rule 14 — Leave nothing running when you finish. No polling loops outlive the round.
+
+Measured 2026-09-29: two rounds (#0416, #0441) backgrounded `swift test` and started `until grep …;
+do sleep 5; done` loops to wait for it. The rounds reported and ended; the loops did not. One ran
+for **two days**, writing 3.9 MB of "no such file" errors after its worktree was removed, and the
+session's agent list showed the finished rounds as still running.
+
+- Prefer Rule 3c: run `swift test` in the foreground, redirected to a file, and read the file.
+- If you must wait on something, bound the wait (`for i in {1..120}; do …; sleep 5; done`) so it
+  ends on its own.
+- Before writing your report, check that nothing you started is still running (`jobs`, and
+  `pgrep -f` for anything you launched) and stop it.
