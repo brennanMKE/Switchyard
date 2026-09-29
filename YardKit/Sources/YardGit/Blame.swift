@@ -136,11 +136,14 @@ public struct BlameParser {
         // tab-prefixed content line closes it.
         var entry: (oid: String, originalLine: Int, finalLine: Int)?
 
-        var rawLines = text.split(separator: "\n", omittingEmptySubsequences: false)[...]
-        if rawLines.last == "" { rawLines = rawLines.dropLast() }
+        // Split on the newline *scalar*, not the `Character`: Swift reads
+        // "\r\n" as one Character, so a CRLF content line would fuse with
+        // the next entry's header line (#0483, measured).
+        var rawLines = text.unicodeScalars.split(separator: "\n", omittingEmptySubsequences: false)[...]
+        if rawLines.last?.isEmpty == true { rawLines = rawLines.dropLast() }
 
         for rawLine in rawLines {
-            let line = String(rawLine)
+            let line = String(Substring(rawLine))
 
             if let open = entry {
                 if line.hasPrefix("\t") {
@@ -202,26 +205,29 @@ public struct BlameParser {
     /// Applies one header line to the entry's commit. Unknown keys are
     /// ignored on purpose — porcelain is allowed to grow fields.
     static func applyHeaderLine(_ line: String, to info: inout CommitInfo) throws {
-        func value(after prefix: String) -> String {
-            String(line.dropFirst(prefix.count))
+        // Matched scalar by scalar: a value opening with a combining mark
+        // fuses with the separating space into one `Character`, so
+        // `line.hasPrefix("summary ")` is false for `summary \u{301}x`
+        // (#0483, measured).
+        func value(after prefix: String) -> String? {
+            guard line.unicodeScalars.starts(with: prefix.unicodeScalars) else { return nil }
+            return String(Substring(line.unicodeScalars.dropFirst(prefix.unicodeScalars.count)))
         }
-        if line.hasPrefix("author ") {
-            info.author = value(after: "author ")
-        } else if line.hasPrefix("author-mail ") {
-            var mail = value(after: "author-mail ")
+        if let author = value(after: "author ") {
+            info.author = author
+        } else if var mail = value(after: "author-mail ") {
             if mail.hasPrefix("<") { mail.removeFirst() }
             if mail.hasSuffix(">") { mail.removeLast() }
             info.authorEmail = mail
-        } else if line.hasPrefix("author-time ") {
-            info.authorTime = Int(value(after: "author-time "))
-        } else if line.hasPrefix("author-tz ") {
-            info.authorTimeZone = value(after: "author-tz ")
-        } else if line.hasPrefix("summary ") {
-            info.summary = value(after: "summary ")
+        } else if let time = value(after: "author-time ") {
+            info.authorTime = Int(time)
+        } else if let zone = value(after: "author-tz ") {
+            info.authorTimeZone = zone
+        } else if let summary = value(after: "summary ") {
+            info.summary = summary
         } else if line == "boundary" {
             info.isBoundary = true
-        } else if line.hasPrefix("filename ") {
-            let path = value(after: "filename ")
+        } else if let path = value(after: "filename ") {
             if path.hasPrefix("\"") { throw Failure.quotedPath(line) }
             info.path = path
         }
