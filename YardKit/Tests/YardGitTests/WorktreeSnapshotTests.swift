@@ -348,8 +348,10 @@ struct WorktreeSnapshotTests {
             command: "commit-tree")
         let unremovable = WorktreeSnapshot.Error.worktreeFileUnremovable(
             path: "/r/later.txt", detail: "denied")
+        let unwritable = WorktreeSnapshot.Error.worktreeFileUnwritable(
+            path: "/r/eol.crlf", detail: "read-only")
         let bare = WorktreeSnapshot.Error.noWorktree(gitDir: "/r/bare.git")
-        for error in [unreadable, malformed, unremovable, bare] {
+        for error in [unreadable, malformed, unremovable, unwritable, bare] {
             #expect(error.exitClass == .repositoryError)
         }
         #expect(unreadable.description.contains("/r/.git/index"))
@@ -357,6 +359,8 @@ struct WorktreeSnapshotTests {
         #expect(malformed.description.contains("commit-tree"))
         #expect(unremovable.description.contains("/r/later.txt"))
         #expect(unremovable.description.contains("denied"))
+        #expect(unwritable.description.contains("/r/eol.crlf"))
+        #expect(unwritable.description.contains("read-only"))
         #expect(bare.description.contains("/r/bare.git"))
     }
 
@@ -414,5 +418,163 @@ struct WorktreeSnapshotTests {
 
         #expect(!showOutput.contains(realName),
                 "the machine's real identity must not appear on the snapshot commit")
+    }
+}
+
+// MARK: - Content filters (#0473)
+
+/// Before #0473 capture hashed through the clean filter and restore wrote
+/// through the smudge filter, so any file whose bytes were not a fixed
+/// point of `smudge(clean(x))` came back changed (measured on git 2.54.0:
+/// CRLF → LF under `core.autocrlf=input`, LF → CRLF under `eol=crlf`, and a
+/// secret stripped by a clean filter lost outright).
+extension WorktreeSnapshotTests {
+
+    /// A fixture whose single commit carries `files` (and `.gitattributes`
+    /// when given), with `config` set before that commit so a clean filter
+    /// applies to it.
+    private func filteredRepository(
+        config: [(String, String)],
+        attributes: String?,
+        files: [String: String]
+    ) throws -> FixtureRepository {
+        var repo = try FixtureRepository()
+        for (key, value) in config {
+            try git.run(["config", key, value], workingDirectory: repo.url.path)
+        }
+        var committed = files
+        if let attributes { committed[".gitattributes"] = attributes }
+        try repo.build([FixtureRepository.Commit("base", files: committed)])
+        return repo
+    }
+
+    @Test func aCRLFFileUnderAutocrlfInputRoundTripsByteForByte() throws {
+        let repo = try filteredRepository(
+            config: [("core.autocrlf", "input")], attributes: nil,
+            files: ["auto.txt": "one\ntwo\n"])
+        defer { repo.destroy() }
+        let ctx = try context(of: repo)
+        let crlf = Data("one\r\ntwo\r\n".utf8)
+        let tracked = repo.url.appendingPathComponent("auto.txt")
+        // A name starting with a double quote: `hash-object --stdin-paths`
+        // reads such a line as C-quoted, so it only survives quoting.
+        let untracked = repo.url.appendingPathComponent("\"quoted\".txt")
+        try crlf.write(to: tracked)
+        try crlf.write(to: untracked)
+
+        let snap = try WorktreeSnapshot.capture(in: ctx)
+
+        try Data("changed\n".utf8).write(to: tracked)
+        try Data("changed\n".utf8).write(to: untracked)
+        try snap.restore(in: ctx)
+        #expect(try fileBytes(tracked) == crlf,
+                "a tracked CRLF file must not come back LF")
+        #expect(try fileBytes(untracked) == crlf,
+                "an untracked CRLF file must not come back LF")
+    }
+
+    @Test func anEolAttributePathRoundTripsByteForByteAndKeepsItsMode() throws {
+        let repo = try filteredRepository(
+            config: [], attributes: "*.crlf text eol=crlf\n",
+            files: ["eol.crlf": "one\ntwo\n"])
+        defer { repo.destroy() }
+        let ctx = try context(of: repo)
+        let file = repo.url.appendingPathComponent("eol.crlf")
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: file.path)
+        let lf = Data("one\ntwo\n".utf8)
+        try #require(try fileBytes(file) == lf)  // the user's bytes are LF
+
+        let snap = try WorktreeSnapshot.capture(in: ctx)
+
+        try Data("changed\n".utf8).write(to: file)
+        try snap.restore(in: ctx)
+        #expect(try fileBytes(file) == lf,
+                "an eol=crlf path holding LF bytes must not come back CRLF")
+        let mode = try #require(try FileManager.default
+            .attributesOfItem(atPath: file.path)[.posixPermissions] as? Int)
+        #expect(mode & 0o111 != 0,
+                "rewriting the raw bytes must keep the executable bit")
+    }
+
+    @Test func aCleanFilteredPathRoundTripsByteForByte() throws {
+        let repo = try filteredRepository(
+            config: [("filter.strip.clean", "sed -e 's/^SECRET=.*/SECRET=/'"),
+                     ("filter.strip.smudge", "cat")],
+            attributes: "*.env filter=strip\n",
+            files: ["app.env": "SECRET=\nNAME=x\n"])
+        defer { repo.destroy() }
+        let ctx = try context(of: repo)
+        let file = repo.url.appendingPathComponent("app.env")
+        let secret = Data("SECRET=hunter2\nNAME=x\n".utf8)
+        try secret.write(to: file)
+
+        let snap = try WorktreeSnapshot.capture(in: ctx)
+
+        #expect(try capturedBytes(of: "app.env", in: snap.commit,
+                                  at: repo.url.path) == secret,
+                "the capture must hold the raw bytes, not the clean filter's output")
+        try Data("changed\n".utf8).write(to: file)
+        try snap.restore(in: ctx)
+        #expect(try fileBytes(file) == secret,
+                "the clean filter must not delete the user's content")
+    }
+
+    /// A path no conversion applies to is stored exactly as `add -u` stores
+    /// it, so the tree for an unfiltered worktree is the tree it was before
+    /// #0473 — only the commit message gains the trailer.
+    @Test func anUnfilteredCaptureKeepsItsTreeAndGainsTheRawTrailer() throws {
+        let repo = try FixtureRepository.linear()
+        defer { repo.destroy() }
+        let ctx = try context(of: repo)
+        try Data("modified\r\n".utf8).write(to: repo.url.appendingPathComponent("a.txt"))
+
+        let snap = try WorktreeSnapshot.capture(in: ctx)
+
+        let index = FileManager.default.temporaryDirectory
+            .appendingPathComponent("wst-0473-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: index) }
+        try FileManager.default.copyItem(
+            at: URL(fileURLWithPath: ctx.path(for: "index")), to: index)
+        let env = ["GIT_INDEX_FILE": index.path]
+        try git.run(["add", "-u"], workingDirectory: repo.url.path, extraEnvironment: env)
+        let expectedTree = try git.run(["write-tree"], workingDirectory: repo.url.path,
+                                       extraEnvironment: env).text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let tree = try git.run(["rev-parse", "\(snap.commit)^{tree}"],
+                               workingDirectory: repo.url.path).text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        #expect(tree == expectedTree)
+        let message = try git.run(["cat-file", "commit", snap.commit],
+                                  workingDirectory: repo.url.path).text
+        #expect(message.hasSuffix("switchyard worktree snapshot\n\nSwitchyard-Worktree-Bytes: raw\n"))
+    }
+
+    /// A snapshot written before #0473 has no trailer and holds clean-filter
+    /// output; it must restore through the smudge filter exactly as it did
+    /// then, not be written raw.
+    @Test func aSnapshotWithoutTheRawTrailerStillRestoresThroughSmudge() throws {
+        let repo = try filteredRepository(
+            config: [], attributes: "*.crlf text eol=crlf\n",
+            files: ["eol.crlf": "one\ntwo\n"])
+        defer { repo.destroy() }
+        let ctx = try context(of: repo)
+        let file = repo.url.appendingPathComponent("eol.crlf")
+        // What pre-#0473 capture stored: the clean filter's LF output, in a
+        // commit whose message is the bare subject.
+        let tree = try git.run(["rev-parse", "HEAD^{tree}"],
+                               workingDirectory: repo.url.path).text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let legacy = try git.run(["commit-tree", tree, "-m", "switchyard worktree snapshot"],
+                                 workingDirectory: repo.url.path).text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let emptyTree = try git.run(["hash-object", "-t", "tree", "/dev/null"],
+                                    workingDirectory: repo.url.path).text
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        try Data("changed\n".utf8).write(to: file)
+        try WorktreeSnapshot(commit: legacy, untrackedTree: emptyTree).restore(in: ctx)
+        #expect(try fileBytes(file) == Data("one\r\ntwo\r\n".utf8),
+                "a legacy snapshot restores through the smudge filter, as it always did")
     }
 }
