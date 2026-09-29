@@ -285,3 +285,34 @@ filename "we\\"ird.txt"
     let lines = try BlameParser().parse("")
     #expect(lines.isEmpty)
 }
+
+// MARK: - #0483: CRLF lines and combining marks
+
+/// Swift reads "\r\n" as one `Character`, so splitting porcelain on the "\n"
+/// Character fused a CRLF content line with the next entry's header line,
+/// and the following tab-prefixed content line then failed as an entry
+/// header (measured on `main`: throws `malformedEntryHeader("\tb\r")`).
+@Test func aCRLFFileBlamesOneEntryPerLine() throws {
+    var repo = try FixtureRepository()
+    defer { repo.destroy() }
+    try repo.build([.init("base", files: ["f.txt": "a\r\nb\r\n"])])
+
+    let lines = try blameFile(at: repo.url.path, file: "f.txt")
+
+    #expect(lines.map(\.content) == ["a\r", "b\r"])
+    #expect(lines.map(\.finalLine) == [1, 2])
+}
+
+/// `summary <subject>`: a subject opening with a combining mark fuses with
+/// the separating space into one `Character`, so `hasPrefix("summary ")` is
+/// false, the summary is never recorded, and the entry throws (measured on
+/// `main`: throws `missingCommitHeader`).
+@Test func aSubjectOpeningWithACombiningMarkBlames() throws {
+    var repo = try FixtureRepository()
+    defer { repo.destroy() }
+    try repo.build([.init("base", files: ["f.txt": "a\n"], message: "\u{301}x")])
+
+    let lines = try blameFile(at: repo.url.path, file: "f.txt")
+
+    #expect(lines.map(\.summary) == ["\u{301}x"])
+}
