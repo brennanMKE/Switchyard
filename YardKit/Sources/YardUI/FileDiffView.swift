@@ -11,9 +11,27 @@ import YardGit
 /// MVP, nothing more.
 public struct FileDiffView: View {
     private let file: FileDiff
+    /// #0444: a button on every hunk's header line — the Changes view's
+    /// Stage Hunk / Unstage Hunk. `nil` (every other caller) draws none.
+    private let hunkAction: HunkAction?
 
-    public init(file: FileDiff) {
+    /// One per-hunk button: its title, whether it is enabled, and what it
+    /// does with the hunk it sits on.
+    public struct HunkAction {
+        public let title: String
+        public let isEnabled: Bool
+        public let perform: (Hunk) -> Void
+
+        public init(title: String, isEnabled: Bool, perform: @escaping (Hunk) -> Void) {
+            self.title = title
+            self.isEnabled = isEnabled
+            self.perform = perform
+        }
+    }
+
+    public init(file: FileDiff, hunkAction: HunkAction? = nil) {
         self.file = file
+        self.hunkAction = hunkAction
     }
 
     public var body: some View {
@@ -32,7 +50,7 @@ public struct FileDiffView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(file.hunks, id: \.id) { hunk in
-                    HunkView(hunk: hunk)
+                    HunkView(hunk: hunk, action: hunkAction)
                 }
             }
         }
@@ -42,13 +60,23 @@ public struct FileDiffView: View {
 /// One hunk: its `@@` header line, then its body lines.
 private struct HunkView: View {
     let hunk: Hunk
+    let action: FileDiffView.HunkAction?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(hunk.header)
-                .font(.system(.caption, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .padding(.vertical, 2)
+            HStack {
+                Text(hunk.header)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                if let action {
+                    Spacer()
+                    Button(action.title) { action.perform(hunk) }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                        .disabled(!action.isEnabled)
+                }
+            }
+            .padding(.vertical, 2)
             ForEach(Array(hunk.body.enumerated()), id: \.offset) { _, line in
                 DiffLineView(line: line)
             }

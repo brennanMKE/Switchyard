@@ -158,6 +158,10 @@ public struct ContentView: View {
     /// guard `runningAction` gives the commit actions.
     @State private var runningWorkingChange: WorkingChange?
 
+    /// #0444: bumped after every in-place refresh, so the Changes view
+    /// reloads its diffs even when the status kept its shape.
+    @State private var workingTreeRevision = 0
+
     /// #0393: the journal listing for the open repository — the chain state
     /// the Edit menu's Undo and Redo titles and enabled flags read. `nil`
     /// while loading or with no repository open, which leaves both items
@@ -634,6 +638,7 @@ public struct ContentView: View {
                 WorkingChangesView(
                     changes: WorkingChanges(status: summary.status),
                     repositoryPath: repositoryPath,
+                    revision: workingTreeRevision,
                     isBusy: isBusy || journalRunning,
                     perform: { runWorkingChange($0) })
             }
@@ -1143,6 +1148,7 @@ public struct ContentView: View {
             graphRows = newRows
             sidebar = newSidebar
             journalListing = newJournal
+            workingTreeRevision += 1
             if let newSelection = select(newRows, newSummary.whereAmI.rawHead) {
                 selectedResolution = nil
                 selectedCommit = newSelection

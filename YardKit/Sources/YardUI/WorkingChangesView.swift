@@ -14,6 +14,9 @@ import YardGit
 public struct WorkingChangesView: View {
     private let changes: WorkingChanges
     private let repositoryPath: String
+    /// Bumped by `ContentView` after every refresh, so the diffs reload even
+    /// when the status did not change shape (a hunk staged in an `MM` file).
+    private let revision: Int
     private let isBusy: Bool
     private let perform: (WorkingChange) -> Void
 
@@ -24,13 +27,17 @@ public struct WorkingChangesView: View {
     }
 
     @State private var selection: FileSelection?
+    /// #0444: both hunk listings; `nil` while loading.
+    @State private var diffs: WorkingDiffs?
+    @State private var diffError: String?
 
     public init(
-        changes: WorkingChanges, repositoryPath: String, isBusy: Bool,
+        changes: WorkingChanges, repositoryPath: String, revision: Int, isBusy: Bool,
         perform: @escaping (WorkingChange) -> Void
     ) {
         self.changes = changes
         self.repositoryPath = repositoryPath
+        self.revision = revision
         self.isBusy = isBusy
         self.perform = perform
     }
@@ -42,10 +49,15 @@ public struct WorkingChangesView: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                fileList
-                    .frame(minHeight: 120, maxHeight: .infinity)
+                VSplitView {
+                    fileList
+                        .frame(minHeight: 120, maxHeight: .infinity)
+                    diffPane
+                        .frame(minHeight: 120, maxHeight: .infinity)
+                }
             }
         }
+        .task(id: revision) { await reloadDiffs() }
     }
 
     // MARK: - #0443: the file lists
@@ -133,6 +145,67 @@ public struct WorkingChangesView: View {
                 .disabled(isBusy)
                 .accessibilityIdentifier("\(action.lowercased())-file-\(row.path)")
             }
+        }
+    }
+
+    // MARK: - #0444: the selected file's diff
+
+    /// The selected row, looked up in the current lists: after a stage or
+    /// an unstage the row the selection names may have left its side.
+    private var selectedRow: WorkingChanges.Row? {
+        guard let selection else { return nil }
+        return (selection.staged ? changes.staged : changes.unstaged)
+            .first { $0.path == selection.path }
+    }
+
+    @ViewBuilder
+    private var diffPane: some View {
+        if let selection, let row = selectedRow {
+            if let diffError {
+                placeholder(diffError)
+            } else if let diffs {
+                if let file = diffs.file(row.path, staged: selection.staged) {
+                    ScrollView {
+                        FileDiffView(
+                            file: file,
+                            hunkAction: FileDiffView.HunkAction(
+                                title: selection.staged ? "Unstage Hunk" : "Stage Hunk",
+                                isEnabled: !isBusy
+                            ) { hunk in
+                                perform(selection.staged
+                                    ? .unstageHunk(id: hunk.id) : .stageHunk(id: hunk.id))
+                            })
+                        .padding()
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                } else if row.state == .untracked {
+                    placeholder("\(row.path) is untracked — stage it to add it to the next commit")
+                } else {
+                    placeholder("No diff to show for \(row.path)")
+                }
+            } else {
+                ProgressView()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        } else {
+            placeholder("Select a file to see its changes")
+        }
+    }
+
+    private func placeholder(_ text: String) -> some View {
+        Text(text)
+            .foregroundStyle(.secondary)
+            .multilineTextAlignment(.center)
+            .padding()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func reloadDiffs() async {
+        do {
+            diffs = try await loadWorkingDiffs(at: repositoryPath)
+            diffError = nil
+        } catch {
+            diffError = String(describing: error)
         }
     }
 }
