@@ -567,4 +567,38 @@ Usage: `switchyard set-tip <commit>`
 | 1 | Invalid arguments — set-tip requires exactly one positional argument <commit> and takes no flags. |
 | 4 | The tip could not be set for a reason the other codes do not name — an unknown commit, a detached HEAD, a tip that already names the target, or a target no local branch names among them. |
 
+### `switchyard stage`
+
+Stage whole paths, or unstaged hunks by id, into the index.
+
+Usage: `switchyard stage (<path>... | --hunk <id>...)`
+
+| Flag | Meaning |
+|---|---|
+| `--hunk <id>` | Stage this unstaged hunk, by the id `switchyard hunks --unstaged` prints. Repeatable; not combinable with paths. |
+
+| Exit | Meaning |
+|---|---|
+| 0 | The paths or hunks were staged; the payload echoes them as paths or hunks. One journal entry, operation stage. |
+| 1 | Invalid arguments — no path and no --hunk, both paths and --hunk, --hunk without an id, or an unknown flag. A path that starts with - goes after --. |
+| 4 | The request failed for a reason the other codes do not name. |
+| 6 | Not a repository, a path git cannot match, or a hunk id that is unknown, stale, or a conflicted file's combined hunk; nothing was staged. |
+
+### `switchyard unstage`
+
+Unstage whole paths, or staged hunks by id, leaving the worktree untouched.
+
+Usage: `switchyard unstage (<path>... | --hunk <id>...)`
+
+| Flag | Meaning |
+|---|---|
+| `--hunk <id>` | Unstage this staged hunk, by the id `switchyard hunks --staged` prints. Repeatable; not combinable with paths. |
+
+| Exit | Meaning |
+|---|---|
+| 0 | The paths or hunks were unstaged; the payload echoes them as paths or hunks. A staged rename named by its new path is unstaged whole. One journal entry, operation unstage. |
+| 1 | Invalid arguments — no path and no --hunk, both paths and --hunk, --hunk without an id, or an unknown flag. A path that starts with - goes after --. |
+| 4 | The request failed for a reason the other codes do not name. |
+| 6 | Not a repository, or a hunk id that is unknown or stale; nothing was unstaged. |
+
 <!-- END GENERATED -->

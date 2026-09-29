@@ -46,6 +46,8 @@ struct GlobalJSONFlagTests {
         "branch": ["branch", "create", "b", "HEAD"],
         "rebase-onto": ["rebase-onto", "HEAD"],
         "set-tip": ["set-tip", "HEAD"],
+        "stage": ["stage", "a.txt"],
+        "unstage": ["unstage", "a.txt"],
     ]
 
     static let dispatchArgv: [String: [String]] = [

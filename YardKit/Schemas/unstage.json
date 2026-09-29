@@ -1,0 +1,72 @@
+{
+  "command" : "unstage",
+  "envelope" : {
+    "failure" : {
+      "error" : {
+        "code" : {
+          "enum" : [
+            "app_unavailable",
+            "blocked_on_conflicts",
+            "broker_unreachable",
+            "human_declined",
+            "ok",
+            "repository_error",
+            "request_failed",
+            "session_terminated",
+            "signing_failed",
+            "timed_out",
+            "usage"
+          ],
+          "type" : "string"
+        },
+        "hint" : {
+          "optional" : true,
+          "type" : "string"
+        },
+        "message" : {
+          "type" : "string"
+        }
+      },
+      "ok" : false,
+      "schemaVersion" : 1
+    },
+    "success" : {
+      "ok" : true,
+      "result" : {
+        "optional" : true,
+        "schema" : "unstage"
+      },
+      "schemaVersion" : 1
+    }
+  },
+  "exitCodes" : [
+    {
+      "code" : 0,
+      "meaning" : "The paths or hunks were unstaged; the payload echoes them as paths or hunks. A staged rename named by its new path is unstaged whole. One journal entry, operation unstage."
+    },
+    {
+      "code" : 1,
+      "meaning" : "Invalid arguments — no path and no --hunk, both paths and --hunk, --hunk without an id, or an unknown flag. A path that starts with - goes after --."
+    },
+    {
+      "code" : 4,
+      "meaning" : "The request failed for a reason the other codes do not name."
+    },
+    {
+      "code" : 6,
+      "meaning" : "Not a repository, or a hunk id that is unknown or stale; nothing was unstaged."
+    }
+  ],
+  "flags" : [
+    {
+      "argument" : "id",
+      "help" : "Unstage this staged hunk, by the id `switchyard hunks --staged` prints. Repeatable; not combinable with paths.",
+      "long" : "hunk",
+      "short" : null
+    }
+  ],
+  "schemaName" : "unstage",
+  "schemaVersion" : 1,
+  "summary" : "Unstage whole paths, or staged hunks by id, leaving the worktree untouched.",
+  "usage" : "unstage (<path>... | --hunk <id>...)"
+}

@@ -12,7 +12,7 @@ public enum CommandRegistry {
 
     /// All known `yard` command specifications in the order they should be
     /// rendered in help output.
-    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, skillSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, revertSpec, cherryPickSpec, mergeSpec, rewriteDiffSpec, rerereSpec, reviewSpec, askSpec, resolveSpec, watchSpec, tagSpec, branchSpec, rebaseOntoSpec, setTipSpec]
+    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, skillSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, revertSpec, cherryPickSpec, mergeSpec, rewriteDiffSpec, rerereSpec, reviewSpec, askSpec, resolveSpec, watchSpec, tagSpec, branchSpec, rebaseOntoSpec, setTipSpec, stageSpec, unstageSpec]
 
     // MARK: - The switchyard spec — rendered by `yard --help`
 
@@ -591,6 +591,46 @@ public enum CommandRegistry {
         schemaName: "set-tip",
         // No `payload` shape (#0362): the result is the same single-oid
         // object the other rewrites produce, and the same precedent applies.
+        payload: nil
+    )
+
+    // MARK: - The stage spec — engine-backed, resolved by `YardCommands` (guide §11 decision 37)
+
+    static let stageSpec = CommandSpec(
+        name: "stage",
+        summary: "Stage whole paths, or unstaged hunks by id, into the index.",
+        usage: "stage (<path>... | --hunk <id>...)",
+        flags: [
+            FlagSpec(long: "hunk", argument: "id", help: "Stage this unstaged hunk, by the id `switchyard hunks --unstaged` prints. Repeatable; not combinable with paths."),
+        ],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The paths or hunks were staged; the payload echoes them as paths or hunks. One journal entry, operation stage."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — no path and no --hunk, both paths and --hunk, --hunk without an id, or an unknown flag. A path that starts with - goes after --."),
+            ExitCodeSpec(code: 4, meaning: "The request failed for a reason the other codes do not name."),
+            ExitCodeSpec(code: 6, meaning: "Not a repository, a path git cannot match, or a hunk id that is unknown, stale, or a conflicted file's combined hunk; nothing was staged."),
+        ],
+        schemaName: "stage",
+        // No `payload` shape: `paths`/`hunks` are arrays, and `PayloadShape`
+        // is flat-only (#0194). `StageCommandTests` pins the encoded keys.
+        payload: nil
+    )
+
+    // MARK: - The unstage spec — engine-backed, resolved by `YardCommands` (guide §11 decision 37)
+
+    static let unstageSpec = CommandSpec(
+        name: "unstage",
+        summary: "Unstage whole paths, or staged hunks by id, leaving the worktree untouched.",
+        usage: "unstage (<path>... | --hunk <id>...)",
+        flags: [
+            FlagSpec(long: "hunk", argument: "id", help: "Unstage this staged hunk, by the id `switchyard hunks --staged` prints. Repeatable; not combinable with paths."),
+        ],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The paths or hunks were unstaged; the payload echoes them as paths or hunks. A staged rename named by its new path is unstaged whole. One journal entry, operation unstage."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — no path and no --hunk, both paths and --hunk, --hunk without an id, or an unknown flag. A path that starts with - goes after --."),
+            ExitCodeSpec(code: 4, meaning: "The request failed for a reason the other codes do not name."),
+            ExitCodeSpec(code: 6, meaning: "Not a repository, or a hunk id that is unknown or stale; nothing was unstaged."),
+        ],
+        schemaName: "unstage",
         payload: nil
     )
 
