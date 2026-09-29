@@ -59,7 +59,9 @@ func linePatch(
     file: FileDiff, hunk: Hunk, lines: Set<Int>, direction: LinePatchDirection
 ) throws -> String {
     for index in lines.sorted() {
-        let marker = hunk.body.indices.contains(index) ? hunk.body[index].first : nil
+        // The marker is the line's first *scalar*: a line opening with a
+        // combining mark fuses with it into one `Character` (#0488).
+        let marker = hunk.body.indices.contains(index) ? hunk.body[index].unicodeScalars.first : nil
         guard marker == "+" || marker == "-" else {
             throw StagingError.notAChangedLine(hunkID: hunk.id, line: index)
         }
@@ -69,7 +71,8 @@ func linePatch(
     var kept: [PatchLine] = []
     var droppedLast = false
     for (index, raw) in hunk.body.enumerated() {
-        guard let marker = raw.first else { continue }
+        guard let scalar = raw.unicodeScalars.first else { continue }
+        let marker = Character(scalar)
         if marker == "\\" {
             if !droppedLast, !kept.isEmpty { kept[kept.count - 1].noNewline = true }
             continue
@@ -85,7 +88,7 @@ func linePatch(
         }
         droppedLast = becomes == nil
         if let becomes {
-            kept.append(PatchLine(marker: becomes, text: raw.dropFirst(), noNewline: false))
+            kept.append(PatchLine(marker: becomes, text: Substring(raw.unicodeScalars.dropFirst()), noNewline: false))
         }
     }
 

@@ -34,7 +34,9 @@ public nonisolated struct DiffLineSelection: Equatable, Sendable {
     /// Whether `line` of `hunk` can be selected: a `+` or `-` line.
     public static func isSelectable(_ line: Int, in hunk: Hunk) -> Bool {
         guard hunk.body.indices.contains(line) else { return false }
-        let marker = hunk.body[line].first
+        // The first *scalar*: a line opening with a combining mark fuses
+        // with its marker into one `Character` (#0488).
+        let marker = hunk.body[line].unicodeScalars.first
         return marker == "+" || marker == "-"
     }
 
