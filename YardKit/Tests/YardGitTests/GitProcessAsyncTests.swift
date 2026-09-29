@@ -178,13 +178,43 @@ struct GitProcessAsyncTests {
         #expect(terminationStatus == SIGTERM)
     }
 
+    /// A child that creates the file named by `$0`, then runs until that file
+    /// is removed, or after 12 000 polls of 50 ms (#0451). It cannot finish
+    /// on its own while the test still intends to cancel it: the file is
+    /// removed only by the test's `defer`, after the cancelled capture has
+    /// returned. The poll bound is the backstop that ends a run whose
+    /// cancellation never reached the child (Rule 14), not a deadline the
+    /// test races: each poll forks a `sleep`, so under load it stretches with
+    /// the machine, and 600 s is three times the longest cancel test measured
+    /// (204 s).
+    private static let runUntilMarkerRemoved =
+        ": > \"$0\"; i=0; while [ -e \"$0\" ] && [ $i -lt 12000 ]; do sleep 0.05; i=$((i+1)); done"
+
+    /// The child is known to be running before `cancel()`, by construction
+    /// rather than by a sleep (#0451). The old child was `sleep 30`, a
+    /// wall-clock deadline: under parallel load the test's own resumption
+    /// after `Task.sleep(100 ms)` was measured arriving 200 s late, by which
+    /// time the child had exited 0 and the capture had succeeded before any
+    /// cancellation existed.
     @Test func cancellingAsyncCaptureTerminatesTheChildAndThrows() async throws {
-        let sleeper = GitProcess(executablePath: "/bin/sleep")
+        let shell = GitProcess(executablePath: "/bin/sh")
+        let marker = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("yard-cancel-running-\(UUID().uuidString)")
+        // Cleanup only. If cancellation never reaches the child, the test
+        // waits in `task.value` until the child's poll backstop ends it.
+        defer { try? FileManager.default.removeItem(at: marker) }
         let task = Task {
-            try await sleeper.capture(["30"])
+            try await shell.capture(["-c", Self.runUntilMarkerRemoved, marker.path])
         }
-        // Long enough that the child is launched; not an assertion.
-        try await Task.sleep(for: .milliseconds(100))
+        // Bounded wait for the child to be running (Rule 7c: a bounded loop,
+        // never a wall-clock assertion). 18 000 polls of at least 10 ms.
+        var polls = 0
+        while !FileManager.default.fileExists(atPath: marker.path), polls < 18_000 {
+            try await Task.sleep(for: .milliseconds(10))
+            polls += 1
+        }
+        try #require(FileManager.default.fileExists(atPath: marker.path),
+                     "the child never started")
         task.cancel()
 
         var thrown: (any Error)?
