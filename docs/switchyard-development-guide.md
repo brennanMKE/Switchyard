@@ -1846,6 +1846,76 @@ a feature at any milestone on the grounds that GitUp had it.
       or hunks (`push -- <paths>`, `--staged`, `--patch`), `--keep-index`, renaming a stash, and
       CLI verbs.
 
+37. **The CLI gains `stage`, `unstage`, `commit`, `discard`, `fetch`, `pull`, `push`, `stash`,
+    `undo` and `redo`, each a thin arm over the engine call the app's button makes.** Decided
+    2026-09-29 in the planning pass for umbrella **#0497**, with high confidence; each bullet is
+    cheap to reverse, and #0497 carries the questions for Brennan. Prototyped end to end in a
+    planning worktree and run through `yard-engine` and the full suite.
+
+    - **Grammar.** `stage (<path>... | --hunk <id>...)`, `unstage (<path>... | --hunk <id>...)`,
+      `discard (<path>... | --hunk <id>...)` — paths or hunk ids, never both, `--hunk` repeatable,
+      `--` before a path that starts with `-`. `commit [--message <message>] [--amend] [--sign |
+      --no-sign]` — `--message` required except with `--amend`, which then keeps `HEAD`'s full
+      message (`git commit --amend --no-edit`). `fetch`, `pull`, `push` take no arguments.
+      `stash (list | push [--message <message>] [--include-untracked] | apply <stash> [--index] |
+      pop <stash> [--index] | drop <stash>)` — a subcommand is required, never git's implicit
+      push; `<stash>` is `stash@{n}`, a bare `n`, or a full oid, resolved to an oid once and acted
+      on by oid (decision 36). `undo [--steps <n>]`, `redo [--steps <n>]`, `n` a positive integer.
+      Flag names are git's (`--include-untracked`, `--index`, `--amend`), not the app's labels,
+      and flag defaults are git's: `stash push` leaves untracked files unless asked, where the
+      app's sheet defaults the checkbox on.
+    - **Paths are repository-relative, whatever the current directory**, exactly as `status`,
+      `hunks` and `conflicts` print them, and literal (`--literal-pathspecs`, #0438). Every arm
+      runs git from `WorktreeContext.topLevel`. Measured: `stage a.txt` from `sub/` stages the
+      top-level `a.txt`; `stage ../a.txt` is git's "outside repository", exit 6. `unstage` of a
+      staged rename by its new path also unstages the old path (#0439's trap), which the app's
+      `WorkingChanges` does and an agent would not know to.
+    - **Routing is unchanged.** Each is a `CommandRegistry` name, so `route` classifies it
+      `.remote`, the CLI hands argv to the app over XPC (decision 15), and the app answers from
+      `runEngineCommand` — one new case per arm, one new file per arm in `YardCommands`. The app
+      owns the engine; the CLI links nothing new. `yard-engine` gets every verb for free.
+    - **Exit codes come from the error.** The older arms flatten every engine failure to 4. These
+      convert an `ExitClassCarrying` error to its own §6 class — 6, 8 or 9 — and anything else to
+      4, the conversion `ExitClass`'s doc comment reserved for wiring time: a hook refusing a
+      commit, a stale hunk id or `nothing to redo` is 6, a signing failure is 9. One shared
+      helper, `engineFailure` in `YardCommands/EngineServing.swift`.
+    - **An outcome to branch on is `ok: true` at a non-zero exit**, as `review`'s reject (7) and
+      `resolve`'s remaining conflicts (8) are. A `stash apply` or `pop` that conflicts exits **8**
+      with `{"outcome":"conflicted","conflictedPaths":[…]}`; git applied what it could and kept the
+      stash (decision 36).
+    - **`discard` takes no confirmation flag.** The app asks because a click is cheap to misplace;
+      an agent's argv is deliberate, `drop` and `branch delete` ask nothing either, and the call is
+      one `discard` entry that `switchyard undo` restores byte for byte (decision 34, measured
+      through the CLI). The engine still refuses what a snapshot cannot hold (a nested repository,
+      intent-to-add, a conflicted path), and a pathspec cannot widen it: every path must name a
+      `status` entry. `stash drop` likewise.
+    - **Fetch, pull and push get synchronous twins in `RemoteSync`**, the reverse of `Stash.list`'s
+      async twin, because `runEngineCommand` is synchronous and a semaphore bridge is the pattern
+      the Swift guidance forbids. Same probes, same entries (fetch and pull before, push after),
+      same refusals; `pushPlan` and `upstreamRemote` are factored out so the refspec rules live
+      once. Not cancellable from the CLI — interrupting the CLI does not stop the app's git. No
+      prompts: the app's environment and `GitProcess` already disable them (decision 32).
+    - **Undo and redo** pass `command: "switchyard undo …"` into the traversal entry (the
+      parameter `JournalUndo` kept for this), and report each step: the entry restored, the
+      pieces restored and not, `detachedFrom`, `leftAlone`, and for undo the `operation` undone
+      (the restored entry's metadata, as `JournalMenu.undoOperation` reads it). A walk that asks
+      for more than remains or would cross a push is refused whole (#0461) — measured: after a CLI
+      `push`, `undo` exits 6 and `origin/main` stays put.
+    - **Payloads.** `stage`/`unstage`/`discard` echo `{"paths":[…]}` or `{"hunks":[…]}`; `commit`
+      `{oid, amended}`; `fetch` `{remotes}`; `pull` `{outcome: upToDate|fastForwarded, from?, to?}`;
+      `push` `{remote, remoteRef, setUpstream}`; `stash list` `{stashes:[item]}`, `stash push` the
+      new `stash@{0}` item (`name`, `index`, `oid`, `baseOID`, `includesUntracked`, `date`,
+      `message`), apply/pop `{oid, outcome, conflictedPaths?}`, drop `{dropped}`; undo/redo
+      `{steps:[…]}`. The flat ones (`commit`, `pull`, `push`) declare a `PayloadShape`.
+    - **Tests** run each arm in-process against a `FixtureRepository` (bare remotes in a temporary
+      directory, never the network), plus one test that spawns the built `yard-engine` for
+      stage → commit → undo. The shipping `switchyard` binary cannot be driven to the app in a test
+      without launching it, which tests never do; its routing is covered by the registry.
+    - **Out of scope, filed as questions in #0497:** line-level staging (`hunkID` + body indices
+      are too fragile for argv), `commit --hunk`, provenance flags on `commit`, `journal`,
+      `checkpoint` and `restore`, force-push, `pull --rebase`, fetching one remote, `stash branch`,
+      stashing selected paths, `--keep-index`.
+
 ### Still open
 
 **Is M1's criterion 5 closable as written, and should it be restated?** Raised by the twelfth M1
