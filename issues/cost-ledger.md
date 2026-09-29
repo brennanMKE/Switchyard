@@ -552,6 +552,7 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-09-29 | #0481-#0488 | Opus planning subagent: CRLF/combining-mark parser audit, 6 children + 1 deferred, 1,262 s wall (O, measured) | 183,821 | — |
 | 2026-09-29 | #0482 | round 1, Sonnet implementation, 422 s wall, passed pending review (S, measured) | 77,440 | — |
 | 2026-09-29 | #0483 | round 1, Sonnet implementation, 464 s wall, passed pending review (S, measured) | 100,373 | — |
+| 2026-09-29 | #0479 | round 1, Sonnet implementation, 667 s wall, passed pending review (S, measured) | 110,256 | — |
 | | | **Total measured** (tokens include 2026-09-22/23 rows; $ not updated for them) | **47,386,796** | **$437.24** |
 
 ## What this total does and does not cover
