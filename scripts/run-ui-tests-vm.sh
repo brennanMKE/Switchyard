@@ -27,7 +27,10 @@
 #      `ENABLE_APP_SANDBOX=NO` so the app can read the guest fixture), teeing
 #      the log, with the result bundle captured.
 #   5. Stream the results back to `build/ui-tests/<run-id>/`.
-#   6. Cleanup on EXIT (trap): stop and delete the clone, remove the export.
+#   6. Cleanup on EXIT, on any errexit failure and on HUP/INT/TERM (traps —
+#      see cleanup_and_exit for why EXIT alone is not enough, #0460): stop
+#      and delete the clone, remove the export. SIGKILL skips every trap; the
+#      next run's #0424 sweep reclaims that clone.
 #
 # The export share is read-only on purpose; results come back via `tart exec
 # … tar`, not through the share. Run this script in the foreground of a
@@ -59,9 +62,14 @@ BOOT_TIMEOUT_SECS=120
 log()  { print -r -- "==> $*"; }
 fail() { print -r -- "!! $*" >&2; exit 1; }
 
+typeset -g CLEANED_UP=0
+
 cleanup() {
-  local rc=$?
-  trap - EXIT
+  local rc=${1:-$?}
+  (( CLEANED_UP )) && return 0
+  CLEANED_UP=1
+  trap - EXIT ZERR INT TERM HUP
+  set +e
   log "Cleaning up (exit $rc)"
   # Release whatever spike-scoped lease is open. Not fatal if missed: leases
   # are pid-stamped and the next acquire prunes ours.
@@ -83,11 +91,39 @@ with open(os.path.join(dir, "release", rid + ".json"), "w") as f:
     json.dump(doc, f, indent=2)
 PY
   fi
-  tart stop "$CLONE" >/dev/null 2>&1 || true
-  tart delete "$CLONE" >/dev/null 2>&1 || true
+  if [[ -n "$CLONE" ]]; then
+    tart stop "$CLONE" >/dev/null 2>&1 || true
+    tart delete "$CLONE" >/dev/null 2>&1 || true
+  fi
   rm -rf "$EXPORT"
 }
+
+# #0460: zsh 5.9 does NOT run the EXIT trap when errexit fires inside a
+# function, nor when a trap handler calls `exit` while a function is running
+# (measured: `f(){ false; }; f` under `set -e` exits 1 with the EXIT trap
+# silent). Every clone lives inside start_guest/run_spike/run_launch_smoke, so
+# the EXIT trap alone leaked the clone on any failing guest command. Errors
+# and signals therefore clean up explicitly and then exit.
+cleanup_and_exit() {
+  local rc=$1
+  # A failing command inside $(...) runs this in the subshell: leave the clone
+  # to the parent, which fails on the substitution's status next.
+  (( ZSH_SUBSHELL == 0 )) || exit "$rc"
+  cleanup "$rc"
+  exit "$rc"
+}
+# ZERR fires on every non-zero status, including inside the deliberate
+# `set +e` windows around xcodebuild — those must fall through untouched.
+on_zerr() {
+  local rc=$?
+  [[ -o errexit ]] || return "$rc"
+  cleanup_and_exit "$rc"
+}
 trap cleanup EXIT
+trap on_zerr ZERR
+trap 'cleanup_and_exit 129' HUP
+trap 'cleanup_and_exit 130' INT
+trap 'cleanup_and_exit 143' TERM
 
 # --- Preflight -------------------------------------------------------------
 
