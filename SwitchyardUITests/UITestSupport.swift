@@ -245,3 +245,52 @@ extension XCUIApplication {
             identifier: "changes-\(staged ? "staged" : "unstaged")-\(path)").firstMatch
     }
 }
+
+/// #0455: the Fetch/Pull/Push fixture scripts/uitest-fixtures/make-remote-fixture.sh
+/// generates inside the guest — keep the two in sync. Every clone is on
+/// `remote-main` tracking `origin/remote-main` except `pushRepository`.
+enum UITestRemoteFixture {
+    static let directory = "/Users/admin/uitest-remote"
+    /// Up to date until Fetch, then 1 behind.
+    static let pullRepository = directory + "/pull-repo"
+    /// 1 ahead; 1 behind once fetched. Pull cannot fast-forward.
+    static let divergedRepository = directory + "/diverged-repo"
+    /// On `push-feature`, no upstream, one commit to push.
+    static let pushRepository = directory + "/push-repo"
+    /// 1 ahead, with a pre-push hook that sleeps 300 s.
+    static let slowPushRepository = directory + "/slow-push-repo"
+    static let branch = "remote-main"
+    static let upstream = "origin/remote-main"
+    static let pushBranch = "push-feature"
+    /// The commit another writer pushed after the clones were made.
+    static let remoteSubject = "0457 remote commit"
+}
+
+extension XCUIApplication {
+    /// Launches the app on one of the remote fixture's clones with the real panes.
+    @MainActor
+    func launchWithRemoteFixture(_ repositoryPath: String) {
+        launchArguments = ["-uiTestRepository", repositoryPath, "-uiTestRealSurfaces"]
+        launch()
+        let tree = debugDescription
+        XCTAssertTrue(
+            windows.firstMatch.waitForExistence(timeout: 60),
+            "The app launched but opened no window within 60 s — its element " +
+            "tree starts with: \(String(tree.prefix(1200)))",
+            file: #filePath, line: #line)
+    }
+
+    /// A toolbar network button (#0457): `toolbar-fetch`, `toolbar-pull`, `toolbar-push`.
+    @MainActor
+    func remoteButton(_ name: String) -> XCUIElement {
+        buttons.matching(identifier: "toolbar-\(name)").firstMatch
+    }
+
+    /// Any static text whose label or value contains `text`: the header's
+    /// tracking line ("On branch … · 1 behind origin/…").
+    @MainActor
+    func text(containing text: String) -> XCUIElement {
+        staticTexts.matching(NSPredicate(
+            format: "label CONTAINS %@ OR value CONTAINS %@", text, text)).firstMatch
+    }
+}
