@@ -1525,6 +1525,41 @@ a feature at any milestone on the grounds that GitUp had it.
     - **Out of scope, filed as questions in #0437:** amend, discarding worktree changes, line-level
       (partial-hunk) staging, a signing override, and the `PATH` a Finder-launched app gives hooks.
 
+31. **The agent skill is rendered by a Swift function, printed by `switchyard skill`, and the
+    directory holding it is also the Claude Code plugin.** Decided 2026-09-29 in the planning pass
+    for #0066-#0069, with high confidence; each bullet is cheap to reverse.
+
+    - **Path: `skills/switchyard/SKILL.md`.** #0102 renamed the binary to `switchyard`, so the
+      skill directory takes the binary's name; `skills/yard/` in older text means this path.
+    - **The prose lives in Swift, not in markers inside the markdown.** `renderSkill()` in
+      `YardKit/Sources/YardKit/SkillRenderer.swift` builds the whole file: the hand-written
+      judgment from string constants in `SkillProse.swift`, then the command reference from
+      `CommandRegistry.all`, between `BEGIN GENERATED` / `END GENERATED` comments so a reader
+      knows not to edit it. SKILL.md is never edited by hand. A golden test holds the committed file
+      to the function byte for byte, as `SchemaGoldenTests` does for `YardKit/Schemas/`;
+      `scripts/generate-skill.sh` rewrites it. Keeping the prose in markdown between markers would
+      have forced a merge step and a resource file in the CLI; this way nothing can clobber the
+      prose, and the binary carries the skill with no bundle lookup. A second test fails if a
+      `switchyard …` example in the prose names a command or flag the registry does not have.
+    - **`switchyard skill` prints markdown, not an envelope.** The skill is documentation, like
+      `--help`, and an agent reads it as markdown. The global `--json` flag is stripped before any
+      command sees it (#0420) and changes nothing here either. The command is answered locally: no
+      app, no repository.
+    - **The plugin root is `skills/switchyard/`.** It holds `SKILL.md` and
+      `.claude-plugin/plugin.json`; the repository root holds `.claude-plugin/marketplace.json`
+      with `"source": "./skills/switchyard"`. Claude Code loads a plugin with `SKILL.md` at its root
+      and no `skills/` directory as a single skill (plugin manifest reference, checked 2026-09-29).
+      Making the repository root the plugin was rejected: a local-path marketplace loads the plugin
+      in place, so the plugin would be the whole checkout, `.build` included, and `claude plugin
+      validate` warns about the root `CLAUDE.md`. `plugin.json` carries no `version`, so a
+      git-hosted install is versioned by commit SHA and picks up every regenerated skill.
+    - **OpenCode gets no package of its own.** OpenCode reads `SKILL.md` from
+      `~/.config/opencode/skills/<name>/` and from Claude-compatible `.claude/skills/` paths, and the
+      file's front matter already meets its rules (`name` matches the folder, description of at
+      most 1024 characters). The README's install section gives the one-line install
+      (`switchyard skill > …/SKILL.md`) for OpenCode and any other agent; #0069's separate package is
+      folded into #0068.
+
 ### Still open
 
 **Is M1's criterion 5 closable as written, and should it be restated?** Raised by the twelfth M1
