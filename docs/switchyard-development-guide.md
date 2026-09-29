@@ -1745,7 +1745,8 @@ a feature at any milestone on the grounds that GitUp had it.
       context line, or on the only selected line, clears it. While a hunk has selected lines its
       header buttons read **Stage Lines** (**Unstage Lines** on the staged side) and **Discard
       Lines…**; with none they are Stage Hunk and Discard Hunk…, so no new control appears. The
-      selection clears after every refresh and when another file is selected. Discard Lines… asks
+      selection clears when another file is selected. A refresh keeps it: it names a hunk by id,
+      a hash of the hunk's lines, so a changed hunk drops out of it by itself. Discard Lines… asks
       first with the same dialog as Discard Hunk… ("Discard 2 lines of t.txt?"), decision 34's rule.
     - **Engine: `YardGit/LineStaging.swift`.** `stageLines(hunkID:lines:)`,
       `unstageLines(hunkID:lines:)` and `DiscardChanges.discardLines(hunkID:lines:)` take a hunk id
