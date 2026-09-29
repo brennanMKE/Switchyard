@@ -22,6 +22,7 @@ struct GlobalJSONFlagTests {
     /// top-level `switchyard` spec, which is the program, not a command.
     static let composedArgv: [String: [String]] = [
         "noop": ["noop"],
+        "skill": ["skill"],
         "whereami": ["whereami"],
         "status": ["status"],
         "conflicts": ["conflicts"],
