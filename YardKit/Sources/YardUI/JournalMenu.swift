@@ -37,6 +37,10 @@ public nonisolated enum JournalMenuTitles {
         "stage": "Stage",
         "unstage": "Unstage",
         "commit": "Commit",
+        // #0456: the toolbar's network operations (guide §11 decision 32).
+        "fetch": "Fetch",
+        "pull": "Pull",
+        "push": "Push",
     ]
 
     /// "Undo <title>" for a mapped operation, plain "Undo" for anything
