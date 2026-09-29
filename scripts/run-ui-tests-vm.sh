@@ -522,6 +522,8 @@ run_spike_if_selected 0444 Spike0444StageHunkUITests
 run_spike_if_selected 0445 Spike0445CommitUITests
 run_spike_if_selected 0446 Spike0446WorkingChangesRowUITests
 run_spike_if_selected 0447 Spike0447RefreshOnActivateUITests
+run_spike_if_selected 0457 Spike0457FetchPullUITests fetch-pull
+run_spike_if_selected 0457 Spike0457PullRefusedUITests refused
 
 print ""
 if (( TEST_RC == 0 )); then
