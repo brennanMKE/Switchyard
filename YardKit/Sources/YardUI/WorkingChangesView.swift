@@ -30,15 +30,19 @@ public struct WorkingChangesView: View {
     /// #0444: both hunk listings; `nil` while loading.
     @State private var diffs: WorkingDiffs?
     @State private var diffError: String?
+    /// #0445: the draft commit message, owned by `ContentView` so it
+    /// survives selecting a commit and coming back.
+    @Binding private var message: String
 
     public init(
         changes: WorkingChanges, repositoryPath: String, revision: Int, isBusy: Bool,
-        perform: @escaping (WorkingChange) -> Void
+        message: Binding<String>, perform: @escaping (WorkingChange) -> Void
     ) {
         self.changes = changes
         self.repositoryPath = repositoryPath
         self.revision = revision
         self.isBusy = isBusy
+        self._message = message
         self.perform = perform
     }
 
@@ -56,6 +60,8 @@ public struct WorkingChangesView: View {
                         .frame(minHeight: 120, maxHeight: .infinity)
                 }
             }
+            Divider()
+            commitArea
         }
         .task(id: revision) { await reloadDiffs() }
     }
@@ -207,5 +213,39 @@ public struct WorkingChangesView: View {
         } catch {
             diffError = String(describing: error)
         }
+    }
+
+    // MARK: - #0445: the commit message and Commit
+
+    private var commitArea: some View {
+        let blocked = changes.commitBlockedReason(message: message)
+        return VStack(alignment: .leading, spacing: 6) {
+            TextEditor(text: $message)
+                .font(.body)
+                .frame(minHeight: 56, maxHeight: 120)
+                .overlay(alignment: .topLeading) {
+                    if message.isEmpty {
+                        Text("Commit message")
+                            .foregroundStyle(.tertiary)
+                            .padding(.leading, 5)
+                            .allowsHitTesting(false)
+                    }
+                }
+                .accessibilityIdentifier("commit-message")
+            HStack {
+                Text(changes.staged.count == 1 ? "1 file staged" : "\(changes.staged.count) files staged")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Commit") {
+                    perform(.commit(message: message))
+                }
+                .keyboardShortcut(.return, modifiers: .command)
+                .disabled(blocked != nil || isBusy)
+                .help(blocked ?? "Commit the staged changes (⌘↩)")
+                .accessibilityIdentifier("commit-button")
+            }
+        }
+        .padding(8)
     }
 }
