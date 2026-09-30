@@ -1,0 +1,67 @@
+{
+  "command" : "fetch",
+  "envelope" : {
+    "failure" : {
+      "error" : {
+        "code" : {
+          "enum" : [
+            "app_unavailable",
+            "blocked_on_conflicts",
+            "broker_unreachable",
+            "human_declined",
+            "ok",
+            "repository_error",
+            "request_failed",
+            "session_terminated",
+            "signing_failed",
+            "timed_out",
+            "usage"
+          ],
+          "type" : "string"
+        },
+        "hint" : {
+          "optional" : true,
+          "type" : "string"
+        },
+        "message" : {
+          "type" : "string"
+        }
+      },
+      "ok" : false,
+      "schemaVersion" : 1
+    },
+    "success" : {
+      "ok" : true,
+      "result" : {
+        "optional" : true,
+        "schema" : "fetch"
+      },
+      "schemaVersion" : 1
+    }
+  },
+  "exitCodes" : [
+    {
+      "code" : 0,
+      "meaning" : "The fetch completed; the payload lists the remotes fetched. One journal entry, operation fetch, written first: undo puts the remote-tracking refs back."
+    },
+    {
+      "code" : 1,
+      "meaning" : "Invalid arguments — fetch takes none."
+    },
+    {
+      "code" : 4,
+      "meaning" : "The request failed for a reason the other codes do not name."
+    },
+    {
+      "code" : 6,
+      "meaning" : "Not a repository, or git fetch failed — an unreachable remote or a missing credential (terminal prompts are disabled)."
+    }
+  ],
+  "flags" : [
+
+  ],
+  "schemaName" : "fetch",
+  "schemaVersion" : 1,
+  "summary" : "Fetch every remote (git fetch --all). Never prompts for credentials.",
+  "usage" : "fetch"
+}

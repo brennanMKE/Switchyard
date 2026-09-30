@@ -12,7 +12,7 @@ public enum CommandRegistry {
 
     /// All known `yard` command specifications in the order they should be
     /// rendered in help output.
-    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, skillSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, revertSpec, cherryPickSpec, mergeSpec, rewriteDiffSpec, rerereSpec, reviewSpec, askSpec, resolveSpec, watchSpec, tagSpec, branchSpec, rebaseOntoSpec, setTipSpec, stageSpec, unstageSpec, commitSpec, discardSpec]
+    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, skillSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, revertSpec, cherryPickSpec, mergeSpec, rewriteDiffSpec, rerereSpec, reviewSpec, askSpec, resolveSpec, watchSpec, tagSpec, branchSpec, rebaseOntoSpec, setTipSpec, stageSpec, unstageSpec, commitSpec, discardSpec, fetchSpec, pullSpec, pushSpec]
 
     // MARK: - The switchyard spec — rendered by `yard --help`
 
@@ -677,6 +677,65 @@ public enum CommandRegistry {
         ],
         schemaName: "discard",
         payload: nil
+    )
+
+    // MARK: - The fetch spec — engine-backed, resolved by `YardCommands` (guide §11 decisions 32, 37)
+
+    static let fetchSpec = CommandSpec(
+        name: "fetch",
+        summary: "Fetch every remote (git fetch --all). Never prompts for credentials.",
+        usage: "fetch",
+        flags: [],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The fetch completed; the payload lists the remotes fetched. One journal entry, operation fetch, written first: undo puts the remote-tracking refs back."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — fetch takes none."),
+            ExitCodeSpec(code: 4, meaning: "The request failed for a reason the other codes do not name."),
+            ExitCodeSpec(code: 6, meaning: "Not a repository, or git fetch failed — an unreachable remote or a missing credential (terminal prompts are disabled)."),
+        ],
+        schemaName: "fetch",
+        payload: nil
+    )
+
+    // MARK: - The pull spec — engine-backed, resolved by `YardCommands` (guide §11 decisions 32, 37)
+
+    static let pullSpec = CommandSpec(
+        name: "pull",
+        summary: "Fetch the current branch's upstream and fast-forward to it. Never merges or rebases.",
+        usage: "pull",
+        flags: [],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The branch is up to date or was fast-forwarded; the payload says which. One journal entry, operation pull: undo puts the branch, index, worktree and remote-tracking refs back."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — pull takes none."),
+            ExitCodeSpec(code: 4, meaning: "The request failed for a reason the other codes do not name."),
+            ExitCodeSpec(code: 6, meaning: "Not a repository, a detached HEAD, a branch with no upstream, a branch that has diverged from its upstream (not possible to fast-forward), or a failed fetch."),
+        ],
+        schemaName: "pull",
+        payload: PayloadShape(fields: [
+            PayloadField(name: "outcome", type: .string, enumCases: ["upToDate", "fastForwarded"], description: "Whether the branch already contained its upstream or moved forward to it."),
+            PayloadField(name: "from", type: .string, optional: true, description: "The branch's full oid before the fast-forward. Absent when upToDate."),
+            PayloadField(name: "to", type: .string, optional: true, description: "The branch's full oid after the fast-forward. Absent when upToDate."),
+        ])
+    )
+
+    // MARK: - The push spec — engine-backed, resolved by `YardCommands` (guide §11 decisions 32, 37)
+
+    static let pushSpec = CommandSpec(
+        name: "push",
+        summary: "Push the current branch to its upstream, or to the same name on origin (setting the upstream). Never forces.",
+        usage: "push",
+        flags: [],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The push completed; the payload names the remote, the ref updated there, and whether the upstream was set. Its journal entry is written after the push, and undo refuses to cross it."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — push takes none."),
+            ExitCodeSpec(code: 4, meaning: "The request failed for a reason the other codes do not name."),
+            ExitCodeSpec(code: 6, meaning: "Not a repository, a detached HEAD, no remote, several remotes and none named origin, an upstream in this repository, or git push failed — rejected as non-fast-forward, a hook refused, or a missing credential. Nothing was journaled."),
+        ],
+        schemaName: "push",
+        payload: PayloadShape(fields: [
+            PayloadField(name: "remote", type: .string, description: "The remote pushed to, e.g. \"origin\"."),
+            PayloadField(name: "remoteRef", type: .string, description: "The full ref updated on the remote, e.g. \"refs/heads/main\"."),
+            PayloadField(name: "setUpstream", type: .bool, description: "True when this push also set the branch's upstream (the branch had none)."),
+        ])
     )
 
     // MARK: - The rewrite-diff spec — engine-backed, resolved by `YardCommands` (#0064)
