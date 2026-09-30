@@ -37,15 +37,22 @@ struct PushPayload: Encodable, Sendable, Equatable {
     let setUpstream: Bool
 }
 
-/// `switchyard fetch`, `switchyard pull`, `switchyard push` — no arguments.
-/// Fetch is `git fetch --all`; pull fetches the upstream's remote and
+/// `switchyard fetch [<remote>]`, `switchyard pull`, `switchyard push`.
+/// Fetch is `git fetch --all`, or `git fetch -- <remote>` for one configured
+/// remote (guide §11 decision 43); pull fetches the upstream's remote and
 /// fast-forwards only; push sends the current branch with an explicit
 /// refspec and never forces (guide §11 decision 32). Credentials come from
 /// the app's environment and nothing ever prompts: a missing credential is
 /// git's own "terminal prompts disabled" failure, exit 6.
 func runRemote(arguments: [String], workingDirectory: String) -> EngineReply {
     let command = arguments.first ?? "fetch"
+    if command == "fetch", arguments.count == 2 {
+        return runFetchRemote(arguments[1], workingDirectory: workingDirectory)
+    }
     guard arguments.count == 1 else {
+        if command == "fetch" {
+            return engineUsage("fetch takes at most one <remote>; got '\(arguments.dropFirst().joined(separator: " "))'.")
+        }
         return engineUsage("\(command) takes no arguments; got '\(arguments.dropFirst().joined(separator: " "))'.")
     }
     do {
@@ -62,6 +69,22 @@ func runRemote(arguments: [String], workingDirectory: String) -> EngineReply {
             return engineSuccess(PushPayload(
                 remote: result.remote, remoteRef: result.remoteRef, setUpstream: result.setUpstream))
         }
+    } catch {
+        return engineFailure(error)
+    }
+}
+
+/// `switchyard fetch <remote>`: one configured remote, one `fetch` journal
+/// entry. A name that starts with `-` is a usage refusal (no remote can have
+/// one: `RemoteConfig.nameProblem`); a name no remote has is exit 6.
+private func runFetchRemote(_ name: String, workingDirectory: String) -> EngineReply {
+    guard !name.hasPrefix("-") else {
+        return engineUsage("fetch takes at most one <remote>, a configured remote's name; got the flag '\(name)'.")
+    }
+    do {
+        let top = try repositoryTop(workingDirectory)
+        try RemoteSync.fetch(remote: name, at: top)
+        return engineSuccess(FetchPayload(remotes: [name]))
     } catch {
         return engineFailure(error)
     }

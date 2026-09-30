@@ -46,7 +46,7 @@
     },
     {
       "code" : 1,
-      "meaning" : "Invalid arguments — fetch takes none."
+      "meaning" : "Invalid arguments — fetch takes at most one <remote>, and no flags."
     },
     {
       "code" : 4,
@@ -54,7 +54,7 @@
     },
     {
       "code" : 6,
-      "meaning" : "Not a repository, or git fetch failed — an unreachable remote or a missing credential (terminal prompts are disabled)."
+      "meaning" : "Not a repository; no remote of that name; or git fetch failed — an unreachable remote or a missing credential (terminal prompts are disabled)."
     }
   ],
   "flags" : [
@@ -62,6 +62,6 @@
   ],
   "schemaName" : "fetch",
   "schemaVersion" : 1,
-  "summary" : "Fetch every remote (git fetch --all). Never prompts for credentials.",
-  "usage" : "fetch"
+  "summary" : "Fetch every remote (git fetch --all), or one. Never prompts for credentials.",
+  "usage" : "fetch [<remote>]"
 }

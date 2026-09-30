@@ -670,16 +670,16 @@ Usage: `switchyard discard (<path>... | --hunk <id>...)`
 
 ### `switchyard fetch`
 
-Fetch every remote (git fetch --all). Never prompts for credentials.
+Fetch every remote (git fetch --all), or one. Never prompts for credentials.
 
-Usage: `switchyard fetch`
+Usage: `switchyard fetch [<remote>]`
 
 | Exit | Meaning |
 |---|---|
 | 0 | The fetch completed; the payload lists the remotes fetched. One journal entry, operation fetch, written first: undo puts the remote-tracking refs back. |
-| 1 | Invalid arguments — fetch takes none. |
+| 1 | Invalid arguments — fetch takes at most one <remote>, and no flags. |
 | 4 | The request failed for a reason the other codes do not name. |
-| 6 | Not a repository, or git fetch failed — an unreachable remote or a missing credential (terminal prompts are disabled). |
+| 6 | Not a repository; no remote of that name; or git fetch failed — an unreachable remote or a missing credential (terminal prompts are disabled). |
 
 ### `switchyard pull`
 

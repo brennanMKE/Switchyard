@@ -304,6 +304,29 @@ public extension RemoteSync {
         try git.run(["fetch", "--all"], workingDirectory: path)
     }
 
+    /// Synchronous twin of `fetch(remote:at:git:) async` (guide §11
+    /// decision 43): one remote, one `fetch` entry written first.
+    static func fetch(remote name: String, at path: String, git: GitProcess = GitProcess()) throws {
+        let context = try WorktreeContext.resolve(path: path, git: git)
+        guard try RemoteConfig.names(at: path, git: git).contains(name) else {
+            throw RemoteConfig.Refusal.unknownRemote(name)
+        }
+        try JournalCheckpoint.checkpoint(operation: "fetch", in: context, git: git)
+        try git.run(["fetch", "--", name], workingDirectory: path)
+    }
+
+    /// Synchronous twin of `prune(remote:at:git:) async` (guide §11
+    /// decision 43): one `prune` entry written first, so undo brings the
+    /// pruned remote-tracking branches back.
+    static func prune(remote name: String, at path: String, git: GitProcess = GitProcess()) throws {
+        let context = try WorktreeContext.resolve(path: path, git: git)
+        guard try RemoteConfig.names(at: path, git: git).contains(name) else {
+            throw RemoteConfig.Refusal.unknownRemote(name)
+        }
+        try JournalCheckpoint.checkpoint(operation: pruneOperation, in: context, git: git)
+        try git.run(["remote", "prune", "--", name], workingDirectory: path)
+    }
+
     /// Synchronous twin of `pull(at:git:) async`.
     @discardableResult
     static func pull(at path: String, git: GitProcess = GitProcess()) throws -> PullResult {
