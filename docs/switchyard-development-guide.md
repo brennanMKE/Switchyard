@@ -2253,6 +2253,57 @@ a feature at any milestone on the grounds that GitUp had it.
       `set-url`, history search over the CLI (decision 40's scopes — `log` would need flags), and
       `--follow` on `log` itself.
 
+44. **A large repository stays fast: the History pane's chips, commit lookup and filter text are
+    derived once per load into a `HistoryIndex`, off the main actor, and never in `body`; a
+    window's six reads run at once.** Decided 2026-09-30 in the planning pass for umbrella
+    **#0551**, with high confidence; prototyped end to end in a planning worktree (index, loader,
+    wiring, VM spike on a 6,002-commit fixture). #0551 carries the questions for Brennan.
+
+    - **Why this, over the next two candidates.** The ask was a daily driver for someone coming
+      from GitUp, whose defining property was speed on large repositories — and this was the only
+      candidate with a *measured* defect. On git/git (5,000 loaded commits, 1,017 refs) the loads
+      were already fast (history 0.17 s, graph 0.06 s, sidebar 0.13 s, `BranchMapLayout.make` 3
+      ms), but `CommitHistoryView.body` rebuilt every commit's ref chips against the whole ref list
+      on each evaluation (42-46 ms release, 731-770 ms debug; O(commits × refs)) and, while a
+      filter query was typed, ran Foundation's case-insensitive search over every commit (118-154
+      ms more) — on the main actor, re-run on every `ContentView` update because the view is
+      handed fresh closures. In the VM's debug build, typing `needle` into the filter over the
+      large fixture took 12.7 s for six keystrokes. **The commit composer** (subject/body split,
+      50/72 guides, co-author trailers, recent messages) is the runner-up: used on every commit,
+      but polish on a working flow with no measured defect, and it has real design questions
+      (where a body guide draws in a `TextEditor`, what "recent" means) that would go to Brennan.
+      **A batch of the umbrellas' cheap follow-ups** (the sidebar filter only in the Commits scope,
+      the "Switching…" line behind the alert, Add Remote in a menu) is third: each is small and
+      cosmetic, and together they fix nothing a user is blocked on.
+    - **What is built once.** `HistoryIndex(entries:refs:)` — `chipsByOid` (`RefChips.make` itself,
+      handed only the refs at that commit, refs grouped by oid once: O(commits + refs)),
+      `entriesByOid`, and per commit the folded message, author and chip names. 7.4-8.6 ms release
+      / 19.5 ms debug on git/git, once per load. `CommitHistoryView` takes it as a **required**
+      `index:` and reads it; its `body` builds none of it.
+    - **Where it lives.** `loadRepositoryWindow(at:)` (`@concurrent`) builds it from the history
+      and refs it just read, and `ContentView` assigns `historyIndex` only alongside `history` and
+      `sidebar`, from that load — in `reload()` and `refreshAfterMutation(select:)`. Never from
+      `body` (swift-guidance: view construction is pure) and never in `onChange` of the inputs
+      (one writer, event-origin). A rerere forget reloads the sidebar alone and keeps the index:
+      it touches no ref.
+    - **The filter is a folded byte search.** Text and query are folded with
+      `String.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)` into UTF-8
+      bytes, and `memmem(3)` tests containment: 1.0-1.8 ms per query on git/git (from 118-154 ms).
+      Same answers as the Foundation search on 19 of 20 queries tried; **`ß` differs**, and the
+      folded answer is the right one — Foundation matched `ß` against a lone `s`, folding expands it
+      to `ss`. `HistoryFilter.matches` (one commit) runs the same code, so the two cannot drift.
+      Chip names are folded the same way; the sidebar keeps `RefFilter`.
+    - **A window's reads run at once.** `reload()` and `refreshAfterMutation(select:)` awaited
+      six independent `@concurrent` loaders in sequence — 0.62-0.68 s on git/git — on open and
+      after **every** in-app mutation. Under `async let` in `loadRepositoryWindow` they take
+      0.20-0.21 s. Only the summary's failure throws; the other five fall back as before (an
+      unborn branch's unreadable log is an empty history). Every pane now appears together.
+    - **Not in this decision:** paging past History's 5,000 commits (#0405) — the next step if
+      5,000 is not enough; per-row rendering cost while scrolling (a `LazyVStack` of `Canvas`
+      strips, not measured in-app — an Instruments question); the sidebar's per-render tag sort;
+      the Whole File diff of a very large file (#0534 question 4). The VM spike records its
+      timings as attachments and asserts none (CLAUDE.md).
+
 ### Still open
 
 **Is M1's criterion 5 closable as written, and should it be restated?** Raised by the twelfth M1
