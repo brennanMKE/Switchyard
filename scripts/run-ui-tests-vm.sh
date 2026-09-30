@@ -572,6 +572,7 @@ run_spike_if_selected 0568 Spike0568DraftKeptUITests draft
 run_spike_if_selected 0570 Spike0570UndoAfterCommitUITests
 run_spike_if_selected 0571 Spike0571SidebarStatusUITests
 run_spike_if_selected 0572 Spike0572StagedSelectionUITests
+run_spike_if_selected 0574 Spike0574HeaderAndDiffLayoutUITests
 
 print ""
 if (( TEST_RC == 0 )); then

@@ -119,4 +119,12 @@ struct TrackingSummaryTests {
         #expect(TrackingSummary.operationInProgress(for: state(isMidRebase: true, hasConflicts: true))
                 == "A rebase is in progress")
     }
+
+    // MARK: - separateOID (#0574)
+
+    @Test func theHeaderShowsTheOIDOnce() {
+        #expect(TrackingSummary.separateOID(for: state()) == "a1b2c3d")
+        #expect(TrackingSummary.separateOID(for: state(branch: nil, headOID: "abcdef0")) == nil)
+        #expect(TrackingSummary.separateOID(for: state(headOID: "")) == nil)
+    }
 }
