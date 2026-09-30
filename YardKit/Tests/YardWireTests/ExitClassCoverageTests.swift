@@ -207,6 +207,9 @@ struct ExitClassCoverageTests {
             // #0507: Checkout.Refusal is decided before the checkpoint, from
             // the refs, the worktree list, WhereAmI and git's own dry run.
             Row("Checkout.Refusal", Checkout.Refusal.alreadyOnBranch("main"), .repositoryError),
+            // #0514: an unparseable `git log --follow` record, the class
+            // BlameParser.Failure's malformed entry carries.
+            Row("FileHistory.Failure", FileHistory.Failure.malformedRecord("bad record"), .repositoryError),
             // #0242: JournalObserved.Metadata gained a production
             // serialization path; its error carries the same class as
             // JournalEntryMetadata.SerializationError above.
