@@ -587,6 +587,7 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-09-29 | #0512 | learning subagent (Sonnet) on round 1 VM failure: hypothesis confirmed, 120 s wall (measured) | 88,942 | — |
 | 2026-09-29 | #0512 | round 2, Sonnet implementation (runRefAction fix), 305 s wall, passed pending review (S, measured) | 84,416 | — |
 | 2026-09-29 | #0513 | planning (Opus): blame + file history umbrella + #0514-#0520, decision 39, prototype + 3 VM spike runs, 4710 s wall (measured) | 319,023 | — |
+| 2026-09-29 | #0515 | round 1, Sonnet implementation, 394 s wall, passed pending review (S, measured) | 92,286 | — |
 | | | **Total measured** (tokens include 2026-09-22/23 rows; $ not updated for them) | **47,386,796** | **$437.24** |
 
 ## What this total does and does not cover
