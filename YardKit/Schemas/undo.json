@@ -54,7 +54,7 @@
     },
     {
       "code" : 6,
-      "meaning" : "Not a repository; fewer operations than --steps remain; the walk would cross a push (the remote already has it); or a restore was refused. Nothing was changed by a refused walk."
+      "meaning" : "Not a repository; fewer operations than --steps remain; the walk would cross a push (the remote already has it) or a remote rename or removal (a remote's configuration is not journaled); or a restore was refused. Nothing was changed by a refused walk."
     }
   ],
   "flags" : [

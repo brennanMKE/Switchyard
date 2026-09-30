@@ -121,6 +121,8 @@ public func runEngineCommand(
         return runFileHistory(arguments: arguments, workingDirectory: workingDirectory)
     case "blame":
         return runBlame(arguments: arguments, workingDirectory: workingDirectory)
+    case "remote":
+        return runRemoteManage(arguments: arguments, workingDirectory: workingDirectory)
     case "rewrite-diff":
         // One required positional, no flags: `switchyard rewrite-diff
         // <journal-entry-id>` arrives as `["rewrite-diff", "<id>"]`. The arm
