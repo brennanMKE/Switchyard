@@ -35,6 +35,8 @@ public nonisolated enum CommitAction: String, CaseIterable, Sendable {
     case addTag
     case createBranch
     case editLocalBranch
+    /// #0511: `git switch --detach` at this commit (guide §11 decision 38).
+    case checkOutDetached
 
     /// Menu title. An ellipsis marks exactly the actions that ask for more
     /// input or a confirmation before they run (HIG).
@@ -60,6 +62,7 @@ public nonisolated enum CommitAction: String, CaseIterable, Sendable {
         case .addTag: "Add Tag…"
         case .createBranch: "Create Branch…"
         case .editLocalBranch: "Edit Local Branch…"
+        case .checkOutDetached: "Check Out (Detached)"
         }
     }
 
@@ -84,7 +87,7 @@ public nonisolated enum CommitAction: String, CaseIterable, Sendable {
         case .cherryPick: KeyboardShortcut("c", modifiers: [.command, .option])
         case .merge: KeyboardShortcut("m", modifiers: [.command, .shift])
         case .rebaseOnto: KeyboardShortcut("r", modifiers: [.command, .shift])
-        case .setBranchTip, .editLocalBranch: nil
+        case .setBranchTip, .editLocalBranch, .checkOutDetached: nil
         case .addTag: KeyboardShortcut("t", modifiers: [.command, .shift])
         case .createBranch: KeyboardShortcut("b", modifiers: [.command, .shift])
         }
@@ -109,6 +112,7 @@ public nonisolated enum CommitAction: String, CaseIterable, Sendable {
         case .addTag: "Adding tag…"
         case .createBranch: "Creating branch…"
         case .editLocalBranch: "Renaming branch…"
+        case .checkOutDetached: "Checking out commit…"
         }
     }
 
@@ -119,6 +123,7 @@ public nonisolated enum CommitAction: String, CaseIterable, Sendable {
         [.delete],
         [.revert, .cherryPick],
         [.merge, .rebaseOnto, .setBranchTip],
+        [.checkOutDetached],
         [.addTag, .createBranch, .editLocalBranch],
     ]
 
@@ -299,6 +304,8 @@ public nonisolated enum CommitActionRules {
             return nil
         case .editLocalBranch:
             return c.localBranchHere == nil ? "No local branch points here" : nil
+        case .checkOutDetached:
+            return c.branchName == nil && c.chainIndex == 0 ? "HEAD is already detached here" : nil
         }
     }
 
@@ -372,7 +379,10 @@ public nonisolated enum CommitActionRequest: Equatable, Sendable {
         owners: [String: BranchTip]
     ) -> CommitActionRequest? {
         switch action {
-        case .editMessage, .squashIntoParent, .split, .addTag, .createBranch, .editLocalBranch:
+        case .editMessage, .squashIntoParent, .split, .addTag, .createBranch, .editLocalBranch,
+             .checkOutDetached:
+            // #0511: Check Out (Detached) runs as a `RefAction` in
+            // `ContentView`, so a refused checkout can offer to stash.
             return nil
         case .fixupIntoParent:
             guard chain.first == oid, chain.count > 1 else { return nil }
@@ -408,7 +418,7 @@ public nonisolated enum RewriteSelection {
         case .swapWithParent: index + 1
         case .revert, .cherryPick, .rebaseOnto, .setBranchTip: 0
         case .editMessage, .fixupIntoParent, .squashIntoParent, .split, .delete,
-             .merge, .addTag, .createBranch, .editLocalBranch:
+             .merge, .addTag, .createBranch, .editLocalBranch, .checkOutDetached:
             index
         }
     }
@@ -449,6 +459,7 @@ public nonisolated struct CommitActionFailure: Equatable, Sendable {
         case .addTag: "Add Tag"
         case .createBranch: "Create Branch"
         case .editLocalBranch: "Rename Branch"
+        case .checkOutDetached: "Check Out Commit"
         }
         var message = String(describing: error)
         switch (error as? any ExitClassCarrying)?.exitClass {

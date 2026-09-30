@@ -88,15 +88,32 @@ private func state(_ action: CommitAction, in states: [CommitActionState]) throw
 // MARK: - Item set
 
 @Test func everyActionAppearsExactlyOnceInTheMenu() {
-    #expect(CommitAction.allCases.count == 15)
-    #expect(CommitAction.menuGroups.flatMap { $0 }.count == 15)
+    #expect(CommitAction.allCases.count == 16)
+    #expect(CommitAction.menuGroups.flatMap { $0 }.count == 16)
     #expect(Set(CommitAction.menuGroups.flatMap { $0 }) == Set(CommitAction.allCases))
 }
 
-@Test func allFifteenActionsAreCoveredByTheRules() throws {
+@Test func allSixteenActionsAreCoveredByTheRules() throws {
     let states = try Fixture.states("c3")
-    #expect(states.count == 15)
+    #expect(states.count == 16)
     #expect(Set(states.map(\.action)) == Set(CommitAction.allCases))
+}
+
+// MARK: - #0511: Check Out (Detached)
+
+@Test func checkOutDetachedIsOfferedEverywhereButWhereHeadIsAlreadyDetached() throws {
+    #expect(CommitAction.checkOutDetached.title == "Check Out (Detached)")
+    #expect(CommitAction.checkOutDetached.shortcut == nil)
+    #expect(try Fixture.reason(.checkOutDetached, in: Fixture.states("c3")) == nil,
+            "on a branch, detaching at its tip is a real move")
+    #expect(try Fixture.reason(.checkOutDetached, in: Fixture.states("s1")) == nil)
+    let detached = Fixture.whereAmI(branch: nil)
+    #expect(try Fixture.reason(.checkOutDetached, in: Fixture.states("c3", whereAmI: detached))
+        == "HEAD is already detached here")
+    #expect(try Fixture.reason(.checkOutDetached, in: Fixture.states("c2", whereAmI: detached)) == nil)
+    #expect(CommitActionRequest.make(
+        for: .checkOutDetached, oid: "s1", chain: Fixture.chain, owners: Fixture.owners) == nil,
+        "it runs as a RefAction, never as a commit request")
 }
 
 // MARK: - The measured table: tip (c3)
@@ -204,9 +221,9 @@ private func state(_ action: CommitAction, in states: [CommitActionState]) throw
 
 // MARK: - The guards that precede every rule
 
-@Test func busyDisablesAllFifteenWithOneSentenceBeforeAnyOtherRule() throws {
+@Test func busyDisablesAllSixteenWithOneSentenceBeforeAnyOtherRule() throws {
     let states = try Fixture.states("c3", isBusy: true)
-    #expect(states.count == 15)
+    #expect(states.count == 16)
     for entry in states {
         #expect(!entry.isEnabled)
         #expect(entry.disabledReason == "Another operation is still running")
@@ -324,9 +341,9 @@ private func state(_ action: CommitAction, in states: [CommitActionState]) throw
     }
 }
 
-@Test func setBranchTipAndEditLocalBranchAreTheDeliberatelyUnallocatedItems() {
+@Test func setBranchTipEditLocalBranchAndCheckOutDetachedAreTheDeliberatelyUnallocatedItems() {
     let unallocated = CommitAction.allCases.filter { $0.shortcut == nil }
-    #expect(Set(unallocated) == [.setBranchTip, .editLocalBranch])
+    #expect(Set(unallocated) == [.setBranchTip, .editLocalBranch, .checkOutDetached])
 }
 
 @Test func titlesThatAskForInputOrConfirmationEndWithAnEllipsis() {
@@ -509,7 +526,7 @@ private func state(_ action: CommitAction, in states: [CommitActionState]) throw
 
 @Test func allDisabledCoversEveryActionWithOneReason() {
     let states = CommitActionRules.allDisabled(reason: "Select a commit first")
-    #expect(states.count == 15)
+    #expect(states.count == 16)
     for entry in states {
         #expect(!entry.isEnabled)
         #expect(entry.disabledReason == "Select a commit first")

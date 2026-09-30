@@ -1061,6 +1061,9 @@ public struct ContentView: View {
             guard let branch = owners[oid], !branch.isRemote, branch.oid == oid else { return }
             actionPromptIndex = chain.firstIndex(of: oid) ?? 0
             actionPrompt = .renameBranch(old: branch.name, commit: oid, subject: subject)
+        case .checkOutDetached:
+            // #0511: the ref path, so a refusal can offer Stash Changes.
+            runRefAction(.detach(commit: oid))
         case .fixupIntoParent, .swapWithParent, .swapWithChild, .revert, .cherryPick,
              .merge, .rebaseOnto, .setBranchTip:
             guard let request = CommitActionRequest.make(
