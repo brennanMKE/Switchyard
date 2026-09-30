@@ -763,25 +763,32 @@ invocation, and every path lookup goes through it. It exists from M1 for this re
 
 ## Current state
 
-**Updated 2026-09-28.** Full suite **2,063 tests** in six test runs (162 / 337 / 380 / 1048 / 14 /
-122), green on `main` at `bf0d9fe4`; the full VM UI run (`scripts/run-ui-tests-vm.sh`: a Debug
-launch smoke plus 18 spikes) reports `RESULT: TEST SUCCEEDED`.
+**Updated 2026-09-30.** Full suite **2,498 tests** in six test runs (162 / 475 / 399 / 1242 / 14 /
+206), green on `main`; the full VM UI run (`scripts/run-ui-tests-vm.sh`: a Debug launch smoke plus
+~40 spikes) reports `RESULT: TEST SUCCEEDED`. `docs/test-baseline.txt` may lag; trust a fresh run.
 
-- **Milestones are suspended** (see the top of this file). Issues carry milestone `—`.
-- **The app works as a repository browser and history editor.** Every open path (File ▸ Open,
-  Open Recent, drag-drop, Dock, `switchyard://`, XPC) shows the repository in a window (#0416,
-  #0435); repositories are **native macOS window tabs** (#0417, guide decision 28). The History
-  pane is the **Option B branch map** (guide decision 29, #0425-#0431): staircase tree, one
-  connector per branch, "⋯ N" folds, a recency pop-up (2 weeks default), merged lanes dimmed.
-- **The CLI reaches the app over XPC in unsigned builds** (#0418): builds are sealed ad-hoc
-  (`scripts/adhoc-seal-app.sh`, a build phase plus `make-release.sh`). Debug bundles are sealed
-  without the hardened runtime (#0434). `--json` is accepted everywhere (#0420). The app sandbox
-  is off (#0423).
-- **Not built yet:** staging and committing from the app, network operations, the agent skill
-  (#0066-#0069).
+- **Milestones are suspended** (see the top of this file). Issues carry milestone `—`. Each feature
+  is an umbrella issue with small children, planned by Opus down to the code, built by Sonnet in
+  `../switchyard-NNNN`, reviewed (suite twice, one mutation, VM spikes) and squash-merged.
+- **The app is a working daily git client.** Open paths and window tabs (#0416-#0417); the Option B
+  branch map (guide 29); staging, commit, amend, discard, hunk and line staging (guides 30-35);
+  fetch/pull/push (32); stash (36); switch / check out / delete branch and tag (38); blame and
+  file history (39); History search by message, author, path and content (40); remote management
+  (41); diff view options — ignore whitespace, word highlights, context (42); fast History on large
+  repositories via `HistoryIndex` and `loadRepositoryWindow` (44); the commit composer — guide
+  line, Co-Author and Recent Messages menus, `commit.template`, per-repository drafts (45).
+- **The CLI has 44 commands**, all over XPC to the app (guides 37, 43): stage/unstage/commit/
+  discard/stash/fetch/pull/push/undo/redo, switch, tag --delete, file-history, blame, remote. The
+  skill (`skills/switchyard/SKILL.md`) is generated and documents them.
+- **Open by design:** #0076 (CI) and #0103 (libgit2) are parked. Each umbrella's `## Questions`
+  section holds decisions for Brennan with the default the code already uses.
+- **Review habits that were learned the hard way this week:** capture `✘ Test` lines, not only the
+  summary (#0528); present a follow-up dialog only after the busy flag clears (#0512); merge `main`
+  into a branch and run the suite twice before squashing.
 - **Known VM traps:** the golden image has SIP off, so the launch smoke re-enables library
   validation explicitly (#0434); the "App Background Activity" banner can steal clicks at the top
-  right (#0432); concurrent VM runs can delete each other's clones until #0424 lands.
+  right (#0432); wait for `tart list | grep switchyard-uitest-[0-9p]` to be empty before a run;
+  a script's log directory (`build/`) must exist in a fresh worktree.
 
 **On 2026-08-16 `main` was reset** to recover from work done outside the workflow; see
 `docs/workflow-reset-2026-08-16.md` for what moved to which branch and what has to be re-done.
