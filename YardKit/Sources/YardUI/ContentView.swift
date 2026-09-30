@@ -1298,18 +1298,25 @@ public struct ContentView: View {
         runningWorkingChange = change
         Task {
             defer { runningWorkingChange = nil }
+            var committed = false
             do {
                 try await performWorkingChange(change, at: repositoryPath)
                 switch change {
                 case .commit, .amend:
                     commitDraft = CommitDraft(template: commitTemplate)
                     draftStore.save("", for: repositoryPath)
+                    committed = true
                 default: break
                 }
             } catch {
                 actionFailure = change.failure(for: error)
             }
             await refreshAfterMutation { _, _ in nil }
+            // #0570: the message is committed; its typing steps must not
+            // swallow ⌘Z, which now means Undo Commit (or Undo Amend).
+            if committed, let editor = NSApp.keyWindow?.firstResponder as? NSText {
+                editor.undoManager?.removeAllActions()
+            }
         }
     }
 

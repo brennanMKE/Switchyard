@@ -569,6 +569,7 @@ run_spike_if_selected 0556 Spike0556MatchStepUITests
 run_spike_if_selected 0557 Spike0557MapArrowsUITests
 run_spike_if_selected 0568 Spike0568ComposerUITests composer
 run_spike_if_selected 0568 Spike0568DraftKeptUITests draft
+run_spike_if_selected 0570 Spike0570UndoAfterCommitUITests
 
 print ""
 if (( TEST_RC == 0 )); then
