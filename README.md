@@ -140,13 +140,13 @@ codes and payload). Every command answers with the JSON envelope on stdout.
 
 | Group | Commands |
 | --- | --- |
-| **Read** | `whereami`, `status`, `conflicts`, `hunks --staged\|--unstaged`, `log [<range>]`, `graph [--limit <n>]`, `verify <rev>`, `rewrite-diff <entry>`, `rerere status` |
+| **Read** | `whereami`, `status`, `conflicts`, `hunks --staged\|--unstaged`, `log [<range>]`, `graph [--limit <n>]`, `verify <rev>`, `rewrite-diff <entry>`, `rerere status`, `file-history <path>`, `blame <path>` |
 | **Stage & commit** | `stage`, `unstage` (paths or `--hunk <id>`), `commit [--amend]`, `discard`, `stash list\|push\|apply\|pop\|drop` |
-| **Remotes** | `fetch`, `pull` (fast-forward only), `push` (never forced) |
+| **Remotes** | `fetch [<remote>]`, `pull` (fast-forward only), `push` (never forced), `remote list\|add\|set-url\|rename\|remove\|prune` |
 | **Undo** | `undo [--steps <n>]`, `redo [--steps <n>]` |
 | **Rewrite** | `absorb [--dry-run]`, `split`, `reword`, `drop`, `reorder`, `rebase-onto`, `set-tip` |
 | **Integrate** | `revert`, `cherry-pick`, `merge --ff-only\|--no-ff` |
-| **Refs** | `tag`, `branch create\|rename\|delete\|upstream` |
+| **Refs** | `switch <branch>\|--track <remote-branch>\|--detach <commit>`, `tag`, `tag --delete`, `branch create\|rename\|delete\|upstream` |
 | **Worktrees** | `wt list`, `wt where` |
 | **Human-in-the-loop** *(needs the app)* | `review --wait`, `ask`, `resolve --wait`, `watch` |
 | **Local** | `--help`, `--version`, `schema`, `noop` |
