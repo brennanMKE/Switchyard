@@ -21,6 +21,12 @@ public struct FileDiffView: View {
     /// lines selectable by click, shift-click, ⌘-click and drag (guide §11
     /// decision 35); `nil` (every other caller) leaves the diff read-only.
     private let lineSelection: Binding<DiffLineSelection>?
+    /// #0537: the words that changed inside paired lines, drawn on a
+    /// stronger tint (guide §11 decision 42). App-wide, on by default.
+    @AppStorage(FileDiffView.highlightsWordChangesKey) private var highlightsWordChanges = true
+
+    /// The `UserDefaults` key for Highlight Changed Words.
+    public nonisolated static let highlightsWordChangesKey = "diffHighlightsWordChanges"
 
     /// One per-hunk button: its title, whether it is enabled, and what it
     /// does with the hunk it sits on.
@@ -72,7 +78,7 @@ public struct FileDiffView: View {
             } else {
                 ForEach(file.hunks, id: \.id) { hunk in
                     HunkView(hunk: hunk, action: hunkAction, discard: discardAction,
-                             selection: lineSelection)
+                             selection: lineSelection, highlightsWords: highlightsWordChanges)
                 }
             }
         }
@@ -85,6 +91,8 @@ private struct HunkView: View {
     let action: FileDiffView.HunkAction?
     let discard: FileDiffView.HunkAction?
     let selection: Binding<DiffLineSelection>?
+    /// #0537: draw the words that changed inside paired lines.
+    let highlightsWords: Bool
     /// #0480: where each line sits, for mapping a drag to a line. A class,
     /// so `onGeometryChange` writing it invalidates nothing: only the drag
     /// gesture reads it, never `body`.
@@ -96,7 +104,9 @@ private struct HunkView: View {
     private var selectedLines: [Int] { selection?.wrappedValue.selectedLines(in: hunk) ?? [] }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        // #0537: per hunk, when drawn — measured at most 0.84 ms for a hunk.
+        let words = highlightsWords ? IntralineDiff.changes(in: hunk) : [:]
+        return VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text(hunk.header)
                     .font(.system(.caption, design: .monospaced))
@@ -108,14 +118,15 @@ private struct HunkView: View {
             .padding(.vertical, 2)
             ForEach(Array(hunk.body.enumerated()), id: \.offset) { offset, line in
                 if let selection {
-                    DiffLineView(line: line, isSelected: selection.wrappedValue.isSelected(offset, in: hunk))
+                    DiffLineView(line: line, isSelected: selection.wrappedValue.isSelected(offset, in: hunk),
+                                 changes: words[offset] ?? [])
                         .contentShape(Rectangle())
                         .onGeometryChange(for: CGRect.self) { [space] proxy in proxy.frame(in: .named(space)) } action: {
                             frames.rows[offset] = $0
                         }
                         .gesture(clicks(offset, selection))
                 } else {
-                    DiffLineView(line: line, isSelected: false)
+                    DiffLineView(line: line, isSelected: false, changes: words[offset] ?? [])
                 }
             }
         }
@@ -182,6 +193,9 @@ struct DiffLineView: View {
     let line: String
     /// #0480: selected in the Changes view; drawn with the accent color.
     let isSelected: Bool
+    /// #0537: the words that changed (`IntralineDiff`), drawn on a stronger
+    /// tint of the line's own; empty for none.
+    var changes: [Range<String.Index>] = []
 
     private var marker: Unicode.Scalar? { Self.marker(of: line) }
 
@@ -202,8 +216,28 @@ struct DiffLineView: View {
         }
     }
 
+    /// `line` as drawn: every character of it — the text an accessibility
+    /// query finds is the line itself — with `changes` on `tint`.
+    nonisolated static func attributed(
+        _ line: String, changes: [Range<String.Index>], tint: Color
+    ) -> AttributedString {
+        var text = AttributedString()
+        for segment in IntralineDiff.segments(of: line, changes: changes) {
+            var piece = AttributedString(segment.text)
+            if segment.isChanged { piece.backgroundColor = tint }
+            text += piece
+        }
+        return text
+    }
+
+    /// A changed word's tint: the line's color, three times as strong. A
+    /// selected line shows the accent color alone.
+    private var wordTint: Color {
+        marker == "+" ? Color.green.opacity(0.36) : Color.red.opacity(0.36)
+    }
+
     var body: some View {
-        Text(line)
+        Text(Self.attributed(line, changes: isSelected ? [] : changes, tint: wordTint))
             .font(.system(.caption, design: .monospaced))
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 4)
