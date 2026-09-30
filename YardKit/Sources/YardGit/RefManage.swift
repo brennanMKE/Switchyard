@@ -39,6 +39,9 @@ public enum RefManageError: Error, Equatable, Sendable, CustomStringConvertible 
     /// The branch this operation names does not exist. Raised before anything
     /// is touched.
     case unknownBranch(String)
+    /// The tag this operation names does not exist. Raised before anything
+    /// is touched.
+    case unknownTag(String)
     /// The upstream to track does not resolve to any local branch or
     /// remote-tracking ref. Raised before anything is touched.
     case unknownUpstream(String)
@@ -79,6 +82,8 @@ public enum RefManageError: Error, Equatable, Sendable, CustomStringConvertible 
             "unknown commit '\(revision)' — it does not resolve in this repository; nothing was touched"
         case let .unknownBranch(name):
             "unknown branch '\(name)' — there is no refs/heads/\(name) in this repository; nothing was touched"
+        case let .unknownTag(name):
+            "unknown tag '\(name)' — there is no refs/tags/\(name) in this repository; nothing was touched"
         case let .unknownUpstream(name):
             "unknown upstream '\(name)' — it does not resolve to a local branch or a "
                 + "remote-tracking ref; nothing was touched"
@@ -121,8 +126,8 @@ extension RefManageError: ExitClassCarrying {
 // MARK: - Tag
 
 /// Tag creation — lightweight or annotated, signing per explicit intent
-/// (#0363). Everything else about tags (rename, delete) is not in this
-/// issue's surface.
+/// (#0363), and deletion (guide §11 decision 38). Renaming a tag is not in
+/// the surface.
 ///
 /// The measured shape of the operation (git 2.50.1): `git tag <name> <commit>`
 /// is a lightweight ref pointing at the commit; `-a -F -` builds an annotated
@@ -203,6 +208,39 @@ public struct Tag: Equatable, Sendable {
             try perform(
                 name: name, commitOid: commitOid, annotated: annotated, message: message,
                 signing: signing, at: path, git: scoped, extraEnvironment: extraEnvironment)
+        }
+    }
+
+    /// Deletes a tag — `git tag -d` — lightweight or annotated. One journal
+    /// entry, operation `tag-delete`; Undo restores the ref, and an
+    /// annotated tag's object with it (the object is still in the object
+    /// store: switchyard never runs `git gc`). The result names the object
+    /// the ref held and whether it was annotated.
+    ///
+    /// - Throws: `RefManageError.unknownTag` when there is no
+    ///   `refs/tags/<name>`; `GitProcess.Failure` for every other non-zero
+    ///   exit.
+    @discardableResult
+    public static func delete(
+        name: String,
+        at path: String,
+        git: GitProcess = GitProcess(),
+        extraEnvironment: [String: String] = [:]
+    ) throws -> Result {
+        let probe = try git.capture(
+            ["rev-parse", "--verify", "--quiet", "refs/tags/\(name)"],
+            workingDirectory: path, extraEnvironment: extraEnvironment)
+        guard probe.exitCode == 0, let oid = probe.lines.first, !oid.isEmpty else {
+            throw RefManageError.unknownTag(name)
+        }
+        let annotated = try git.run(
+            ["cat-file", "-t", oid], workingDirectory: path, extraEnvironment: extraEnvironment
+        ).lines.first == "tag"
+        return try JournalCheckpoint.around(operation: "tag-delete", at: path, git: git) { scoped in
+            try scoped.run(
+                ["tag", "-d", "--", name],
+                workingDirectory: path, extraEnvironment: extraEnvironment)
+            return Result(ref: "refs/tags/\(name)", oid: oid, annotated: annotated)
         }
     }
 
