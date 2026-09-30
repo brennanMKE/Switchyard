@@ -51,6 +51,13 @@ public struct CommitHistoryView: View {
     private let highlightQuery: String
     /// #0402: which match the previous/next buttons are on.
     @State private var matchIndex = 0
+    /// #0524: what the filter text is matched against (guide §11 decision
+    /// 40). Per window, not persisted.
+    @State private var searchScope: HistorySearchScope = .commits
+    /// #0524: the `.paths`/`.content` matches git returned, in History's order.
+    @State private var engineMatches: [String] = []
+    /// #0524: true while git runs a `.paths`/`.content` search.
+    @State private var searching = false
     /// #0410: the commit the map should scroll to -- set from
     /// `scrollRequest`, the first match and match stepping.
     @State private var focusRequest: HistoryScrollRequest?
@@ -98,8 +105,14 @@ public struct CommitHistoryView: View {
                 (entry.oid, refs.map { RefChips.make(oid: entry.oid, refs: $0, decoration: entry.refs) } ?? [])
             },
             uniquingKeysWith: { first, _ in first })
-        let matchOids: [String] = query.isEmpty ? [] : entries.compactMap { entry in
-            HistoryFilter.matches(entry, chips: chipsByOid[entry.oid] ?? [], query: query) ? entry.oid : nil
+        let matchOids: [String] = if query.isEmpty {
+            []
+        } else if searchScope.engineKind == nil {
+            entries.compactMap { entry in
+                HistoryFilter.matches(entry, chips: chipsByOid[entry.oid] ?? [], query: query) ? entry.oid : nil
+            }
+        } else {
+            engineMatches
         }
         // #0410: the map needs only each commit's oid and parents. Callers
         // that pass no graph rows (previews) get the map from `entries`.
@@ -157,12 +170,57 @@ public struct CommitHistoryView: View {
             if let request { revealedTips.insert(request.oid) }
             focus(request, in: layout)
         }
-        // #0402: typing jumps to the first match.
+        // #0402: typing jumps to the first match. #0524: a `.paths` or
+        // `.content` search jumps when git answers, in `runEngineSearch`.
         .onChange(of: query) { _, _ in
             matchIndex = 0
-            if let first = matchOids.first {
+            if searchScope.engineKind == nil, let first = matchOids.first {
                 focus(HistoryScrollRequest(oid: first), in: layout)
             }
+        }
+        .onChange(of: searchScope) { _, scope in
+            matchIndex = 0
+            if scope.engineKind == nil, let first = matchOids.first {
+                focus(HistoryScrollRequest(oid: first), in: layout)
+            }
+        }
+        // #0524: a new query, scope or history restarts the git search;
+        // the old task's cancellation terminates its `git`.
+        .task(id: HistorySearchKey(
+            query: query, scope: searchScope, repositoryPath: repositoryPath,
+            firstOid: entries.first?.oid, count: entries.count)) {
+            await runEngineSearch(query: query, layout: layout)
+        }
+    }
+
+    /// #0524: runs the `.paths`/`.content` search for `query` over the
+    /// loaded commits, then jumps to the first match, as typing does for
+    /// `.commits`. The short sleep lets typing settle: each keystroke
+    /// restarts the task, and a cancelled task stops here or terminates its
+    /// `git`.
+    private func runEngineSearch(query: String, layout: BranchMapLayout) async {
+        guard let kind = searchScope.engineKind, !query.isEmpty, let repositoryPath else {
+            // Guarded: this runs on every Commits-scope keystroke.
+            if !engineMatches.isEmpty { engineMatches = [] }
+            if searching { searching = false }
+            return
+        }
+        searching = true
+        let found: [String]
+        do {
+            try await Task.sleep(for: .milliseconds(250))
+            found = try await loadHistorySearch(
+                at: repositoryPath, kind: kind, query: query, candidates: entries.map(\.oid))
+        } catch {
+            if Task.isCancelled { return }
+            found = []
+        }
+        guard !Task.isCancelled else { return }
+        engineMatches = found
+        searching = false
+        matchIndex = 0
+        if let first = found.first {
+            focus(HistoryScrollRequest(oid: first), in: layout)
         }
     }
 
@@ -207,7 +265,22 @@ public struct CommitHistoryView: View {
     /// the Detail pane follows) and scrolls it to the centre.
     private func matchBar(matchOids: [String], layout: BranchMapLayout) -> some View {
         HStack(spacing: 8) {
-            Text(matchOids.count == 1 ? "1 match" : "\(matchOids.count) matches")
+            // #0524: what the text is matched against (guide §11 decision 40).
+            Picker("Search", selection: $searchScope) {
+                ForEach(HistorySearchScope.allCases) { scope in
+                    Text(scope.title).tag(scope)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .accessibilityIdentifier("history-search-scope")
+            .help(searchScope.help)
+            Text(HistorySearchScope.summary(count: matchOids.count, searching: searching))
+                // The segmented control leaves little room; the count wraps
+                // to two lines without these (planning VM screenshot).
+                .lineLimit(1)
+                .fixedSize()
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer()
@@ -250,6 +323,17 @@ public struct CommitHistoryView: View {
         }
         focusRequest = request
     }
+}
+
+/// #0524: what restarts a `.paths`/`.content` search: the text, the scope,
+/// the repository, and the loaded history (a reload after a commit changes
+/// its first oid or its count).
+private nonisolated struct HistorySearchKey: Equatable {
+    let query: String
+    let scope: HistorySearchScope
+    let repositoryPath: String?
+    let firstOid: String?
+    let count: Int
 }
 
 /// One ref chip: a capsule before the subject, tinted by #0366's colours and
