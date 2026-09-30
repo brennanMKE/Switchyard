@@ -754,7 +754,7 @@ Usage: `switchyard undo [--steps <n>]`
 | 0 | Every step was restored; the payload lists each step's entry, the operation it undid, and the pieces restored. |
 | 1 | Invalid arguments — --steps without a positive integer, or anything else. |
 | 4 | The request failed for a reason the other codes do not name. |
-| 6 | Not a repository; fewer operations than --steps remain; the walk would cross a push (the remote already has it); or a restore was refused. Nothing was changed by a refused walk. |
+| 6 | Not a repository; fewer operations than --steps remain; the walk would cross a push (the remote already has it) or a remote rename or removal (a remote's configuration is not journaled); or a restore was refused. Nothing was changed by a refused walk. |
 
 ### `switchyard redo`
 
@@ -831,5 +831,18 @@ Usage: `switchyard blame <path> [--revision <rev>] [--lines <range>]`
 | 1 | Invalid arguments — not exactly one <path>, an unknown or duplicated flag, a flag value that is missing or starts with '-', or --lines that is not two positive integers <start>,<end> with start ≤ end. |
 | 4 | The request failed for a reason the other codes do not name. |
 | 6 | Not a repository, or git refused the blame — no such file (at that revision), an unknown revision, or a --lines range past the end of the file. |
+
+### `switchyard remote`
+
+List, add, re-point, rename, remove or prune remotes. A subcommand is required.
+
+Usage: `switchyard remote (list | add <name> <url> | set-url <name> <url> | rename <old> <new> | remove <name> | prune <name>)`
+
+| Exit | Meaning |
+|---|---|
+| 0 | Done. list: {remotes:[{name, fetchURL?, pushURLs}]}. add/set-url: {remote, undoable:false} — configuration only, not journaled; undo neither reverses it nor stops at it. rename: {name, previousName, trackingBranches, upstreamOf, undoable:false}; remove: {removed, trackingBranches, upstreamOf, undoable:false} — each writes a journal entry after it succeeds that undo refuses to cross (exit 6), as a push's. prune: {remote, pruned, undoable:true} — one journal entry first; undo brings the pruned branches back. Nothing fetches: add a remote, then fetch <name>. |
+| 1 | Invalid arguments — no or an unknown subcommand, the wrong number of arguments for it, or any flag (none is taken). |
+| 4 | The request failed for a reason the other codes do not name. |
+| 6 | Nothing was changed: not a repository; no remote of that name; a name git would refuse, already in use, or nesting with another remote's (a beside a/b); an empty URL or one with control characters; or git failed (prune could not reach the remote). |
 
 <!-- END GENERATED -->

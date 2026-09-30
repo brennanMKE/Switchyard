@@ -1,0 +1,67 @@
+{
+  "command" : "remote",
+  "envelope" : {
+    "failure" : {
+      "error" : {
+        "code" : {
+          "enum" : [
+            "app_unavailable",
+            "blocked_on_conflicts",
+            "broker_unreachable",
+            "human_declined",
+            "ok",
+            "repository_error",
+            "request_failed",
+            "session_terminated",
+            "signing_failed",
+            "timed_out",
+            "usage"
+          ],
+          "type" : "string"
+        },
+        "hint" : {
+          "optional" : true,
+          "type" : "string"
+        },
+        "message" : {
+          "type" : "string"
+        }
+      },
+      "ok" : false,
+      "schemaVersion" : 1
+    },
+    "success" : {
+      "ok" : true,
+      "result" : {
+        "optional" : true,
+        "schema" : "remote"
+      },
+      "schemaVersion" : 1
+    }
+  },
+  "exitCodes" : [
+    {
+      "code" : 0,
+      "meaning" : "Done. list: {remotes:[{name, fetchURL?, pushURLs}]}. add\/set-url: {remote, undoable:false} — configuration only, not journaled; undo neither reverses it nor stops at it. rename: {name, previousName, trackingBranches, upstreamOf, undoable:false}; remove: {removed, trackingBranches, upstreamOf, undoable:false} — each writes a journal entry after it succeeds that undo refuses to cross (exit 6), as a push's. prune: {remote, pruned, undoable:true} — one journal entry first; undo brings the pruned branches back. Nothing fetches: add a remote, then fetch <name>."
+    },
+    {
+      "code" : 1,
+      "meaning" : "Invalid arguments — no or an unknown subcommand, the wrong number of arguments for it, or any flag (none is taken)."
+    },
+    {
+      "code" : 4,
+      "meaning" : "The request failed for a reason the other codes do not name."
+    },
+    {
+      "code" : 6,
+      "meaning" : "Nothing was changed: not a repository; no remote of that name; a name git would refuse, already in use, or nesting with another remote's (a beside a\/b); an empty URL or one with control characters; or git failed (prune could not reach the remote)."
+    }
+  ],
+  "flags" : [
+
+  ],
+  "schemaName" : "remote",
+  "schemaVersion" : 1,
+  "summary" : "List, add, re-point, rename, remove or prune remotes. A subcommand is required.",
+  "usage" : "remote (list | add <name> <url> | set-url <name> <url> | rename <old> <new> | remove <name> | prune <name>)"
+}

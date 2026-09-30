@@ -12,7 +12,7 @@ public enum CommandRegistry {
 
     /// All known `yard` command specifications in the order they should be
     /// rendered in help output.
-    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, skillSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, revertSpec, cherryPickSpec, mergeSpec, rewriteDiffSpec, rerereSpec, reviewSpec, askSpec, resolveSpec, watchSpec, tagSpec, branchSpec, rebaseOntoSpec, setTipSpec, stageSpec, unstageSpec, commitSpec, discardSpec, fetchSpec, pullSpec, pushSpec, stashSpec, undoSpec, redoSpec, switchSpec, fileHistorySpec, blameSpec]
+    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, skillSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, revertSpec, cherryPickSpec, mergeSpec, rewriteDiffSpec, rerereSpec, reviewSpec, askSpec, resolveSpec, watchSpec, tagSpec, branchSpec, rebaseOntoSpec, setTipSpec, stageSpec, unstageSpec, commitSpec, discardSpec, fetchSpec, pullSpec, pushSpec, stashSpec, undoSpec, redoSpec, switchSpec, fileHistorySpec, blameSpec, remoteSpec]
 
     // MARK: - The switchyard spec — rendered by `yard --help`
 
@@ -777,7 +777,7 @@ public enum CommandRegistry {
             ExitCodeSpec(code: 0, meaning: "Every step was restored; the payload lists each step's entry, the operation it undid, and the pieces restored."),
             ExitCodeSpec(code: 1, meaning: "Invalid arguments — --steps without a positive integer, or anything else."),
             ExitCodeSpec(code: 4, meaning: "The request failed for a reason the other codes do not name."),
-            ExitCodeSpec(code: 6, meaning: "Not a repository; fewer operations than --steps remain; the walk would cross a push (the remote already has it); or a restore was refused. Nothing was changed by a refused walk."),
+            ExitCodeSpec(code: 6, meaning: "Not a repository; fewer operations than --steps remain; the walk would cross a push (the remote already has it) or a remote rename or removal (a remote's configuration is not journaled); or a restore was refused. Nothing was changed by a refused walk."),
         ],
         schemaName: "undo",
         payload: nil
@@ -858,6 +858,25 @@ public enum CommandRegistry {
             ExitCodeSpec(code: 6, meaning: "Not a repository, or git refused the blame — no such file (at that revision), an unknown revision, or a --lines range past the end of the file."),
         ],
         schemaName: "blame",
+        payload: nil
+    )
+
+    // MARK: - The remote spec — engine-backed, resolved by `YardCommands` (guide §11 decisions 41, 43)
+
+    /// Named `remote`, covering the group: the arm dispatches on the second
+    /// token, as `stash` and `branch` do.
+    static let remoteSpec = CommandSpec(
+        name: "remote",
+        summary: "List, add, re-point, rename, remove or prune remotes. A subcommand is required.",
+        usage: "remote (list | add <name> <url> | set-url <name> <url> | rename <old> <new> | remove <name> | prune <name>)",
+        flags: [],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "Done. list: {remotes:[{name, fetchURL?, pushURLs}]}. add/set-url: {remote, undoable:false} — configuration only, not journaled; undo neither reverses it nor stops at it. rename: {name, previousName, trackingBranches, upstreamOf, undoable:false}; remove: {removed, trackingBranches, upstreamOf, undoable:false} — each writes a journal entry after it succeeds that undo refuses to cross (exit 6), as a push's. prune: {remote, pruned, undoable:true} — one journal entry first; undo brings the pruned branches back. Nothing fetches: add a remote, then fetch <name>."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — no or an unknown subcommand, the wrong number of arguments for it, or any flag (none is taken)."),
+            ExitCodeSpec(code: 4, meaning: "The request failed for a reason the other codes do not name."),
+            ExitCodeSpec(code: 6, meaning: "Nothing was changed: not a repository; no remote of that name; a name git would refuse, already in use, or nesting with another remote's (a beside a/b); an empty URL or one with control characters; or git failed (prune could not reach the remote)."),
+        ],
+        schemaName: "remote",
         payload: nil
     )
 
