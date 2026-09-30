@@ -771,4 +771,28 @@ Usage: `switchyard redo [--steps <n>]`
 | 4 | The request failed for a reason the other codes do not name. |
 | 6 | Not a repository; fewer undone operations than --steps remain (a new operation since the undo ends the redo run); or a restore was refused. |
 
+### `switchyard switch`
+
+Switch to a branch, check out a remote branch as a new tracking branch, or detach at a commit. Never discards local changes.
+
+Usage: `switchyard switch (<branch> | --track <remote-branch> | --detach <commit>)`
+
+| Flag | Meaning |
+|---|---|
+| `--detach <commit>` | Detach HEAD at <commit>. |
+| `--track <remote-branch>` | Create the local branch named after <remote-branch> without its remote (origin/x → x), tracking it, and switch to it. |
+
+| Exit | Meaning |
+|---|---|
+| 0 | Switched; the payload carries HEAD's oid, the branch (absent when detached) and the journal operation (switch, switch-track or switch-detach). One journal entry: undo puts HEAD, the index and the working tree back (a branch --track created stays). |
+| 1 | Invalid arguments — not exactly one target, both --track and --detach, or an unknown flag. |
+| 4 | The request failed for a reason the other codes do not name. |
+| 6 | Nothing was touched and nothing journaled: not a repository; an unknown branch, remote branch or commit; already there; the branch is checked out in another worktree; a local branch of that name exists (--track); a rebase, merge, cherry-pick or revert in progress or unresolved conflicts; or local changes the switch would overwrite (the message names them — commit or stash them first). |
+
+| Result field | Type | Meaning |
+|---|---|---|
+| `branch` | string, optional | The checked-out branch's short name. Absent when HEAD is detached. |
+| `head` | string | HEAD's full oid after the switch. |
+| `operation` | string (switch, switch-detach, switch-track) | The journal operation recorded; undo names it. |
+
 <!-- END GENERATED -->
