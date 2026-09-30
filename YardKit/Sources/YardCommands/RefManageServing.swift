@@ -63,12 +63,19 @@ private func runTag(
     var message: String?
     var annotate = false
     var signChoices: [String] = []
+    var delete = false
     var usageMessage: String?
 
     var index = 0
     while index < arguments.count, usageMessage == nil {
         let token = arguments[index]
         switch token {
+        case "--delete":
+            if delete {
+                usageMessage = "tag takes at most one --delete flag."
+            } else {
+                delete = true
+            }
         case "--annotate":
             annotate = true
         case "--message":
@@ -91,13 +98,35 @@ private func runTag(
         default:
             if token.hasPrefix("-") {
                 usageMessage = "tag takes exactly two positional arguments, <name> <commit>, "
-                    + "and the flags --annotate, --message <message>, --sign, --no-sign; "
+                    + "and the flags --annotate, --message <message>, --sign, --no-sign "
+                    + "(or --delete <name>); "
                     + "got the unknown flag '\(token)'."
             } else {
                 positionals.append(token)
             }
         }
         index += 1
+    }
+
+    if delete {
+        // `tag --delete <name>` — git's spelling (guide §11 decision 43).
+        // `tag delete v1` stays what it always was: a tag named `delete` at v1.
+        if usageMessage == nil, annotate || message != nil || !signChoices.isEmpty {
+            usageMessage = "tag --delete takes one <name> and no other flags."
+        }
+        if usageMessage == nil, positionals.count != 1 {
+            let received = positionals.isEmpty ? "none" : "'\(positionals.joined(separator: " "))'"
+            usageMessage = "tag --delete requires exactly one <name>; got \(received)."
+        }
+        if let usageMessage {
+            return finishUsage(usageMessage)
+        }
+        do {
+            let top = try repositoryTop(workingDirectory)
+            return engineSuccess(try Tag.delete(name: positionals[0], at: top))
+        } catch {
+            return engineFailure(error)
+        }
     }
 
     if usageMessage == nil, Set(signChoices).count > 1 {
