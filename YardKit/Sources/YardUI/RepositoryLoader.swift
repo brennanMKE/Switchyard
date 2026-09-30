@@ -125,9 +125,13 @@ public func loadCommitGraph(at path: String) async throws -> [GraphRow] {
 /// Empty for a merge commit (`commitDiff`'s own documented behaviour,
 /// measured #0341) — callers branch on `CommitLogEntry.parents.count > 1`
 /// to show an explicit note instead of treating that as "nothing changed".
+///
+/// #0540: drawn with `options` (guide §11 decision 42).
 @concurrent
-public func loadCommitDiff(at path: String, revision: String) async throws -> [FileDiff] {
-    try await commitDiff(at: path, revision: revision)
+public func loadCommitDiff(
+    at path: String, revision: String, options: DiffOptions = .standard
+) async throws -> [FileDiff] {
+    try await commitDiff(at: path, revision: revision, options: options)
 }
 
 /// A repository's refs and worktree list, loaded together for the Sidebar
