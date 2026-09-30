@@ -15,20 +15,10 @@ public nonisolated enum HistoryFilter {
         query.trimmingCharacters(in: .whitespaces)
     }
 
+    /// #0552: one commit against `query`, by the same rule
+    /// `HistoryIndex.matches(query:)` applies to every loaded commit.
     public static func matches(_ entry: CommitLogEntry, chips: [RefChip], query: String) -> Bool {
-        let q = normalized(query)
-        if q.isEmpty { return true }
-        if entry.message.range(of: q, options: [.caseInsensitive, .diacriticInsensitive]) != nil {
-            return true
-        }
-        if entry.author.range(of: q, options: [.caseInsensitive, .diacriticInsensitive]) != nil {
-            return true
-        }
-        if chips.contains(where: { RefFilter.matches($0.name, query: q) }) { return true }
-        let lower = q.lowercased()
-        if lower.count >= 4, lower.allSatisfy(\.isHexDigit), entry.oid.hasPrefix(lower) {
-            return true
-        }
-        return false
+        guard let folded = Query(query) else { return true }
+        return SearchKey(entry: entry, chips: chips).matches(folded)
     }
 }
