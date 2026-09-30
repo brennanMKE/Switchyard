@@ -20,6 +20,9 @@ public struct CommitDetailView: View {
     /// #0403: opens this commit's changes window (#0406). `nil` hides the
     /// Show Changes button.
     private let onShowChanges: (() -> Void)?
+    /// #0518: Show History and Blame on a changed file, at this commit
+    /// (guide §11 decision 39). `nil` offers neither.
+    private let onInspect: ((FileInspectorTarget) -> Void)?
 
     /// `commitDiff` returns an empty result for **every** merge commit,
     /// whatever it changed (measured, #0341) -- so a blank pane there would
@@ -28,11 +31,13 @@ public struct CommitDetailView: View {
     private var isMerge: Bool { entry.parents.count > 1 }
 
     public init(entry: CommitLogEntry, files: [FileDiff]?, diffError: String?,
-                onShowChanges: (() -> Void)? = nil) {
+                onShowChanges: (() -> Void)? = nil,
+                onInspect: ((FileInspectorTarget) -> Void)? = nil) {
         self.entry = entry
         self.files = files
         self.diffError = diffError
         self.onShowChanges = onShowChanges
+        self.onInspect = onInspect
     }
 
     public var body: some View {
@@ -181,6 +186,16 @@ public struct CommitDetailView: View {
                             .lineLimit(1)
                             .truncationMode(.middle)
                             .help(file.path)
+                            .accessibilityIdentifier("commit-file-\(file.path)")
+                            .contextMenu {
+                                if let onInspect {
+                                    let target = FileInspectorTarget.forCommitFile(
+                                        file, oid: entry.oid, mode: .history)
+                                    Button("Show History") { onInspect(target) }
+                                    Button("Blame") { onInspect(target.with(.blame)) }
+                                        .disabled(target.blameUnavailable != nil)
+                                }
+                            }
                     }
                 }
             }
