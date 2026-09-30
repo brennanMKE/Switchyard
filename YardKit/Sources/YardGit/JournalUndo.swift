@@ -72,6 +72,13 @@ public enum JournalUndo {
         /// while the remote keeps the commits (guide §11 decision 32).
         /// `available` is how many steps could be undone before the push.
         case pushNotUndoable(entry: JournalEntryID, requested: Int, available: Int)
+        /// #0528: the walk would restore `entry`, a remote rename or removal
+        /// (`operation` is `RemoteConfig.renameOperation` or
+        /// `.removeOperation`). The remote's configuration is in no journal
+        /// entry, so restoring this or anything older would bring back
+        /// remote-tracking branches for a remote that no longer has that name
+        /// (guide §11 decision 41).
+        case remoteChangeNotUndoable(operation: String, entry: JournalEntryID, requested: Int, available: Int)
 
         public var description: String {
             switch self {
@@ -82,6 +89,9 @@ public enum JournalUndo {
             case let .pushNotUndoable(entry, requested, available):
                 "can't undo past push \(entry): the remote already has the pushed commits; "
                     + "\(requested) step(s) requested, \(available) available before the push"
+            case let .remoteChangeNotUndoable(operation, entry, requested, available):
+                "can't undo past \(operation) \(entry): a remote's configuration is not journaled; "
+                    + "\(requested) step(s) requested, \(available) available before it"
             }
         }
     }
@@ -92,6 +102,12 @@ public enum JournalUndo {
     /// (#0034 decision 7): a push is a normal entry by every structural
     /// test, and only its operation says the remote moved.
     public static let pushOperation = "push"
+
+    /// #0528: the operations whose entries undo refuses besides a push —
+    /// a remote rename and a remote removal (guide §11 decision 41).
+    public static let remoteChangeOperations: Set<String> = [
+        RemoteConfig.renameOperation, RemoteConfig.removeOperation,
+    ]
 
     /// Undoes `steps` operations on this worktree's chain, returning one
     /// restore report per step, oldest target last. `command` and `agent`
@@ -187,6 +203,13 @@ public enum JournalUndo {
                 if direction == .undo, operations[traversal.restored] == pushOperation {
                     throw Error.pushNotUndoable(
                         entry: traversal.restored, requested: steps, available: planned.count)
+                }
+                // #0528: nor past a remote rename or removal (decision 41).
+                if direction == .undo, let operation = operations[traversal.restored],
+                   remoteChangeOperations.contains(operation) {
+                    throw Error.remoteChangeNotUndoable(
+                        operation: operation, entry: traversal.restored,
+                        requested: steps, available: planned.count)
                 }
                 simulated.append(.init(
                     node: .init(
