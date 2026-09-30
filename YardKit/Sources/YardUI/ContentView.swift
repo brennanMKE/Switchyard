@@ -69,6 +69,12 @@ public struct ContentView: View {
     /// `history` above.
     @State private var graphRows: [GraphRow] = []
 
+    /// #0554: `history` indexed against `sidebar?.refs` -- the chips, the
+    /// commits by oid and the filter's search text `CommitHistoryView` used
+    /// to rebuild on every body (guide §11 decision 44). Assigned only
+    /// together with `history` and `sidebar`, from `loadRepositoryWindow`.
+    @State private var historyIndex = HistoryIndex.empty
+
     /// The History pane's selection, keyed on `oid`. #0082's Detail pane
     /// observes it to show the selected commit.
     @State private var selectedCommit: String?
@@ -735,7 +741,7 @@ public struct ContentView: View {
 
     private func commitHistory(summary: RepositorySummary) -> some View {
         CommitHistoryView(
-            entries: history, graphRows: graphRows,
+            entries: history, index: historyIndex, graphRows: graphRows,
             headOid: summary.whereAmI.rawHead.isEmpty ? nil : summary.whereAmI.rawHead,
             refs: sidebar?.refs,
             branchTips: sidebar?.branchTips,
@@ -913,6 +919,7 @@ public struct ContentView: View {
         summary = nil
         history = []
         graphRows = []
+        historyIndex = .empty
         sidebar = nil
         selectedCommit = nil
         selectedResolution = nil
@@ -927,23 +934,19 @@ public struct ContentView: View {
         journalFailure = nil
         journalNotice = nil
         do {
-            summary = try await loadRepositorySummary(at: repositoryPath)
-            // Separate from the summary load on purpose: a repository whose
-            // log cannot be read (an unborn branch has no HEAD) must still
-            // show its header and status rather than falling into the error
-            // state wholesale. Same reasoning for the graph and sidebar
-            // loads below -- three independent engine calls, so one failing
-            // does not blank the others.
-            history = (try? await loadCommitHistory(at: repositoryPath)) ?? []
-            graphRows = (try? await loadCommitGraph(at: repositoryPath)) ?? []
-            sidebar = try? await loadRepositorySidebar(at: repositoryPath)
-            // #0393: the journal listing rides along with the other loads —
-            // a listing that fails (or a repository that never checkpointed)
-            // leaves the menu disabled with its plain titles, not an error.
-            journalListing = try? await loadJournalListing(at: repositoryPath)
-            // #0457: the toolbar's remotes. A failed read disables the
-            // three buttons rather than failing the window.
-            remoteNames = (try? await loadRemoteNames(at: repositoryPath)) ?? []
+            // #0554: the six reads run at once (#0553). Only the summary's
+            // failure is an error: a repository whose log cannot be read (an
+            // unborn branch has no HEAD) still shows its header and status,
+            // and a failed journal listing or remote read leaves the Edit
+            // menu's plain titles or the toolbar's buttons disabled.
+            let load = try await loadRepositoryWindow(at: repositoryPath)
+            summary = load.summary
+            history = load.history
+            graphRows = load.graphRows
+            historyIndex = load.historyIndex
+            sidebar = load.sidebar
+            journalListing = load.journalListing
+            remoteNames = load.remoteNames
         } catch {
             errorMessage = String(describing: error)
         }
@@ -1531,23 +1534,20 @@ public struct ContentView: View {
     private func refreshAfterMutation(select: ([GraphRow], String) -> String?) async {
         guard let repositoryPath else { return }
         do {
-            let newSummary = try await loadRepositorySummary(at: repositoryPath)
-            let newHistory = (try? await loadCommitHistory(at: repositoryPath)) ?? []
-            let newRows = (try? await loadCommitGraph(at: repositoryPath)) ?? []
-            let newSidebar = try? await loadRepositorySidebar(at: repositoryPath)
-            // #0393: every in-app mutation re-reads the journal listing too,
-            // so the Edit menu's titles and enabled flags track the chain —
-            // a commit action wrote a checkpoint the menu must now see.
-            let newJournal = try? await loadJournalListing(at: repositoryPath)
-            let newRemotes = (try? await loadRemoteNames(at: repositoryPath)) ?? []
-            summary = newSummary
-            remoteNames = newRemotes
-            history = newHistory
-            graphRows = newRows
-            sidebar = newSidebar
-            journalListing = newJournal
+            // #0554: one concurrent load (#0553). #0393: it re-reads the
+            // journal listing too, so the Edit menu's titles and enabled
+            // flags track the chain — a commit action wrote a checkpoint the
+            // menu must now see.
+            let load = try await loadRepositoryWindow(at: repositoryPath)
+            summary = load.summary
+            remoteNames = load.remoteNames
+            history = load.history
+            graphRows = load.graphRows
+            historyIndex = load.historyIndex
+            sidebar = load.sidebar
+            journalListing = load.journalListing
             workingTreeRevision += 1
-            if let newSelection = select(newRows, newSummary.whereAmI.rawHead) {
+            if let newSelection = select(load.graphRows, load.summary.whereAmI.rawHead) {
                 selectedResolution = nil
                 selectedStash = nil
                 selectedCommit = newSelection

@@ -18,6 +18,10 @@ import YardGit
 /// from `entries`, so the `#Preview` below still shows a commit.
 public struct CommitHistoryView: View {
     private let entries: [CommitLogEntry]
+    /// #0554: `entries` indexed against `refs` by the caller, once per load
+    /// (guide §11 decision 44): the chips, the commits by oid and the
+    /// filter's matches. `body` reads it and builds none of it.
+    private let index: HistoryIndex
     private let graphRows: [GraphRow]
     private let headOid: String?
     /// The repository's refs (#0366): tips derived from this claim history,
@@ -73,7 +77,7 @@ public struct CommitHistoryView: View {
     @Binding private var selection: String?
 
     public init(
-        entries: [CommitLogEntry], graphRows: [GraphRow] = [], headOid: String? = nil,
+        entries: [CommitLogEntry], index: HistoryIndex, graphRows: [GraphRow] = [], headOid: String? = nil,
         refs: RefSnapshot? = nil, branchTips: BranchTipDates.Report? = nil, repositoryPath: String? = nil,
         branchName: String? = nil,
         menuStates: ((String) -> [CommitActionState])? = nil,
@@ -84,6 +88,7 @@ public struct CommitHistoryView: View {
         selection: Binding<String?>
     ) {
         self.entries = entries
+        self.index = index
         self.graphRows = graphRows
         self.headOid = headOid
         self.refs = refs
@@ -100,17 +105,10 @@ public struct CommitHistoryView: View {
 
     public var body: some View {
         let query = HistoryFilter.normalized(highlightQuery)
-        let chipsByOid: [String: [RefChip]] = Dictionary(
-            entries.map { entry in
-                (entry.oid, refs.map { RefChips.make(oid: entry.oid, refs: $0, decoration: entry.refs) } ?? [])
-            },
-            uniquingKeysWith: { first, _ in first })
         let matchOids: [String] = if query.isEmpty {
             []
         } else if searchScope.engineKind == nil {
-            entries.compactMap { entry in
-                HistoryFilter.matches(entry, chips: chipsByOid[entry.oid] ?? [], query: query) ? entry.oid : nil
-            }
+            index.matches(query: query)
         } else {
             engineMatches
         }
@@ -142,8 +140,8 @@ public struct CommitHistoryView: View {
             }
             BranchMapView(
                 layout: layout,
-                entriesByOid: Dictionary(entries.map { ($0.oid, $0) }, uniquingKeysWith: { first, _ in first }),
-                chipsByOid: chipsByOid,
+                entriesByOid: index.entriesByOid,
+                chipsByOid: index.chipsByOid,
                 headOid: headOid,
                 localOids: localOids,
                 matches: query.isEmpty ? nil : Set(matchOids),
@@ -389,18 +387,20 @@ struct RefChipView: View {
 
 #Preview {
     @Previewable @State var selection: String?
+    let entries = [
+        CommitLogEntry(
+            oid: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+            parents: [],
+            author: "Ada Lovelace",
+            refs: "HEAD -> main",
+            signatureStatus: .noSig,
+            message: "Add the History pane",
+            trailers: []
+        ),
+    ]
     CommitHistoryView(
-        entries: [
-            CommitLogEntry(
-                oid: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
-                parents: [],
-                author: "Ada Lovelace",
-                refs: "HEAD -> main",
-                signatureStatus: .noSig,
-                message: "Add the History pane",
-                trailers: []
-            ),
-        ],
+        entries: entries,
+        index: HistoryIndex(entries: entries, refs: nil),
         selection: $selection
     )
 }
