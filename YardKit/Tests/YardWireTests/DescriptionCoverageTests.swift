@@ -215,6 +215,10 @@ struct DescriptionCoverageTests {
             Row("Stash.swift", "Stash.Refusal",
                 Stash.Refusal.intentToAdd(path: "probe-ita.txt"),
                 .carries(["probe-ita.txt", "intent-to-add"])),
+            Row("Checkout.swift", "Checkout.Refusal",
+                Checkout.Refusal.localChangesWouldBeOverwritten(
+                    target: "probe-branch", paths: ["probe-a.txt"]),
+                .carries(["probe-branch", "probe-a.txt", "nothing was touched"])),
             Row("Rewrite.swift", "RewriteError",
                 RewriteError.unknownCommit("probe-revision"),
                 .carries(["probe-revision", "nothing was touched"])),
