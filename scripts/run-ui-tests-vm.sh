@@ -561,6 +561,7 @@ run_spike_if_selected 0525 Spike0525HistorySearchUITests
 run_spike_if_selected 0533 Spike0533RemoteManagementUITests
 run_spike_if_selected 0542 Spike0542DiffOptionsUITests
 run_spike_if_selected 0555 Spike0555LargeHistoryUITests
+run_spike_if_selected 0556 Spike0556MatchStepUITests
 
 print ""
 if (( TEST_RC == 0 )); then
