@@ -715,4 +715,38 @@ Usage: `switchyard stash (list | push [--message <message>] [--include-untracked
 | 6 | Not a repository; no commits; nothing to stash; unresolved conflicts; an intent-to-add path; a <stash> the list does not hold; or git refused the apply (local changes or an untracked file in the way, --index not applicable). |
 | 8 | apply or pop conflicted (blocked_on_conflicts) — ok:true, outcome "conflicted", conflictedPaths listed; git applied what it could and kept the stash. Resolve, or undo. |
 
+### `switchyard undo`
+
+Undo the last journaled operations in this worktree, as Edit ▸ Undo does.
+
+Usage: `switchyard undo [--steps <n>]`
+
+| Flag | Meaning |
+|---|---|
+| `--steps <n>` | How many operations to undo (a positive integer, default 1). All or nothing. |
+
+| Exit | Meaning |
+|---|---|
+| 0 | Every step was restored; the payload lists each step's entry, the operation it undid, and the pieces restored. |
+| 1 | Invalid arguments — --steps without a positive integer, or anything else. |
+| 4 | The request failed for a reason the other codes do not name. |
+| 6 | Not a repository; fewer operations than --steps remain; the walk would cross a push (the remote already has it); or a restore was refused. Nothing was changed by a refused walk. |
+
+### `switchyard redo`
+
+Redo operations undone in this worktree, as Edit ▸ Redo does.
+
+Usage: `switchyard redo [--steps <n>]`
+
+| Flag | Meaning |
+|---|---|
+| `--steps <n>` | How many undone operations to redo (a positive integer, default 1). All or nothing. |
+
+| Exit | Meaning |
+|---|---|
+| 0 | Every step was restored; the payload lists each step's entry and the pieces restored. |
+| 1 | Invalid arguments — --steps without a positive integer, or anything else. |
+| 4 | The request failed for a reason the other codes do not name. |
+| 6 | Not a repository; fewer undone operations than --steps remain (a new operation since the undo ends the redo run); or a restore was refused. |
+
 <!-- END GENERATED -->

@@ -54,6 +54,8 @@ struct GlobalJSONFlagTests {
         "pull": ["pull"],
         "push": ["push"],
         "stash": ["stash", "list"],
+        "undo": ["undo"],
+        "redo": ["redo"],
     ]
 
     static let dispatchArgv: [String: [String]] = [
