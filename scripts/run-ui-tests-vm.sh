@@ -51,6 +51,7 @@ GUEST_REMOTE_FIXTURE="/Users/$GUEST_USER/uitest-remote"
 GUEST_STASH_FIXTURE="/Users/$GUEST_USER/uitest-stash-repo"
 GUEST_SWITCH_FIXTURE="/Users/$GUEST_USER/uitest-switch"
 GUEST_BLAME_FIXTURE="/Users/$GUEST_USER/uitest-blame-repo"
+GUEST_REMOTES_FIXTURE="/Users/$GUEST_USER/uitest-remotes"
 RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"
 # Optional spike filter: pass an issue number (e.g. `0383`) to run just that
 # spike's clone; with no argument all four run, each in its own clone.
@@ -345,7 +346,7 @@ start_guest() {
     sleep 5
   done
   log "[$label] Guest reachable; copying source, generating the fixture"
-  tart exec "$CLONE" /bin/zsh -lc "rm -rf $GUEST_SRC $GUEST_RESULTS $GUEST_FIXTURE $GUEST_MAP_FIXTURE $GUEST_CHANGES_FIXTURE $GUEST_REMOTE_FIXTURE $GUEST_STASH_FIXTURE $GUEST_SWITCH_FIXTURE $GUEST_BLAME_FIXTURE && mkdir -p $GUEST_RESULTS"
+  tart exec "$CLONE" /bin/zsh -lc "rm -rf $GUEST_SRC $GUEST_RESULTS $GUEST_FIXTURE $GUEST_MAP_FIXTURE $GUEST_CHANGES_FIXTURE $GUEST_REMOTE_FIXTURE $GUEST_STASH_FIXTURE $GUEST_SWITCH_FIXTURE $GUEST_BLAME_FIXTURE $GUEST_REMOTES_FIXTURE && mkdir -p $GUEST_RESULTS"
   tart exec "$CLONE" /bin/zsh -lc "cp -R '/Volumes/My Shared Files/run/src' $GUEST_SRC"
 # The fixture the spike re-derivations (#0395 round 2) drive:
 #   - four commits with distinctive subjects (History rows to select;
@@ -384,6 +385,9 @@ tart exec "$CLONE" /bin/zsh -lc \
   # #0520: the file history and blame fixture — a renamed file, edited in
   # the working tree.
   tart exec "$CLONE" /bin/zsh -lc "zsh $GUEST_SRC/scripts/uitest-fixtures/make-blame-fixture.sh $GUEST_BLAME_FIXTURE"
+  # #0533: the remote-management fixture — a clone with a stale
+  # remote-tracking branch, and a second bare repository to add.
+  tart exec "$CLONE" /bin/zsh -lc "zsh $GUEST_SRC/scripts/uitest-fixtures/make-remotes-fixture.sh $GUEST_REMOTES_FIXTURE"
   local actual_branch
   actual_branch="$(tart exec "$CLONE" /bin/zsh -lc "git -C $GUEST_FIXTURE symbolic-ref --short HEAD" | tr -d '[:space:]')"
   [[ "$actual_branch" == "$GUEST_FIXTURE_BRANCH" ]] \
@@ -547,6 +551,7 @@ run_spike_if_selected 0496 Spike0496StashListUITests
 run_spike_if_selected 0512 Spike0512SwitchBranchUITests
 run_spike_if_selected 0520 Spike0520FileHistoryBlameUITests
 run_spike_if_selected 0525 Spike0525HistorySearchUITests
+run_spike_if_selected 0533 Spike0533RemoteManagementUITests
 
 print ""
 if (( TEST_RC == 0 )); then
