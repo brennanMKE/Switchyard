@@ -577,6 +577,7 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-09-29 | #0503 | round 1, Sonnet implementation, 930 s wall, passed pending review (S, measured) | 123,494 | — |
 | 2026-09-29 | #0504 | round 1, Sonnet implementation, 752 s wall, passed pending review (S, measured) | 119,573 | — |
 | 2026-09-29 | #0505 | round 1, Sonnet implementation, 293 s wall, passed pending review (S, measured) | 89,240 | — |
+| 2026-09-29 | #0506 | planning (Opus): switch/checkout/delete refs umbrella + #0507-#0512, decision 38, prototype + VM spike, 1438 s wall (measured) | 332,696 | — |
 | | | **Total measured** (tokens include 2026-09-22/23 rows; $ not updated for them) | **47,386,796** | **$437.24** |
 
 ## What this total does and does not cover
