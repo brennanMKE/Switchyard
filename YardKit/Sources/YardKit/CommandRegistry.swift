@@ -685,14 +685,14 @@ public enum CommandRegistry {
 
     static let fetchSpec = CommandSpec(
         name: "fetch",
-        summary: "Fetch every remote (git fetch --all). Never prompts for credentials.",
-        usage: "fetch",
+        summary: "Fetch every remote (git fetch --all), or one. Never prompts for credentials.",
+        usage: "fetch [<remote>]",
         flags: [],
         exitCodes: [
             ExitCodeSpec(code: 0, meaning: "The fetch completed; the payload lists the remotes fetched. One journal entry, operation fetch, written first: undo puts the remote-tracking refs back."),
-            ExitCodeSpec(code: 1, meaning: "Invalid arguments — fetch takes none."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — fetch takes at most one <remote>, and no flags."),
             ExitCodeSpec(code: 4, meaning: "The request failed for a reason the other codes do not name."),
-            ExitCodeSpec(code: 6, meaning: "Not a repository, or git fetch failed — an unreachable remote or a missing credential (terminal prompts are disabled)."),
+            ExitCodeSpec(code: 6, meaning: "Not a repository; no remote of that name; or git fetch failed — an unreachable remote or a missing credential (terminal prompts are disabled)."),
         ],
         schemaName: "fetch",
         payload: nil

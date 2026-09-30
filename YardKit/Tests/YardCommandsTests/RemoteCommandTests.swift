@@ -21,7 +21,9 @@ struct RemoteCommandTests {
         let empty = try nonRepositoryDirectory()
         defer { try? FileManager.default.removeItem(atPath: empty) }
         for command in ["fetch", "pull", "push"] {
-            for tail in [["origin"], ["--force"], ["--all"]] {
+            // fetch takes one <remote> (guide §11 decision 43), so its bad tail is two.
+            let named = command == "fetch" ? ["origin", "upstream"] : ["origin"]
+            for tail in [named, ["--force"], ["--all"]] {
                 let reply = try runArm([command] + tail, in: empty)
                 #expect(reply.exitCode == .usage, "\(command) \(tail): \(reply.stdout)")
             }
