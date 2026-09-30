@@ -2305,6 +2305,53 @@ a feature at any milestone on the grounds that GitUp had it.
       the Whole File diff of a very large file (#0534 question 4). The VM spike records its
       timings as attachments and asserts none (CLAUDE.md).
 
+45. **The commit composer keeps one message editor (first line is the subject) and adds a guide
+    line, a Co-Author menu, a Recent Messages menu, `commit.template`, and a draft kept per
+    repository; nothing opens an editor, and every commit still goes through `git commit -m`.**
+    Decided 2026-09-30 in the planning pass for umbrella **#0558** (decision 44's runner-up), with
+    high confidence; prototyped end to end in a planning worktree (engine, views, VM spike). Each
+    bullet is cheap to reverse, and #0558 carries the questions for Brennan.
+
+    - **One editor, not a subject field and a body editor.** The first line is the subject, which is
+      git's own model (`%s` is the first paragraph). A split pair would need a join rule, and
+      splitting `HEAD`'s message for Amend would rewrite a message whose line 2 is not blank (`a\nb`
+      comes back as `a\n\nb`), and it would need focus handling between two fields. The draft stays
+      one `String`, so Amend (decision 33) is unchanged.
+    - **A guide line, not a drawn column: warns, never blocks** (#0563). Under the editor:
+      `Subject 42/50`, then `Leave line 2 blank` when line 2 holds text, then `N body lines over 72`
+      (lines 3 on, not counting lines with no space or `Token: value` trailers). It is orange when
+      any part is a warning. `CommitDraft.blockedReason` does not read it. A 72-column rule means
+      nothing in the editor's proportional font.
+    - **Co-Author** (#0559, #0560, #0566). A menu of recent authors of `HEAD`'s last 500 commits and
+      the `Co-authored-by` people those commits credit, newest first, without `user.email`. Picking
+      one puts the trailer **into the editor text** through `git interpret-trailers`, with every
+      placement option on the command line so `trailer.*` config cannot move or drop it
+      (`--no-divider --where end --if-exists addIfDifferent --if-missing add`, measured). It is not a
+      hidden `--trailer` list, so the user sees it and hooks and signing treat it as message text. A
+      blank message gets `\n\n<trailer>\n` so the subject line stays free.
+    - **Recent Messages** (#0561, #0567). The full messages of `HEAD`'s last reflog entries whose
+      subject is `commit:` or `commit (…):`, newest first, each once, at most 10. The reflog, not the
+      log, because the message worth reusing is the one Undo Commit or an amend just took away. The
+      app persists nothing for this. Picking one replaces the editor's text.
+    - **`commit.template`** (#0562, #0565). `git commit -m` ignores it (measured), so an empty draft
+      starts from it, when the window opens and after each commit. Comments are stripped with `git
+      stripspace --strip-comments`, which honors `core.commentChar`, because `-m` would otherwise
+      commit them (measured). An unedited template blocks Commit ("Edit the message from
+      commit.template"), as git's editor flow refuses it. This is the composer's only new block.
+    - **The draft is kept per repository in `UserDefaults`** (`commitDraft:<path>`, #0564). Not
+      `@SceneStorage`, which is dropped with the window. Not `@AppStorage`, whose key is fixed at
+      declaration. The binding the Changes view writes through saves it, `.task(id:
+      repositoryPath)` restores it, and a commit clears it. While amending, the set-aside draft is
+      what is kept.
+    - **Unchanged:** ⌘↩ commits (decision 30, #0445 — already built). Every commit and amend is
+      still `commitStaged` / `AmendHead.run` with `-m`, so `pre-commit`, `prepare-commit-msg`,
+      `commit-msg` and `commit.gpgsign` behave exactly as before. `interpret-trailers`,
+      `stripspace`, `config` and `log -g` never invoke `GIT_EDITOR`, which `GitProcess` pins to
+      `false` anyway.
+    - **Not in this decision:** a hard-wrap-body command; a monospaced editor with a drawn 72
+      guide; Co-Author from the system Contacts; a CLI flag for co-authors. Each is a question or a
+      follow-up in #0558.
+
 ### Still open
 
 **Is M1's criterion 5 closable as written, and should it be restated?** Raised by the twelfth M1
