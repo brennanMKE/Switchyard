@@ -323,6 +323,45 @@ extension XCUIApplication {
     }
 }
 
+/// #0520: the file history and blame fixture
+/// scripts/uitest-fixtures/make-blame-fixture.sh generates inside the guest —
+/// keep the two in sync.
+enum UITestBlameFixture {
+    static let repositoryPath = "/Users/admin/uitest-blame-repo"
+    /// Renamed from `oldName` in `renameSubject`, edited in the working tree.
+    static let file = "notes.txt"
+    static let oldName = "notes-old.txt"
+    static let firstSubject = "blame first commit"
+    static let renameSubject = "blame rename commit"
+    static let editSubject = "blame edit commit"
+    /// Touches only other.txt, so it is not in notes.txt's history.
+    static let otherSubject = "blame other commit"
+}
+
+extension XCUIApplication {
+    /// Launches the app on the blame fixture with the real panes.
+    @MainActor
+    func launchWithBlameFixture() {
+        launchArguments = [
+            "-uiTestRepository", UITestBlameFixture.repositoryPath,
+            "-uiTestRealSurfaces",
+        ]
+        launch()
+        let tree = debugDescription
+        XCTAssertTrue(
+            windows.firstMatch.waitForExistence(timeout: 60),
+            "The app launched but opened no window within 60 s — its element " +
+            "tree starts with: \(String(tree.prefix(1200)))",
+            file: #filePath, line: #line)
+    }
+
+    /// The file inspector's path line (#0517), when an inspector is open.
+    @MainActor
+    func fileInspectorPath() -> XCUIElement {
+        staticTexts.matching(identifier: "file-inspector-path").firstMatch
+    }
+}
+
 /// #0455: the Fetch/Pull/Push fixture scripts/uitest-fixtures/make-remote-fixture.sh
 /// generates inside the guest — keep the two in sync. Every clone is on
 /// `remote-main` tracking `origin/remote-main` except `pushRepository`.
