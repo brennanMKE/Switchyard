@@ -260,6 +260,31 @@ public func blameFile(
     revision: String? = nil,
     git: GitProcess = GitProcess()
 ) throws -> [BlameLine] {
+    let output = try git.run(
+        blameArguments(file: file, lines: lines, revision: revision), workingDirectory: path)
+    return try BlameParser().parse(output.text)
+}
+
+/// Async twin of `blameFile(at:file:lines:revision:git:)` (#0515), for the
+/// app's blame view: same arguments, same parser, same result, but `git`
+/// runs on `GitProcess`'s non-blocking path, so no pool thread is held while
+/// it works and **cancelling the calling task terminates it** — a blame of a
+/// large file the user has already navigated away from stops.
+public func blameFile(
+    at path: String,
+    file: String,
+    lines: ClosedRange<Int>? = nil,
+    revision: String? = nil,
+    git: GitProcess = GitProcess()
+) async throws -> [BlameLine] {
+    let output = try await git.run(
+        blameArguments(file: file, lines: lines, revision: revision), workingDirectory: path)
+    return try BlameParser().parse(output.text)
+}
+
+/// The argument vector both `blameFile` overloads run, shared so the two
+/// cannot drift.
+func blameArguments(file: String, lines: ClosedRange<Int>?, revision: String?) -> [String] {
     var arguments = ["-c", "core.quotepath=false", "blame", "--porcelain"]
     if let lines {
         arguments += ["-L", "\(lines.lowerBound),\(lines.upperBound)"]
@@ -268,8 +293,7 @@ public func blameFile(
         arguments.append(revision)
     }
     arguments += ["--", file]
-    let output = try git.run(arguments, workingDirectory: path)
-    return try BlameParser().parse(output.text)
+    return arguments
 }
 
 // MARK: - Wire encoding (#0132)
