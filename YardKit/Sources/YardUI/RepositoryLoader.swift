@@ -335,3 +335,54 @@ public func redoJournal(at path: String) async throws -> [JournalRestore.Report]
     let context = try await WorktreeContext.resolve(path: path)
     return try JournalUndo.redo(in: context)
 }
+
+/// #0553 (guide §11 decision 44): everything a repository window reads on
+/// open and after every in-app mutation, loaded together.
+///
+/// `nonisolated`: a plain immutable value type, built by the `@concurrent`
+/// loader below -- the same reasoning as `RepositorySummary`.
+public nonisolated struct RepositoryWindowLoad: Sendable {
+    public let summary: RepositorySummary
+    /// Empty when the log cannot be read (an unborn branch).
+    public let history: [CommitLogEntry]
+    public let graphRows: [GraphRow]
+    /// `nil` when the sidebar read failed.
+    public let sidebar: RepositorySidebarSummary?
+    /// `nil` when the listing failed or the repository never checkpointed.
+    public let journalListing: JournalList.Listing?
+    /// Empty when the read failed.
+    public let remoteNames: [String]
+    /// #0552: `history` indexed against `sidebar?.refs`.
+    public let historyIndex: HistoryIndex
+}
+
+/// Loads a repository window's six reads at once (#0553). They were awaited
+/// one after another; on git/git that took 0.62-0.68 s and running them
+/// together takes 0.20-0.21 s (measured 2026-09-30, release build, three
+/// runs each). Only the summary's failure throws -- the other five fall
+/// back exactly as `ContentView.reload()` always let them: a repository
+/// whose log cannot be read must still show its header and status.
+///
+/// `@concurrent`, like every loader in this file; each `async let` child
+/// runs its own `@concurrent` loader, so the `git` processes overlap. The
+/// index is built here too, off the main actor.
+@concurrent
+public func loadRepositoryWindow(at path: String) async throws -> RepositoryWindowLoad {
+    async let summary = loadRepositorySummary(at: path)
+    async let history = loadCommitHistory(at: path)
+    async let graphRows = loadCommitGraph(at: path)
+    async let sidebar = loadRepositorySidebar(at: path)
+    async let journalListing = loadJournalListing(at: path)
+    async let remoteNames = loadRemoteNames(at: path)
+    let loadedSummary = try await summary
+    let loadedHistory = (try? await history) ?? []
+    let loadedSidebar = try? await sidebar
+    return RepositoryWindowLoad(
+        summary: loadedSummary,
+        history: loadedHistory,
+        graphRows: (try? await graphRows) ?? [],
+        sidebar: loadedSidebar,
+        journalListing: try? await journalListing,
+        remoteNames: (try? await remoteNames) ?? [],
+        historyIndex: HistoryIndex(entries: loadedHistory, refs: loadedSidebar?.refs))
+}
