@@ -219,6 +219,9 @@ struct DescriptionCoverageTests {
                 Checkout.Refusal.localChangesWouldBeOverwritten(
                     target: "probe-branch", paths: ["probe-a.txt"]),
                 .carries(["probe-branch", "probe-a.txt", "nothing was touched"])),
+            Row("RemoteConfig.swift", "RemoteConfig.Refusal",
+                RemoteConfig.Refusal.invalidName("probe name", reason: "probe reason."),
+                .carries(["probe name", "probe reason.", "Nothing was changed"])),
             Row("FileHistory.swift", "FileHistory.Failure",
                 FileHistory.Failure.malformedRecord("probe history record"),
                 .carries(["probe history record"])),
