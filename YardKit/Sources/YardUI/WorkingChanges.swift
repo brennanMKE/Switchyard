@@ -117,6 +117,18 @@ public nonisolated struct WorkingChanges: Equatable, Sendable {
     /// Nothing to show: the view reads "Working tree clean".
     public var isClean: Bool { staged.isEmpty && unstaged.isEmpty && conflicted.isEmpty }
 
+    /// #0572: the side a selected file is shown on after a refresh — its
+    /// own side while the path is still listed there, else the other side
+    /// (a Stage or Unstage moved the whole file), else `nil` (it left both
+    /// lists: committed, discarded, or conflicted).
+    public func sideShowing(path: String, staged: Bool) -> Bool? {
+        let own = staged ? self.staged : unstaged
+        if own.contains(where: { $0.path == path }) { return staged }
+        let other = staged ? unstaged : self.staged
+        if other.contains(where: { $0.path == path }) { return !staged }
+        return nil
+    }
+
     /// The paths `unstagePaths` needs for `rows`: each row's path, plus a
     /// rename's old path — resetting only the new name leaves the old one
     /// staged as a deletion (measured, #0439).
