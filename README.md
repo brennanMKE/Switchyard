@@ -94,9 +94,9 @@ The CLI *is* the agent interface. Its contract:
   prompt. A command that needs the app and cannot reach it fails with exit code 3 naming what is
   missing — it never silently falls back, because an agent would then proceed without the human
   approval it was told to obtain.
-- **Every mutating command is journaled**, so it can be undone from the app whether or not the
-  caller thought to ask. (CLI `undo`/`redo` and provenance trailers on commits are designed in the
-  guide, not built.)
+- **Every mutating command is journaled**, so it can be undone — by `switchyard undo`, or from the
+  app's Edit menu — whether or not the caller thought to ask. (Provenance trailers on commits are
+  designed in the guide, not built.)
 
 ### Teaching an agent to use it
 
@@ -141,6 +141,9 @@ codes and payload). Every command answers with the JSON envelope on stdout.
 | Group | Commands |
 | --- | --- |
 | **Read** | `whereami`, `status`, `conflicts`, `hunks --staged\|--unstaged`, `log [<range>]`, `graph [--limit <n>]`, `verify <rev>`, `rewrite-diff <entry>`, `rerere status` |
+| **Stage & commit** | `stage`, `unstage` (paths or `--hunk <id>`), `commit [--amend]`, `discard`, `stash list\|push\|apply\|pop\|drop` |
+| **Remotes** | `fetch`, `pull` (fast-forward only), `push` (never forced) |
+| **Undo** | `undo [--steps <n>]`, `redo [--steps <n>]` |
 | **Rewrite** | `absorb [--dry-run]`, `split`, `reword`, `drop`, `reorder`, `rebase-onto`, `set-tip` |
 | **Integrate** | `revert`, `cherry-pick`, `merge --ff-only\|--no-ff` |
 | **Refs** | `tag`, `branch create\|rename\|delete\|upstream` |

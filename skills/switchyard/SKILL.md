@@ -1,6 +1,6 @@
 ---
 name: switchyard
-description: Drive the Switchyard git client from the shell with the `switchyard` CLI. Read repository state as JSON (whereami, status, log, graph, hunks, conflicts), rewrite local history without an editor (reword, drop, reorder, split, absorb, rebase-onto), and hand decisions to the human in the Switchyard app (review, ask, resolve). Use in a git repository on a Mac with Switchyard.app installed, instead of raw git for these operations.
+description: Drive the Switchyard git client from the shell with the `switchyard` CLI. Read repository state as JSON (whereami, status, log, graph, hunks, conflicts), stage and commit (stage, unstage, commit, discard, stash), sync with remotes (fetch, pull, push), rewrite local history without an editor (reword, drop, reorder, split, absorb, rebase-onto), undo any of it (undo, redo), and hand decisions to the human in the Switchyard app (review, ask, resolve). Use in a git repository on a Mac with Switchyard.app installed, instead of raw git for these operations.
 ---
 
 # switchyard
@@ -13,7 +13,8 @@ description: Drive the Switchyard git client from the shell with the `switchyard
 - Most commands launch Switchyard.app if it is not running. `review`, `ask`, `resolve` and `watch` never launch it: they need a human already at the app, and exit 3 without one. Treat exit 3 from those as "no human available" — do not proceed as if approved.
 - A command's stdout is exactly one JSON envelope. The exceptions are `--help`, `--version` and `switchyard skill`, which print text, and `watch`, which streams one JSON object per line. Parse `ok` and the exit code; do not scrape the human-readable stderr line.
 - Nothing is interactive. No editor or pager ever opens; messages are passed as flags.
-- Undo is not a CLI command in this build. A rewrite that went wrong is undone by the human from the app's Edit menu.
+- Every command that changes the repository writes one journal entry first. `switchyard undo` reverses the last one and `switchyard redo` puts it back; the human's Edit ▸ Undo walks the same journal. Undo stops at a push, because the remote already has it.
+- Paths are repository-relative, exactly as `status` and `hunks` print them, whatever the current directory.
 
 ## Workflows
 
@@ -26,6 +27,27 @@ switchyard log main..HEAD
 ```
 
 `whereami` answers branch, upstream, ahead/behind, and whether a rebase, merge, cherry-pick or revert is in progress, in one call. Check `isMidRebase`, `isMidMerge` and `hasConflicts` before starting any rewrite.
+
+### Stage and commit
+
+```sh
+switchyard hunks --unstaged
+switchyard stage src/parser.swift
+switchyard stage --hunk 3f2a9c1d0b4e
+switchyard commit --message "Parse trailers"
+```
+
+Stage whole files by path, or single hunks by the `id` that `hunks` prints; an id goes stale when the file changes, so list again rather than reusing an old one. `commit --amend` without `--message` keeps `HEAD`'s message, and is refused once `HEAD` has been pushed. `discard` throws away unstaged changes without asking; `undo` brings them back.
+
+### Undo a mistake
+
+```sh
+switchyard undo
+switchyard undo --steps 3
+switchyard redo
+```
+
+Each step in the reply names the operation it undid. A walk longer than the journal, or one that would cross a push, is refused whole with exit 6 and changes nothing.
 
 ### Clean up a branch before review
 
