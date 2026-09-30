@@ -147,10 +147,7 @@ public extension RemoteSync {
     @discardableResult
     static func pull(at path: String, git: GitProcess = GitProcess()) async throws -> PullResult {
         let context = try await WorktreeContext.resolve(path: path, git: git)
-        let branch = try currentBranch(at: path, git: git)
-        guard let remote = try configValue("branch.\(branch).remote", at: path, git: git),
-              try configValue("branch.\(branch).merge", at: path, git: git) != nil
-        else { throw Refusal.noUpstream(branch: branch) }
+        let remote = try upstreamRemote(at: path, git: git)
 
         try JournalCheckpoint.checkpoint(operation: "pull", in: context, git: git)
         try await git.run(["fetch", remote], workingDirectory: path)
@@ -161,6 +158,15 @@ public extension RemoteSync {
 }
 
 extension RemoteSync {
+
+    /// The checked-out branch's upstream remote, or `Refusal.noUpstream`.
+    static func upstreamRemote(at path: String, git: GitProcess) throws -> String {
+        let branch = try currentBranch(at: path, git: git)
+        guard let remote = try configValue("branch.\(branch).remote", at: path, git: git),
+              try configValue("branch.\(branch).merge", at: path, git: git) != nil
+        else { throw Refusal.noUpstream(branch: branch) }
+        return remote
+    }
 
     /// `git merge --ff-only @{upstream}` through the synchronous
     /// `GitProcess.run`, which task cancellation does not reach — the
@@ -206,21 +212,7 @@ public extension RemoteSync {
     @discardableResult
     static func push(at path: String, git: GitProcess = GitProcess()) async throws -> PushResult {
         let context = try await WorktreeContext.resolve(path: path, git: git)
-        let branch = try currentBranch(at: path, git: git)
-
-        let result: PushResult
-        if let remote = try configValue("branch.\(branch).remote", at: path, git: git),
-           let merge = try configValue("branch.\(branch).merge", at: path, git: git) {
-            guard remote != "." else { throw Refusal.localUpstream(branch: branch) }
-            result = PushResult(remote: remote, remoteRef: merge, setUpstream: false)
-        } else {
-            let remote = try defaultRemote(at: path, git: git)
-            result = PushResult(remote: remote, remoteRef: "refs/heads/\(branch)", setUpstream: true)
-        }
-
-        var arguments = ["push"]
-        if result.setUpstream { arguments.append("--set-upstream") }
-        arguments += [result.remote, "refs/heads/\(branch):\(result.remoteRef)"]
+        let (result, arguments) = try pushPlan(at: path, git: git)
         try await git.run(arguments, workingDirectory: path)
 
         try JournalCheckpoint.checkpoint(operation: JournalUndo.pushOperation, in: context, git: git)
@@ -230,6 +222,24 @@ public extension RemoteSync {
 
 extension RemoteSync {
 
+    /// Where `push` goes and the `git push` argv that sends it there.
+    static func pushPlan(at path: String, git: GitProcess) throws -> (PushResult, [String]) {
+        let branch = try currentBranch(at: path, git: git)
+        let result: PushResult
+        if let remote = try configValue("branch.\(branch).remote", at: path, git: git),
+           let merge = try configValue("branch.\(branch).merge", at: path, git: git) {
+            guard remote != "." else { throw Refusal.localUpstream(branch: branch) }
+            result = PushResult(remote: remote, remoteRef: merge, setUpstream: false)
+        } else {
+            let remote = try defaultRemote(at: path, git: git)
+            result = PushResult(remote: remote, remoteRef: "refs/heads/\(branch)", setUpstream: true)
+        }
+        var arguments = ["push"]
+        if result.setUpstream { arguments.append("--set-upstream") }
+        arguments += [result.remote, "refs/heads/\(branch):\(result.remoteRef)"]
+        return (result, arguments)
+    }
+
     /// `origin` when it exists, else the only remote; a refusal otherwise.
     static func defaultRemote(at path: String, git: GitProcess) throws -> String {
         let names = try git.run(["remote"], workingDirectory: path).lines.filter { !$0.isEmpty }
@@ -237,5 +247,44 @@ extension RemoteSync {
         if names.count == 1 { return names[0] }
         if names.isEmpty { throw Refusal.noRemote }
         throw Refusal.ambiguousRemote(names)
+    }
+}
+
+// MARK: - Synchronous twins (guide §11 decision 37)
+
+/// The CLI's `fetch`, `pull` and `push` arms run inside `runEngineCommand`,
+/// which is synchronous, so each operation has a synchronous twin, as
+/// `Stash.list` has an async one. Same probes, same journal entries, same
+/// refusals; the only difference is that nothing here is cancellable — a
+/// CLI caller has no Cancel button, and interrupting the CLI does not stop
+/// the app's work.
+public extension RemoteSync {
+
+    /// Synchronous twin of `fetch(at:git:) async`.
+    static func fetch(at path: String, git: GitProcess = GitProcess()) throws {
+        let context = try WorktreeContext.resolve(path: path, git: git)
+        try JournalCheckpoint.checkpoint(operation: "fetch", in: context, git: git)
+        try git.run(["fetch", "--all"], workingDirectory: path)
+    }
+
+    /// Synchronous twin of `pull(at:git:) async`.
+    @discardableResult
+    static func pull(at path: String, git: GitProcess = GitProcess()) throws -> PullResult {
+        let context = try WorktreeContext.resolve(path: path, git: git)
+        let remote = try upstreamRemote(at: path, git: git)
+        try JournalCheckpoint.checkpoint(operation: "pull", in: context, git: git)
+        try git.run(["fetch", remote], workingDirectory: path)
+        return try fastForwardToUpstream(at: path, git: git)
+    }
+
+    /// Synchronous twin of `push(at:git:) async`: journaled after it
+    /// succeeds, never before.
+    @discardableResult
+    static func push(at path: String, git: GitProcess = GitProcess()) throws -> PushResult {
+        let context = try WorktreeContext.resolve(path: path, git: git)
+        let (result, arguments) = try pushPlan(at: path, git: git)
+        try git.run(arguments, workingDirectory: path)
+        try JournalCheckpoint.checkpoint(operation: JournalUndo.pushOperation, in: context, git: git)
+        return result
     }
 }

@@ -1,0 +1,86 @@
+{
+  "command" : "push",
+  "envelope" : {
+    "failure" : {
+      "error" : {
+        "code" : {
+          "enum" : [
+            "app_unavailable",
+            "blocked_on_conflicts",
+            "broker_unreachable",
+            "human_declined",
+            "ok",
+            "repository_error",
+            "request_failed",
+            "session_terminated",
+            "signing_failed",
+            "timed_out",
+            "usage"
+          ],
+          "type" : "string"
+        },
+        "hint" : {
+          "optional" : true,
+          "type" : "string"
+        },
+        "message" : {
+          "type" : "string"
+        }
+      },
+      "ok" : false,
+      "schemaVersion" : 1
+    },
+    "success" : {
+      "ok" : true,
+      "result" : {
+        "fields" : [
+          {
+            "description" : "The remote pushed to, e.g. \"origin\".",
+            "name" : "remote",
+            "optional" : false,
+            "type" : "string"
+          },
+          {
+            "description" : "The full ref updated on the remote, e.g. \"refs\/heads\/main\".",
+            "name" : "remoteRef",
+            "optional" : false,
+            "type" : "string"
+          },
+          {
+            "description" : "True when this push also set the branch's upstream (the branch had none).",
+            "name" : "setUpstream",
+            "optional" : false,
+            "type" : "bool"
+          }
+        ],
+        "optional" : true
+      },
+      "schemaVersion" : 1
+    }
+  },
+  "exitCodes" : [
+    {
+      "code" : 0,
+      "meaning" : "The push completed; the payload names the remote, the ref updated there, and whether the upstream was set. Its journal entry is written after the push, and undo refuses to cross it."
+    },
+    {
+      "code" : 1,
+      "meaning" : "Invalid arguments — push takes none."
+    },
+    {
+      "code" : 4,
+      "meaning" : "The request failed for a reason the other codes do not name."
+    },
+    {
+      "code" : 6,
+      "meaning" : "Not a repository, a detached HEAD, no remote, several remotes and none named origin, an upstream in this repository, or git push failed — rejected as non-fast-forward, a hook refused, or a missing credential. Nothing was journaled."
+    }
+  ],
+  "flags" : [
+
+  ],
+  "schemaName" : "push",
+  "schemaVersion" : 1,
+  "summary" : "Push the current branch to its upstream, or to the same name on origin (setting the upstream). Never forces.",
+  "usage" : "push"
+}

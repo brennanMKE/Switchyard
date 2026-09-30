@@ -644,4 +644,55 @@ Usage: `switchyard discard (<path>... | --hunk <id>...)`
 | 4 | The request failed for a reason the other codes do not name. |
 | 6 | Not a repository; a path that is conflicted, intent-to-add, a nested repository, a submodule, or has no unstaged change; or a hunk id that is unknown or stale. Nothing was discarded. |
 
+### `switchyard fetch`
+
+Fetch every remote (git fetch --all). Never prompts for credentials.
+
+Usage: `switchyard fetch`
+
+| Exit | Meaning |
+|---|---|
+| 0 | The fetch completed; the payload lists the remotes fetched. One journal entry, operation fetch, written first: undo puts the remote-tracking refs back. |
+| 1 | Invalid arguments — fetch takes none. |
+| 4 | The request failed for a reason the other codes do not name. |
+| 6 | Not a repository, or git fetch failed — an unreachable remote or a missing credential (terminal prompts are disabled). |
+
+### `switchyard pull`
+
+Fetch the current branch's upstream and fast-forward to it. Never merges or rebases.
+
+Usage: `switchyard pull`
+
+| Exit | Meaning |
+|---|---|
+| 0 | The branch is up to date or was fast-forwarded; the payload says which. One journal entry, operation pull: undo puts the branch, index, worktree and remote-tracking refs back. |
+| 1 | Invalid arguments — pull takes none. |
+| 4 | The request failed for a reason the other codes do not name. |
+| 6 | Not a repository, a detached HEAD, a branch with no upstream, a branch that has diverged from its upstream (not possible to fast-forward), or a failed fetch. |
+
+| Result field | Type | Meaning |
+|---|---|---|
+| `from` | string, optional | The branch's full oid before the fast-forward. Absent when upToDate. |
+| `outcome` | string (fastForwarded, upToDate) | Whether the branch already contained its upstream or moved forward to it. |
+| `to` | string, optional | The branch's full oid after the fast-forward. Absent when upToDate. |
+
+### `switchyard push`
+
+Push the current branch to its upstream, or to the same name on origin (setting the upstream). Never forces.
+
+Usage: `switchyard push`
+
+| Exit | Meaning |
+|---|---|
+| 0 | The push completed; the payload names the remote, the ref updated there, and whether the upstream was set. Its journal entry is written after the push, and undo refuses to cross it. |
+| 1 | Invalid arguments — push takes none. |
+| 4 | The request failed for a reason the other codes do not name. |
+| 6 | Not a repository, a detached HEAD, no remote, several remotes and none named origin, an upstream in this repository, or git push failed — rejected as non-fast-forward, a hook refused, or a missing credential. Nothing was journaled. |
+
+| Result field | Type | Meaning |
+|---|---|---|
+| `remote` | string | The remote pushed to, e.g. "origin". |
+| `remoteRef` | string | The full ref updated on the remote, e.g. "refs/heads/main". |
+| `setUpstream` | bool | True when this push also set the branch's upstream (the branch had none). |
+
 <!-- END GENERATED -->
