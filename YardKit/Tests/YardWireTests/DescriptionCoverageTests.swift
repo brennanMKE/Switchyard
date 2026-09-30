@@ -219,6 +219,9 @@ struct DescriptionCoverageTests {
                 Checkout.Refusal.localChangesWouldBeOverwritten(
                     target: "probe-branch", paths: ["probe-a.txt"]),
                 .carries(["probe-branch", "probe-a.txt", "nothing was touched"])),
+            Row("FileHistory.swift", "FileHistory.Failure",
+                FileHistory.Failure.malformedRecord("probe history record"),
+                .carries(["probe history record"])),
             Row("Rewrite.swift", "RewriteError",
                 RewriteError.unknownCommit("probe-revision"),
                 .carries(["probe-revision", "nothing was touched"])),
