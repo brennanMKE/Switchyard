@@ -51,6 +51,11 @@ public nonisolated enum JournalMenuTitles {
         "stash-apply": "Apply Stash",
         "stash-pop": "Pop Stash",
         "stash-drop": "Drop Stash",
+        // #0509: switching and checking out (guide §11 decision 38).
+        // "tag-delete" above was mapped ahead of Tag.delete.
+        "switch": "Switch Branch",
+        "switch-track": "Check Out Branch",
+        "switch-detach": "Check Out Commit",
     ]
 
     /// "Undo <title>" for a mapped operation, plain "Undo" for anything
