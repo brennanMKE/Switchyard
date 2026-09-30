@@ -12,3 +12,15 @@ import YardGit
 public func loadCommitTemplate(at path: String) async throws -> String? {
     try CommitTemplate.read(at: path)
 }
+
+/// #0566: who the Co-Author menu offers.
+@concurrent
+public func loadCoAuthors(at path: String) async throws -> [CoAuthors.Person] {
+    try CoAuthors.recent(at: path)
+}
+
+/// #0566: `message` with `trailer` added where git puts it.
+@concurrent
+public func addingTrailer(_ trailer: String, to message: String, at path: String) async throws -> String {
+    try MessageTrailers.adding(trailer, to: message, at: path)
+}
