@@ -117,8 +117,11 @@ public func performStashAction(_ action: StashAction, at path: String) async thr
     }
 }
 
-/// What one stash holds, for the stash detail pane (`stashDiff`).
+/// What one stash holds, for the stash detail pane (`stashDiff`). #0541:
+/// drawn with `options` (guide §11 decision 42).
 @concurrent
-public func loadStashDiff(at path: String, oid: String) async throws -> [FileDiff] {
-    try await stashDiff(at: path, oid: oid)
+public func loadStashDiff(
+    at path: String, oid: String, options: DiffOptions = .standard
+) async throws -> [FileDiff] {
+    try await stashDiff(at: path, oid: oid, options: options)
 }
