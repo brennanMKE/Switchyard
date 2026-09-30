@@ -618,6 +618,7 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-09-30 | #0542 | round 1, Sonnet implementation, 372 s wall, passed pending review (S, measured) | 103,506 | — |
 | 2026-09-30 | #0543 | planning (Opus): CLI verbs for switch/tag delete/file-history/blame/fetch remote/remote, decision 43, #0544-#0550, 1340 s wall (measured) | 277,809 | — |
 | 2026-09-30 | #0544 | round 1, Sonnet implementation, 957 s wall, passed pending review (S, measured) | 105,969 | — |
+| 2026-09-30 | #0545 | round 1, Sonnet implementation, 874 s wall, passed pending review (S, measured) | 105,570 | — |
 | | | **Total measured** (tokens include 2026-09-22/23 rows; $ not updated for them) | **47,386,796** | **$437.24** |
 
 ## What this total does and does not cover
