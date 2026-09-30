@@ -394,11 +394,15 @@ public nonisolated enum WorkingChange: Equatable, Sendable {
 
 /// Loads both hunk listings for the Changes view. `@concurrent` for the
 /// reason every loader in `RepositoryLoader.swift` carries it; the async
-/// `listHunks` releases the pool thread while git runs.
+/// `listHunks` releases the pool thread while git runs. #0539: drawn with
+/// `options` (guide §11 decision 42); only `.standard` listings can be
+/// staged from.
 @concurrent
-public func loadWorkingDiffs(at path: String) async throws -> WorkingDiffs {
-    let unstaged = try await listHunks(at: path, area: .unstaged)
-    let staged = try await listHunks(at: path, area: .staged)
+public func loadWorkingDiffs(
+    at path: String, options: DiffOptions = .standard
+) async throws -> WorkingDiffs {
+    let unstaged = try await listHunks(at: path, area: .unstaged, options: options)
+    let staged = try await listHunks(at: path, area: .staged, options: options)
     return WorkingDiffs(unstaged: unstaged, staged: staged)
 }
 

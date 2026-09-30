@@ -52,6 +52,20 @@ public struct WorkingChangesView: View {
     @State private var lineSelection = DiffLineSelection()
     /// #0494: whether the Stash Changes sheet is up.
     @State private var showingStashSheet = false
+    /// #0539: Ignore Whitespace and Context (guide §11 decision 42). Not
+    /// persisted: anything but the standard options turns hunk and line
+    /// actions off, and that must not outlive the look it was for.
+    @State private var diffOptions = DiffViewOptions()
+    /// #0539: the options `diffs` was drawn with. Hunk and line actions wait
+    /// for a standard listing, not only standard options: switching back
+    /// shows the filtered listing until the reload lands.
+    @State private var diffsDrawnWith = DiffViewOptions()
+
+    /// What the diffs are reloaded for: a refresh, or new options.
+    private struct DiffLoad: Hashable {
+        let revision: Int
+        let options: DiffViewOptions
+    }
 
     public init(
         changes: WorkingChanges, repositoryPath: String, revision: Int, isBusy: Bool,
@@ -82,13 +96,16 @@ public struct WorkingChangesView: View {
                         .frame(minHeight: 120, maxHeight: .infinity)
                         // #0480: a selection belongs to the file it was made in.
                         .onChange(of: selection) { lineSelection = DiffLineSelection() }
+                        // #0539: and to the listing it was made in.
+                        .onChange(of: diffOptions) { lineSelection = DiffLineSelection() }
                 }
             }
             Divider()
             commitArea
         }
+        // #0539: the diffs reload for a refresh and for new options.
+        .task(id: DiffLoad(revision: revision, options: diffOptions)) { await reloadDiffs() }
         .task(id: revision) {
-            await reloadDiffs()
             // #0466: HEAD may have moved (a commit, an amend, an undo, a
             // push), so the checkbox's message and refusal are re-read too.
             amendTarget = try? await loadAmendTarget(at: repositoryPath)
@@ -247,37 +264,58 @@ public struct WorkingChangesView: View {
             .first { $0.path == selection.path }
     }
 
+    /// #0539: the options bar over the selected file's diff.
     @ViewBuilder
     private var diffPane: some View {
+        if selectedRow != nil {
+            VStack(spacing: 0) {
+                DiffOptionsBar(options: $diffOptions, stagingNote: true)
+                Divider()
+                diffBody
+            }
+        } else {
+            diffBody
+        }
+    }
+
+    @ViewBuilder
+    private var diffBody: some View {
         if let selection, let row = selectedRow {
             if let diffError {
                 placeholder(diffError)
             } else if let diffs {
                 if let file = diffs.file(row.path, staged: selection.staged) {
+                    // #0539: hunk and line actions act on the standard
+                    // listing only (guide §11 decision 42).
+                    let actsOnHunks = diffOptions.isStandard && diffsDrawnWith.isStandard
                     ScrollView {
                         FileDiffView(
                             file: file,
                             hunkAction: FileDiffView.HunkAction(
                                 title: selection.staged ? "Unstage Hunk" : "Stage Hunk",
                                 linesTitle: selection.staged ? "Unstage Lines" : "Stage Lines",
-                                isEnabled: !isBusy
+                                isEnabled: !isBusy && actsOnHunks
                             ) { hunk, lines in
                                 perform(.stageOrUnstage(hunk, lines: lines, staged: selection.staged))
                             },
                             // #0472: Discard Hunk… on the unstaged side only;
                             // #0480: Discard Lines… while lines are selected.
                             discardAction: selection.staged ? nil : FileDiffView.HunkAction(
-                                title: "Discard Hunk…", linesTitle: "Discard Lines…", isEnabled: !isBusy
+                                title: "Discard Hunk…", linesTitle: "Discard Lines…",
+                                isEnabled: !isBusy && actsOnHunks
                             ) { hunk, lines in
                                 pendingDiscard = lines.isEmpty
                                     ? DiscardConfirmation(hunk: hunk) : DiscardConfirmation(lines: lines, of: hunk)
                             },
-                            lineSelection: $lineSelection)
+                            lineSelection: actsOnHunks ? $lineSelection : nil)
                         .padding()
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 } else if row.state == .untracked {
                     placeholder("\(row.path) is untracked — stage it to add it to the next commit")
+                } else if diffsDrawnWith.ignoresWhitespace {
+                    // #0539: `-w` leaves out a file whose every change is whitespace.
+                    placeholder(DiffViewOptions.whitespaceOnlyNote(for: row.path))
                 } else {
                     placeholder("No diff to show for \(row.path)")
                 }
@@ -299,9 +337,14 @@ public struct WorkingChangesView: View {
     }
 
     private func reloadDiffs() async {
+        let options = diffOptions
         do {
-            diffs = try await loadWorkingDiffs(at: repositoryPath)
+            diffs = try await loadWorkingDiffs(at: repositoryPath, options: options.diffOptions)
+            diffsDrawnWith = options
             diffError = nil
+        } catch is CancellationError {
+            // #0539: new options or a refresh replaced this load; the
+            // next one fills the pane.
         } catch {
             diffError = String(describing: error)
         }
