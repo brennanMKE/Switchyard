@@ -2022,6 +2022,61 @@ a feature at any milestone on the grounds that GitUp had it.
       `FileHistory.run` and `blameFile`, left to a later issue with the grammar chosen (#0513
       question 4).
 
+40. **History search reaches authors, changed paths and diff content: a Commits | Paths | Content
+    scope in the History pane's match bar; Paths and Content ask git about the loaded commits
+    only.** Decided 2026-09-29 in the planning pass for umbrella **#0521**, with high confidence;
+    prototyped end to end in a planning worktree (engine, view, VM spike). #0521 carries the
+    questions for Brennan.
+
+    - **Why this gap, over the next two.** After #0402 the one filter field finds a commit by
+      its message, a ref name or an oid prefix — **not by who wrote it, which files it touched,
+      or what text it added or removed**, the three questions a daily user asks of history most
+      ("when did this folder change", "who added this string"). GitUp's search covers them, and
+      nothing in the app answers the last two at all: file history (decision 39) is one file,
+      `--follow`, never a folder or a pattern. It is also the cheapest large gap: one engine
+      function, one view edit, no new window, read-only. **Remote management** (add, rename,
+      remove a remote; edit its URL) was the runner-up — needed once per clone, not daily, and
+      the terminal does it in one line. **Whitespace and word-diff options** were third: real,
+      but a refinement of a view that works, where search is a question the app cannot answer.
+      Cherry-pick, revert, merge, rebase, tag and branch creation already ship on the commit
+      menu (#0359); incoming and outgoing commits already show as the header's ahead/behind
+      count and remote-only history's dashed lanes (#0358, #0368).
+    - **Author joins the Commits scope's in-memory match** (`HistoryFilter`), case- and
+      diacritic-insensitively like the message. No git call: every loaded `CommitLogEntry`
+      already carries `%an`.
+    - **One field, three scopes, chosen in the match bar** — the bar that appears when the field
+      has text (#0402), so the choice sits beside the count it changes. Not a query syntax
+      (`author:`, `path:`): nothing in the app teaches one, and a word typed as a path must not
+      silently search messages. Not a union of all three: typing "filter" would light up every
+      commit that touched a file named for it along with every message saying it, and the count
+      would stop meaning anything. The scope is per window and resets to Commits; the sidebar
+      keeps narrowing refs by the same text whatever the scope (#0378).
+    - **Paths** is `git log -- ':(icase)*<text>*'`: a commit matches when it changed a file whose
+      path contains the text, in a directory name or a file name — the default pathspec's `*`
+      matches `/` (measured). `*`, `?`, `[`, `]` and `\` are backslash-escaped so they match
+      themselves (unescaped, `*[ird]*` matched every commit of the measuring repository;
+      escaped, the one touching `we[ird].txt`). **Content** is `git log -M -i -S<text>`: a
+      commit matches when it changed how often the text occurs — added or removed it — case-
+      insensitively. `-M` pins rename detection: with `diff.renames=false` a renaming commit
+      matched every line of the renamed file (measured on #0520's fixture: "charlie" matched
+      the rename as well as the commit that added it). Both use `--no-merges`: a merge's
+      changes are its branches' commits, which match on their own — without it a merge whose
+      parents both touched matching paths is listed too (measured).
+    - **Only the loaded commits are searched**, passed on stdin to `git log --no-walk=unsorted
+      --stdin`. History holds the newest 5,000 (#0405), a match can only be shown if it is
+      loaded, and the bound makes the cost the window's rather than the repository's. Measured
+      on git/git (85,179 commits reachable; git 2.54.0, host): over the 5,000 loaded, a path
+      search takes **0.28–0.29 s** and a content search **0.41 s**; the same searches walking
+      everything take **2.0 s** and **7.8 s**. An empty stdin lists nothing (not `HEAD`), and
+      the engine does not run git for no candidates or a blank query anyway.
+    - **Off the main actor, debounced, cancellable.** The view runs the search in a
+      `.task(id:)` keyed on the text, the scope, the repository and the loaded history; each
+      keystroke restarts it, a 250 ms sleep lets typing settle, and a cancelled task terminates
+      its `git` (`GitProcess`'s async path). The count reads "Searching…" while git runs;
+      matches dim and step (⌘G / ⇧⌘G) exactly as #0402's do.
+    - **Read-only.** No journal entry, no ref written. **No CLI verb** in this pass —
+      `switchyard log` refuses `-`-prefixed tokens (decision 39's last point applies unchanged).
+
 ### Still open
 
 **Is M1's criterion 5 closable as written, and should it be restated?** Raised by the twelfth M1
