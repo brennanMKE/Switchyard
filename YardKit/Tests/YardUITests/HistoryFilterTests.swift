@@ -47,3 +47,13 @@ func hexQueryMatchesOidPrefix() {
 func nonMatchingHistoryQueryDoesNotMatch() {
     #expect(!HistoryFilter.matches(entry("Fix the build"), chips: [], query: "clipboard"))
 }
+
+@Test("a query matches the author, case- and diacritic-insensitively")
+func queryMatchesAuthor() {
+    let e = CommitLogEntry(oid: "abcdef0123456789abcdef0123456789abcdef01", parents: [],
+                           author: "Zoë Fixture", refs: "", signatureStatus: .noSig,
+                           message: "unrelated", trailers: [])
+    #expect(HistoryFilter.matches(e, chips: [], query: "zoe"))
+    #expect(HistoryFilter.matches(e, chips: [], query: "FIXTURE"))
+    #expect(!HistoryFilter.matches(e, chips: [], query: "ada"))
+}
