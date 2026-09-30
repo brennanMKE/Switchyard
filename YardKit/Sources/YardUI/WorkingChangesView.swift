@@ -60,6 +60,8 @@ public struct WorkingChangesView: View {
     /// for a standard listing, not only standard options: switching back
     /// shows the filtered listing until the reload lands.
     @State private var diffsDrawnWith = DiffViewOptions()
+    /// #0566: the people the Co-Author menu offers; empty until loaded.
+    @State private var coAuthors: [CoAuthors.Person] = []
 
     /// What the diffs are reloaded for: a refresh, or new options.
     private struct DiffLoad: Hashable {
@@ -109,6 +111,8 @@ public struct WorkingChangesView: View {
             // #0466: HEAD may have moved (a commit, an amend, an undo, a
             // push), so the checkbox's message and refusal are re-read too.
             amendTarget = try? await loadAmendTarget(at: repositoryPath)
+            // #0566: a commit may have brought a new author.
+            coAuthors = (try? await loadCoAuthors(at: repositoryPath)) ?? []
         }
         // #0471: every discard asks first (guide §11 decision 34). Return
         // does nothing: the destructive button has no default-action
@@ -362,6 +366,7 @@ public struct WorkingChangesView: View {
             // pushed "Amend" onto two lines in a narrow Detail pane
             // (measured in the VM).
             HStack {
+                coAuthorMenu
                 Spacer()
                 Button("Stash Changes…") { showingStashSheet = true }
                     .buttonStyle(.borderless)
@@ -416,6 +421,36 @@ public struct WorkingChangesView: View {
             }
         }
         .padding(8)
+    }
+
+    /// #0566: Co-Author, which adds `Co-authored-by: Name <email>` to the
+    /// message (guide §11 decision 45).
+    private var coAuthorMenu: some View {
+        Menu("Co-Author") {
+            ForEach(coAuthors, id: \.self) { person in
+                Button(person.identity) { addCoAuthor(person) }
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .controlSize(.small)
+        .fixedSize()
+        .disabled(coAuthors.isEmpty || isBusy)
+        .help(coAuthors.isEmpty
+            ? "No one else has committed here recently"
+            : "Credit someone with a Co-authored-by trailer")
+        .accessibilityIdentifier("co-author-menu")
+    }
+
+    /// #0566: adds `person`'s trailer where git puts it. The editor is only
+    /// changed if it still holds what was sent: a keystroke typed while git
+    /// ran is never overwritten.
+    private func addCoAuthor(_ person: CoAuthors.Person) {
+        let sent = draft.message
+        Task {
+            guard let updated = try? await addingTrailer(person.trailer, to: sent, at: repositoryPath),
+                  draft.message == sent else { return }
+            draft.message = updated
+        }
     }
 
     /// "N files staged", prefixed while amending with the commit it replaces.
