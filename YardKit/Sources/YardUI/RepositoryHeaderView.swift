@@ -65,9 +65,12 @@ struct RepositoryHeaderView: View {
             HStack(spacing: 8) {
                 Text(TrackingSummary.text(for: whereAmI))
                     .font(.headline)
-                Text(whereAmI.headOID)
-                    .font(.system(.body, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                // #0574: detached, the tracking line already ends with it.
+                if let oid = TrackingSummary.separateOID(for: whereAmI) {
+                    Text(oid)
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
             }
             if let message = TrackingSummary.operationInProgress(for: whereAmI) {
                 HStack(spacing: 12) {
