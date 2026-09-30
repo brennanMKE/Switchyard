@@ -145,6 +145,14 @@ public struct WorkingChangesView: View {
                 },
                 onCancel: { showingStashSheet = false })
         }
+        // #0572: a Stage or Unstage that moved the selected file keeps it
+        // selected, on the side it moved to, so its diff stays on screen.
+        .onChange(of: changes) {
+            guard let selection,
+                  let staged = changes.sideShowing(path: selection.path, staged: selection.staged),
+                  staged != selection.staged else { return }
+            self.selection = FileSelection(path: selection.path, staged: staged)
+        }
     }
 
     // MARK: - #0443: the file lists

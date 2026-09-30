@@ -366,3 +366,21 @@ func performStagesUnstagesAndDiscardsLines(format: FixtureRepository.RefFormat) 
     #expect(try String(contentsOf: repo.url.appendingPathComponent("t.txt"), encoding: .utf8)
         == "a\nb\nC\nd\ne\n")
 }
+
+@Test func aSelectionFollowsItsFileToTheOtherSide() {
+    let changes = WorkingChanges(status: WorktreeStatus(entries: [
+        entry("both.txt", .modified, .modified),
+        entry("staged.txt", .modified, .unmodified),
+        entry("edited.txt", .unmodified, .modified),
+    ]))
+    // Still on its own side: stays.
+    #expect(changes.sideShowing(path: "both.txt", staged: false) == false)
+    #expect(changes.sideShowing(path: "both.txt", staged: true) == true)
+    #expect(changes.sideShowing(path: "edited.txt", staged: false) == false)
+    // Staged whole: selected as unstaged, now only staged.
+    #expect(changes.sideShowing(path: "staged.txt", staged: false) == true)
+    // Unstaged whole: selected as staged, now only unstaged.
+    #expect(changes.sideShowing(path: "edited.txt", staged: true) == false)
+    // Gone from both lists.
+    #expect(changes.sideShowing(path: "committed.txt", staged: true) == nil)
+}
