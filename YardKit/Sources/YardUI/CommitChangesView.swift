@@ -54,6 +54,18 @@ public struct CommitChangesView: View {
     @State private var files: [FileDiff]?
     @State private var loadError: String?
     @State private var selectedPath: String?
+    /// #0540: Ignore Whitespace and Context (guide §11 decision 42), for
+    /// this window; not persisted.
+    @State private var options = DiffViewOptions()
+    /// #0540: the diff drawn with `options`; `nil` for the standard options
+    /// (`files` is drawn) and while it loads.
+    @State private var shownFiles: [FileDiff]?
+
+    /// What `shownFiles` is loaded for.
+    private struct ShownLoad: Hashable {
+        let target: CommitChangesTarget
+        let options: DiffViewOptions
+    }
 
     public init(target: CommitChangesTarget) {
         self.target = target
@@ -69,6 +81,7 @@ public struct CommitChangesView: View {
         .frame(minWidth: 820, minHeight: 520)
         .navigationTitle(target.title)
         .task(id: target) { await load() }
+        .task(id: ShownLoad(target: target, options: options)) { await loadShown() }
     }
 
     @ViewBuilder
@@ -92,7 +105,16 @@ public struct CommitChangesView: View {
         }
     }
 
+    /// #0540: the options bar over the diffs.
     private var diffScroll: some View {
+        VStack(spacing: 0) {
+            DiffOptionsBar(options: $options)
+            Divider()
+            diffList
+        }
+    }
+
+    private var diffList: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
@@ -101,8 +123,15 @@ public struct CommitChangesView: View {
                             .foregroundStyle(.secondary)
                     }
                     ForEach(files ?? [], id: \.path) { file in
-                        FileDiffView(file: file)
-                            .id(file.path)
+                        // #0540: a file the options hid is a note, not a gap.
+                        Group {
+                            if let shown = DiffViewOptions.file(file, in: shownFiles) {
+                                FileDiffView(file: shown)
+                            } else {
+                                WhitespaceOnlyFileView(path: file.path)
+                            }
+                        }
+                        .id(file.path)
                     }
                 }
                 .padding()
@@ -115,6 +144,25 @@ public struct CommitChangesView: View {
             }
         }
         .background(.background)
+    }
+
+    /// #0540: the diff drawn with `options`. The standard options draw
+    /// `files` and load nothing.
+    private func loadShown() async {
+        guard !options.isStandard else {
+            shownFiles = nil
+            return
+        }
+        do {
+            shownFiles = try await loadCommitDiff(
+                at: target.repositoryPath, revision: target.oid, options: options.diffOptions)
+        } catch is CancellationError {
+            // New options replaced this load; the next one fills the pane.
+        } catch {
+            // The standard diff is still on screen; the load that fails
+            // here is the same `commitDiff` with one or two flags more.
+            shownFiles = nil
+        }
     }
 
     private func load() async {
