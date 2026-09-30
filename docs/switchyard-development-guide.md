@@ -2194,6 +2194,65 @@ a feature at any milestone on the grounds that GitUp had it.
       so every existing caller and the config-immunity sweep see the same argument vector. No CLI
       flag in this pass.
 
+43. **The CLI gains `switch`, `tag --delete`, `file-history`, `blame`, `fetch <remote>` and `remote
+    list|add|set-url|rename|remove|prune` — thin arms over the engine decisions 38, 39 and 41 built,
+    in decision 37's shape.** Decided 2026-09-30 in the planning pass for umbrella **#0543**, with
+    high confidence; every bullet is cheap to reverse, and #0543 carries the questions for Brennan.
+    Prototyped end to end in a planning worktree: every arm compiled, the full suite passed with the
+    whole set applied, and each named mutation turned its suite red.
+
+    - **Grammar, git's spelling.** `switch (<branch> | --track <remote-branch> | --detach <commit>)`
+      — `git switch`'s own verb and flags, not `checkout`; `--track origin/x` makes `x`, as git
+      does. `tag --delete <name>`: git's long flag, because **`tag delete v1` already means "create
+      a tag named `delete` at `v1`"** (#0363's grammar) and must keep meaning it; `--delete` takes
+      exactly one name and no create flag. `file-history <path> [--revision <rev>]` and `blame
+      <path> [--revision <rev>] [--lines <start>,<end>]` — a new verb rather than `log --follow`,
+      because `log`'s payload is `CommitLog` entries and a file's history carries a per-commit
+      status and previous path: one command, one payload shape. `fetch [<remote>]` — the existing
+      verb with one optional positional. `remote (list | add <name> <url> | set-url <name> <url> |
+      rename <old> <new> | remove <name> | prune <name>)` — a subcommand required, as `stash`;
+      git's own subcommand names, `list` for git's bare `git remote`. No `remote` subcommand takes a
+      flag. `--` ends the flags before a path that starts with `-`; a `--revision` value that starts
+      with `-` is refused (git would read it as an option).
+    - **Paths are repository-relative and literal**, as decision 37's. `file-history` runs `git
+      --literal-pathspecs log --follow`: without it `*.txt` followed every `.txt` file (measured,
+      git 2.54.0), and the app's inspector gains the same guarantee. `--lines` is two bare positive
+      integers, start ≤ end; git's other `-L` forms are not accepted.
+    - **Payloads.** `switch` `{head, branch?, operation}` (`switch`, `switch-track`,
+      `switch-detach` — the operation `undo` then names); `tag --delete` the existing `Tag.Result`
+      `{ref, oid, annotated}` for the ref it deleted; `file-history` `{path, revision,
+      commits:[{oid, author, authorTime, subject, status, path, previousPath?}]}`; `blame` `{path,
+      revision?, lines:[BlameLine]}`; `fetch <remote>` the existing `{remotes:[name]}`; `remote
+      list` `{remotes:[{name, fetchURL?, pushURLs}]}`, `add`/`set-url` `{remote, undoable}`,
+      `rename` `{name, previousName, trackingBranches, upstreamOf, undoable}`, `remove` `{removed,
+      trackingBranches, upstreamOf, undoable}`, `prune` `{remote, pruned, undoable}`.
+    - **Decision 41's journaling is in the payload, not only in the docs.** Every `remote` mutation
+      carries `undoable`: `false` for `add` and `set-url` (configuration, never journaled) and for
+      `rename` and `remove` (a marker entry `undo` refuses to cross, exit 6 — measured through the
+      CLI: after `remote remove origin`, `undo` exits 6 naming `remote-remove` and no
+      `refs/remotes/origin/*` comes back); `true` for `prune`, journaled first so `undo` restores
+      the pruned branches (measured). `undo`'s exit-6 text names the remote rename or removal
+      beside the push. `switch` and `tag --delete` are one journal entry each, which `undo`
+      reverses (measured).
+    - **Exit codes from the error**, decision 37's `engineFailure`: a `Checkout.Refusal`, an
+      unknown tag, a `RemoteConfig.Refusal` and every `git` failure are 6. **`tag --delete` uses it
+      too, although `tag`'s create path still flattens to 4** (#0497 question 4) — a new path
+      starts with the rule the new verbs follow. A switch refused for local changes is exit 6 with
+      the files in the message and nothing journaled; there is no `--merge`, no discard, no
+      automatic stash (decision 38's rule; an agent runs `stash push` itself).
+    - **Synchronous twins** for `FileHistory.run`, `RemoteSync.fetch(remote:)` and
+      `RemoteSync.prune(remote:)`, for decision 37's reason: `runEngineCommand` is synchronous.
+      Same arguments, same checkpoints, same refusals.
+    - **Routing unchanged**: four new `CommandRegistry` names (`switch`, `file-history`, `blame`,
+      `remote`; 40 → 44), each `.remote` over XPC to the app's `runEngineCommand`. `tag` and `fetch`
+      keep their entries with new usage lines. Tests run each arm in-process against fixtures,
+      remotes as bare repositories in a temporary directory; URLs added by `remote add` are
+      `https://example.invalid/…`, which nothing contacts.
+    - **Out of scope, filed as questions in #0543:** `switch --create`, choosing the local name for
+      `--track`, `switch -` (the previous branch), deleting a remote branch, a push URL on
+      `set-url`, history search over the CLI (decision 40's scopes — `log` would need flags), and
+      `--follow` on `log` itself.
+
 ### Still open
 
 **Is M1's criterion 5 closable as written, and should it be restated?** Raised by the twelfth M1
