@@ -200,6 +200,11 @@ public nonisolated struct CommitDraft: Equatable, Sendable {
         isAmending = amending
     }
 
+    /// #0564: what `CommitDraftStore` keeps for the repository: the draft
+    /// the user is writing. While amending that is the draft set aside —
+    /// the editor holds `HEAD`'s message, which is read again next time.
+    public var savedText: String { isAmending ? setAside : message }
+
     /// What the button sends.
     public var change: WorkingChange {
         isAmending ? .amend(message: message) : .commit(message: message)

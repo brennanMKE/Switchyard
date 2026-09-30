@@ -222,6 +222,10 @@ public struct ContentView: View {
     /// a commit and coming back.
     @State private var commitDraft = CommitDraft()
 
+    /// #0564: where `commitDraft` is kept between windows (guide §11
+    /// decision 45).
+    private let draftStore = CommitDraftStore()
+
     /// #0393: the journal listing for the open repository — the chain state
     /// the Edit menu's Undo and Redo titles and enabled flags read. `nil`
     /// while loading or with no repository open, which leaves both items
@@ -424,6 +428,8 @@ public struct ContentView: View {
             RepositoryOpener.openDropped(urls: urls) != nil
         } isTargeted: { _ in }
         .task(id: repositoryPath) {
+            // #0564: the draft this repository was left with.
+            commitDraft = CommitDraft(message: repositoryPath.flatMap { draftStore.load(for: $0) } ?? "")
             await reload()
         }
         // #0416: the entry points that are not views (app delegate, XPC,
@@ -824,7 +830,7 @@ public struct ContentView: View {
                     revision: workingTreeRevision,
                     isBusy: isBusy || journalRunning,
                     whereAmI: summary.whereAmI,
-                    draft: $commitDraft,
+                    draft: savedDraft,
                     perform: { runWorkingChange($0) },
                     onInspect: { fileInspector = $0 })
             }
@@ -1260,6 +1266,17 @@ public struct ContentView: View {
 
     // MARK: - #0443: the Changes view
 
+    /// #0564: `commitDraft`, saved for the repository on every edit — the
+    /// one place the Changes view writes it.
+    private var savedDraft: Binding<CommitDraft> {
+        Binding(
+            get: { commitDraft },
+            set: { draft in
+                commitDraft = draft
+                if let repositoryPath { draftStore.save(draft.savedText, for: repositoryPath) }
+            })
+    }
+
     /// #0443: runs one Changes-view mutation — each is one journal
     /// checkpoint in the engine, so Edit ▸ Undo reverts it — then refreshes
     /// in place without touching the selection, which is `nil` while the
@@ -1275,7 +1292,9 @@ public struct ContentView: View {
             do {
                 try await performWorkingChange(change, at: repositoryPath)
                 switch change {
-                case .commit, .amend: commitDraft = CommitDraft()
+                case .commit, .amend:
+                    commitDraft = CommitDraft()
+                    draftStore.save("", for: repositoryPath)
                 default: break
                 }
             } catch {
