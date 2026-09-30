@@ -1,0 +1,78 @@
+{
+  "command" : "blame",
+  "envelope" : {
+    "failure" : {
+      "error" : {
+        "code" : {
+          "enum" : [
+            "app_unavailable",
+            "blocked_on_conflicts",
+            "broker_unreachable",
+            "human_declined",
+            "ok",
+            "repository_error",
+            "request_failed",
+            "session_terminated",
+            "signing_failed",
+            "timed_out",
+            "usage"
+          ],
+          "type" : "string"
+        },
+        "hint" : {
+          "optional" : true,
+          "type" : "string"
+        },
+        "message" : {
+          "type" : "string"
+        }
+      },
+      "ok" : false,
+      "schemaVersion" : 1
+    },
+    "success" : {
+      "ok" : true,
+      "result" : {
+        "optional" : true,
+        "schema" : "blame"
+      },
+      "schemaVersion" : 1
+    }
+  },
+  "exitCodes" : [
+    {
+      "code" : 0,
+      "meaning" : "The payload carries the path, the revision (absent for the working tree) and lines:[{oid, finalLine, originalLine, originalPath, author, authorEmail, authorTime, authorTimeZone, summary, isBoundary, content}]."
+    },
+    {
+      "code" : 1,
+      "meaning" : "Invalid arguments — not exactly one <path>, an unknown or duplicated flag, a flag value that is missing or starts with '-', or --lines that is not two positive integers <start>,<end> with start ≤ end."
+    },
+    {
+      "code" : 4,
+      "meaning" : "The request failed for a reason the other codes do not name."
+    },
+    {
+      "code" : 6,
+      "meaning" : "Not a repository, or git refused the blame — no such file (at that revision), an unknown revision, or a --lines range past the end of the file."
+    }
+  ],
+  "flags" : [
+    {
+      "argument" : "range",
+      "help" : "Only the lines <start>,<end> — 1-based, inclusive, e.g. 10,20. Bounds the work as well as the output.",
+      "long" : "lines",
+      "short" : null
+    },
+    {
+      "argument" : "rev",
+      "help" : "Blame the file as of <rev>. Without it, the working tree's file, with uncommitted lines given the all-zero oid.",
+      "long" : "revision",
+      "short" : null
+    }
+  ],
+  "schemaName" : "blame",
+  "schemaVersion" : 1,
+  "summary" : "Show which commit last changed each line of a file (git blame). Read-only.",
+  "usage" : "blame <path> [--revision <rev>] [--lines <range>]"
+}

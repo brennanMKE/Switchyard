@@ -33,6 +33,7 @@ private let positionalPlaceholders: [String: [String]] = [
     "stash": ["<stash>"],
     "switch": ["<branch>", "<remote-branch>", "<commit>"],
     "file-history": ["<path>"],
+    "blame": ["<path>"],
 ]
 
 /// Every `--flag` token in a usage string.
@@ -58,7 +59,7 @@ struct CommandUsageTests {
 
     @Test("every command that takes positionals names each of them in its usage")
     func positionalsAppearInUsage() throws {
-        #expect(positionalPlaceholders.count == 24)
+        #expect(positionalPlaceholders.count == 25)
         for (name, placeholders) in positionalPlaceholders {
             let spec = try #require(CommandRegistry.lookup(name: name), "\(name) is not registered")
             for placeholder in placeholders {
