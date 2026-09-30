@@ -226,6 +226,10 @@ public struct ContentView: View {
     /// decision 45).
     private let draftStore = CommitDraftStore()
 
+    /// #0565: the repository's `commit.template`, comments stripped; `nil`
+    /// when it has none. Read when the window opens a repository.
+    @State private var commitTemplate: String?
+
     /// #0393: the journal listing for the open repository — the chain state
     /// the Edit menu's Undo and Redo titles and enabled flags read. `nil`
     /// while loading or with no repository open, which leaves both items
@@ -430,6 +434,11 @@ public struct ContentView: View {
         .task(id: repositoryPath) {
             // #0564: the draft this repository was left with.
             commitDraft = CommitDraft(message: repositoryPath.flatMap { draftStore.load(for: $0) } ?? "")
+            // #0565: an empty draft starts from commit.template.
+            if let repositoryPath {
+                commitTemplate = try? await loadCommitTemplate(at: repositoryPath)
+                commitDraft.adoptTemplate(commitTemplate)
+            }
             await reload()
         }
         // #0416: the entry points that are not views (app delegate, XPC,
@@ -1293,7 +1302,7 @@ public struct ContentView: View {
                 try await performWorkingChange(change, at: repositoryPath)
                 switch change {
                 case .commit, .amend:
-                    commitDraft = CommitDraft()
+                    commitDraft = CommitDraft(template: commitTemplate)
                     draftStore.save("", for: repositoryPath)
                 default: break
                 }

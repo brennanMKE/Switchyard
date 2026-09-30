@@ -178,11 +178,34 @@ public nonisolated struct CommitDraft: Equatable, Sendable {
     /// The draft set aside when Amend was turned on, put back when it is
     /// turned off.
     private var setAside: String
+    /// #0565: `commit.template`'s text, comments stripped (`CommitTemplate`);
+    /// `nil` when the repository has none.
+    public private(set) var template: String?
 
-    public init(message: String = "") {
-        self.message = message
+    /// A draft showing `message`, else `template`, else nothing.
+    public init(message: String? = nil, template: String? = nil) {
+        self.message = message ?? template ?? ""
         self.isAmending = false
         self.setAside = ""
+        self.template = template
+    }
+
+    /// #0565: learns the repository's template, read after the window
+    /// opened. A draft that is still empty starts with it; one the user has
+    /// begun, or one being amended, is left alone.
+    public mutating func adoptTemplate(_ template: String?) {
+        self.template = template
+        guard let template, !isAmending, message.isEmpty else { return }
+        message = template
+    }
+
+    /// #0565: the editor still holds the template as it was loaded. `git
+    /// commit` refuses that from an editor ("you did not edit the
+    /// message"); Commit waits for an edit too.
+    private var isUneditedTemplate: Bool {
+        guard let template else { return false }
+        return message.trimmingCharacters(in: .whitespacesAndNewlines)
+            == template.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Turns Amend on or off. On sets the draft aside and shows
@@ -215,7 +238,10 @@ public nonisolated struct CommitDraft: Equatable, Sendable {
     /// blocked if the checkbox is on when `HEAD` stops being amendable (a
     /// push from the toolbar, say).
     public func blockedReason(for changes: WorkingChanges, amendUnavailable: String?) -> String? {
-        guard isAmending else { return changes.commitBlockedReason(message: message) }
+        guard isAmending else {
+            if let reason = changes.commitBlockedReason(message: message) { return reason }
+            return isUneditedTemplate ? "Edit the message from commit.template" : nil
+        }
         return amendUnavailable ?? changes.amendBlockedReason(message: message)
     }
 }
