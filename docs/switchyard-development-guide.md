@@ -1968,6 +1968,60 @@ a feature at any milestone on the grounds that GitUp had it.
       the local name when checking out a remote branch, deleting a remote branch (a push),
       renaming a tag, and switching from the History row's branch chips.
 
+39. **A file's history and its blame are one read-only inspector in the Detail pane, over the
+    selection, opened from a file's context menu; History is `git log --follow`; clicking a commit
+    in it selects that commit in the History pane beside it.** Decided 2026-09-29 in the planning
+    pass for umbrella **#0513**, with high confidence; prototyped end to end in a planning worktree
+    (engine, views, VM spike). #0513 carries the questions for Brennan.
+
+    - **Where: the Detail pane, not a sheet or a window.** The feature's one cross-pane interaction
+      — click a line's commit, see it in History — only works when History is on screen beside
+      it. A sheet is modal and covers History; a window (the #0406 changes window's shape) would
+      need cross-window routing back to its repository window and would put that window over
+      the blame. The Detail pane is already "what the current selection shows" (decisions 30
+      and 36), and its splitter widens it. The inspector sits **over** the selection: opening it
+      does not change what is selected, its close button shows the selection again, and any
+      selection the user makes (a History row, a sidebar ref or stash, the working tree row)
+      closes it. A commit clicked **inside** it is selected in History and scrolled to
+      (`HistoryScrollRequest`, #0401) while the inspector stays, so the user can keep reading
+      the blame and close it to see that commit.
+    - **Entry points.** Show History and Blame on a Changes-view file row's context menu (not
+      on an untracked or a conflicted row; Blame disabled on a deleted one), on each of a
+      commit's changed files in `CommitDetailView` (at that commit; Blame disabled for a file the
+      commit deleted), and File ▸ Show File History… / Blame File… — an open panel in the
+      worktree, for any file nothing lists. A History row's context menu has Blame This Version.
+      The inspector's header switches between History and Blame for the same file.
+    - **History is `git log --follow <rev> -- <path>`, always, one file.** `<rev>` is the commit
+      the file was opened at, or `HEAD` for the working tree. Measured on git/git (git 2.54.0,
+      `builtin/log.c`, renamed from `builtin-log.c` in 81b50f3ce4): `--follow` lists **609**
+      commits — all **431** non-merge commits that touched `builtin/log.c` (none lost) plus
+      **178** from before the rename — and **no merges**; without it, **636** (431 plus 205
+      merges) and nothing before the rename. `-c diff.renames=false` does not change the 609.
+      `--follow` refuses two paths (`fatal: --follow requires exactly one pathspec`), so a folder
+      has no history view. A **staged rename** follows from its original path, which is the one
+      `HEAD` has (from the new path the log is empty — measured). Merges are not listed; each
+      row shows what the commit did to the file (Added, Renamed from x, Deleted).
+    - **Blame is `blameFile` (#0018)**: the working tree's file, with its not-yet-committed lines
+      marked, or the file at the commit. Rows are grouped into runs by commit: the gutter (short
+      oid, author, abbreviated relative date) shows on a run's first line, and alternate runs
+      are shaded.
+    - **A commit History has not loaded opens its changes window instead.** History loads the
+      newest 5,000 commits (#0405); a blame of an old file reaches far past them (on git/git,
+      most of it). Selecting what is not in the list would do nothing, so the click opens that
+      commit's changes window (#0406) — the one surface that shows any oid.
+    - **Off the main actor, cancellable, lazy.** Both loads are `@concurrent`; blame gains an
+      async twin on `GitProcess`'s non-blocking path, so switching files or modes terminates a
+      running `git blame`. The blame is a `LazyVStack` in a two-axis `ScrollView` (lines do not
+      wrap); the gutter strings are made off the main actor with the parse. Measured on git/git
+      (debug build, host): `builtin/log.c` (2,820 lines) history 0.59–1.14 s, blame 0.29–0.35 s,
+      of which the row building is 8–11 ms; `diff.c` (7,881 lines) blame 0.59–0.61 s. `git` is
+      the cost.
+    - **Read-only.** No journal entry, no ref written.
+    - **No CLI verb in this pass.** `switchyard log` refuses every `-`-prefixed token, so
+      `log -- <path>` is not reachable; `blame` has no verb. Both are thin arms over
+      `FileHistory.run` and `blameFile`, left to a later issue with the grammar chosen (#0513
+      question 4).
+
 ### Still open
 
 **Is M1's criterion 5 closable as written, and should it be restated?** Raised by the twelfth M1
