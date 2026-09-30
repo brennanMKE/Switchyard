@@ -2136,6 +2136,64 @@ a feature at any milestone on the grounds that GitUp had it.
     - **No CLI verbs in this pass.** `switchyard remote add|rename|remove|set-url` would be thin
       arms over `RemoteConfig`; left to a later issue with decision 37's shape (#0526 question).
 
+42. **Diff views get a Diff Options menu: Ignore Whitespace (`-w`), Highlight Changed Words (in
+    the app, on by default) and Context (3 lines, 10 lines, whole file). Anything but the standard
+    diff turns hunk and line staging and discarding off, visibly, until Reset.** Decided 2026-09-30
+    in the planning pass for umbrella **#0534**, with high confidence; prototyped end to end in a
+    planning worktree (engine, views, VM spike). #0534 carries the questions for Brennan.
+
+    - **Where.** A bar over the diff in the three places a diff is read — the Changes view's
+      selected file, the commit changes window (#0406) and the stash detail pane (#0496) — holding
+      a **Diff Options** menu (`slider.horizontal.3`) and, when an option is on, a line saying
+      which ("Whitespace ignored · Whole file"). Not the View menu in this pass: the menu items
+      would need a focused-value route to whichever pane owns the diff, and the bar puts the
+      choice beside the thing it changes. The review sheet, the Resolve pane and rerere's detail
+      follow the word-highlight setting but have no bar.
+    - **Ignore Whitespace is `--ignore-all-space` (`-w`)**, not `--ignore-space-change` (`-b`) or
+      `--ignore-space-at-eol`. Measured on git/git's newest 2,000 non-merge commits: `-b` changes
+      the `--shortstat` of 282, `-w` of 317 — every one `-b` changes plus code moved into a new
+      block (9719c290ee: 7/8 lines plain and under `-b`, 2/3 under `-w`), since `-b` still shows a
+      line indented from nothing; `--ignore-space-at-eol` changes none. The cost of `-w` — it also
+      hides `a b` → `ab` inside a string — is why the bar always says it is on. **A file whose
+      every change is whitespace disappears from `git diff -w` entirely** (no `diff --git` block,
+      measured), so each view keeps the standard listing for its file list and draws "Only
+      whitespace changed in <path>" where that file's diff would be.
+    - **Word highlights are computed in the app, not by `--word-diff=porcelain`.** A run of `-`
+      lines directly followed by an equally long run of `+` lines is paired line by line and
+      diffed by token (words, whitespace runs, single punctuation; Swift's `difference(from:)`);
+      the changed tokens get a stronger tint of the line's own color. Unequal runs, pairs sharing
+      less than half their text, lines over 500 characters and combined (`@@@`) hunks get none.
+      Measured on git/git `HEAD~300..HEAD` (139,492 body lines): 0.108 s for every hunk, the
+      slowest 0.84 ms, against `--word-diff=porcelain`'s 0.454 s for git alone (0.210 s plain) —
+      and porcelain is a second output format with no hunk bodies to stage from. The hunk body is
+      unchanged, so **word highlights never affect staging**. App-wide `@AppStorage`, on by
+      default.
+    - **Context is `--unified=N` appended after the pinned `--unified=3`** (git takes the last,
+      measured); Whole File is `--unified=2147483647`, one hunk per file.
+    - **Staging and discarding always act on the standard diff.** The engine already guarantees
+      it: `stageHunks`, `stageLines`, `discardHunks`, `discardLines` and their unstage twins re-list
+      hunks with the pinned flags only (the sync `listHunks`, untouched), and a hunk id is a hash
+      of path and body — so an id from a `-w` or `-U10` listing names nothing there and is refused
+      (`StagingError.unknownHunkIDs`, pinned by a test), and an id that does match names a
+      byte-identical hunk. The view adds the visible half: **with any option but the standard
+      ones, Stage/Unstage Hunk and Discard Hunk… are disabled, lines are not selectable, and the
+      bar reads "Hunks and lines can’t be staged or discarded" with a Reset button** — enabled
+      again only once a standard listing has loaded, not merely once the options are standard.
+      File-level Stage, Unstage, Discard Changes… and the section buttons stay: they act on paths,
+      not on the diff. Rejected: mapping a filtered selection back onto the standard hunks (a
+      `-w` context line is the *new* text, so the two bodies do not correspond line for line), and
+      staging with the options (a `-w` hunk does not `git apply` — measured, "patch does not
+      apply").
+    - **Ignore Whitespace and Context are per view, in `@State`, not persisted.** Anything but the
+      standard options turns staging off, and a hidden-whitespace setting that outlived the look
+      it was for would leave a later session with disabled buttons and changes it cannot see.
+      Word highlights change nothing but tint, so they persist app-wide, as the branch map's
+      recency window does (decision 29).
+    - **Engine surface**: `DiffOptions` (`ignoresWhitespace`, `contextLines`) as `options:` on the
+      async `listHunks`, `commitDiff` and `stashDiff`, default `.standard` — which appends no flag,
+      so every existing caller and the config-immunity sweep see the same argument vector. No CLI
+      flag in this pass.
+
 ### Still open
 
 **Is M1's criterion 5 closable as written, and should it be restated?** Raised by the twelfth M1
