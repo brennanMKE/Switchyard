@@ -55,6 +55,11 @@ public struct CommitHistoryView: View {
     private let highlightQuery: String
     /// #0402: which match the previous/next buttons are on.
     @State private var matchIndex = 0
+    /// #0556: the last previous/next press. The buttons only record it and
+    /// `onChange(of: matchStep)` steps, so the step reads this render's
+    /// matches: ⌘G ran the button's action from the render that first
+    /// showed the match bar, with that render's matches (measured in the VM).
+    @State private var matchStep: MatchStepRequest?
     /// #0524: what the filter text is matched against (guide §11 decision
     /// 40). Per window, not persisted.
     @State private var searchScope: HistorySearchScope = .commits
@@ -176,6 +181,10 @@ public struct CommitHistoryView: View {
                 focus(HistoryScrollRequest(oid: first), in: layout)
             }
         }
+        // #0556: a previous/next press, stepped through this render's matches.
+        .onChange(of: matchStep) { _, request in
+            if let request { step(request.delta, in: matchOids, layout: layout) }
+        }
         .onChange(of: searchScope) { _, scope in
             matchIndex = 0
             if scope.engineKind == nil, let first = matchOids.first {
@@ -283,7 +292,7 @@ public struct CommitHistoryView: View {
                 .foregroundStyle(.secondary)
             Spacer()
             Button {
-                step(-1, in: matchOids, layout: layout)
+                matchStep = MatchStepRequest(delta: -1)
             } label: {
                 Image(systemName: "chevron.up")
             }
@@ -291,7 +300,7 @@ public struct CommitHistoryView: View {
             .help("Previous match (⇧⌘G)")
             .disabled(matchOids.isEmpty)
             Button {
-                step(1, in: matchOids, layout: layout)
+                matchStep = MatchStepRequest(delta: 1)
             } label: {
                 Image(systemName: "chevron.down")
             }
@@ -321,6 +330,13 @@ public struct CommitHistoryView: View {
         }
         focusRequest = request
     }
+}
+
+/// #0556: one press of the match bar's previous (-1) or next (+1). The
+/// fresh `serial` makes a second press in the same direction a change.
+private nonisolated struct MatchStepRequest: Equatable {
+    let delta: Int
+    let serial = UUID()
 }
 
 /// #0524: what restarts a `.paths`/`.content` search: the text, the scope,
