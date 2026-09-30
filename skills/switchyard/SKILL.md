@@ -526,22 +526,24 @@ Usage: `switchyard watch [<repository-path>] [--timeout <seconds>]`
 
 ### `switchyard tag`
 
-Create a lightweight or annotated tag at a commit.
+Create a lightweight or annotated tag at a commit, or delete a tag.
 
-Usage: `switchyard tag <name> <commit> [--annotate] [--message <message>] [--sign | --no-sign]`
+Usage: `switchyard tag (<name> <commit> [--annotate] [--message <message>] [--sign | --no-sign] | --delete <name>)`
 
 | Flag | Meaning |
 |---|---|
 | `--annotate` | Create an annotated tag (implied by --message). Requires a message. |
+| `--delete` | Delete the tag <name> (git tag --delete), lightweight or annotated. One journal entry: undo restores it. Takes no other flag. |
 | `--message <message>` | The tag's message, passed as a flag — implies an annotated tag; GIT_EDITOR is never invoked. |
 | `--no-sign` | Never sign, even when tag.gpgsign is true. |
 | `--sign` | Sign the annotated tag, even when tag.gpgsign is false. |
 
 | Exit | Meaning |
 |---|---|
-| 0 | The tag was created; the payload carries the ref, the object it names (the tag object when annotated, the commit when lightweight), and whether it is annotated. |
-| 1 | Invalid arguments — tag requires exactly two positional arguments <name> <commit>; an unknown, duplicated, or value-missing flag; or both --sign and --no-sign. |
+| 0 | The tag was created or deleted; the payload carries the ref, the object it names or named (the tag object when annotated, the commit when lightweight), and whether it is annotated. A deletion is one journal entry, operation tag-delete, that undo restores. |
+| 1 | Invalid arguments — tag requires exactly two positional arguments <name> <commit>, or --delete and exactly one <name> with no other flag; an unknown, duplicated, or value-missing flag; or both --sign and --no-sign. |
 | 4 | The tag could not be created for a reason the other codes do not name — an invalid name, an existing tag name, a `/`-boundary clash with an existing tag, an unknown commit, a missing message on an annotated tag, a signing intent on a lightweight tag, or a signing failure among them. |
+| 6 | With --delete: not a repository, or there is no tag of that name. Nothing was touched. |
 
 ### `switchyard branch`
 

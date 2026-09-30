@@ -509,18 +509,20 @@ public enum CommandRegistry {
 
     static let tagSpec = CommandSpec(
         name: "tag",
-        summary: "Create a lightweight or annotated tag at a commit.",
-        usage: "tag <name> <commit> [--annotate] [--message <message>] [--sign | --no-sign]",
+        summary: "Create a lightweight or annotated tag at a commit, or delete a tag.",
+        usage: "tag (<name> <commit> [--annotate] [--message <message>] [--sign | --no-sign] | --delete <name>)",
         flags: [
+            FlagSpec(long: "delete", argument: nil, help: "Delete the tag <name> (git tag --delete), lightweight or annotated. One journal entry: undo restores it. Takes no other flag."),
             FlagSpec(long: "annotate", argument: nil, help: "Create an annotated tag (implied by --message). Requires a message."),
             FlagSpec(long: "message", argument: "message", help: "The tag's message, passed as a flag — implies an annotated tag; GIT_EDITOR is never invoked."),
             FlagSpec(long: "sign", argument: nil, help: "Sign the annotated tag, even when tag.gpgsign is false."),
             FlagSpec(long: "no-sign", argument: nil, help: "Never sign, even when tag.gpgsign is true."),
         ],
         exitCodes: [
-            ExitCodeSpec(code: 0, meaning: "The tag was created; the payload carries the ref, the object it names (the tag object when annotated, the commit when lightweight), and whether it is annotated."),
-            ExitCodeSpec(code: 1, meaning: "Invalid arguments — tag requires exactly two positional arguments <name> <commit>; an unknown, duplicated, or value-missing flag; or both --sign and --no-sign."),
+            ExitCodeSpec(code: 0, meaning: "The tag was created or deleted; the payload carries the ref, the object it names or named (the tag object when annotated, the commit when lightweight), and whether it is annotated. A deletion is one journal entry, operation tag-delete, that undo restores."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — tag requires exactly two positional arguments <name> <commit>, or --delete and exactly one <name> with no other flag; an unknown, duplicated, or value-missing flag; or both --sign and --no-sign."),
             ExitCodeSpec(code: 4, meaning: "The tag could not be created for a reason the other codes do not name — an invalid name, an existing tag name, a `/`-boundary clash with an existing tag, an unknown commit, a missing message on an annotated tag, a signing intent on a lightweight tag, or a signing failure among them."),
+            ExitCodeSpec(code: 6, meaning: "With --delete: not a repository, or there is no tag of that name. Nothing was touched."),
         ],
         schemaName: "tag",
         // No `payload` shape (#0363): the result is a single object whose
