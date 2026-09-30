@@ -382,6 +382,15 @@ public struct WorkingChangesView: View {
                     }
                 }
                 .accessibilityIdentifier("commit-message")
+            // #0563: the subject and body guides (guide §11 decision 45).
+            // A warning, never a block: Commit does not read it.
+            if !draft.message.isEmpty {
+                let guide = CommitMessageGuide(message: draft.message)
+                Text(guide.summary)
+                    .font(.caption)
+                    .foregroundStyle(guide.isWarning ? Color.orange : Color.secondary)
+                    .accessibilityIdentifier("message-guide")
+            }
             HStack {
                 Text(caption)
                     .font(.caption)
