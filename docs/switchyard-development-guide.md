@@ -2267,8 +2267,9 @@ a feature at any milestone on the grounds that GitUp had it.
       on each evaluation (42-46 ms release, 731-770 ms debug; O(commits × refs)) and, while a
       filter query was typed, ran Foundation's case-insensitive search over every commit (118-154
       ms more) — on the main actor, re-run on every `ContentView` update because the view is
-      handed fresh closures. In the VM's debug build, typing `needle` into the filter over the
-      large fixture took 12.7 s for six keystrokes. **The commit composer** (subject/body split,
+      handed fresh closures. In the VM (debug build, #0555's 6,002-commit, 1,000-tag fixture)
+      typing `rel-5994` into the filter took 17.05 s to reach "1 match" and `needle` 13.72 s to
+      reach "20 matches"; with this decision applied, 2.18 s and 2.23 s. **The commit composer** (subject/body split,
       50/72 guides, co-author trailers, recent messages) is the runner-up: used on every commit,
       but polish on a working flow with no measured defect, and it has real design questions
       (where a body guide draws in a `TextEditor`, what "recent" means) that would go to Brennan.
