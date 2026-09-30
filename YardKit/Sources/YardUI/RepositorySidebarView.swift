@@ -115,6 +115,10 @@ public struct RepositorySidebarView: View {
     /// until the pass lands after the sidebar appears -- content-dependent
     /// merged answers read *unknown* until then, never blocking the rows.
     @State private var contentStates: [String: BranchStatus.MergedState]?
+    /// #0571: the worktree `branchStatus` was read for. A refresh of the
+    /// same worktree keeps the old numbers on screen until the new ones
+    /// land; a different worktree clears them first.
+    @State private var branchStatusPath: String?
     /// #0378: the filter field's text. Empty or all-whitespace means no
     /// filtering; anything else narrows the three ref sections. #0402: owned
     /// by ContentView so the History pane filters too.
@@ -160,6 +164,13 @@ public struct RepositorySidebarView: View {
     private nonisolated static let headsPrefix = "refs/heads/"
     private nonisolated static let remotesPrefix = "refs/remotes/"
     private nonisolated static let tagsPrefix = "refs/tags/"
+
+    /// #0571: what the branch status is re-read for — the worktree, and
+    /// every ref, since a commit, push, fetch or undo moves one.
+    private struct BranchStatusKey: Equatable {
+        let path: String?
+        let refs: RefSnapshot
+    }
 
     /// `HEAD`'s current branch name, from `RefSnapshot.head`. `nil` on a
     /// detached `HEAD` -- `isDetached` below covers that case explicitly
@@ -485,15 +496,19 @@ public struct RepositorySidebarView: View {
         }
         .searchable(text: $refFilter, placement: .sidebar, prompt: "Filter")
         .listStyle(.sidebar)
-        .task(id: summary.currentWorktreePath) {
+        .task(id: BranchStatusKey(path: summary.currentWorktreePath, refs: summary.refs)) {
             // #0372: the synchronous-load read is one `for-each-ref` process
             // (decision 27's budget); the content pass is the background
-            // fill that lands after the rows appear. Both reset on a path
-            // change -- a repository switch must not show the previous
-            // repository's numbers for a moment.
+            // fill that lands after the rows appear. #0571: re-read whenever
+            // a ref moves, not only when the worktree changes; a repository
+            // switch must not show the previous repository's numbers for a
+            // moment, so only a new path clears them first.
             guard let path = summary.currentWorktreePath else { return }
-            branchStatus = nil
-            contentStates = nil
+            if branchStatusPath != path {
+                branchStatus = nil
+                contentStates = nil
+                branchStatusPath = path
+            }
             guard let report = try? await BranchStatus.read(at: path) else { return }
             branchStatus = report
             contentStates = try? await BranchStatus.contentPass(for: report, at: path)
