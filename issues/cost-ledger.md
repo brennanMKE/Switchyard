@@ -631,6 +631,7 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-09-30 | #0554 | round 1, Sonnet implementation, 434 s wall, passed pending review (S, measured) | 107,286 | — |
 | 2026-09-30 | #0555 | round 1, Sonnet implementation, 362 s wall, passed pending review (S, measured) | 103,454 | — |
 | 2026-09-30 | #0556 | round 1, Sonnet implementation, 331 s wall, passed pending review (S, measured) | 91,078 | — |
+| 2026-09-30 | #0557 | round 1, Sonnet implementation, 365 s wall, passed pending review (S, measured) | 84,728 | — |
 | | | **Total measured** (tokens include 2026-09-22/23 rows; $ not updated for them) | **47,386,796** | **$437.24** |
 
 ## What this total does and does not cover
