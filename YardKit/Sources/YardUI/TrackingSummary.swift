@@ -23,6 +23,13 @@ public nonisolated enum TrackingSummary {
         }
     }
 
+    /// #0574: the oid the header shows beside the tracking line — `nil`
+    /// when HEAD is detached (the line already ends with it) or unborn.
+    public static func separateOID(for state: WhereAmI) -> String? {
+        guard state.branch != nil, !state.headOID.isEmpty else { return nil }
+        return state.headOID
+    }
+
     /// The in-progress git operation that blocks history changes, or `nil`.
     public static func operationInProgress(for state: WhereAmI) -> String? {
         if state.isMidRebase { return "A rebase is in progress" }

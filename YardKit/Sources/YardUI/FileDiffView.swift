@@ -111,6 +111,9 @@ private struct HunkView: View {
                 Text(hunk.header)
                     .font(.system(.caption, design: .monospaced))
                     .foregroundStyle(.secondary)
+                    // #0574: the header gives way, not the buttons.
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 if action != nil || discard != nil { Spacer() }
                 if let discard { button(discard) }
                 if let action { button(action) }
@@ -143,6 +146,7 @@ private struct HunkView: View {
         }
         .buttonStyle(.borderless)
         .controlSize(.small)
+        .fixedSize()
         .disabled(!action.isEnabled)
     }
 
