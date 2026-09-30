@@ -61,8 +61,11 @@ public enum FileHistory {
     /// `core.quotepath` says); `--no-show-signature` keeps
     /// `log.showSignature` from prepending prose to the format;
     /// `--encoding=UTF-8` pins `%an`/`%s` against `i18n.logOutputEncoding`.
+    /// `--literal-pathspecs` makes `file` a path, never a pattern: without
+    /// it `*.txt` follows every `.txt` file (measured, git 2.54.0), and the
+    /// CLI's `file-history` takes the path from argv (guide §11 decision 43).
     static func arguments(file: String, revision: String) -> [String] {
-        ["log", "--follow", "--no-show-signature", "--encoding=UTF-8",
+        ["--literal-pathspecs", "log", "--follow", "--no-show-signature", "--encoding=UTF-8",
          "--format=%H%x01%an%x01%at%x01%s", "--name-status", "-z",
          revision, "--", file]
     }
@@ -79,6 +82,16 @@ public enum FileHistory {
     ) async throws -> [Entry] {
         let output = try await git.run(arguments(file: file, revision: revision), workingDirectory: path)
         return try parse(output.text)
+    }
+
+    /// Synchronous twin of `run(path:file:revision:git:) async`, for the
+    /// CLI's `file-history` arm: `runEngineCommand` is synchronous (guide §11
+    /// decisions 37 and 43). Same arguments, same parser, not cancellable.
+    public static func run(
+        path: String, file: String, revision: String = "HEAD",
+        git: GitProcess = GitProcess()
+    ) throws -> [Entry] {
+        try parse(git.run(arguments(file: file, revision: revision), workingDirectory: path).text)
     }
 
     /// Parses `-z` output: each record is the format line, a NUL, then

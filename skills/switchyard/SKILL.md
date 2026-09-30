@@ -797,4 +797,21 @@ Usage: `switchyard switch (<branch> | --track <remote-branch> | --detach <commit
 | `head` | string | HEAD's full oid after the switch. |
 | `operation` | string (switch, switch-detach, switch-track) | The journal operation recorded; undo names it. |
 
+### `switchyard file-history`
+
+List the commits that changed one file, newest first, following renames (git log --follow). Read-only.
+
+Usage: `switchyard file-history <path> [--revision <rev>]`
+
+| Flag | Meaning |
+|---|---|
+| `--revision <rev>` | Walk from <rev> instead of HEAD. |
+
+| Exit | Meaning |
+|---|---|
+| 0 | The payload carries the path, the revision walked from, and commits:[{oid, author, authorTime, subject, status, path, previousPath?}] — status is what the commit did to the file (M, A, D, R, C, T). A path no commit touched is an empty list. Merges are not listed. |
+| 1 | Invalid arguments — not exactly one <path>, an unknown or duplicated flag, or a --revision value that is missing or starts with '-'. Use -- before a path that starts with '-'. |
+| 4 | The request failed for a reason the other codes do not name. |
+| 6 | Not a repository, or git refused the walk (an unknown --revision). |
+
 <!-- END GENERATED -->

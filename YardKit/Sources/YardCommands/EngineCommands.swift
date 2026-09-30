@@ -117,6 +117,8 @@ public func runEngineCommand(
         return runUndo(arguments: arguments, workingDirectory: workingDirectory)
     case "switch":
         return runSwitch(arguments: arguments, workingDirectory: workingDirectory)
+    case "file-history":
+        return runFileHistory(arguments: arguments, workingDirectory: workingDirectory)
     case "rewrite-diff":
         // One required positional, no flags: `switchyard rewrite-diff
         // <journal-entry-id>` arrives as `["rewrite-diff", "<id>"]`. The arm

@@ -12,7 +12,7 @@ public enum CommandRegistry {
 
     /// All known `yard` command specifications in the order they should be
     /// rendered in help output.
-    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, skillSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, revertSpec, cherryPickSpec, mergeSpec, rewriteDiffSpec, rerereSpec, reviewSpec, askSpec, resolveSpec, watchSpec, tagSpec, branchSpec, rebaseOntoSpec, setTipSpec, stageSpec, unstageSpec, commitSpec, discardSpec, fetchSpec, pullSpec, pushSpec, stashSpec, undoSpec, redoSpec, switchSpec]
+    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, skillSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, revertSpec, cherryPickSpec, mergeSpec, rewriteDiffSpec, rerereSpec, reviewSpec, askSpec, resolveSpec, watchSpec, tagSpec, branchSpec, rebaseOntoSpec, setTipSpec, stageSpec, unstageSpec, commitSpec, discardSpec, fetchSpec, pullSpec, pushSpec, stashSpec, undoSpec, redoSpec, switchSpec, fileHistorySpec]
 
     // MARK: - The switchyard spec — rendered by `yard --help`
 
@@ -822,6 +822,25 @@ public enum CommandRegistry {
             PayloadField(name: "branch", type: .string, optional: true, description: "The checked-out branch's short name. Absent when HEAD is detached."),
             PayloadField(name: "operation", type: .string, enumCases: ["switch", "switch-track", "switch-detach"], description: "The journal operation recorded; undo names it."),
         ])
+    )
+
+    // MARK: - The file-history and blame specs — engine-backed, resolved by `YardCommands` (guide §11 decisions 39, 43)
+
+    static let fileHistorySpec = CommandSpec(
+        name: "file-history",
+        summary: "List the commits that changed one file, newest first, following renames (git log --follow). Read-only.",
+        usage: "file-history <path> [--revision <rev>]",
+        flags: [
+            FlagSpec(long: "revision", argument: "rev", help: "Walk from <rev> instead of HEAD."),
+        ],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The payload carries the path, the revision walked from, and commits:[{oid, author, authorTime, subject, status, path, previousPath?}] — status is what the commit did to the file (M, A, D, R, C, T). A path no commit touched is an empty list. Merges are not listed."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — not exactly one <path>, an unknown or duplicated flag, or a --revision value that is missing or starts with '-'. Use -- before a path that starts with '-'."),
+            ExitCodeSpec(code: 4, meaning: "The request failed for a reason the other codes do not name."),
+            ExitCodeSpec(code: 6, meaning: "Not a repository, or git refused the walk (an unknown --revision)."),
+        ],
+        schemaName: "file-history",
+        payload: nil
     )
 
     // MARK: - The rewrite-diff spec — engine-backed, resolved by `YardCommands` (#0064)
