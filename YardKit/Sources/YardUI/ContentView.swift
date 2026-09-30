@@ -786,6 +786,7 @@ public struct ContentView: View {
                let item = sidebar?.stashes.first(where: { $0.oid == selectedStash }) {
                 StashDetailView(
                     item: item,
+                    repositoryPath: repositoryPath ?? "",
                     files: selectedStashDiff,
                     diffError: selectedStashDiffError,
                     isBusy: isBusy || journalRunning,
