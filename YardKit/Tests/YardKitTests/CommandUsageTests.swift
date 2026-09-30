@@ -30,6 +30,7 @@ private let positionalPlaceholders: [String: [String]] = [
     "stage": ["<path>"],
     "unstage": ["<path>"],
     "discard": ["<path>"],
+    "stash": ["<stash>"],
 ]
 
 /// Every `--flag` token in a usage string.
@@ -55,7 +56,7 @@ struct CommandUsageTests {
 
     @Test("every command that takes positionals names each of them in its usage")
     func positionalsAppearInUsage() throws {
-        #expect(positionalPlaceholders.count == 21)
+        #expect(positionalPlaceholders.count == 22)
         for (name, placeholders) in positionalPlaceholders {
             let spec = try #require(CommandRegistry.lookup(name: name), "\(name) is not registered")
             for placeholder in placeholders {
