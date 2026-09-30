@@ -12,7 +12,7 @@ public enum CommandRegistry {
 
     /// All known `yard` command specifications in the order they should be
     /// rendered in help output.
-    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, skillSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, revertSpec, cherryPickSpec, mergeSpec, rewriteDiffSpec, rerereSpec, reviewSpec, askSpec, resolveSpec, watchSpec, tagSpec, branchSpec, rebaseOntoSpec, setTipSpec, stageSpec, unstageSpec, commitSpec, discardSpec, fetchSpec, pullSpec, pushSpec]
+    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, skillSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, revertSpec, cherryPickSpec, mergeSpec, rewriteDiffSpec, rerereSpec, reviewSpec, askSpec, resolveSpec, watchSpec, tagSpec, branchSpec, rebaseOntoSpec, setTipSpec, stageSpec, unstageSpec, commitSpec, discardSpec, fetchSpec, pullSpec, pushSpec, stashSpec]
 
     // MARK: - The switchyard spec — rendered by `yard --help`
 
@@ -736,6 +736,30 @@ public enum CommandRegistry {
             PayloadField(name: "remoteRef", type: .string, description: "The full ref updated on the remote, e.g. \"refs/heads/main\"."),
             PayloadField(name: "setUpstream", type: .bool, description: "True when this push also set the branch's upstream (the branch had none)."),
         ])
+    )
+
+    // MARK: - The stash spec — engine-backed, resolved by `YardCommands` (guide §11 decisions 36, 37)
+
+    /// Named `stash`, covering the group: the arm dispatches on the second
+    /// token, as `branch` does.
+    static let stashSpec = CommandSpec(
+        name: "stash",
+        summary: "List, push, apply, pop or drop stashes. A subcommand is required.",
+        usage: "stash (list | push [--message <message>] [--include-untracked] | apply <stash> [--index] | pop <stash> [--index] | drop <stash>)",
+        flags: [
+            FlagSpec(long: "message", argument: "message", help: "With push: the stash's message."),
+            FlagSpec(long: "include-untracked", argument: nil, help: "With push: stash untracked files too (git's default is not to)."),
+            FlagSpec(long: "index", argument: nil, help: "With apply or pop: bring staged changes back staged, not unstaged."),
+        ],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "Done. list: {stashes:[…]}, newest first. push: the new stash@{0}. apply/pop: {oid, outcome:\"applied\"}. drop: {dropped: oid}. Each mutating subcommand is one journal entry."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — no or an unknown subcommand, a flag another subcommand owns, a missing or extra <stash>, or a duplicated flag. <stash> is stash@{n}, n, or a full oid from stash list."),
+            ExitCodeSpec(code: 4, meaning: "The request failed for a reason the other codes do not name."),
+            ExitCodeSpec(code: 6, meaning: "Not a repository; no commits; nothing to stash; unresolved conflicts; an intent-to-add path; a <stash> the list does not hold; or git refused the apply (local changes or an untracked file in the way, --index not applicable)."),
+            ExitCodeSpec(code: 8, meaning: "apply or pop conflicted (blocked_on_conflicts) — ok:true, outcome \"conflicted\", conflictedPaths listed; git applied what it could and kept the stash. Resolve, or undo."),
+        ],
+        schemaName: "stash",
+        payload: nil
     )
 
     // MARK: - The rewrite-diff spec — engine-backed, resolved by `YardCommands` (#0064)

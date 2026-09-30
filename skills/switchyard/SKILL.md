@@ -695,4 +695,24 @@ Usage: `switchyard push`
 | `remoteRef` | string | The full ref updated on the remote, e.g. "refs/heads/main". |
 | `setUpstream` | bool | True when this push also set the branch's upstream (the branch had none). |
 
+### `switchyard stash`
+
+List, push, apply, pop or drop stashes. A subcommand is required.
+
+Usage: `switchyard stash (list | push [--message <message>] [--include-untracked] | apply <stash> [--index] | pop <stash> [--index] | drop <stash>)`
+
+| Flag | Meaning |
+|---|---|
+| `--include-untracked` | With push: stash untracked files too (git's default is not to). |
+| `--index` | With apply or pop: bring staged changes back staged, not unstaged. |
+| `--message <message>` | With push: the stash's message. |
+
+| Exit | Meaning |
+|---|---|
+| 0 | Done. list: {stashes:[…]}, newest first. push: the new stash@{0}. apply/pop: {oid, outcome:"applied"}. drop: {dropped: oid}. Each mutating subcommand is one journal entry. |
+| 1 | Invalid arguments — no or an unknown subcommand, a flag another subcommand owns, a missing or extra <stash>, or a duplicated flag. <stash> is stash@{n}, n, or a full oid from stash list. |
+| 4 | The request failed for a reason the other codes do not name. |
+| 6 | Not a repository; no commits; nothing to stash; unresolved conflicts; an intent-to-add path; a <stash> the list does not hold; or git refused the apply (local changes or an untracked file in the way, --index not applicable). |
+| 8 | apply or pop conflicted (blocked_on_conflicts) — ok:true, outcome "conflicted", conflictedPaths listed; git applied what it could and kept the stash. Resolve, or undo. |
+
 <!-- END GENERATED -->

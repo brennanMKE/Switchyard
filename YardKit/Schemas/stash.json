@@ -1,0 +1,88 @@
+{
+  "command" : "stash",
+  "envelope" : {
+    "failure" : {
+      "error" : {
+        "code" : {
+          "enum" : [
+            "app_unavailable",
+            "blocked_on_conflicts",
+            "broker_unreachable",
+            "human_declined",
+            "ok",
+            "repository_error",
+            "request_failed",
+            "session_terminated",
+            "signing_failed",
+            "timed_out",
+            "usage"
+          ],
+          "type" : "string"
+        },
+        "hint" : {
+          "optional" : true,
+          "type" : "string"
+        },
+        "message" : {
+          "type" : "string"
+        }
+      },
+      "ok" : false,
+      "schemaVersion" : 1
+    },
+    "success" : {
+      "ok" : true,
+      "result" : {
+        "optional" : true,
+        "schema" : "stash"
+      },
+      "schemaVersion" : 1
+    }
+  },
+  "exitCodes" : [
+    {
+      "code" : 0,
+      "meaning" : "Done. list: {stashes:[…]}, newest first. push: the new stash@{0}. apply\/pop: {oid, outcome:\"applied\"}. drop: {dropped: oid}. Each mutating subcommand is one journal entry."
+    },
+    {
+      "code" : 1,
+      "meaning" : "Invalid arguments — no or an unknown subcommand, a flag another subcommand owns, a missing or extra <stash>, or a duplicated flag. <stash> is stash@{n}, n, or a full oid from stash list."
+    },
+    {
+      "code" : 4,
+      "meaning" : "The request failed for a reason the other codes do not name."
+    },
+    {
+      "code" : 6,
+      "meaning" : "Not a repository; no commits; nothing to stash; unresolved conflicts; an intent-to-add path; a <stash> the list does not hold; or git refused the apply (local changes or an untracked file in the way, --index not applicable)."
+    },
+    {
+      "code" : 8,
+      "meaning" : "apply or pop conflicted (blocked_on_conflicts) — ok:true, outcome \"conflicted\", conflictedPaths listed; git applied what it could and kept the stash. Resolve, or undo."
+    }
+  ],
+  "flags" : [
+    {
+      "argument" : null,
+      "help" : "With push: stash untracked files too (git's default is not to).",
+      "long" : "include-untracked",
+      "short" : null
+    },
+    {
+      "argument" : null,
+      "help" : "With apply or pop: bring staged changes back staged, not unstaged.",
+      "long" : "index",
+      "short" : null
+    },
+    {
+      "argument" : "message",
+      "help" : "With push: the stash's message.",
+      "long" : "message",
+      "short" : null
+    }
+  ],
+  "schemaName" : "stash",
+  "schemaVersion" : 1,
+  "summary" : "List, push, apply, pop or drop stashes. A subcommand is required.",
+  "usage" : "stash (list | push [--message <message>] [--include-untracked] | apply <stash> [--index] | pop <stash> [--index] | drop <stash>)"
+}
