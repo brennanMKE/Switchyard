@@ -546,6 +546,7 @@ run_spike_if_selected 0494 Spike0494StashChangesUITests
 run_spike_if_selected 0496 Spike0496StashListUITests
 run_spike_if_selected 0512 Spike0512SwitchBranchUITests
 run_spike_if_selected 0520 Spike0520FileHistoryBlameUITests
+run_spike_if_selected 0525 Spike0525HistorySearchUITests
 
 print ""
 if (( TEST_RC == 0 )); then
