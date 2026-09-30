@@ -814,4 +814,22 @@ Usage: `switchyard file-history <path> [--revision <rev>]`
 | 4 | The request failed for a reason the other codes do not name. |
 | 6 | Not a repository, or git refused the walk (an unknown --revision). |
 
+### `switchyard blame`
+
+Show which commit last changed each line of a file (git blame). Read-only.
+
+Usage: `switchyard blame <path> [--revision <rev>] [--lines <range>]`
+
+| Flag | Meaning |
+|---|---|
+| `--lines <range>` | Only the lines <start>,<end> — 1-based, inclusive, e.g. 10,20. Bounds the work as well as the output. |
+| `--revision <rev>` | Blame the file as of <rev>. Without it, the working tree's file, with uncommitted lines given the all-zero oid. |
+
+| Exit | Meaning |
+|---|---|
+| 0 | The payload carries the path, the revision (absent for the working tree) and lines:[{oid, finalLine, originalLine, originalPath, author, authorEmail, authorTime, authorTimeZone, summary, isBoundary, content}]. |
+| 1 | Invalid arguments — not exactly one <path>, an unknown or duplicated flag, a flag value that is missing or starts with '-', or --lines that is not two positive integers <start>,<end> with start ≤ end. |
+| 4 | The request failed for a reason the other codes do not name. |
+| 6 | Not a repository, or git refused the blame — no such file (at that revision), an unknown revision, or a --lines range past the end of the file. |
+
 <!-- END GENERATED -->

@@ -12,7 +12,7 @@ public enum CommandRegistry {
 
     /// All known `yard` command specifications in the order they should be
     /// rendered in help output.
-    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, skillSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, revertSpec, cherryPickSpec, mergeSpec, rewriteDiffSpec, rerereSpec, reviewSpec, askSpec, resolveSpec, watchSpec, tagSpec, branchSpec, rebaseOntoSpec, setTipSpec, stageSpec, unstageSpec, commitSpec, discardSpec, fetchSpec, pullSpec, pushSpec, stashSpec, undoSpec, redoSpec, switchSpec, fileHistorySpec]
+    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, skillSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, revertSpec, cherryPickSpec, mergeSpec, rewriteDiffSpec, rerereSpec, reviewSpec, askSpec, resolveSpec, watchSpec, tagSpec, branchSpec, rebaseOntoSpec, setTipSpec, stageSpec, unstageSpec, commitSpec, discardSpec, fetchSpec, pullSpec, pushSpec, stashSpec, undoSpec, redoSpec, switchSpec, fileHistorySpec, blameSpec]
 
     // MARK: - The switchyard spec — rendered by `yard --help`
 
@@ -840,6 +840,24 @@ public enum CommandRegistry {
             ExitCodeSpec(code: 6, meaning: "Not a repository, or git refused the walk (an unknown --revision)."),
         ],
         schemaName: "file-history",
+        payload: nil
+    )
+
+    static let blameSpec = CommandSpec(
+        name: "blame",
+        summary: "Show which commit last changed each line of a file (git blame). Read-only.",
+        usage: "blame <path> [--revision <rev>] [--lines <range>]",
+        flags: [
+            FlagSpec(long: "revision", argument: "rev", help: "Blame the file as of <rev>. Without it, the working tree's file, with uncommitted lines given the all-zero oid."),
+            FlagSpec(long: "lines", argument: "range", help: "Only the lines <start>,<end> — 1-based, inclusive, e.g. 10,20. Bounds the work as well as the output."),
+        ],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "The payload carries the path, the revision (absent for the working tree) and lines:[{oid, finalLine, originalLine, originalPath, author, authorEmail, authorTime, authorTimeZone, summary, isBoundary, content}]."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — not exactly one <path>, an unknown or duplicated flag, a flag value that is missing or starts with '-', or --lines that is not two positive integers <start>,<end> with start ≤ end."),
+            ExitCodeSpec(code: 4, meaning: "The request failed for a reason the other codes do not name."),
+            ExitCodeSpec(code: 6, meaning: "Not a repository, or git refused the blame — no such file (at that revision), an unknown revision, or a --lines range past the end of the file."),
+        ],
+        schemaName: "blame",
         payload: nil
     )
 

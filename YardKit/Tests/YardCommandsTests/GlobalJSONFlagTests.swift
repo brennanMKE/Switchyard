@@ -58,6 +58,7 @@ struct GlobalJSONFlagTests {
         "redo": ["redo"],
         "switch": ["switch", "main"],
         "file-history": ["file-history", "a.txt"],
+        "blame": ["blame", "a.txt"],
     ]
 
     static let dispatchArgv: [String: [String]] = [
