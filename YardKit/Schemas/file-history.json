@@ -1,0 +1,72 @@
+{
+  "command" : "file-history",
+  "envelope" : {
+    "failure" : {
+      "error" : {
+        "code" : {
+          "enum" : [
+            "app_unavailable",
+            "blocked_on_conflicts",
+            "broker_unreachable",
+            "human_declined",
+            "ok",
+            "repository_error",
+            "request_failed",
+            "session_terminated",
+            "signing_failed",
+            "timed_out",
+            "usage"
+          ],
+          "type" : "string"
+        },
+        "hint" : {
+          "optional" : true,
+          "type" : "string"
+        },
+        "message" : {
+          "type" : "string"
+        }
+      },
+      "ok" : false,
+      "schemaVersion" : 1
+    },
+    "success" : {
+      "ok" : true,
+      "result" : {
+        "optional" : true,
+        "schema" : "file-history"
+      },
+      "schemaVersion" : 1
+    }
+  },
+  "exitCodes" : [
+    {
+      "code" : 0,
+      "meaning" : "The payload carries the path, the revision walked from, and commits:[{oid, author, authorTime, subject, status, path, previousPath?}] — status is what the commit did to the file (M, A, D, R, C, T). A path no commit touched is an empty list. Merges are not listed."
+    },
+    {
+      "code" : 1,
+      "meaning" : "Invalid arguments — not exactly one <path>, an unknown or duplicated flag, or a --revision value that is missing or starts with '-'. Use -- before a path that starts with '-'."
+    },
+    {
+      "code" : 4,
+      "meaning" : "The request failed for a reason the other codes do not name."
+    },
+    {
+      "code" : 6,
+      "meaning" : "Not a repository, or git refused the walk (an unknown --revision)."
+    }
+  ],
+  "flags" : [
+    {
+      "argument" : "rev",
+      "help" : "Walk from <rev> instead of HEAD.",
+      "long" : "revision",
+      "short" : null
+    }
+  ],
+  "schemaName" : "file-history",
+  "schemaVersion" : 1,
+  "summary" : "List the commits that changed one file, newest first, following renames (git log --follow). Read-only.",
+  "usage" : "file-history <path> [--revision <rev>]"
+}
