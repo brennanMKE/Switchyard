@@ -1,6 +1,6 @@
 ---
 name: switchyard
-description: Drive the Switchyard git client from the shell with the `switchyard` CLI. Read repository state as JSON (whereami, status, log, graph, hunks, conflicts), stage and commit (stage, unstage, commit, discard, stash), sync with remotes (fetch, pull, push), rewrite local history without an editor (reword, drop, reorder, split, absorb, rebase-onto), undo any of it (undo, redo), and hand decisions to the human in the Switchyard app (review, ask, resolve). Use in a git repository on a Mac with Switchyard.app installed, instead of raw git for these operations.
+description: Drive the Switchyard git client from the shell with the `switchyard` CLI. Read repository state as JSON (whereami, status, log, graph, hunks, conflicts), stage and commit (stage, unstage, commit, discard, stash), switch branches (switch), read a file's history and blame (file-history, blame), sync with and manage remotes (fetch, pull, push, remote), rewrite local history without an editor (reword, drop, reorder, split, absorb, rebase-onto), undo any of it (undo, redo), and hand decisions to the human in the Switchyard app (review, ask, resolve). Use in a git repository on a Mac with Switchyard.app installed, instead of raw git for these operations.
 ---
 
 # switchyard
@@ -13,7 +13,7 @@ description: Drive the Switchyard git client from the shell with the `switchyard
 - Most commands launch Switchyard.app if it is not running. `review`, `ask`, `resolve` and `watch` never launch it: they need a human already at the app, and exit 3 without one. Treat exit 3 from those as "no human available" — do not proceed as if approved.
 - A command's stdout is exactly one JSON envelope. The exceptions are `--help`, `--version` and `switchyard skill`, which print text, and `watch`, which streams one JSON object per line. Parse `ok` and the exit code; do not scrape the human-readable stderr line.
 - Nothing is interactive. No editor or pager ever opens; messages are passed as flags.
-- Every command that changes the repository writes one journal entry first. `switchyard undo` reverses the last one and `switchyard redo` puts it back; the human's Edit ▸ Undo walks the same journal. Undo stops at a push, because the remote already has it.
+- Every command that changes the repository writes one journal entry first. `switchyard undo` reverses the last one and `switchyard redo` puts it back; the human's Edit ▸ Undo walks the same journal. Undo stops at a push, and at a remote rename or removal, because neither can be taken back by restoring refs.
 - Paths are repository-relative, exactly as `status` and `hunks` print them, whatever the current directory.
 
 ## Workflows
@@ -48,6 +48,37 @@ switchyard redo
 ```
 
 Each step in the reply names the operation it undid. A walk longer than the journal, or one that would cross a push, is refused whole with exit 6 and changes nothing.
+
+### Switch branches
+
+```sh
+switchyard switch feature
+switchyard switch --track origin/feature
+switchyard switch --detach v1.2
+```
+
+`switch` never discards local changes. A change the switch would overwrite refuses the whole switch with exit 6, naming the files, and nothing is touched: commit them, or `stash push` them, then switch. `undo` switches back.
+
+### Read a file's history
+
+```sh
+switchyard file-history src/parser.swift
+switchyard blame src/parser.swift --lines 40,60
+switchyard blame src/parser.swift --revision HEAD~3
+```
+
+`file-history` follows renames; each commit's `status` says what it did to the file. `blame` without `--revision` reads the working tree, and a line not yet committed has the all-zero oid. Pass `--lines` on a large file: it bounds git's work, not just the output.
+
+### Manage remotes
+
+```sh
+switchyard remote list
+switchyard remote add upstream https://example.com/project.git
+switchyard fetch upstream
+switchyard remote prune origin
+```
+
+`remote add` and `remote set-url` change configuration only: they are not journaled, and `undo` does not reverse them. `remote rename` and `remote remove` report `undoable: false` — a later `undo` refuses to cross them (exit 6). `fetch <remote>` and `remote prune` are undoable.
 
 ### Clean up a branch before review
 
