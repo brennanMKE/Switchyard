@@ -56,6 +56,11 @@ public nonisolated enum JournalMenuTitles {
         "switch": "Switch Branch",
         "switch-track": "Check Out Branch",
         "switch-detach": "Check Out Commit",
+        // #0530: remote management (guide §11 decision 41). Rename and
+        // remove are never undone; their titles are for "Can’t Undo …".
+        "prune": "Prune",
+        "remote-rename": "Rename Remote",
+        "remote-remove": "Remove Remote",
     ]
 
     /// "Undo <title>" for a mapped operation, plain "Undo" for anything
@@ -63,7 +68,8 @@ public nonisolated enum JournalMenuTitles {
     /// not decode.
     public static func undo(operation: String?) -> String {
         // #0459: a push cannot be taken back, so the item says so.
-        if JournalMenu.undoBlocked(operation: operation) { return "Can’t Undo Push" }
+        // #0530: nor a remote rename or removal.
+        if JournalMenu.undoBlocked(operation: operation) { return title("Can’t Undo", operation: operation) }
         return title("Undo", operation: operation)
     }
 
@@ -104,8 +110,14 @@ public nonisolated enum JournalMenu {
     /// restore. Only a push: its entry is written after the push succeeds
     /// (`RemoteSync.push`), the remote already has the commits, and no local
     /// restore can take them back (guide §11 decision 32).
+    ///
+    /// #0530: and a remote rename or removal — the remote's configuration is
+    /// in no journal entry, so no restore can put it back (guide §11
+    /// decision 41).
     public static func undoBlocked(operation: String?) -> Bool {
-        operation == JournalUndo.pushOperation
+        guard let operation else { return false }
+        return operation == JournalUndo.pushOperation
+            || JournalUndo.remoteChangeOperations.contains(operation)
     }
 
     /// #0448: whether Undo and Redo belong to text editing rather than the

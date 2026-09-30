@@ -165,11 +165,17 @@ public nonisolated struct RepositorySidebarSummary: Sendable {
     /// Empty by default so existing callers (and previews) still compile.
     public var stashes: [Stash.Item]
 
+    /// #0530: every configured remote with its URLs (guide §11 decision
+    /// 41). Empty by default so existing callers (and previews) still
+    /// compile.
+    public var remotes: [RemoteConfig.Remote]
+
     public init(
         refs: RefSnapshot, worktrees: [WorktreeEntry], currentWorktreePath: String?,
         rerere: Rerere.Status = Rerere.Status(enabled: false, entries: []),
         branchTips: BranchTipDates.Report? = nil,
-        stashes: [Stash.Item] = []
+        stashes: [Stash.Item] = [],
+        remotes: [RemoteConfig.Remote] = []
     ) {
         self.refs = refs
         self.worktrees = worktrees
@@ -177,6 +183,7 @@ public nonisolated struct RepositorySidebarSummary: Sendable {
         self.rerere = rerere
         self.branchTips = branchTips
         self.stashes = stashes
+        self.remotes = remotes
     }
 }
 
@@ -216,9 +223,12 @@ public func loadRepositorySidebar(at path: String) async throws -> RepositorySid
     // #0495: the stash list throws like the other sections' reads: a list
     // that silently came back empty would hide stashes Undo can drop.
     let stashes = try await Stash.list(at: path)
+    // #0530: `try?` like the tip dates: a failed read shows no remote rows
+    // (the remote-tracking branches still list) rather than no sidebar.
+    let remotes = (try? await RemoteConfig.list(at: path)) ?? []
     return RepositorySidebarSummary(
         refs: refs, worktrees: worktrees, currentWorktreePath: context.topLevel, rerere: rerere,
-        branchTips: branchTips, stashes: stashes)
+        branchTips: branchTips, stashes: stashes, remotes: remotes)
 }
 
 /// Loads one recorded rerere resolution — the cached conflict preimage, the
