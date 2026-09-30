@@ -86,7 +86,7 @@ struct BranchMapView: View {
         // arrows pass through, so the Commit menu's ⌥⌘↑ and ⌥⌘↓ still reach
         // the menu bar (#0383).
         .onKeyPress(keys: [.upArrow, .downArrow]) { press in
-            guard press.modifiers.isEmpty, let selection, let current = nodeRowByOid[selection] else {
+            guard BranchMapKeys.stepsLane(press.modifiers), let selection, let current = nodeRowByOid[selection] else {
                 return .ignored
             }
             let step = press.key == .upArrow ? -1 : 1
@@ -337,6 +337,16 @@ private struct BranchMapLabel: View {
             .opacity(isMerged ? 0.45 : 1)
             .help(header.chips.map(\.name).joined(separator: ", ") + (isMerged ? " (merged)" : ""))
             .accessibilityLabel(BranchMapLabels.accessibilityLabel(header.chips, isMerged: isMerged))
+    }
+}
+
+/// #0557: which arrow presses step the map's selection through its lane.
+public nonisolated enum BranchMapKeys {
+    /// True for an arrow with no ⌘, ⌥, ⌃ or ⇧. An arrow key always carries
+    /// `.function` (measured in the VM: a plain ↓ arrives with rawValue 64),
+    /// so `modifiers.isEmpty` never held and ↓/↑ did nothing (#0426, #0557).
+    public static func stepsLane(_ modifiers: EventModifiers) -> Bool {
+        modifiers.isDisjoint(with: [.command, .option, .control, .shift])
     }
 }
 
