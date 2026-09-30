@@ -2077,6 +2077,65 @@ a feature at any milestone on the grounds that GitUp had it.
     - **Read-only.** No journal entry, no ref written. **No CLI verb** in this pass —
       `switchyard log` refuses `-`-prefixed tokens (decision 39's last point applies unchanged).
 
+41. **Remotes are managed from the sidebar's Remotes section: each remote is a row (name, fetch
+    URL) above its remote-tracking branches, with Fetch, Prune, Edit URL…, Rename Remote…,
+    Remove Remote… and Add Remote… on its menu. Add and Edit URL are not journaled; Rename and
+    Remove write an entry after they succeed that Undo refuses, as a push's is.** Decided
+    2026-09-30 in the planning pass for umbrella **#0526**, with high confidence; prototyped end to
+    end in a planning worktree (engine, views, VM spike). #0526 carries the questions for Brennan.
+
+    - **Where.** The Remotes section already lists remote-tracking branches; it now lists each
+      configured remote (`git remote -v`, one process, URLs after `insteadOf` rewriting — what git
+      contacts) as a row above its own branches, with its fetch URL on a second line and every
+      push URL in the help text when they differ. Branches no configured remote owns (a ref left
+      by a removed remote, a hand-made `refs/remotes/x/y`) list after the groups, as before. The
+      section shows even with no remotes ("No remotes"), so **Add Remote…** — on the section
+      header's menu, the "No remotes" row and every remote row — is always reachable. Remote rows
+      are not selectable (they are not commits); the branch rows keep #0401's click, #0510's menu
+      and their `origin/x` labels.
+    - **Git decides what a name may be; the sheet says so first.** `git remote add` accepts a name
+      exactly when `git check-ref-format refs/remotes/<name>/test` does (measured on 47 names, git
+      2.54.0); `RemoteConfig.nameProblem` mirrors it and a test runs git on every name. Two rules
+      are Switchyard's own: a leading `-` (git accepts it after `--`, and every later `git fetch
+      <name>` reads it as an option) and a name that nests with an existing one (`a` beside
+      `a/b`), which `git remote add` refuses but `git remote rename` does not (measured). A URL
+      must be non-empty with no control characters and no leading `-`: git itself accepts an
+      empty URL and one containing a newline (which splits `git remote -v`'s line — measured).
+      Surrounding whitespace is trimmed.
+    - **Not journaled: Add Remote… and Edit URL….** A remote is `git config`, and a journal entry
+      captures refs, `HEAD`, the index, the worktree, the sequencer and the stash — never config
+      (`JournalCheckpoint`). Neither moves a ref, so Edit ▸ Undo keeps naming the operation before
+      it and restoring that entry leaves the new configuration alone. Each sheet says "Edit ▸ Undo
+      doesn't undo this" and how to take it back.
+    - **Rename and Remove write a marker entry after they succeed, and Undo refuses it** — the
+      push rule (decision 32, #0461), for a different reason: both move refs *and* config, and a
+      restore can only put the refs back. Measured: after `git remote remove origin`, undoing the
+      entry before it recreated `refs/remotes/origin/main` for a remote that no longer existed;
+      a rename would leave the old name's branches beside the new. So `JournalUndo` refuses to
+      restore a `remote-rename` or `remote-remove` entry (`Error.remoteChangeNotUndoable`), and the
+      Edit menu reads "Can’t Undo Rename Remote" / "Can’t Undo Remove Remote", disabled. Earlier
+      entries stay reachable only by restoring them explicitly (`switchyard restore`), as after a
+      push. A rename or removal that fails writes no entry.
+    - **Remove Remote… always asks, and says what goes**: its remote-tracking branches are deleted
+      (named, up to three, then "and N more"), and each local branch whose upstream it was stops
+      tracking it — `git remote remove` unsets both `branch.<b>.remote` and `branch.<b>.merge`
+      (measured); local branches and commits stay. Destructive button, no Return shortcut (#0359).
+      Rename moves `refs/remotes/<old>/*` and rewrites `branch.<b>.remote` (measured), which its
+      sheet says.
+    - **Fetch “name” and Prune “name” are per remote and undoable.** Fetch is `git fetch --
+      <name>`, journaled as `fetch` before it runs (decision 32's entry, one remote). Prune is `git
+      remote prune -- <name>`: it deletes the remote-tracking branches the remote no longer has and
+      fetches nothing; journaled as `prune` before it runs, so Edit ▸ Undo Prune brings them back.
+      Both contact the remote, so they run as the toolbar's `remoteTask` and the progress line's
+      Cancel terminates them. Add Remote…'s **Fetch its branches now** (on by default) runs Fetch
+      after the add as a second step: a new remote with no branches listed looks like one that did
+      not work.
+    - **Edit URL… changes the fetch URL** (`remote.<name>.url`, prefilled as configured, before
+      `insteadOf`); a separately set push URL is shown and left alone. Editing push URLs is not in
+      this pass.
+    - **No CLI verbs in this pass.** `switchyard remote add|rename|remove|set-url` would be thin
+      arms over `RemoteConfig`; left to a later issue with decision 37's shape (#0526 question).
+
 ### Still open
 
 **Is M1's criterion 5 closable as written, and should it be restated?** Raised by the twelfth M1
