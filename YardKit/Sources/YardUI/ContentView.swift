@@ -792,7 +792,8 @@ public struct ContentView: View {
                     entry: entry,
                     files: selectedCommitDiff,
                     diffError: selectedCommitDiffError,
-                    onShowChanges: { openChanges(for: entry.oid) }
+                    onShowChanges: { openChanges(for: entry.oid) },
+                    onInspect: { fileInspector = $0 }
                 )
             } else if let repositoryPath {
                 // #0443: guide §11 decision 30 — with no commit selected
@@ -804,7 +805,8 @@ public struct ContentView: View {
                     isBusy: isBusy || journalRunning,
                     whereAmI: summary.whereAmI,
                     draft: $commitDraft,
-                    perform: { runWorkingChange($0) })
+                    perform: { runWorkingChange($0) },
+                    onInspect: { fileInspector = $0 })
             }
         }
     }

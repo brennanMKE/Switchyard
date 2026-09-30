@@ -21,6 +21,9 @@ public struct WorkingChangesView: View {
     /// #0466: the operation-in-progress flags the Amend checkbox reads.
     private let whereAmI: WhereAmI
     private let perform: (WorkingChange) -> Void
+    /// #0518: Show History and Blame on a file row (guide §11 decision 39).
+    /// `nil` offers neither.
+    private let onInspect: ((FileInspectorTarget) -> Void)?
 
     /// Which file's diff the lower half shows: a path on one side.
     struct FileSelection: Hashable {
@@ -52,7 +55,8 @@ public struct WorkingChangesView: View {
 
     public init(
         changes: WorkingChanges, repositoryPath: String, revision: Int, isBusy: Bool,
-        whereAmI: WhereAmI, draft: Binding<CommitDraft>, perform: @escaping (WorkingChange) -> Void
+        whereAmI: WhereAmI, draft: Binding<CommitDraft>, perform: @escaping (WorkingChange) -> Void,
+        onInspect: ((FileInspectorTarget) -> Void)? = nil
     ) {
         self.changes = changes
         self.repositoryPath = repositoryPath
@@ -61,6 +65,7 @@ public struct WorkingChangesView: View {
         self.whereAmI = whereAmI
         self._draft = draft
         self.perform = perform
+        self.onInspect = onInspect
     }
 
     public var body: some View {
@@ -214,9 +219,15 @@ public struct WorkingChangesView: View {
                 .accessibilityIdentifier("\(action.lowercased())-file-\(row.path)")
             }
         }
-        // #0471: Discard Changes… on an unstaged row. A staged or
-        // conflicted row's menu is empty, and SwiftUI shows none.
+        // #0518: Show History and Blame on any row that has them — not an
+        // untracked or a conflicted one. #0471: Discard Changes… on an
+        // unstaged row. A menu with no items is not shown.
         .contextMenu {
+            if let onInspect, let target = FileInspectorTarget.forWorkingRow(row, mode: .history) {
+                Button("Show History") { onInspect(target) }
+                Button("Blame") { onInspect(target.with(.blame)) }
+                    .disabled(target.blameUnavailable != nil)
+            }
             if WorkingChanges.canDiscard(row) {
                 Button("Discard Changes…") {
                     pendingDiscard = DiscardConfirmation(rows: [row])
