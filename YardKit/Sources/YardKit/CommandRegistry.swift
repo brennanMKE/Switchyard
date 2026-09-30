@@ -12,7 +12,7 @@ public enum CommandRegistry {
 
     /// All known `yard` command specifications in the order they should be
     /// rendered in help output.
-    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, skillSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, revertSpec, cherryPickSpec, mergeSpec, rewriteDiffSpec, rerereSpec, reviewSpec, askSpec, resolveSpec, watchSpec, tagSpec, branchSpec, rebaseOntoSpec, setTipSpec, stageSpec, unstageSpec, commitSpec, discardSpec, fetchSpec, pullSpec, pushSpec, stashSpec]
+    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, skillSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, revertSpec, cherryPickSpec, mergeSpec, rewriteDiffSpec, rerereSpec, reviewSpec, askSpec, resolveSpec, watchSpec, tagSpec, branchSpec, rebaseOntoSpec, setTipSpec, stageSpec, unstageSpec, commitSpec, discardSpec, fetchSpec, pullSpec, pushSpec, stashSpec, undoSpec, redoSpec]
 
     // MARK: - The switchyard spec — rendered by `yard --help`
 
@@ -759,6 +759,42 @@ public enum CommandRegistry {
             ExitCodeSpec(code: 8, meaning: "apply or pop conflicted (blocked_on_conflicts) — ok:true, outcome \"conflicted\", conflictedPaths listed; git applied what it could and kept the stash. Resolve, or undo."),
         ],
         schemaName: "stash",
+        payload: nil
+    )
+
+    // MARK: - The undo and redo specs — engine-backed, resolved by `YardCommands` (guide §11 decision 37)
+
+    static let undoSpec = CommandSpec(
+        name: "undo",
+        summary: "Undo the last journaled operations in this worktree, as Edit ▸ Undo does.",
+        usage: "undo [--steps <n>]",
+        flags: [
+            FlagSpec(long: "steps", argument: "n", help: "How many operations to undo (a positive integer, default 1). All or nothing."),
+        ],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "Every step was restored; the payload lists each step's entry, the operation it undid, and the pieces restored."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — --steps without a positive integer, or anything else."),
+            ExitCodeSpec(code: 4, meaning: "The request failed for a reason the other codes do not name."),
+            ExitCodeSpec(code: 6, meaning: "Not a repository; fewer operations than --steps remain; the walk would cross a push (the remote already has it); or a restore was refused. Nothing was changed by a refused walk."),
+        ],
+        schemaName: "undo",
+        payload: nil
+    )
+
+    static let redoSpec = CommandSpec(
+        name: "redo",
+        summary: "Redo operations undone in this worktree, as Edit ▸ Redo does.",
+        usage: "redo [--steps <n>]",
+        flags: [
+            FlagSpec(long: "steps", argument: "n", help: "How many undone operations to redo (a positive integer, default 1). All or nothing."),
+        ],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "Every step was restored; the payload lists each step's entry and the pieces restored."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — --steps without a positive integer, or anything else."),
+            ExitCodeSpec(code: 4, meaning: "The request failed for a reason the other codes do not name."),
+            ExitCodeSpec(code: 6, meaning: "Not a repository; fewer undone operations than --steps remain (a new operation since the undo ends the redo run); or a restore was refused."),
+        ],
+        schemaName: "redo",
         payload: nil
     )
 
