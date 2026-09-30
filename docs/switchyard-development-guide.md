@@ -1916,6 +1916,58 @@ a feature at any milestone on the grounds that GitUp had it.
       `checkpoint` and `restore`, force-push, `pull --rebase`, fetching one remote, `stash branch`,
       stashing selected paths, `--keep-index`.
 
+38. **Switching, checking out and deleting refs: the sidebar's branch, remote and tag rows, and the
+    Commit menu; `git switch`'s own rule for local changes, with Stash Changes and Switch.** Decided
+    2026-09-29 in the planning pass for umbrella **#0506**, with high confidence; every bullet is
+    cheap to reverse, and #0506 carries the questions for Brennan. Prototyped end to end in a
+    planning worktree (engine, views, VM spike).
+
+    - **Where.** A local branch row: **double-click** switches, and its context menu has **Switch to
+      “x”** and **Delete Branch…**. A remote branch row: **Check Out as Local Branch** (`origin/x` →
+      a new `x` tracking it). A tag row: **Delete Tag…**. The Commit menu (and the History row's
+      context menu, which is the same menu): **Check Out (Detached)**. A disabled item's help text
+      says why, from the same rules the engine refuses by.
+    - **Engine.** `Checkout.switchBranch` (`git switch --no-guess`), `Checkout.trackRemote`
+      (`git switch --create x --track refs/remotes/origin/x`), `Checkout.detach` (`git switch
+      --detach`), `Tag.delete` (`git tag -d`), and the existing `Branch.delete`. **Each is one
+      journal checkpoint**, operations `switch`, `switch-track`, `switch-detach`, `tag-delete`,
+      `branch-delete`, so Edit ▸ Undo reverts it; the checkpoint captures `HEAD`, the index and the
+      working tree, so Undo Switch Branch puts all three back.
+    - **Local changes follow `git switch` exactly.** A change to a file that is the same in both
+      commits is carried across; a change the checkout would overwrite — modified, staged, or an
+      untracked file in the way — refuses the whole checkout and touches nothing. There is no
+      "discard and switch" and no `--merge`. The refusal is decided **before** the checkpoint with
+      the same two-way merge `git switch` runs, as a dry run — `git read-tree -m -u -n HEAD
+      <target>` after `git update-index -q --refresh` — so a refused switch writes no journal
+      entry. Measured (git 2.54.0): the dry run refuses exactly what `git switch` refuses and
+      passes what it carries; without the refresh it refuses a file whose stat data changed and
+      whose content did not. The dry run names only the first file; the refusal's file list is the
+      paths that differ between `HEAD` and the target *and* have a local change.
+    - **The refusal is a question.** The app shows "Your changes would be overwritten by checking
+      out “x”" with **Stash Changes and Switch** and **Cancel**. Stash Changes and Switch is
+      `Stash.push` (untracked files included, message "Before checking out x") then the checkout —
+      **two journal entries**, so the first Undo switches back and the second puts the changes
+      back in the working tree. Chosen over opening the Stash Changes… sheet because the sheet
+      would leave the user to click Switch again; the stash stays visible in the Stashes list.
+    - **Refusals the app checks first** (and the engine refuses anyway): switching to the current
+      branch; to a branch another worktree has checked out (git refuses to check one branch out
+      twice); any checkout while a rebase, merge, cherry-pick or revert is in progress or the index
+      has conflicts; Check Out as Local Branch when a local branch of that name exists, or on
+      `origin/HEAD`; detaching where `HEAD` is already detached.
+    - **Delete Branch… always asks.** The first dialog never forces: the engine decides whether the
+      branch is merged (its tip reachable from `HEAD`, `git branch -d`'s rule). When it is not, the
+      engine's refusal becomes a **second** dialog — "“x” is not merged into the current branch",
+      destructive **Delete Unmerged Branch** — which forces. No typed confirmation: Undo Delete
+      Branch restores it. The current branch and a branch another worktree holds cannot be
+      deleted (disabled, with the reason). **Delete Tag…** asks once; Undo restores a lightweight
+      or an annotated tag (the tag object is still in the store — switchyard never runs `git gc`).
+    - **Undo of Check Out as Local Branch leaves the new branch** (and its upstream config): decision
+      20, a restore deletes only refs its snapshot recorded — the same way Undo New Branch leaves
+      the branch it made. `HEAD`, the index and the working tree go back. Measured.
+    - **Out of scope, filed as questions in #0506:** CLI verbs (`switch`, `tag delete`), choosing
+      the local name when checking out a remote branch, deleting a remote branch (a push),
+      renaming a tag, and switching from the History row's branch chips.
+
 ### Still open
 
 **Is M1's criterion 5 closable as written, and should it be restated?** Raised by the twelfth M1
