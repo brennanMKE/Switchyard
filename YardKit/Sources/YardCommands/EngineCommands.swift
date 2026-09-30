@@ -115,6 +115,8 @@ public func runEngineCommand(
         return runStash(arguments: arguments, workingDirectory: workingDirectory)
     case "undo", "redo":
         return runUndo(arguments: arguments, workingDirectory: workingDirectory)
+    case "switch":
+        return runSwitch(arguments: arguments, workingDirectory: workingDirectory)
     case "rewrite-diff":
         // One required positional, no flags: `switchyard rewrite-diff
         // <journal-entry-id>` arrives as `["rewrite-diff", "<id>"]`. The arm

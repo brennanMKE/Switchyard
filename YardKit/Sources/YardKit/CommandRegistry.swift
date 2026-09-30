@@ -12,7 +12,7 @@ public enum CommandRegistry {
 
     /// All known `yard` command specifications in the order they should be
     /// rendered in help output.
-    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, skillSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, revertSpec, cherryPickSpec, mergeSpec, rewriteDiffSpec, rerereSpec, reviewSpec, askSpec, resolveSpec, watchSpec, tagSpec, branchSpec, rebaseOntoSpec, setTipSpec, stageSpec, unstageSpec, commitSpec, discardSpec, fetchSpec, pullSpec, pushSpec, stashSpec, undoSpec, redoSpec]
+    public static let all: [CommandSpec] = [switchyardSpec, noopSpec, skillSpec, whereamiSpec, statusSpec, conflictsSpec, wtSpec, wtWhereSpec, hunksSpec, logSpec, graphSpec, verifySpec, absorbSpec, splitSpec, rewordSpec, dropSpec, reorderSpec, revertSpec, cherryPickSpec, mergeSpec, rewriteDiffSpec, rerereSpec, reviewSpec, askSpec, resolveSpec, watchSpec, tagSpec, branchSpec, rebaseOntoSpec, setTipSpec, stageSpec, unstageSpec, commitSpec, discardSpec, fetchSpec, pullSpec, pushSpec, stashSpec, undoSpec, redoSpec, switchSpec]
 
     // MARK: - The switchyard spec — rendered by `yard --help`
 
@@ -796,6 +796,30 @@ public enum CommandRegistry {
         ],
         schemaName: "redo",
         payload: nil
+    )
+
+    // MARK: - The switch spec — engine-backed, resolved by `YardCommands` (guide §11 decisions 38, 43)
+
+    static let switchSpec = CommandSpec(
+        name: "switch",
+        summary: "Switch to a branch, check out a remote branch as a new tracking branch, or detach at a commit. Never discards local changes.",
+        usage: "switch (<branch> | --track <remote-branch> | --detach <commit>)",
+        flags: [
+            FlagSpec(long: "track", argument: "remote-branch", help: "Create the local branch named after <remote-branch> without its remote (origin/x → x), tracking it, and switch to it."),
+            FlagSpec(long: "detach", argument: "commit", help: "Detach HEAD at <commit>."),
+        ],
+        exitCodes: [
+            ExitCodeSpec(code: 0, meaning: "Switched; the payload carries HEAD's oid, the branch (absent when detached) and the journal operation (switch, switch-track or switch-detach). One journal entry: undo puts HEAD, the index and the working tree back (a branch --track created stays)."),
+            ExitCodeSpec(code: 1, meaning: "Invalid arguments — not exactly one target, both --track and --detach, or an unknown flag."),
+            ExitCodeSpec(code: 4, meaning: "The request failed for a reason the other codes do not name."),
+            ExitCodeSpec(code: 6, meaning: "Nothing was touched and nothing journaled: not a repository; an unknown branch, remote branch or commit; already there; the branch is checked out in another worktree; a local branch of that name exists (--track); a rebase, merge, cherry-pick or revert in progress or unresolved conflicts; or local changes the switch would overwrite (the message names them — commit or stash them first)."),
+        ],
+        schemaName: "switch",
+        payload: PayloadShape(fields: [
+            PayloadField(name: "head", type: .string, description: "HEAD's full oid after the switch."),
+            PayloadField(name: "branch", type: .string, optional: true, description: "The checked-out branch's short name. Absent when HEAD is detached."),
+            PayloadField(name: "operation", type: .string, enumCases: ["switch", "switch-track", "switch-detach"], description: "The journal operation recorded; undo names it."),
+        ])
     )
 
     // MARK: - The rewrite-diff spec — engine-backed, resolved by `YardCommands` (#0064)
