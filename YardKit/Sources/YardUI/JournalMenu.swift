@@ -120,12 +120,18 @@ public nonisolated enum JournalMenu {
             || JournalUndo.remoteChangeOperations.contains(operation)
     }
 
-    /// #0448: whether Undo and Redo belong to text editing rather than the
-    /// journal — true only while an `NSText` view (a field editor, a
-    /// `TextEditor`) is the key window's first responder.
+    /// #0448: whether Undo (or, with `redo`, Redo) belongs to text editing
+    /// rather than the journal — true only while an `NSText` view (a field
+    /// editor, a `TextEditor`) is the key window's first responder.
+    /// #0570: and only while that view has a step to take. A focused editor
+    /// with nothing to undo — the one ⌘↩ just emptied — must not swallow
+    /// Undo Commit.
     @MainActor
-    public static func routesToText(_ firstResponder: NSResponder?) -> Bool {
-        firstResponder is NSText
+    public static func routesToText(_ firstResponder: NSResponder?, redo: Bool = false) -> Bool {
+        guard let text = firstResponder as? NSText, let undoManager = text.undoManager else {
+            return false
+        }
+        return redo ? undoManager.canRedo : undoManager.canUndo
     }
 }
 
@@ -170,7 +176,9 @@ public struct JournalCommands: Commands {
     public init() {}
 
     public var body: some Commands {
-        let editingText = JournalMenu.routesToText(NSApp.keyWindow?.firstResponder)
+        let responder = NSApp.keyWindow?.firstResponder
+        let editingUndo = JournalMenu.routesToText(responder)
+        let editingRedo = JournalMenu.routesToText(responder, redo: true)
         CommandGroup(replacing: .undoRedo) {
             // #0448: forward only while a text view is first responder.
             // Sent unconditionally, `undo:` found a taker in the responder
@@ -182,7 +190,7 @@ public struct JournalCommands: Commands {
                 target?.perform(.undo)
             }
             .keyboardShortcut("z", modifiers: .command)
-            .disabled(!(target?.undoEnabled ?? false) && !editingText)
+            .disabled(!(target?.undoEnabled ?? false) && !editingUndo)
 
             Button(target?.redoTitle ?? "Redo") {
                 if JournalMenu.routesToText(NSApp.keyWindow?.firstResponder),
@@ -190,7 +198,7 @@ public struct JournalCommands: Commands {
                 target?.perform(.redo)
             }
             .keyboardShortcut("z", modifiers: [.command, .shift])
-            .disabled(!(target?.redoEnabled ?? false) && !editingText)
+            .disabled(!(target?.redoEnabled ?? false) && !editingRedo)
         }
     }
 }
