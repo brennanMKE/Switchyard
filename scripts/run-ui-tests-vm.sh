@@ -54,6 +54,7 @@ GUEST_BLAME_FIXTURE="/Users/$GUEST_USER/uitest-blame-repo"
 GUEST_REMOTES_FIXTURE="/Users/$GUEST_USER/uitest-remotes"
 GUEST_DIFFOPTS_FIXTURE="/Users/$GUEST_USER/uitest-diffopts-repo"
 GUEST_LARGE_FIXTURE="/Users/$GUEST_USER/uitest-large-repo"
+GUEST_COMPOSER_FIXTURE="/Users/$GUEST_USER/uitest-composer-repo"
 RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"
 # Optional spike filter: pass an issue number (e.g. `0383`) to run just that
 # spike's clone; with no argument all four run, each in its own clone.
@@ -348,7 +349,7 @@ start_guest() {
     sleep 5
   done
   log "[$label] Guest reachable; copying source, generating the fixture"
-  tart exec "$CLONE" /bin/zsh -lc "rm -rf $GUEST_SRC $GUEST_RESULTS $GUEST_FIXTURE $GUEST_MAP_FIXTURE $GUEST_CHANGES_FIXTURE $GUEST_REMOTE_FIXTURE $GUEST_STASH_FIXTURE $GUEST_SWITCH_FIXTURE $GUEST_BLAME_FIXTURE $GUEST_REMOTES_FIXTURE $GUEST_DIFFOPTS_FIXTURE $GUEST_LARGE_FIXTURE && mkdir -p $GUEST_RESULTS"
+  tart exec "$CLONE" /bin/zsh -lc "rm -rf $GUEST_SRC $GUEST_RESULTS $GUEST_FIXTURE $GUEST_MAP_FIXTURE $GUEST_CHANGES_FIXTURE $GUEST_REMOTE_FIXTURE $GUEST_STASH_FIXTURE $GUEST_SWITCH_FIXTURE $GUEST_BLAME_FIXTURE $GUEST_REMOTES_FIXTURE $GUEST_DIFFOPTS_FIXTURE $GUEST_LARGE_FIXTURE $GUEST_COMPOSER_FIXTURE $GUEST_COMPOSER_FIXTURE-template.txt && mkdir -p $GUEST_RESULTS"
   tart exec "$CLONE" /bin/zsh -lc "cp -R '/Volumes/My Shared Files/run/src' $GUEST_SRC"
 # The fixture the spike re-derivations (#0395 round 2) drive:
 #   - four commits with distinctive subjects (History rows to select;
@@ -395,6 +396,9 @@ tart exec "$CLONE" /bin/zsh -lc \
   tart exec "$CLONE" /bin/zsh -lc "zsh $GUEST_SRC/scripts/uitest-fixtures/make-diffopts-fixture.sh $GUEST_DIFFOPTS_FIXTURE"
   # #0555: the large-history fixture — 6,002 commits and 1,000 tags.
   tart exec "$CLONE" /bin/zsh -lc "zsh $GUEST_SRC/scripts/uitest-fixtures/make-large-history-fixture.sh $GUEST_LARGE_FIXTURE"
+  # #0568: the commit composer fixture — three authors, a commit.template
+  # and a staged file.
+  tart exec "$CLONE" /bin/zsh -lc "zsh $GUEST_SRC/scripts/uitest-fixtures/make-composer-fixture.sh $GUEST_COMPOSER_FIXTURE"
   local actual_branch
   actual_branch="$(tart exec "$CLONE" /bin/zsh -lc "git -C $GUEST_FIXTURE symbolic-ref --short HEAD" | tr -d '[:space:]')"
   [[ "$actual_branch" == "$GUEST_FIXTURE_BRANCH" ]] \
@@ -563,6 +567,8 @@ run_spike_if_selected 0542 Spike0542DiffOptionsUITests
 run_spike_if_selected 0555 Spike0555LargeHistoryUITests
 run_spike_if_selected 0556 Spike0556MatchStepUITests
 run_spike_if_selected 0557 Spike0557MapArrowsUITests
+run_spike_if_selected 0568 Spike0568ComposerUITests composer
+run_spike_if_selected 0568 Spike0568DraftKeptUITests draft
 
 print ""
 if (( TEST_RC == 0 )); then
