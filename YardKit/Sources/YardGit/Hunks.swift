@@ -585,11 +585,12 @@ public func listHunks(
 public func listHunks(
     at path: String,
     area: DiffArea,
+    options: DiffOptions = .standard,
     git: GitProcess = GitProcess()
 ) async throws -> [FileDiff] {
     var arguments = pinnedDiffConfigOverrides + ["diff"]
     if area == .staged { arguments.append("--cached") }
-    arguments += pinnedDiffFlags
+    arguments += pinnedDiffFlags + options.flags
     let output = try await git.run(arguments, workingDirectory: path)
     return try HunkParser().parse(output.text)
 }
@@ -679,19 +680,21 @@ public func commitDiff(
 public func commitDiff(
     at path: String,
     revision: String,
+    options: DiffOptions = .standard,
     git: GitProcess = GitProcess()
 ) async throws -> [FileDiff] {
-    let output = try await git.run(commitDiffArguments(revision: revision), workingDirectory: path)
+    let output = try await git.run(
+        commitDiffArguments(revision: revision, options: options), workingDirectory: path)
     return try HunkParser().parse(output.text)
 }
 
 /// The arguments `commitDiff` runs, shared by the synchronous and async
 /// paths (#0344) so the pinned config overrides and flags cannot drift
 /// between them.
-private func commitDiffArguments(revision: String) -> [String] {
+private func commitDiffArguments(revision: String, options: DiffOptions = .standard) -> [String] {
     var arguments = pinnedDiffConfigOverrides
     arguments += ["diff-tree", "--root", "-p", "--cc", "--no-commit-id"]
-    arguments += pinnedDiffFlags
+    arguments += pinnedDiffFlags + options.flags
     arguments.append(revision)
     return arguments
 }
@@ -713,20 +716,67 @@ private func commitDiffArguments(revision: String) -> [String] {
 public func stashDiff(
     at path: String,
     oid: String,
+    options: DiffOptions = .standard,
     git: GitProcess = GitProcess()
 ) async throws -> [FileDiff] {
-    var tracked = pinnedDiffConfigOverrides + ["diff"] + pinnedDiffFlags
+    var tracked = pinnedDiffConfigOverrides + ["diff"] + pinnedDiffFlags + options.flags
     tracked += [oid + "^1", oid]
     var files = try HunkParser().parse(await git.run(tracked, workingDirectory: path).text)
     let untrackedCommit = oid + "^3"
     if try await git.capture(["rev-parse", "--verify", "-q", untrackedCommit + "^{commit}"],
                              workingDirectory: path).exitCode == 0 {
         var untracked = pinnedDiffConfigOverrides + ["diff-tree", "--root", "-p", "--no-commit-id"]
-        untracked += pinnedDiffFlags
+        untracked += pinnedDiffFlags + options.flags
         untracked.append(untrackedCommit)
         files += try HunkParser().parse(await git.run(untracked, workingDirectory: path).text)
     }
     return files
+}
+
+// MARK: - Diff options (#0535, guide §11 decision 42)
+
+/// How a diff that is only *shown* is drawn: whitespace ignored, more
+/// context. The async `listHunks`, `commitDiff` and `stashDiff` take it;
+/// staging, unstaging and discarding never do — they re-list hunks with the
+/// pinned flags alone, so a hunk id from a listing drawn with other options
+/// names no hunk there (guide §11 decision 42).
+public struct DiffOptions: Sendable, Hashable {
+    /// `--ignore-all-space` (`-w`): a line that differs only in whitespace
+    /// is context, printed as it is now, and a file whose every change is
+    /// whitespace is left out of the listing altogether — no `diff --git`
+    /// block at all (measured, git 2.54.0). Not `--ignore-space-change`
+    /// (`-b`): it still shows a line indented from nothing, which is what
+    /// wrapping code in a new block does (measured on git/git 9719c290ee:
+    /// 7 insertions and 8 deletions plain and under `-b`, 2 and 3 under
+    /// `-w`).
+    public var ignoresWhitespace: Bool
+    /// Lines of context around each change. `DiffOptions.wholeFile` makes
+    /// each file one hunk holding every line.
+    public var contextLines: Int
+
+    /// The pinned diff: whitespace shown, three lines of context.
+    public static let standard = DiffOptions()
+    /// The `contextLines` that shows the whole file. git accepts it and
+    /// prints one hunk per file (measured: `@@ -1,40 +1,40 @@` for a
+    /// one-line change in a 40-line file).
+    public static let wholeFile = Int(Int32.max)
+
+    public init(ignoresWhitespace: Bool = false, contextLines: Int = 3) {
+        self.ignoresWhitespace = ignoresWhitespace
+        self.contextLines = max(0, contextLines)
+    }
+
+    /// Whether this is `standard`: what staging acts on.
+    public var isStandard: Bool { self == .standard }
+
+    /// Appended after `pinnedDiffFlags`. git takes the last `--unified`, so
+    /// this one overrides the pinned `--unified=3` (measured).
+    var flags: [String] {
+        var flags: [String] = []
+        if ignoresWhitespace { flags.append("--ignore-all-space") }
+        if contextLines != 3 { flags.append("--unified=\(contextLines)") }
+        return flags
+    }
 }
 
 // MARK: - Wire encoding (#0132)
