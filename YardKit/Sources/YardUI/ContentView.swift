@@ -1252,20 +1252,29 @@ public struct ContentView: View {
         guard let repositoryPath, !isBusy, !journalRunning else { return }
         runningRef = action
         Task {
-            defer { runningRef = nil }
+            // #0512: the follow-up question (Stash Changes and Switch, or
+            // Delete Unmerged Branch) is presented only after the refresh
+            // and after `runningRef` clears — shown earlier, its button runs
+            // `runRefAction` while `isBusy` is still true and the click is
+            // dropped by the guard above.
+            var blocked: CheckoutBlocked?
+            var unmerged: RefDeleteConfirmation?
             do {
                 try await performRefAction(action, at: repositoryPath)
             } catch {
-                if let blocked = CheckoutBlocked(action: action, error: error) {
-                    checkoutBlocked = blocked
+                if let refusal = CheckoutBlocked(action: action, error: error) {
+                    blocked = refusal
                 } else if case let .deleteBranch(name, false) = action,
                           case .unmergedBranch? = error as? RefManageError {
-                    pendingRefDelete = .unmergedBranch(name)
+                    unmerged = .unmergedBranch(name)
                 } else {
                     actionFailure = action.failure(for: error)
                 }
             }
             await refreshAfterMutation { _, _ in nil }
+            runningRef = nil
+            if let blocked { checkoutBlocked = blocked }
+            if let unmerged { pendingRefDelete = unmerged }
         }
     }
 

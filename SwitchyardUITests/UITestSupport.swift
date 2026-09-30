@@ -278,6 +278,51 @@ extension XCUIApplication {
     }
 }
 
+/// #0512: the switch fixture scripts/uitest-fixtures/make-switch-fixture.sh
+/// generates inside the guest — keep the two in sync.
+enum UITestSwitchFixture {
+    static let repositoryPath = "/Users/admin/uitest-switch/repo"
+    /// Checked out, with notes.txt edited in the working tree.
+    static let main = "switch-main"
+    /// Changes notes.txt, so switching to it over the edit is refused.
+    static let feature = "switch-feature"
+    /// One commit on no other branch.
+    static let unmerged = "unmerged-topic"
+    static let remoteBranch = "origin/remote-topic"
+    static let remoteLocal = "remote-topic"
+    static let tag = "v-delete-me"
+    static let baseSubject = "switch base commit"
+    /// The stash row Stash Changes and Switch leaves (git's `On <branch>: `
+    /// prefix is dropped by the row).
+    static let stashMessage = "Before checking out switch-feature"
+}
+
+extension XCUIApplication {
+    /// Launches the app on the switch fixture with the real panes.
+    @MainActor
+    func launchWithSwitchFixture() {
+        launchArguments = [
+            "-uiTestRepository", UITestSwitchFixture.repositoryPath,
+            "-uiTestRealSurfaces",
+        ]
+        launch()
+        let tree = debugDescription
+        XCTAssertTrue(
+            windows.firstMatch.waitForExistence(timeout: 60),
+            "The app launched but opened no window within 60 s — its element " +
+            "tree starts with: \(String(tree.prefix(1200)))",
+            file: #filePath, line: #line)
+    }
+
+    /// #0512: the repository header's first line (`TrackingSummary.text`),
+    /// matched by prefix — "On branch x · …" or "Detached HEAD at …".
+    @MainActor
+    func header(beginningWith prefix: String) -> XCUIElement {
+        staticTexts.matching(NSPredicate(
+            format: "value BEGINSWITH %@ OR label BEGINSWITH %@", prefix, prefix)).firstMatch
+    }
+}
+
 /// #0455: the Fetch/Pull/Push fixture scripts/uitest-fixtures/make-remote-fixture.sh
 /// generates inside the guest — keep the two in sync. Every clone is on
 /// `remote-main` tracking `origin/remote-main` except `pushRepository`.
