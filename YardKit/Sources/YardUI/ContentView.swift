@@ -172,6 +172,15 @@ public struct ContentView: View {
     @State private var runningStash: StashAction?
     /// #0496: the Drop… confirmation on screen; `nil` when none is.
     @State private var pendingStashDrop: StashDropConfirmation?
+    /// #0510: the ref action running right now (guide §11 decision 38),
+    /// folded into `isBusy` and the Edit menu's busy check.
+    @State private var runningRef: RefAction?
+    /// #0510: the Delete Branch… / Delete Tag… confirmation on screen, or
+    /// the second one an unmerged branch asks.
+    @State private var pendingRefDelete: RefDeleteConfirmation?
+    /// #0510: the checkout the engine refused because it would overwrite
+    /// local changes; the alert offers Stash Changes and Switch.
+    @State private var checkoutBlocked: CheckoutBlocked?
 
     /// #0457: the toolbar's network operation running right now, `nil` when
     /// none. Folded into `isBusy` and the Edit menu's busy check, the same
@@ -436,6 +445,10 @@ public struct ContentView: View {
         }
         // #0496: Drop… asks first (guide §11 decision 36).
         .modifier(StashDropDialog(pending: $pendingStashDrop) { runStashAction($0) })
+        // #0510: Delete Branch… / Delete Tag… ask first, and a refused
+        // checkout offers Stash Changes and Switch (guide §11 decision 38).
+        .modifier(RefActionDialogs(
+            pendingDelete: $pendingRefDelete, blocked: $checkoutBlocked) { runRefAction($0) })
         // #0055: the pending review for the repository this view shows,
         // presented as a sheet. The centre removes a decided model — which
         // clears the binding and dismisses — and a timed-out or superseded
@@ -583,7 +596,8 @@ public struct ContentView: View {
             // take seconds and may raise a pinentry or agent prompt the
             // user must be able to reach.
             if let progress = runningAction?.progressLabel ?? runningWorkingChange?.progressLabel
-                ?? runningRemote?.progressLabel ?? runningStash?.progressLabel {
+                ?? runningRemote?.progressLabel ?? runningStash?.progressLabel
+                ?? runningRef?.progressLabel {
                 HStack(spacing: 6) {
                     ProgressView()
                         .controlSize(.small)
@@ -655,7 +669,12 @@ public struct ContentView: View {
                     },
                     onStashAction: { runStashAction($0) },
                     onDropStash: { pendingStashDrop = StashDropConfirmation(item: $0) },
-                    isBusy: isBusy || journalRunning)
+                    isBusy: isBusy || journalRunning,
+                    refContext: RefActionContext.make(
+                        summary: sidebar, whereAmI: summary.whereAmI,
+                        isBusy: isBusy || journalRunning),
+                    onRefAction: { runRefAction($0) },
+                    onDeleteRef: { pendingRefDelete = $0 })
             } else {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -937,7 +956,7 @@ public struct ContentView: View {
     /// `conflictActionRunning`.
     private var isBusy: Bool {
         runningAction != nil || conflictActionRunning || runningWorkingChange != nil
-            || runningRemote != nil || runningStash != nil
+            || runningRemote != nil || runningStash != nil || runningRef != nil
     }
 
     /// The owners map the row gutter colours with, which the Merge into
@@ -982,7 +1001,7 @@ public struct ContentView: View {
     private var journalMenuTarget: JournalMenuTarget? {
         guard repositoryPath != nil else { return nil }
         let busy = runningAction != nil || journalRunning || runningWorkingChange != nil
-            || runningRemote != nil || runningStash != nil
+            || runningRemote != nil || runningStash != nil || runningRef != nil
         return JournalMenuTarget(
             undoTitle: JournalMenuTitles.undo(
                 operation: JournalMenu.undoOperation(in: journalListing)),
@@ -1131,7 +1150,7 @@ public struct ContentView: View {
     /// current after the chain moves.
     private func runJournal(_ kind: JournalMenuTarget.Kind) {
         guard let repositoryPath, runningAction == nil, runningWorkingChange == nil,
-              runningRemote == nil, runningStash == nil, !journalRunning
+              runningRemote == nil, runningStash == nil, runningRef == nil, !journalRunning
         else { return }
         journalRunning = true
         Task {
@@ -1216,6 +1235,34 @@ public struct ContentView: View {
             if let selectedStash, sidebar?.stashes.contains(where: { $0.oid == selectedStash }) != true {
                 self.selectedStash = nil
             }
+        }
+    }
+
+    // MARK: - #0510: switching and deleting refs (guide §11 decision 38)
+
+    /// #0510: runs one ref action — one journal checkpoint in the engine,
+    /// so Edit ▸ Undo reverts it — then refreshes in place. Two refusals
+    /// are questions, not failures: a checkout that would overwrite local
+    /// changes offers Stash Changes and Switch, and an unmerged branch asks
+    /// again before it is forced. Everything else is the failure alert.
+    private func runRefAction(_ action: RefAction) {
+        guard let repositoryPath, !isBusy, !journalRunning else { return }
+        runningRef = action
+        Task {
+            defer { runningRef = nil }
+            do {
+                try await performRefAction(action, at: repositoryPath)
+            } catch {
+                if let blocked = CheckoutBlocked(action: action, error: error) {
+                    checkoutBlocked = blocked
+                } else if case let .deleteBranch(name, false) = action,
+                          case .unmergedBranch? = error as? RefManageError {
+                    pendingRefDelete = .unmergedBranch(name)
+                } else {
+                    actionFailure = action.failure(for: error)
+                }
+            }
+            await refreshAfterMutation { _, _ in nil }
         }
     }
 

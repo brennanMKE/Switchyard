@@ -75,6 +75,14 @@ public struct RepositorySidebarView: View {
     private let onDropStash: ((Stash.Item) -> Void)?
     /// #0496: disables the context menu's items while anything runs.
     private let isBusy: Bool
+    /// #0510: what the ref rows' Switch, Check Out and Delete items need to
+    /// decide availability (guide §11 decision 38). `nil` hides the items
+    /// (previews, tests).
+    private let refContext: RefActionContext?
+    /// #0510: Switch and Check Out run at once; the deletions ask first,
+    /// which `ContentView` owns.
+    private let onRefAction: ((RefAction) -> Void)?
+    private let onDeleteRef: ((RefDeleteConfirmation) -> Void)?
 
     /// #0371: the ref sections' initial expansion state. Branches opens so
     /// the current branch is visible without a click; Remotes and Tags start
@@ -119,7 +127,10 @@ public struct RepositorySidebarView: View {
         onSelectStash: ((Stash.Item) -> Void)? = nil,
         onStashAction: ((StashAction) -> Void)? = nil,
         onDropStash: ((Stash.Item) -> Void)? = nil,
-        isBusy: Bool = false
+        isBusy: Bool = false,
+        refContext: RefActionContext? = nil,
+        onRefAction: ((RefAction) -> Void)? = nil,
+        onDeleteRef: ((RefDeleteConfirmation) -> Void)? = nil
     ) {
         self.summary = summary
         self._selectedResolution = selectedResolution
@@ -131,6 +142,9 @@ public struct RepositorySidebarView: View {
         self.onStashAction = onStashAction
         self.onDropStash = onDropStash
         self.isBusy = isBusy
+        self.refContext = refContext
+        self.onRefAction = onRefAction
+        self.onDeleteRef = onDeleteRef
     }
 
     // `nonisolated`: inert String constants, read by the `nonisolated`
@@ -342,7 +356,8 @@ public struct RepositorySidebarView: View {
                         isExpanded: isFiltering ? .constant(true) : $branchesExpanded
                     ) {
                         ForEach(branches, id: \.name) { entry in
-                            selectable(entry, branchRow(entry))
+                            selectable(entry, branchRow(entry), onDoubleClick: { switchTo(entry) })
+                                .contextMenu { branchMenu(entry) }
                         }
                     } label: {
                         Text("Branches")
@@ -356,6 +371,7 @@ public struct RepositorySidebarView: View {
                     ) {
                         ForEach(remotes, id: \.name) { entry in
                             selectable(entry, refRow(entry, prefix: Self.remotesPrefix, systemImage: "network"))
+                                .contextMenu { remoteMenu(entry) }
                         }
                     } label: {
                         Text("Remotes")
@@ -369,6 +385,7 @@ public struct RepositorySidebarView: View {
                     ) {
                         ForEach(tags, id: \.name) { entry in
                             refRow(entry, prefix: Self.tagsPrefix, systemImage: "tag")
+                                .contextMenu { tagMenu(entry) }
                         }
                     } label: {
                         Text("Tags")
@@ -428,9 +445,16 @@ public struct RepositorySidebarView: View {
     /// #0401: makes a branch or remote row clickable. A tap gesture rather
     /// than a `Button` keeps the row's `Label` text a plain static text,
     /// which the VM UI tests find the row by (`sidebarRow(named:)`).
-    private func selectable<Content: View>(_ entry: RefSnapshot.Entry, _ content: Content) -> some View {
+    ///
+    /// #0510: a double click runs `onDoubleClick` — Switch, on a local
+    /// branch row. The double-click gesture is attached first so SwiftUI
+    /// tries it before the single tap.
+    private func selectable<Content: View>(
+        _ entry: RefSnapshot.Entry, _ content: Content, onDoubleClick: (() -> Void)? = nil
+    ) -> some View {
         content
             .contentShape(Rectangle())
+            .onTapGesture(count: 2) { onDoubleClick?() }
             .onTapGesture { onSelectRef?(entry) }
             .listRowBackground(
                 selectedRef == entry.name
@@ -468,6 +492,60 @@ public struct RepositorySidebarView: View {
             }
         }
         .help(Self.branchHelpText(for: entry, status: status))
+    }
+
+    // MARK: - #0510: Switch, Check Out and Delete (guide §11 decision 38)
+
+    private func shortName(_ entry: RefSnapshot.Entry, _ prefix: String) -> String {
+        String(entry.name.dropFirst(prefix.count))
+    }
+
+    /// Double-click on a local branch: Switch, when the rules allow it.
+    private func switchTo(_ entry: RefSnapshot.Entry) {
+        let name = shortName(entry, Self.headsPrefix)
+        guard let refContext, RefActionRules.switchReason(branch: name, refContext) == nil else { return }
+        onRefAction?(.switchBranch(name: name))
+    }
+
+    /// A local branch row's menu: Switch, then Delete Branch…. A disabled
+    /// item carries its reason as help text.
+    @ViewBuilder
+    private func branchMenu(_ entry: RefSnapshot.Entry) -> some View {
+        if let refContext {
+            let name = shortName(entry, Self.headsPrefix)
+            let switchReason = RefActionRules.switchReason(branch: name, refContext)
+            Button("Switch to “\(name)”") { onRefAction?(.switchBranch(name: name)) }
+                .disabled(switchReason != nil)
+                .help(switchReason ?? "")
+            Divider()
+            let deleteReason = RefActionRules.deleteBranchReason(branch: name, refContext)
+            Button("Delete Branch…") { onDeleteRef?(.branch(name)) }
+                .disabled(deleteReason != nil)
+                .help(deleteReason ?? "")
+        }
+    }
+
+    /// A remote branch row's menu: Check Out as Local Branch.
+    @ViewBuilder
+    private func remoteMenu(_ entry: RefSnapshot.Entry) -> some View {
+        if let refContext {
+            let name = shortName(entry, Self.remotesPrefix)
+            let reason = RefActionRules.trackReason(remoteBranch: name, refContext)
+            Button("Check Out as Local Branch") { onRefAction?(.trackRemote(remoteBranch: name)) }
+                .disabled(reason != nil)
+                .help(reason ?? "")
+        }
+    }
+
+    /// A tag row's menu: Delete Tag….
+    @ViewBuilder
+    private func tagMenu(_ entry: RefSnapshot.Entry) -> some View {
+        if let refContext {
+            let reason = RefActionRules.deleteTagReason(refContext)
+            Button("Delete Tag…") { onDeleteRef?(.tag(shortName(entry, Self.tagsPrefix))) }
+                .disabled(reason != nil)
+                .help(reason ?? "")
+        }
     }
 
     /// A remote or tag row: the ref name minus its prefix as the label, the
