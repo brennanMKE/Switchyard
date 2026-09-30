@@ -24,3 +24,19 @@ public func loadCoAuthors(at path: String) async throws -> [CoAuthors.Person] {
 public func addingTrailer(_ trailer: String, to message: String, at path: String) async throws -> String {
     try MessageTrailers.adding(trailer, to: message, at: path)
 }
+
+/// #0567: the messages Recent Messages offers, newest first.
+@concurrent
+public func loadRecentMessages(at path: String) async throws -> [String] {
+    try RecentMessages.list(at: path)
+}
+
+/// #0567: a Recent Messages item's title: the message's first line, cut to
+/// `recentMessageTitleLength` characters with an ellipsis.
+public nonisolated let recentMessageTitleLength = 60
+
+public nonisolated func recentMessageTitle(_ message: String) -> String {
+    let subject = message.prefix { $0 != "\n" }
+    guard subject.count > recentMessageTitleLength else { return String(subject) }
+    return subject.prefix(recentMessageTitleLength - 1) + "…"
+}

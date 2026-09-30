@@ -62,6 +62,8 @@ public struct WorkingChangesView: View {
     @State private var diffsDrawnWith = DiffViewOptions()
     /// #0566: the people the Co-Author menu offers; empty until loaded.
     @State private var coAuthors: [CoAuthors.Person] = []
+    /// #0567: the messages Recent Messages offers; empty until loaded.
+    @State private var recentMessages: [String] = []
 
     /// What the diffs are reloaded for: a refresh, or new options.
     private struct DiffLoad: Hashable {
@@ -113,6 +115,8 @@ public struct WorkingChangesView: View {
             amendTarget = try? await loadAmendTarget(at: repositoryPath)
             // #0566: a commit may have brought a new author.
             coAuthors = (try? await loadCoAuthors(at: repositoryPath)) ?? []
+            // #0567: and a commit, an amend or an undo a message to reuse.
+            recentMessages = (try? await loadRecentMessages(at: repositoryPath)) ?? []
         }
         // #0471: every discard asks first (guide §11 decision 34). Return
         // does nothing: the destructive button has no default-action
@@ -366,6 +370,7 @@ public struct WorkingChangesView: View {
             // pushed "Amend" onto two lines in a narrow Detail pane
             // (measured in the VM).
             HStack {
+                recentMessagesMenu
                 coAuthorMenu
                 Spacer()
                 Button("Stash Changes…") { showingStashSheet = true }
@@ -421,6 +426,24 @@ public struct WorkingChangesView: View {
             }
         }
         .padding(8)
+    }
+
+    /// #0567: Recent Messages, which puts a recent commit's whole message in
+    /// the editor, replacing what is there (guide §11 decision 45).
+    private var recentMessagesMenu: some View {
+        Menu("Recent Messages") {
+            ForEach(recentMessages, id: \.self) { message in
+                Button(recentMessageTitle(message)) { draft.message = message }
+            }
+        }
+        .menuStyle(.borderlessButton)
+        .controlSize(.small)
+        .fixedSize()
+        .disabled(recentMessages.isEmpty || isBusy)
+        .help(recentMessages.isEmpty
+            ? "No commits have been made here yet"
+            : "Reuse the message of a recent commit")
+        .accessibilityIdentifier("recent-messages-menu")
     }
 
     /// #0566: Co-Author, which adds `Co-authored-by: Name <email>` to the
