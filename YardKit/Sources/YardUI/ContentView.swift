@@ -550,6 +550,11 @@ public struct ContentView: View {
         // journal — titles, enabled flags and the traversal to run — the
         // same focused-scene pattern the Commit menu's target uses.
         .focusedSceneValue(\.journalMenuTarget, journalMenuTarget)
+        // #0519: File ▸ Show File History… and Blame File… open the file
+        // inspector in the focused window (guide §11 decision 39).
+        .focusedSceneValue(\.fileInspectorMenuTarget, repositoryPath.map { path in
+            FileInspectorMenuTarget(worktreePath: path, open: { fileInspector = $0 })
+        })
         // #0393: a not-clean traversal report. Informational — the undo or
         // redo itself succeeded; a branch a sibling worktree has checked
         // out was left as it is (guide §11 decisions 16 and 23).

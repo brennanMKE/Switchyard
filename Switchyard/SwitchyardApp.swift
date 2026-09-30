@@ -145,6 +145,8 @@ struct SwitchyardApp: App {
             // #0393: Edit ▸ Undo/Redo over the focused window's journal,
             // replacing the system .undoRedo group.
             JournalCommands()
+            // #0519: File ▸ Show File History… and Blame File….
+            FileInspectorCommands()
         }
 
         // #0406: one window per commit's changes. Equal targets focus the
