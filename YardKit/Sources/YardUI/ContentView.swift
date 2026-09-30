@@ -185,6 +185,13 @@ public struct ContentView: View {
     /// #0510: the checkout the engine refused because it would overwrite
     /// local changes; the alert offers Stash Changes and Switch.
     @State private var checkoutBlocked: CheckoutBlocked?
+    /// #0532: the remote action running right now (guide §11 decision
+    /// 41), folded into `isBusy` and the Edit menu's busy check.
+    @State private var runningRemoteAction: RemoteAction?
+    /// #0532: the Add Remote… / Edit URL… / Rename Remote… sheet on screen.
+    @State private var remoteSheet: RemoteSheetRequest?
+    /// #0532: the Remove Remote… confirmation on screen.
+    @State private var pendingRemoteRemoval: RemoteRemovalConfirmation?
 
     /// #0457: the toolbar's network operation running right now, `nil` when
     /// none. Folded into `isBusy` and the Edit menu's busy check, the same
@@ -453,6 +460,11 @@ public struct ContentView: View {
         // checkout offers Stash Changes and Switch (guide §11 decision 38).
         .modifier(RefActionDialogs(
             pendingDelete: $pendingRefDelete, blocked: $checkoutBlocked) { runRefAction($0) })
+        // #0532: the remote sheets and Remove Remote…'s confirmation
+        // (guide §11 decision 41).
+        .modifier(RemoteActionDialogs(
+            sheet: $remoteSheet, pendingRemoval: $pendingRemoteRemoval,
+            existingNames: sidebar?.remotes.map(\.name) ?? []) { runRemoteAction($0) })
         // #0055: the pending review for the repository this view shows,
         // presented as a sheet. The centre removes a decided model — which
         // clears the binding and dismisses — and a timed-out or superseded
@@ -606,7 +618,7 @@ public struct ContentView: View {
             // user must be able to reach.
             if let progress = runningAction?.progressLabel ?? runningWorkingChange?.progressLabel
                 ?? runningRemote?.progressLabel ?? runningStash?.progressLabel
-                ?? runningRef?.progressLabel {
+                ?? runningRef?.progressLabel ?? runningRemoteAction?.progressLabel {
                 HStack(spacing: 6) {
                     ProgressView()
                         .controlSize(.small)
@@ -686,7 +698,8 @@ public struct ContentView: View {
                         summary: sidebar, whereAmI: summary.whereAmI,
                         isBusy: isBusy || journalRunning),
                     onRefAction: { runRefAction($0) },
-                    onDeleteRef: { pendingRefDelete = $0 })
+                    onDeleteRef: { pendingRefDelete = $0 },
+                    onRemoteCommand: { handleRemoteCommand($0) })
             } else {
                 ProgressView()
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1007,6 +1020,7 @@ public struct ContentView: View {
     private var isBusy: Bool {
         runningAction != nil || conflictActionRunning || runningWorkingChange != nil
             || runningRemote != nil || runningStash != nil || runningRef != nil
+            || runningRemoteAction != nil
     }
 
     /// The owners map the row gutter colours with, which the Merge into
@@ -1052,6 +1066,7 @@ public struct ContentView: View {
         guard repositoryPath != nil else { return nil }
         let busy = runningAction != nil || journalRunning || runningWorkingChange != nil
             || runningRemote != nil || runningStash != nil || runningRef != nil
+            || runningRemoteAction != nil
         return JournalMenuTarget(
             undoTitle: JournalMenuTitles.undo(
                 operation: JournalMenu.undoOperation(in: journalListing)),
@@ -1203,7 +1218,8 @@ public struct ContentView: View {
     /// current after the chain moves.
     private func runJournal(_ kind: JournalMenuTarget.Kind) {
         guard let repositoryPath, runningAction == nil, runningWorkingChange == nil,
-              runningRemote == nil, runningStash == nil, runningRef == nil, !journalRunning
+              runningRemote == nil, runningStash == nil, runningRef == nil,
+              runningRemoteAction == nil, !journalRunning
         else { return }
         journalRunning = true
         Task {
@@ -1325,6 +1341,73 @@ public struct ContentView: View {
             runningRef = nil
             if let blocked { checkoutBlocked = blocked }
             if let unmerged { pendingRefDelete = unmerged }
+        }
+    }
+
+    // MARK: - #0532: remote management
+
+    /// #0532: a Remotes-section menu item (guide §11 decision 41). Add and
+    /// Rename open the sheet at once; Edit URL… reads the configured URL
+    /// and Remove Remote… reads what it would delete before presenting —
+    /// neither read sets a busy flag, so the question's button is never
+    /// dropped by `runRemoteAction`'s guard (#0512's lesson).
+    private func handleRemoteCommand(_ command: RemoteMenuCommand) {
+        guard let repositoryPath, !isBusy, !journalRunning else { return }
+        switch command {
+        case .add:
+            remoteSheet = .add
+        case let .rename(remote):
+            remoteSheet = .rename(remote: remote)
+        case let .run(action):
+            runRemoteAction(action)
+        case let .editURL(remote, pushURLs):
+            Task {
+                do {
+                    let url = try await loadConfiguredURL(remote: remote, at: repositoryPath)
+                    remoteSheet = .editURL(remote: remote, url: url, pushURLs: pushURLs)
+                } catch {
+                    actionFailure = RemoteAction.setURL(remote: remote, url: "").failure(for: error)
+                }
+            }
+        case let .remove(remote):
+            Task {
+                do {
+                    let impact = try await loadRemoteRemovalImpact(remote: remote, at: repositoryPath)
+                    pendingRemoteRemoval = RemoteRemovalConfirmation(remote: remote, impact: impact)
+                } catch {
+                    actionFailure = RemoteAction.remove(remote: remote).failure(for: error)
+                }
+            }
+        }
+    }
+
+    /// #0532: runs one remote action and its follow-up (Add's Fetch), then
+    /// refreshes in place. Fetch and Prune are the toolbar's `remoteTask`
+    /// while they run, so the progress line's Cancel reaches them (#0458).
+    /// A failure stops the chain; its alert is presented after the refresh
+    /// and after `runningRemoteAction` clears.
+    private func runRemoteAction(_ action: RemoteAction) {
+        guard let repositoryPath, !isBusy, !journalRunning else { return }
+        runningRemoteAction = action
+        Task {
+            var failure: CommitActionFailure?
+            var step: RemoteAction? = action
+            while let current = step {
+                runningRemoteAction = current
+                let work = Task { try await performRemoteAction(current, at: repositoryPath) }
+                if current.usesNetwork { remoteTask = work }
+                do {
+                    try await work.value
+                    step = current.followUp
+                } catch {
+                    failure = current.failure(for: error)
+                    step = nil
+                }
+                remoteTask = nil
+            }
+            await refreshAfterMutation { _, _ in nil }
+            runningRemoteAction = nil
+            if let failure { actionFailure = failure }
         }
     }
 

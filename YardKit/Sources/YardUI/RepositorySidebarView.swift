@@ -83,6 +83,9 @@ public struct RepositorySidebarView: View {
     /// which `ContentView` owns.
     private let onRefAction: ((RefAction) -> Void)?
     private let onDeleteRef: ((RefDeleteConfirmation) -> Void)?
+    /// #0532: a remote row's menu and the Remotes header's Add Remote…
+    /// (guide §11 decision 41). `nil` hides the items (previews, tests).
+    private let onRemoteCommand: ((RemoteMenuCommand) -> Void)?
 
     /// #0371: the ref sections' initial expansion state. Branches opens so
     /// the current branch is visible without a click; Remotes and Tags start
@@ -130,7 +133,8 @@ public struct RepositorySidebarView: View {
         isBusy: Bool = false,
         refContext: RefActionContext? = nil,
         onRefAction: ((RefAction) -> Void)? = nil,
-        onDeleteRef: ((RefDeleteConfirmation) -> Void)? = nil
+        onDeleteRef: ((RefDeleteConfirmation) -> Void)? = nil,
+        onRemoteCommand: ((RemoteMenuCommand) -> Void)? = nil
     ) {
         self.summary = summary
         self._selectedResolution = selectedResolution
@@ -145,6 +149,7 @@ public struct RepositorySidebarView: View {
         self.refContext = refContext
         self.onRefAction = onRefAction
         self.onDeleteRef = onDeleteRef
+        self.onRemoteCommand = onRemoteCommand
     }
 
     // `nonisolated`: inert String constants, read by the `nonisolated`
@@ -308,6 +313,45 @@ public struct RepositorySidebarView: View {
         )
     }
 
+    /// #0532: one run of the Remotes section — a configured remote's row
+    /// followed by its remote-tracking branches, or (`remote == nil`) the
+    /// remote-tracking branches no configured remote owns, which list as
+    /// before (guide §11 decision 41).
+    public nonisolated struct RemoteGroup: Equatable, Identifiable, Sendable {
+        public let remote: RemoteConfig.Remote?
+        public let branches: [RefSnapshot.Entry]
+        public var id: String { remote.map { "remote:" + $0.name } ?? "unowned" }
+    }
+
+    /// #0532: the Remotes section's groups. `branches` are the section's
+    /// remote-tracking refs, already narrowed by the filter; a remote's row
+    /// shows while nothing is filtered, when its name matches the filter,
+    /// or when any of its branches do. A remote's branches are the refs
+    /// under `refs/remotes/<name>/` (add and rename refuse nested names, so
+    /// no two remotes share one).
+    public nonisolated static func remoteGroups(
+        remotes: [RemoteConfig.Remote], branches: [RefSnapshot.Entry], query: String
+    ) -> [RemoteGroup] {
+        let filtering = !query.trimmingCharacters(in: .whitespaces).isEmpty
+        var owned = Set<String>()
+        var groups: [RemoteGroup] = []
+        for remote in remotes.sorted(by: { $0.name < $1.name }) {
+            let prefix = remotesPrefix + remote.name + "/"
+            let mine = branches.filter { $0.name.hasPrefix(prefix) }
+            owned.formUnion(mine.map(\.name))
+            if !filtering || !mine.isEmpty || RefFilter.matches(remote.name, query: query) {
+                groups.append(RemoteGroup(remote: remote, branches: mine))
+            }
+        }
+        let unowned = branches.filter { !owned.contains($0.name) }
+        if !unowned.isEmpty { groups.append(RemoteGroup(remote: nil, branches: unowned)) }
+        return groups
+    }
+
+    private var remoteGroups: [RemoteGroup] {
+        Self.remoteGroups(remotes: summary.remotes, branches: remotes, query: refFilter)
+    }
+
     private var tags: [RefSnapshot.Entry] {
         Self.filtered(
             summary.refs.refs
@@ -364,17 +408,31 @@ public struct RepositorySidebarView: View {
                     }
                 }
             }
-            if !remotes.isEmpty {
+            // #0532: shown while unfiltered even with no remotes, so Add
+            // Remote… is always reachable (guide §11 decision 41).
+            if !remoteGroups.isEmpty || !isFiltering {
                 Section {
                     DisclosureGroup(
                         isExpanded: isFiltering ? .constant(true) : $remotesExpanded
                     ) {
-                        ForEach(remotes, id: \.name) { entry in
-                            selectable(entry, refRow(entry, prefix: Self.remotesPrefix, systemImage: "network"))
-                                .contextMenu { remoteMenu(entry) }
+                        ForEach(remoteGroups) { group in
+                            if let remote = group.remote {
+                                remoteConfigRow(remote)
+                                    .contextMenu { remoteConfigMenu(remote) }
+                            }
+                            ForEach(group.branches, id: \.name) { entry in
+                                selectable(entry, refRow(entry, prefix: Self.remotesPrefix, systemImage: "network"))
+                                    .contextMenu { remoteMenu(entry) }
+                            }
+                        }
+                        if remoteGroups.isEmpty {
+                            Text("No remotes")
+                                .foregroundStyle(.secondary)
+                                .contextMenu { addRemoteItem }
                         }
                     } label: {
                         Text("Remotes")
+                            .contextMenu { addRemoteItem }
                     }
                 }
             }
@@ -394,7 +452,7 @@ public struct RepositorySidebarView: View {
             }
             if isFiltering {
                 // #0378: every ref section came back empty -- no matches.
-                if branches.isEmpty && remotes.isEmpty && tags.isEmpty {
+                if branches.isEmpty && remoteGroups.isEmpty && tags.isEmpty {
                     ContentUnavailableView.search(text: refFilter)
                 }
             } else {
@@ -534,6 +592,63 @@ public struct RepositorySidebarView: View {
             Button("Check Out as Local Branch") { onRefAction?(.trackRemote(remoteBranch: name)) }
                 .disabled(reason != nil)
                 .help(reason ?? "")
+        }
+    }
+
+    /// #0532: a configured remote's row: its name, and its fetch URL under
+    /// it; the help text lists the fetch and push URLs.
+    private func remoteConfigRow(_ remote: RemoteConfig.Remote) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Label(remote.name, systemImage: "server.rack")
+                .fontWeight(.medium)
+            Text(remote.fetchURL ?? "No URL")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .padding(.leading, 22)
+        }
+        .help(Self.remoteHelpText(remote))
+    }
+
+    /// #0532: a remote row's help text: where it fetches from and pushes to.
+    public nonisolated static func remoteHelpText(_ remote: RemoteConfig.Remote) -> String {
+        let fetch = "Fetch: " + (remote.fetchURL ?? "no URL")
+        guard remote.pushDiffers else { return fetch }
+        let push = remote.pushURLs.isEmpty ? ["no URL"] : remote.pushURLs
+        return fetch + "\n" + push.map { "Push: " + $0 }.joined(separator: "\n")
+    }
+
+    /// #0532: a configured remote's menu (guide §11 decision 41). Every
+    /// item disables while another operation runs.
+    @ViewBuilder
+    private func remoteConfigMenu(_ remote: RemoteConfig.Remote) -> some View {
+        if let onRemoteCommand {
+            let busy = isBusy ? "Another operation is still running" : ""
+            Group {
+                Button("Fetch “\(remote.name)”") { onRemoteCommand(.run(.fetch(remote: remote.name))) }
+                Button("Prune “\(remote.name)”") { onRemoteCommand(.run(.prune(remote: remote.name))) }
+                Divider()
+                Button("Edit URL…") {
+                    onRemoteCommand(.editURL(
+                        remote: remote.name, pushURLs: remote.pushDiffers ? remote.pushURLs : []))
+                }
+                Button("Rename Remote…") { onRemoteCommand(.rename(remote: remote.name)) }
+                Button("Remove Remote…") { onRemoteCommand(.remove(remote: remote.name)) }
+                Divider()
+                Button("Add Remote…") { onRemoteCommand(.add) }
+            }
+            .disabled(isBusy)
+            .help(busy)
+        }
+    }
+
+    /// #0532: Add Remote…, on the Remotes header and the "No remotes" row.
+    @ViewBuilder
+    private var addRemoteItem: some View {
+        if let onRemoteCommand {
+            Button("Add Remote…") { onRemoteCommand(.add) }
+                .disabled(isBusy)
         }
     }
 
