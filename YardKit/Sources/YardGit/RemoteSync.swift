@@ -80,6 +80,43 @@ public enum RemoteSync {
     }
 }
 
+// MARK: - One remote (#0529)
+
+public extension RemoteSync {
+
+    /// The `operation` Prune's journal entry records: Edit ▸ Undo Prune.
+    static let pruneOperation = "prune"
+
+    /// Fetch “<name>”: `git fetch -- <name>`, journaled as one `fetch`
+    /// entry written before the fetch runs — `fetch(at:git:)` for one
+    /// remote, so Edit ▸ Undo Fetch restores that remote's remote-tracking
+    /// refs. `RemoteConfig.Refusal.unknownRemote` when no remote has the
+    /// name; nothing is written then.
+    static func fetch(remote name: String, at path: String, git: GitProcess = GitProcess()) async throws {
+        let context = try await WorktreeContext.resolve(path: path, git: git)
+        guard try await remoteNames(at: path, git: git).contains(name) else {
+            throw RemoteConfig.Refusal.unknownRemote(name)
+        }
+        try JournalCheckpoint.checkpoint(operation: "fetch", in: context, git: git)
+        try await git.run(["fetch", "--", name], workingDirectory: path)
+    }
+
+    /// Prune “<name>”: `git remote prune -- <name>`, which deletes the
+    /// remote-tracking branches whose branch the remote no longer has and
+    /// fetches nothing. Journaled as one `prune` entry written before it
+    /// runs, so Edit ▸ Undo Prune brings the deleted refs back: they are in
+    /// the entry's snapshot. It asks the remote which branches it has, so it
+    /// needs the network like Fetch, and a cancel terminates it.
+    static func prune(remote name: String, at path: String, git: GitProcess = GitProcess()) async throws {
+        let context = try await WorktreeContext.resolve(path: path, git: git)
+        guard try await remoteNames(at: path, git: git).contains(name) else {
+            throw RemoteConfig.Refusal.unknownRemote(name)
+        }
+        try JournalCheckpoint.checkpoint(operation: pruneOperation, in: context, git: git)
+        try await git.run(["remote", "prune", "--", name], workingDirectory: path)
+    }
+}
+
 /// Every refusal is the repository's own state, decided before anything
 /// runs: guide §6 code 6.
 extension RemoteSync.Refusal: ExitClassCarrying {
