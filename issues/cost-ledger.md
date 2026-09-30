@@ -597,6 +597,7 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-09-29 | #0521 | planning (Opus): chose History search (decision 40), umbrella + #0522-#0525, prototype + 2 VM spike runs, 4587 s wall (measured) | 236,800 | — |
 | 2026-09-29 | #0523 | round 1, Sonnet implementation, 361 s wall, passed pending review (S, measured) | 72,526 | — |
 | 2026-09-29 | #0522 | round 1, Sonnet implementation, 435 s wall, passed pending review (S, measured) | 85,099 | — |
+| 2026-09-30 | #0524 | round 1, Sonnet implementation, 370 s wall, passed pending review (S, measured) | 107,830 | — |
 | | | **Total measured** (tokens include 2026-09-22/23 rows; $ not updated for them) | **47,386,796** | **$437.24** |
 
 ## What this total does and does not cover
