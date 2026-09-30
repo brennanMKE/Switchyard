@@ -167,6 +167,10 @@ public struct ContentView: View {
     /// loading.
     @State private var selectedStashDiff: [FileDiff]?
     @State private var selectedStashDiffError: String?
+    /// #0517: the file inspector the Detail pane shows over the selection
+    /// (guide §11 decision 39); `nil` when none is open. Any selection the
+    /// user makes closes it; a commit clicked inside it does not.
+    @State private var fileInspector: FileInspectorTarget?
     /// #0496: the stash action running right now, folded into `isBusy`
     /// and the Edit menu's busy check like `runningWorkingChange`.
     @State private var runningStash: StashAction?
@@ -649,6 +653,7 @@ public struct ContentView: View {
                             if newValue != nil {
                                 selectedCommit = nil
                                 selectedStash = nil
+                                fileInspector = nil
                             }
                         }),
                     refFilter: $filterText,
@@ -657,6 +662,7 @@ public struct ContentView: View {
                         selectedRef = entry.name
                         selectedResolution = nil
                         selectedStash = nil
+                        fileInspector = nil
                         selectedCommit = entry.oid
                         historyScrollRequest = HistoryScrollRequest(oid: entry.oid)
                     },
@@ -666,6 +672,7 @@ public struct ContentView: View {
                         selectedCommit = nil
                         selectedResolution = nil
                         selectedRef = nil
+                        fileInspector = nil
                     },
                     onStashAction: { runStashAction($0) },
                     onDropStash: { pendingStashDrop = StashDropConfirmation(item: $0) },
@@ -701,6 +708,7 @@ public struct ContentView: View {
                     selectedResolution = nil
                     selectedRef = nil
                     selectedStash = nil
+                    fileInspector = nil
                 })
             Divider()
             commitHistory(summary: summary)
@@ -724,6 +732,7 @@ public struct ContentView: View {
                 get: { selectedCommit },
                 set: { newValue in
                     selectedCommit = newValue
+                    fileInspector = nil
                     if newValue != nil {
                         selectedResolution = nil
                         selectedRef = nil
@@ -740,8 +749,22 @@ public struct ContentView: View {
     /// working-tree status list unchanged.
     private func detailPane(summary: RepositorySummary) -> some View {
         Group {
+            // #0517: the file inspector (guide §11 decision 39), over
+            // whatever is selected — closing it shows that selection again.
+            // Not `Binding($fileInspector)`: that binding force-unwraps, and
+            // the closing view reads it once more after close sets `nil`
+            // (SIGTRAP in `BindingOperations.ForceUnwrapping`, measured in
+            // the VM). The getter falls back to the value this branch saw.
+            if let repositoryPath, let inspector = fileInspector {
+                FileInspectorView(
+                    target: Binding(
+                        get: { fileInspector ?? inspector },
+                        set: { fileInspector = $0 }),
+                    repositoryPath: repositoryPath, revision: workingTreeRevision,
+                    onOpenCommit: { openFromInspector(oid: $0, subject: $1) },
+                    onClose: { fileInspector = nil })
             // #0496: a selected stash, while the list still holds it.
-            if let selectedStash,
+            } else if let selectedStash,
                let item = sidebar?.stashes.first(where: { $0.oid == selectedStash }) {
                 StashDetailView(
                     item: item,
@@ -844,6 +867,25 @@ public struct ContentView: View {
             repositoryPath: repositoryPath, oid: oid, subject: entry.subject))
     }
 
+    /// #0517: a commit clicked in the file inspector (guide §11 decision
+    /// 39). One History has loaded is selected there and scrolled to, and
+    /// the inspector stays; an older one opens its changes window.
+    private func openFromInspector(oid: String, subject: String) {
+        guard let repositoryPath else { return }
+        switch FileInspectorLink.resolve(
+            oid: oid, subject: subject, repositoryPath: repositoryPath,
+            loaded: Set(history.map(\.oid))) {
+        case let .selectInHistory(oid):
+            selectedRef = nil
+            selectedStash = nil
+            selectedResolution = nil
+            selectedCommit = oid
+            historyScrollRequest = HistoryScrollRequest(oid: oid)
+        case let .openChanges(target):
+            openWindow(value: target)
+        }
+    }
+
     private func reload() async {
         guard let repositoryPath else { return }
         errorMessage = nil
@@ -857,6 +899,7 @@ public struct ContentView: View {
         selectedResolutionDiff = nil
         selectedResolutionDiffError = nil
         selectedStash = nil
+        fileInspector = nil
         selectedCommitDiff = nil
         selectedCommitDiffError = nil
         journalListing = nil
