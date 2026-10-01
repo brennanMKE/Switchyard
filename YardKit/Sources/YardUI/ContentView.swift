@@ -464,6 +464,10 @@ public struct ContentView: View {
             // mutation — that one refreshes when it finishes.
             if isActive, summary != nil, !isBusy, !journalRunning {
                 Task { await refreshAfterMutation { _, _ in nil } }
+            } else if isActive, summary == nil, errorMessage != nil, repositoryPath != nil {
+                // #0573: a window whose refresh failed (the repository was
+                // moved, or git failed once) tries again when it comes back.
+                Task { await reload() }
             }
         }
         .task(id: selectedCommit) {
