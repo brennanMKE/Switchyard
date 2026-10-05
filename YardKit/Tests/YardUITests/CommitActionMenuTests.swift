@@ -140,7 +140,7 @@ private func state(_ action: CommitAction, in states: [CommitActionState]) throw
         #expect(try state(action, in: states).isEnabled, "\(action) should be enabled")
     }
     #expect(try Fixture.reason(.fixupIntoParent, in: states)
-            == "Only the newest commit on “main” can be folded into its parent")
+            == "A merge commit can’t be folded into its parent")
     #expect(try Fixture.reason(.squashIntoParent, in: states)
             == "Only the newest commit on “main” can be folded into its parent")
     #expect(try Fixture.reason(.swapWithChild, in: states) == "Merge commits can’t be reordered")
@@ -166,8 +166,8 @@ private func state(_ action: CommitAction, in states: [CommitActionState]) throw
     #expect(try Fixture.reason(.swapWithParent, in: states)
             == "A commit can’t move below the root commit")
     #expect(try Fixture.reason(.swapWithChild, in: states) == "Merge commits can’t be reordered")
-    #expect(try Fixture.reason(.fixupIntoParent, in: states)
-            == "Only the newest commit on “main” can be folded into its parent")
+    #expect(try Fixture.reason(.fixupIntoParent, in: states) == nil,
+            "decision 46: a merge above is copied, not replayed, so the fold is offered")
     #expect(try Fixture.reason(.squashIntoParent, in: states)
             == "Only the newest commit on “main” can be folded into its parent")
     #expect(try Fixture.reason(.cherryPick, in: states) == "Its change is already in “main”")
@@ -212,8 +212,7 @@ private func state(_ action: CommitAction, in states: [CommitActionState]) throw
             == "A merge commit above this one can’t be replayed")
     #expect(try Fixture.reason(.split, in: states)
             == "A merge commit above this one can’t be replayed")
-    #expect(try Fixture.reason(.fixupIntoParent, in: states)
-            == "Only the newest commit on “main” can be folded into its parent")
+    #expect(try Fixture.reason(.fixupIntoParent, in: states) == "This commit has no parent")
     #expect(try Fixture.reason(.revert, in: states) == nil)
     #expect(try Fixture.reason(.cherryPick, in: states) == "Its change is already in “main”")
     #expect(try Fixture.reason(.merge, in: states) == "Already part of “main”")
@@ -244,10 +243,10 @@ private func state(_ action: CommitAction, in states: [CommitActionState]) throw
     }
 }
 
-@Test func stagedChangesDisableOnlyTheFoldItems() throws {
+@Test func stagedChangesDisableOnlySquash() throws {
     let states = try Fixture.states("c3", whereAmI: Fixture.whereAmI(stagedCount: 1))
-    #expect(try Fixture.reason(.fixupIntoParent, in: states)
-            == "Commit or unstage your staged changes first")
+    #expect(try Fixture.reason(.fixupIntoParent, in: states) == nil,
+            "decision 46: the fold never touches the index, so staged work rides through")
     #expect(try Fixture.reason(.squashIntoParent, in: states)
             == "Commit or unstage your staged changes first")
     #expect(try Fixture.reason(.editMessage, in: states) == nil)
@@ -403,8 +402,11 @@ private func state(_ action: CommitAction, in states: [CommitActionState]) throw
 
 @Test func nodeDerivedRequestsComeFromTheChainAndOwners() throws {
     #expect(CommitActionRequest.make(for: .fixupIntoParent, oid: "c3", chain: Fixture.chain, owners: Fixture.owners)
-            == .fixupIntoParent(parent: "c2"))
-    #expect(CommitActionRequest.make(for: .fixupIntoParent, oid: "c2", chain: Fixture.chain, owners: Fixture.owners) == nil)
+            == .fixupIntoParent(commit: "c3"))
+    #expect(CommitActionRequest.make(for: .fixupIntoParent, oid: "c1", chain: Fixture.chain, owners: Fixture.owners)
+            == .fixupIntoParent(commit: "c1"), "a commit below the tip folds too")
+    #expect(CommitActionRequest.make(for: .fixupIntoParent, oid: "s1", chain: Fixture.chain, owners: Fixture.owners) == nil,
+            "a commit off HEAD's chain derives no request")
     #expect(CommitActionRequest.make(for: .swapWithParent, oid: "c3", chain: Fixture.chain, owners: Fixture.owners)
             == .swapWithParent(commit: "c3", parent: "c2"))
     #expect(CommitActionRequest.make(for: .swapWithParent, oid: "root", chain: Fixture.chain, owners: Fixture.owners) == nil)
@@ -435,7 +437,7 @@ private func state(_ action: CommitAction, in states: [CommitActionState]) throw
 @Test func everyRequestNamesItsAction() {
     let pairs: [(CommitActionRequest, CommitAction)] = [
         (.editMessage(commit: "c", message: "m"), .editMessage),
-        (.fixupIntoParent(parent: "p"), .fixupIntoParent),
+        (.fixupIntoParent(commit: "c"), .fixupIntoParent),
         (.squashIntoParent(message: "m"), .squashIntoParent),
         (.split(commit: "c", hunkID: "h", first: nil, second: nil), .split),
         (.swapWithParent(commit: "c", parent: "p"), .swapWithParent),
@@ -562,4 +564,20 @@ private func state(_ action: CommitAction, in states: [CommitActionState]) throw
     try await performCommitAction(.delete(commit: c), at: repo.url.path)
 
     #expect(try repo.revParse("main") == b)
+}
+
+@Test func fixupRoundTripFoldsAMidBranchCommitThroughTheRunner() async throws {
+    var repo = try FixtureRepository()
+    defer { repo.destroy() }
+    try repo.build([.init("a"), .init("b"), .init("c"), .init("d")])
+    let b = try #require(repo.oids["b"])
+    let c = try #require(repo.oids["c"])
+
+    try await performCommitAction(.fixupIntoParent(commit: c), at: repo.url.path)
+
+    let entries = try await CommitLog.run(
+        path: repo.url.path, rangeArguments: ["--first-parent", "--reverse", "main"])
+    #expect(entries.map(\.subject) == ["a", "b", "d"], "c folded into b, d copied on top")
+    #expect(try repo.revParse("main~1^{tree}") == (try repo.revParse("\(c)^{tree}")))
+    #expect(try repo.revParse("main~1") != b)
 }
