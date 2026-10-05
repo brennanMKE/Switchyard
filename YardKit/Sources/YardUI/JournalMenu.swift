@@ -21,6 +21,7 @@ public nonisolated enum JournalMenuTitles {
         "drop": "Delete Commit",
         "reorder": "Move Commit",
         "fixup": "Fixup",
+        "squash": "Squash",
         "split": "Split",
         "absorb": "Absorb",
         "revert": "Revert",
