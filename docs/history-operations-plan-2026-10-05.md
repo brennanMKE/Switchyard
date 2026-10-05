@@ -95,4 +95,4 @@ folded into its parent"), which is why Brennan sees it disabled.
 |---|---|---|
 | A. Merge bug | #0575 (children #0576-#0579) | planned — git was right; the Detail pane hid every merge's files (`--cc` is empty for a clean merge). Dispatch #0576 → #0577 → #0578; #0579 any time after #0578 |
 | B. Fixup with Parent | #0580 (children #0581-#0584) | planned — decision 46: any non-root, non-merge commit folds into its parent (parent's message and author kept), descendants copied by tree; prototype green and VM spike fails on main / passes with the change. Dispatch #0581 → #0582; #0583, #0584 after #0581 |
-| C. History-operation VM suite | — | planning |
+| C. History-operation VM suite | #0590 | planned: #0591 harness first, then #0599 + #0592-#0598; VM run on main: 16 of 17 classes pass, Squash fails on its Undo title (#0599); Undo New Branch/Tag question #0600 |
