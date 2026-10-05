@@ -606,8 +606,8 @@ run_spike_if_selected 0591 Spike0591GitAssertionsUITests "" history
 # run_spike_if_selected 0596 Spike0596SwapWithParentUITests swap-parent history
 # run_spike_if_selected 0596 Spike0596SwapWithChildUITests swap-child history
 # run_spike_if_selected 0596 Spike0596DeleteUITests delete history
-# run_spike_if_selected 0597 Spike0597EditMessageUITests edit-message history
-# run_spike_if_selected 0597 Spike0597SplitUITests split history
+run_spike_if_selected 0597 Spike0597EditMessageUITests edit-message history
+run_spike_if_selected 0597 Spike0597SplitUITests split history
 # run_spike_if_selected 0598 Spike0598SetBranchTipUITests set-tip history
 # run_spike_if_selected 0598 Spike0598CreateBranchAndTagUITests refs history
 
