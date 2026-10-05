@@ -2394,6 +2394,25 @@ a feature at any milestone on the grounds that GitUp had it.
       author becomes the current user, dated now (measured). Fixup keeps authors from the start;
       #0583 and #0584 fix the other two with the same helper.
 
+47. **A merge commit's Detail pane and Show Changes window show its first-parent diff — what the
+    merge brought into its branch — with a caption saying so.** Decided 2026-10-05 for #0575, with
+    high confidence. Brennan merged a branch that added a file, and the app selected the new merge
+    commit and showed "Merge commit diffs are not shown yet." Git was right; the window read as an
+    empty commit.
+
+    - **Not the combined diff.** `commitDiff`'s default `--cc` prints only what differs from every
+      parent, so a clean merge is empty (measured, git 2.54.0). That answers "what did the merge
+      itself decide?", which is a review question. A person looking at their history after a merge
+      asks "what did it bring in?"
+    - **`--diff-merges=first-parent`, not `-m --first-parent`.** `diff-tree` ignores
+      `--first-parent`, which leaves plain `-m` (one diff per parent). Measured: on a diverged merge
+      it listed both sides' files (#0576).
+    - **Every caller of `loadCommitDiff` gets it.** For a root or ordinary commit the output is
+      byte-identical to `--cc` (measured). The synchronous `commitDiff` (Split) and the review
+      surface keep `--cc`.
+    - **Not in this decision:** a per-parent picker; showing a merge's own conflict resolutions
+      separately (the `--cc` view). Both can sit on `MergeDiffBase` later.
+
 ### Still open
 
 **Is M1's criterion 5 closable as written, and should it be restated?** Raised by the twelfth M1

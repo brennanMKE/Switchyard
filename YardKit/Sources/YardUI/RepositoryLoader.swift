@@ -122,16 +122,17 @@ public func loadCommitGraph(at path: String) async throws -> [GraphRow] {
 /// `Sendable` value types and need no wrapper type here — unlike
 /// `RepositorySummary` above, which is declared in this target.
 ///
-/// Empty for a merge commit (`commitDiff`'s own documented behaviour,
-/// measured #0341) — callers branch on `CommitLogEntry.parents.count > 1`
-/// to show an explicit note instead of treating that as "nothing changed".
+/// A merge commit gets its **first-parent** diff (#0577, guide §11): what
+/// the merge brought into the branch it was made on. The combined `--cc`
+/// diff `commitDiff` defaults to is empty for every clean merge, which is
+/// how a merge of a branch that added a file read as "no file change".
 ///
 /// #0540: drawn with `options` (guide §11 decision 42).
 @concurrent
 public func loadCommitDiff(
     at path: String, revision: String, options: DiffOptions = .standard
 ) async throws -> [FileDiff] {
-    try await commitDiff(at: path, revision: revision, options: options)
+    try await commitDiff(at: path, revision: revision, options: options, merges: .firstParent)
 }
 
 /// A repository's refs and worktree list, loaded together for the Sidebar

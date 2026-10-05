@@ -119,7 +119,7 @@ public struct CommitChangesView: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
                     if let files, files.isEmpty {
-                        Text("No file changes to show. Merge commit diffs are not shown yet.")
+                        Text("No file changes to show.")
                             .foregroundStyle(.secondary)
                     }
                     ForEach(files ?? [], id: \.path) { file in
