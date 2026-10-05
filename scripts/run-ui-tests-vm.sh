@@ -55,6 +55,7 @@ GUEST_REMOTES_FIXTURE="/Users/$GUEST_USER/uitest-remotes"
 GUEST_DIFFOPTS_FIXTURE="/Users/$GUEST_USER/uitest-diffopts-repo"
 GUEST_LARGE_FIXTURE="/Users/$GUEST_USER/uitest-large-repo"
 GUEST_COMPOSER_FIXTURE="/Users/$GUEST_USER/uitest-composer-repo"
+GUEST_HISTORY_FIXTURE="/Users/$GUEST_USER/uitest-history"
 GUEST_MERGE_FIXTURE="/Users/$GUEST_USER/uitest-merge"
 RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"
 # Optional spike filter: pass an issue number (e.g. `0383`) to run just that
@@ -350,7 +351,7 @@ start_guest() {
     sleep 5
   done
   log "[$label] Guest reachable; copying source, generating the fixture"
-  tart exec "$CLONE" /bin/zsh -lc "rm -rf $GUEST_SRC $GUEST_RESULTS $GUEST_FIXTURE $GUEST_MAP_FIXTURE $GUEST_CHANGES_FIXTURE $GUEST_REMOTE_FIXTURE $GUEST_STASH_FIXTURE $GUEST_SWITCH_FIXTURE $GUEST_BLAME_FIXTURE $GUEST_REMOTES_FIXTURE $GUEST_DIFFOPTS_FIXTURE $GUEST_LARGE_FIXTURE $GUEST_COMPOSER_FIXTURE $GUEST_COMPOSER_FIXTURE-template.txt && mkdir -p $GUEST_RESULTS"
+  tart exec "$CLONE" /bin/zsh -lc "rm -rf $GUEST_SRC $GUEST_RESULTS $GUEST_FIXTURE $GUEST_MAP_FIXTURE $GUEST_CHANGES_FIXTURE $GUEST_REMOTE_FIXTURE $GUEST_STASH_FIXTURE $GUEST_SWITCH_FIXTURE $GUEST_BLAME_FIXTURE $GUEST_REMOTES_FIXTURE $GUEST_DIFFOPTS_FIXTURE $GUEST_LARGE_FIXTURE $GUEST_COMPOSER_FIXTURE $GUEST_COMPOSER_FIXTURE-template.txt $GUEST_HISTORY_FIXTURE && mkdir -p $GUEST_RESULTS"
   tart exec "$CLONE" /bin/zsh -lc "cp -R '/Volumes/My Shared Files/run/src' $GUEST_SRC"
 # The fixture the spike re-derivations (#0395 round 2) drive:
 #   - four commits with distinctive subjects (History rows to select;
@@ -402,6 +403,9 @@ tart exec "$CLONE" /bin/zsh -lc \
   tart exec "$CLONE" /bin/zsh -lc "zsh $GUEST_SRC/scripts/uitest-fixtures/make-composer-fixture.sh $GUEST_COMPOSER_FIXTURE"
   # #0578: the merge fixture — docs2 adds a file; ff/ and diverged/ shapes.
   tart exec "$CLONE" /bin/zsh -lc "rm -rf $GUEST_MERGE_FIXTURE && zsh $GUEST_SRC/scripts/uitest-fixtures/make-merge-fixture.sh $GUEST_MERGE_FIXTURE"
+  # #0591: the history-operation fixture — main plus seven branches, one
+  # repository copy per history spike class.
+  tart exec "$CLONE" /bin/zsh -lc "zsh $GUEST_SRC/scripts/uitest-fixtures/make-history-ops-fixture.sh $GUEST_HISTORY_FIXTURE"
   local actual_branch
   actual_branch="$(tart exec "$CLONE" /bin/zsh -lc "git -C $GUEST_FIXTURE symbolic-ref --short HEAD" | tr -d '[:space:]')"
   [[ "$actual_branch" == "$GUEST_FIXTURE_BRANCH" ]] \
@@ -518,9 +522,12 @@ run_launch_smoke() {
 # An optional third argument suffixes the results label, so two classes under
 # one issue number keep separate results (#0435) instead of the second
 # overwriting the first's `spike-NNNN/` bundle and log.
+# An optional fourth argument names a group (#0591: `history`), so
+# `./run-ui-tests-vm.sh history` runs every spike in it, each in its own clone.
 run_spike_if_selected() {
   local number="$1"; shift
-  if [[ -z "$SPIKE_FILTER" ]] || [[ "$SPIKE_FILTER" == "$number" ]]; then
+  if [[ -z "$SPIKE_FILTER" ]] || [[ "$SPIKE_FILTER" == "$number" ]] \
+     || [[ -n "${3:-}" && "$SPIKE_FILTER" == "$3" ]]; then
     run_spike "$number" "spike-$number${2:+-$2}" SmokeUITests "$1"
   fi
 }
@@ -577,8 +584,27 @@ run_spike_if_selected 0571 Spike0571SidebarStatusUITests
 run_spike_if_selected 0572 Spike0572StagedSelectionUITests
 run_spike_if_selected 0574 Spike0574HeaderAndDiffLayoutUITests
 run_spike_if_selected 0573 Spike0573RecoverWindowUITests
-run_spike_if_selected 0578 Spike0578MergeFastForwardableUITests ff
-run_spike_if_selected 0578 Spike0578MergeDivergedUITests diverged
+run_spike_if_selected 0578 Spike0578MergeFastForwardableUITests ff history
+run_spike_if_selected 0578 Spike0578MergeDivergedUITests diverged history
+
+# #0590: the history-operation suite — `./scripts/run-ui-tests-vm.sh history`.
+run_spike_if_selected 0591 Spike0591GitAssertionsUITests "" history
+# run_spike_if_selected 0592 Spike0592MergeFastForwardableUITests ff history
+# run_spike_if_selected 0592 Spike0592MergeDivergedUITests diverged history
+# run_spike_if_selected 0592 Spike0592MergeConflictUITests conflict history
+# run_spike_if_selected 0593 Spike0593RebaseOntoUITests clean history
+# run_spike_if_selected 0593 Spike0593RebaseConflictUITests conflict history
+# run_spike_if_selected 0594 Spike0594CherryPickUITests cherry-pick history
+# run_spike_if_selected 0594 Spike0594RevertUITests revert history
+# run_spike_if_selected 0595 Spike0595SquashUITests squash history
+# run_spike_if_selected 0595 Spike0595FixupTipUITests fixup history
+# run_spike_if_selected 0596 Spike0596SwapWithParentUITests swap-parent history
+# run_spike_if_selected 0596 Spike0596SwapWithChildUITests swap-child history
+# run_spike_if_selected 0596 Spike0596DeleteUITests delete history
+# run_spike_if_selected 0597 Spike0597EditMessageUITests edit-message history
+# run_spike_if_selected 0597 Spike0597SplitUITests split history
+# run_spike_if_selected 0598 Spike0598SetBranchTipUITests set-tip history
+# run_spike_if_selected 0598 Spike0598CreateBranchAndTagUITests refs history
 
 print ""
 if (( TEST_RC == 0 )); then
