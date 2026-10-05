@@ -410,3 +410,60 @@ extension XCUIApplication {
             format: "label CONTAINS %@ OR value CONTAINS %@", text, text)).firstMatch
     }
 }
+
+/// #0578: the merge fixture scripts/uitest-fixtures/make-merge-fixture.sh
+/// generates inside the guest — keep the two in sync.
+enum UITestMergeFixture {
+    static let root = "/Users/admin/uitest-merge"
+    static let mergedBranch = "docs2"
+    static let docsSubject = "docs2 adds docs.md"
+    static let mergeSubject = "Merge branch 'docs2' into merge-main"
+    static let file = "docs.md"
+
+    static func path(_ shape: String) -> String { "\(root)/\(shape)" }
+}
+
+/// #0578: runs `/usr/bin/git -C <repo> <args>` from the UI test runner, so a
+/// spike asserts what git holds rather than what the window says. Measured
+/// in the guest, 2026-10-05: the runner is unsandboxed and the call exits 0.
+enum UITestGit {
+    struct Result {
+        let status: Int32
+        let output: String
+        /// `output` with the trailing newline removed.
+        var trimmed: String { output.trimmingCharacters(in: .whitespacesAndNewlines) }
+        var lines: [String] { output.split(separator: "\n").map(String.init) }
+    }
+
+    static func run(_ arguments: [String], in repository: String) -> Result {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["-C", repository] + arguments
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        do {
+            try process.run()
+        } catch {
+            return Result(status: -1, output: "could not launch git: \(error)")
+        }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return Result(status: process.terminationStatus, output: String(decoding: data, as: UTF8.self))
+    }
+}
+
+extension XCUIApplication {
+    /// #0578: launches the app on one shape of the merge fixture.
+    @MainActor
+    func launchWithMergeFixture(_ shape: String) {
+        launchArguments = ["-uiTestRepository", UITestMergeFixture.path(shape), "-uiTestRealSurfaces"]
+        launch()
+        let tree = debugDescription
+        XCTAssertTrue(
+            windows.firstMatch.waitForExistence(timeout: 60),
+            "The app launched but opened no window within 60 s — its element " +
+            "tree starts with: \(String(tree.prefix(1200)))",
+            file: #filePath, line: #line)
+    }
+}
