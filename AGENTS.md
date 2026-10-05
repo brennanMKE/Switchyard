@@ -659,6 +659,16 @@ recipe live in `docs/ui-test-automation-vm.md`; the proven template this machine
 - A quest never overrides the stop-list, licensing, or verification rules. Complete what is safely
   completable, checkpoint the rest, report the conflict once.
 
+## Rule 13b — A history operation is verified against git, in the VM.
+
+A round that adds or changes a Commit-menu / History operation also adds (or updates) a VM spike in
+the `history` group of `scripts/run-ui-tests-vm.sh` that drives the action from the app's own
+menu, then reads the repository with `GitRepo` (`SwitchyardUITests/GitAssertions.swift`) — refs,
+parents, `lsTree`, the working-tree file, `porcelain()` — and asserts Edit ▸ Undo restores
+`GitStateSnapshot` exactly. Text on screen is not evidence that git did the right thing: the
+2026-10-05 merge bug made a merge commit with no file change while the History pane looked right
+(umbrella #0590).
+
 ## Build commands
 
 ```sh

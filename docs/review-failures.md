@@ -133,6 +133,18 @@ Checks read the **spec only** — everything above the first `## Review`, `## Wo
   and check that it is still running 10 s later? An XCUITest pass or a Release-only check is not
   that. (#0418 → #0434.)
 
+- **[JUDGMENT] A commit-menu action ships with a VM spike that asserts git state.** If the issue
+  adds or changes a History / Commit-menu operation (anything that reaches `performCommitAction`,
+  `ConflictHandoff`, or a `JournalCheckpoint.around` from the app), does its verification include a
+  VM spike that drives that action **from the app's own menu** and then reads the repository with
+  `GitRepo` (`SwitchyardUITests/GitAssertions.swift`) — HEAD's parents, the tree (`lsTree`), the
+  working-tree file, `porcelain()` — and finally chooses Edit ▸ Undo and asserts
+  `GitStateSnapshot` equals the pre-state? A spike that checks only labels on screen is not that:
+  every operation had engine tests and a menu, and a merge commit "with no file change" still
+  reached Brennan (2026-10-05, umbrella #0590). Use the history fixture
+  (`scripts/uitest-fixtures/make-history-ops-fixture.sh`), add the class to the `history` group in
+  `scripts/run-ui-tests-vm.sh`.
+
 - **[JUDGMENT] A follow-up question is never shown while its own busy flag is set.** If an
   action's failure presents a second dialog whose button re-runs an action through a guard like
   `!isBusy`, is the dialog presented only after the running flag is cleared (and after any
