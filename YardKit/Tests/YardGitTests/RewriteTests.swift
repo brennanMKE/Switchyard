@@ -1090,3 +1090,32 @@ private func indexStamp(_ repo: FixtureRepository) throws -> String {
     #expect(try fullSnapshot(repo) == before,
             "the refusal leaves HEAD, the branch, the index bytes, and every ref byte-identical")
 }
+
+// MARK: - Authorship (#0583)
+
+@Test func rewordKeepsTheCommitsAuthorAndAuthorDate() throws {
+    var repo = try FixtureRepository()
+    defer { repo.destroy() }
+    try repo.build([.init("root")])
+    let ann = hermetic.merging([
+        "GIT_AUTHOR_NAME": "Ann", "GIT_AUTHOR_EMAIL": "ann@example.invalid",
+        "GIT_AUTHOR_DATE": "1600000000 +0200",
+    ]) { _, new in new }
+    try git.run(["commit", "-q", "--allow-empty", "-m", "authored"],
+                workingDirectory: repo.url.path, extraEnvironment: ann)
+    // A descendant with a change: the replay cherry-picks it, and git
+    // refuses to pick an empty commit.
+    try repo.writeUntracked(["child.txt": "child\n"])
+    try git.run(["add", "child.txt"], workingDirectory: repo.url.path)
+    try git.run(["commit", "-q", "-m", "child"],
+                workingDirectory: repo.url.path, extraEnvironment: hermetic)
+
+    _ = try Rewrite.reword(
+        commit: "HEAD~1", message: "reworded\n", at: repo.url.path, extraEnvironment: hermetic)
+
+    #expect(try git.run(
+        ["log", "-n", "1", "--format=%s|%an|%ae|%ad", "--date=raw", "HEAD~1"],
+        workingDirectory: repo.url.path, extraEnvironment: hermetic
+    ).text == "reworded|Ann|ann@example.invalid|1600000000 +0200\n",
+            "Edit Message changes the message only — the author and author date are kept")
+}
