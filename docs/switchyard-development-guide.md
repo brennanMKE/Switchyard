@@ -2352,6 +2352,48 @@ a feature at any milestone on the grounds that GitUp had it.
       guide; Co-Author from the system Contacts; a CLI flag for co-authors. Each is a question or a
       follow-up in #0558.
 
+46. **Fixup with Parent folds any non-root, non-merge commit on `HEAD`'s first-parent chain into its
+    parent, keeping the parent's message and author, and copies every descendant with its own tree;
+    one journal entry, `Undo Fixup`.** Decided 2026-10-05 in the planning pass for umbrella
+    **#0580**, with high confidence; prototyped end to end (engine, menu rule, VM spike) in a
+    planning worktree. Brennan: *"Fixup with Parent is disabled. I want this implemented."*
+
+    - **The semantics are Brennan's `fixup` alias, generalized from `HEAD` to any commit.** The
+      alias is `git reset --soft HEAD~1 && git commit --amend --no-edit`. Measured (git 2.54.0,
+      scratch repos): the result keeps the **parent's message byte for byte**, the **parent's
+      author and author date**, and the parent's own parents; the committer is the current
+      identity and date; the selected commit's message is dropped (it survives only in the
+      reflog). GitUp's Fixup Commit is the same operation — the new commit is derived from the
+      parent with the child's tree and no message change — so the two references agree.
+    - **Descendants are copied, not replayed.** Folding a commit into its parent changes no tree
+      from that commit upward, so every commit on `<commit>..HEAD`'s ancestry path is rebuilt with
+      `git commit-tree` — its own tree, message and author, parents remapped — and the ref moves
+      once (`Rewrite.fixup`, `YardKit/Sources/YardGit/RewriteFixup.swift`). This is GitUp's
+      copy-trees replay, understood from its behaviour and written in our own words. It follows
+      that **no conflict is possible**, a **merge above** the commit is carried with its other
+      parents intact (the cherry-pick replay that Edit Message and Delete use cannot do that), and
+      **the index and working tree are never touched**.
+    - **So the menu item refuses only what loses history.** Enabled for any commit on `HEAD`'s
+      first-parent chain (attached or detached) except: the **root** ("This commit has no parent");
+      a **merge** ("A merge commit can’t be folded into its parent" — measured: the alias on a merge
+      `HEAD` silently drops the second parent's line); and the guards every action shares (busy,
+      an operation in progress). **Staged changes no longer disable it**: the alias's `--amend`
+      sweeps the index into the fold, which is why the old rule refused, but the copy never reads
+      the index, and the engine test proves staged and unstaged work ride through untouched. A
+      **parent that is a merge** is allowed: the folded commit keeps both of the merge's parents,
+      as both the alias and GitUp do. A **root parent** is allowed: the fold is a new root.
+    - **One journal entry.** The whole fold runs inside `JournalCheckpoint.around(operation:
+      "fixup")`, so Edit ▸ Undo Fixup restores the branch tip, `HEAD` and the index exactly.
+    - **Squash with Parent is unchanged** (tip only, its combined-message sheet, #0374). It could
+      take the same copy mechanism later; that is not this decision.
+    - **The CLI has no `fixup` verb today** (guide §6 lists `switchyard fixup <target>` with the
+      older staged-index meaning of `Fixup.run(target:)`). Whether `switchyard fixup <commit>`
+      should mean this operation is a question in #0580, not decided here.
+    - **Found while measuring, filed separately:** Edit Message (`Rewrite.reword`) and Squash with
+      Parent rebuild a commit with `commit-tree` and no `GIT_AUTHOR_*`, so the rewritten commit's
+      author becomes the current user, dated now (measured). Fixup keeps authors from the start;
+      #0583 and #0584 fix the other two with the same helper.
+
 ### Still open
 
 **Is M1's criterion 5 closable as written, and should it be restated?** Raised by the twelfth M1
