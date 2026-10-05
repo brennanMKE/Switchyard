@@ -20,6 +20,7 @@ struct JournalMenuTitlesTests {
             "drop": "Delete Commit",
             "reorder": "Move Commit",
             "fixup": "Fixup",
+            "squash": "Squash",
             "split": "Split",
             "absorb": "Absorb",
             "revert": "Revert",
@@ -33,7 +34,7 @@ struct JournalMenuTitlesTests {
             "tag-create": "New Tag",
             "tag-delete": "Delete Tag",
         ]
-        #expect(pairs.count == 16)
+        #expect(pairs.count == 17)
         for (operation, name) in pairs {
             #expect(JournalMenuTitles.undo(operation: operation) == "Undo \(name)")
             #expect(JournalMenuTitles.redo(operation: operation) == "Redo \(name)")
