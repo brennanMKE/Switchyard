@@ -117,6 +117,13 @@ public enum Squash {
             ["rev-parse", "\(head.tip)^{tree}"],
             workingDirectory: path, extraEnvironment: extraEnvironment
         ).lines.first ?? ""
+        // The folded commit keeps the parent's author and author date, as
+        // `git commit --amend` and GitUp do (#0584); `commit-tree` otherwise
+        // uses the current identity and now.
+        let authorEnvironment = StoredCommit(try git.run(
+            ["cat-file", "commit", parent],
+            workingDirectory: path, extraEnvironment: extraEnvironment
+        ).text).authorEnvironment
         return try JournalCheckpoint.around(operation: "squash", at: path, git: git) { scoped in
             let inEffect = try CommitCreate.signingInEffect(
                 signing, in: path, git: scoped, extraEnvironment: extraEnvironment)
@@ -129,7 +136,8 @@ public enum Squash {
                     arguments,
                     message: message,
                     signingInEffect: inEffect,
-                    at: path, git: scoped, extraEnvironment: extraEnvironment)
+                    at: path, git: scoped,
+                    extraEnvironment: extraEnvironment.merging(authorEnvironment) { _, kept in kept })
             } catch let error as RewriteError {
                 // The shared commit-tree types its signing failure as a
                 // RewriteError; this operation speaks SquashError.
