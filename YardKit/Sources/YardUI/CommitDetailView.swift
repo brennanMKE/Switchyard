@@ -24,12 +24,6 @@ public struct CommitDetailView: View {
     /// (guide §11 decision 39). `nil` offers neither.
     private let onInspect: ((FileInspectorTarget) -> Void)?
 
-    /// `commitDiff` returns an empty result for **every** merge commit,
-    /// whatever it changed (measured, #0341) -- so a blank pane there would
-    /// misread as "this changed nothing". `entry.parents.count > 1` decides
-    /// the explicit note independently of what `files` came back as.
-    private var isMerge: Bool { entry.parents.count > 1 }
-
     public init(entry: CommitLogEntry, files: [FileDiff]?, diffError: String?,
                 onShowChanges: (() -> Void)? = nil,
                 onInspect: ((FileInspectorTarget) -> Void)? = nil) {
@@ -155,11 +149,7 @@ public struct CommitDetailView: View {
 
     @ViewBuilder
     private var diffContent: some View {
-        if isMerge {
-            Text("Merge commit diffs are not shown yet.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-        } else if let diffError {
+        if let diffError {
             Text("Couldn't load diff: \(diffError)")
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -177,6 +167,13 @@ public struct CommitDetailView: View {
                         if let onShowChanges {
                             Button("Show Changes") { onShowChanges() }
                         }
+                    }
+                    // #0577: a merge lists what it brought into its branch —
+                    // `loadCommitDiff`'s first-parent diff — and says so.
+                    if let caption = Self.diffCaption(parentCount: entry.parents.count) {
+                        Text(caption)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                     // #0403: paths only; the diff itself lives in the
                     // changes window (#0404, #0406).
@@ -203,6 +200,12 @@ public struct CommitDetailView: View {
             ProgressView()
                 .frame(maxWidth: .infinity, alignment: .center)
         }
+    }
+
+    /// #0577: the line under a merge commit's file list — `nil` for a root
+    /// or ordinary commit, whose diff needs no qualifier.
+    public nonisolated static func diffCaption(parentCount: Int) -> String? {
+        parentCount > 1 ? "Compared with the first parent: what this merge brought in" : nil
     }
 
     /// #0403: "1 changed file" / "N changed files".
