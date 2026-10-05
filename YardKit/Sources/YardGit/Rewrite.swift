@@ -841,6 +841,11 @@ public enum RewriteError: Error, Equatable, Sendable, CustomStringConvertible {
     /// The commit to drop is a merge: dropping it would silently lose its
     /// second parent's line of history. Raised before anything is touched.
     case dropMergeRefused(commit: String)
+    /// The commit to fix up into its parent is a merge: folding it would
+    /// silently drop its other parents' lines of history (measured: the
+    /// `reset --soft HEAD~1 && commit --amend` alias does exactly that).
+    /// Raised before anything is touched.
+    case foldMergeRefused(commit: String)
     /// A reorder's moved commit or reference is not on the first-parent
     /// chain of the ref `HEAD` names — a cross-branch reorder is a rebase,
     /// not a reorder. Raised before anything is touched.
@@ -879,6 +884,9 @@ public enum RewriteError: Error, Equatable, Sendable, CustomStringConvertible {
         case let .dropMergeRefused(commit):
             "dropping \(commit) is refused: it is a merge commit and dropping it would "
                 + "silently lose its second parent's line of history"
+        case let .foldMergeRefused(commit):
+            "fixing up \(commit) is refused: it is a merge commit and folding it into its "
+                + "parent would silently drop its other parents' lines of history"
         case let .reorderTargetNotOnBranch(revision, ref):
             "the reorder target (\(revision)) is not on \(ref)'s first-parent chain — "
                 + "a cross-branch reorder is a rebase, not a reorder"
@@ -908,7 +916,8 @@ public enum RewriteError: Error, Equatable, Sendable, CustomStringConvertible {
 extension RewriteError: ExitClassCarrying {
     public var exitClass: ExitClass {
         switch self {
-        case .unknownCommit, .commitNotOnRef, .dropMergeRefused, .reorderTargetNotOnBranch,
+        case .unknownCommit, .commitNotOnRef, .dropMergeRefused, .foldMergeRefused,
+             .reorderTargetNotOnBranch,
              .rootRewriteRefused, .nothingToDo, .detachedHeadRefused, .setTipTargetNotOnBranch:
             .repositoryError
         case .blockedOnConflicts: .blockedOnConflicts
