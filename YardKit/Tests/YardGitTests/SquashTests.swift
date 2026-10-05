@@ -446,3 +446,27 @@ private func fullSnapshot(_ repo: FixtureRepository) throws -> String {
     #expect(try repo.revParse("refs/heads/main") == before,
             "no commit was written and the ref never moved")
 }
+// MARK: - Authorship (#0584)
+
+@Test func squashKeepsTheParentsAuthorAndAuthorDate() throws {
+    var repo = try FixtureRepository()
+    defer { repo.destroy() }
+    try repo.build([.init("root")])
+    let ann = hermetic.merging([
+        "GIT_AUTHOR_NAME": "Ann", "GIT_AUTHOR_EMAIL": "ann@example.invalid",
+        "GIT_AUTHOR_DATE": "1600000000 +0200",
+    ]) { _, new in new }
+    try git.run(["commit", "-q", "--allow-empty", "-m", "parent msg"],
+                workingDirectory: repo.url.path, extraEnvironment: ann)
+    try git.run(["commit", "-q", "--allow-empty", "-m", "head msg"],
+                workingDirectory: repo.url.path, extraEnvironment: hermetic)
+
+    _ = try Squash.run(
+        message: "parent msg\n\nhead msg\n", at: repo.url.path, extraEnvironment: hermetic)
+
+    #expect(try git.run(
+        ["log", "-n", "1", "--format=%s|%an|%ae|%ad", "--date=raw", "HEAD"],
+        workingDirectory: repo.url.path, extraEnvironment: hermetic
+    ).text == "parent msg|Ann|ann@example.invalid|1600000000 +0200\n",
+            "the squashed commit keeps the parent's author and author date, as `commit --amend` does")
+}
