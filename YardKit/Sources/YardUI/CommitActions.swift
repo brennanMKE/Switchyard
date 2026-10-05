@@ -319,7 +319,15 @@ public nonisolated enum CommitActionRules {
         switch action {
         case .editMessage, .split:
             return c.mergeAbove ? "A merge commit above this one can’t be replayed" : nil
-        case .fixupIntoParent, .squashIntoParent:
+        case .fixupIntoParent:
+            // Guide §11 decision 46: any non-root, non-merge commit on the
+            // chain folds into its parent. Descendants are copied with their
+            // own trees (`Rewrite.fixup`), so a merge above, staged work and
+            // unstaged work are no reason to refuse.
+            if c.isRoot { return "This commit has no parent" }
+            if c.isMerge { return "A merge commit can’t be folded into its parent" }
+            return nil
+        case .squashIntoParent:
             if index != 0 {
                 return "Only the newest commit on \(branch) can be folded into its parent"
             }
@@ -356,7 +364,7 @@ public nonisolated enum CommitActionRules {
 /// disabled state should have caught it.
 public nonisolated enum CommitActionRequest: Equatable, Sendable {
     case editMessage(commit: String, message: String)
-    case fixupIntoParent(parent: String)
+    case fixupIntoParent(commit: String)
     case squashIntoParent(message: String)
     case split(commit: String, hunkID: String, first: String?, second: String?)
     case swapWithParent(commit: String, parent: String)
@@ -385,8 +393,8 @@ public nonisolated enum CommitActionRequest: Equatable, Sendable {
             // `ContentView`, so a refused checkout can offer to stash.
             return nil
         case .fixupIntoParent:
-            guard chain.first == oid, chain.count > 1 else { return nil }
-            return .fixupIntoParent(parent: chain[1])
+            guard chain.contains(oid) else { return nil }
+            return .fixupIntoParent(commit: oid)
         case .swapWithParent:
             guard let index = chain.firstIndex(of: oid), index + 1 < chain.count else { return nil }
             return .swapWithParent(commit: oid, parent: chain[index + 1])

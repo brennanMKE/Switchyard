@@ -56,6 +56,7 @@ GUEST_DIFFOPTS_FIXTURE="/Users/$GUEST_USER/uitest-diffopts-repo"
 GUEST_LARGE_FIXTURE="/Users/$GUEST_USER/uitest-large-repo"
 GUEST_COMPOSER_FIXTURE="/Users/$GUEST_USER/uitest-composer-repo"
 GUEST_HISTORY_FIXTURE="/Users/$GUEST_USER/uitest-history"
+GUEST_FIXUP_FIXTURE="/Users/$GUEST_USER/uitest-fixup-repo"
 GUEST_MERGE_FIXTURE="/Users/$GUEST_USER/uitest-merge"
 RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"
 # Optional spike filter: pass an issue number (e.g. `0383`) to run just that
@@ -351,7 +352,7 @@ start_guest() {
     sleep 5
   done
   log "[$label] Guest reachable; copying source, generating the fixture"
-  tart exec "$CLONE" /bin/zsh -lc "rm -rf $GUEST_SRC $GUEST_RESULTS $GUEST_FIXTURE $GUEST_MAP_FIXTURE $GUEST_CHANGES_FIXTURE $GUEST_REMOTE_FIXTURE $GUEST_STASH_FIXTURE $GUEST_SWITCH_FIXTURE $GUEST_BLAME_FIXTURE $GUEST_REMOTES_FIXTURE $GUEST_DIFFOPTS_FIXTURE $GUEST_LARGE_FIXTURE $GUEST_COMPOSER_FIXTURE $GUEST_COMPOSER_FIXTURE-template.txt $GUEST_HISTORY_FIXTURE && mkdir -p $GUEST_RESULTS"
+  tart exec "$CLONE" /bin/zsh -lc "rm -rf $GUEST_SRC $GUEST_RESULTS $GUEST_FIXTURE $GUEST_MAP_FIXTURE $GUEST_CHANGES_FIXTURE $GUEST_REMOTE_FIXTURE $GUEST_STASH_FIXTURE $GUEST_SWITCH_FIXTURE $GUEST_BLAME_FIXTURE $GUEST_REMOTES_FIXTURE $GUEST_DIFFOPTS_FIXTURE $GUEST_LARGE_FIXTURE $GUEST_COMPOSER_FIXTURE $GUEST_COMPOSER_FIXTURE-template.txt $GUEST_HISTORY_FIXTURE $GUEST_FIXUP_FIXTURE && mkdir -p $GUEST_RESULTS"
   tart exec "$CLONE" /bin/zsh -lc "cp -R '/Volumes/My Shared Files/run/src' $GUEST_SRC"
 # The fixture the spike re-derivations (#0395 round 2) drive:
 #   - four commits with distinctive subjects (History rows to select;
@@ -401,6 +402,9 @@ tart exec "$CLONE" /bin/zsh -lc \
   # #0568: the commit composer fixture — three authors, a commit.template
   # and a staged file.
   tart exec "$CLONE" /bin/zsh -lc "zsh $GUEST_SRC/scripts/uitest-fixtures/make-composer-fixture.sh $GUEST_COMPOSER_FIXTURE"
+  # #0582: the Fixup with Parent fixture — four commits on fixup-main and a
+  # staged file.
+  tart exec "$CLONE" /bin/zsh -lc "zsh $GUEST_SRC/scripts/uitest-fixtures/make-fixup-fixture.sh $GUEST_FIXUP_FIXTURE"
   # #0578: the merge fixture — docs2 adds a file; ff/ and diverged/ shapes.
   tart exec "$CLONE" /bin/zsh -lc "rm -rf $GUEST_MERGE_FIXTURE && zsh $GUEST_SRC/scripts/uitest-fixtures/make-merge-fixture.sh $GUEST_MERGE_FIXTURE"
   # #0591: the history-operation fixture — main plus seven branches, one
@@ -586,6 +590,7 @@ run_spike_if_selected 0574 Spike0574HeaderAndDiffLayoutUITests
 run_spike_if_selected 0573 Spike0573RecoverWindowUITests
 run_spike_if_selected 0578 Spike0578MergeFastForwardableUITests ff history
 run_spike_if_selected 0578 Spike0578MergeDivergedUITests diverged history
+run_spike_if_selected 0582 Spike0582FixupWithParentUITests "" history
 
 # #0590: the history-operation suite — `./scripts/run-ui-tests-vm.sh history`.
 run_spike_if_selected 0591 Spike0591GitAssertionsUITests "" history
