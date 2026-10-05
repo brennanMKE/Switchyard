@@ -649,6 +649,7 @@ same 85/15 assumption gives **$16.00 per million combined tokens**. Rows using i
 | 2026-09-30 | #0572 | round 1, Sonnet implementation, 567 s wall, passed pending review (S, measured) | 98,887 | — |
 | 2026-09-30 | #0574 | round 1, Sonnet implementation, 416 s wall, passed pending review (S, measured) | 107,357 | — |
 | 2026-09-30 | #0573 | round 1, Sonnet implementation, 440 s wall, passed pending review (S, measured) | 112,620 | — |
+| 2026-10-05 | #0575 | planning (Opus): merge bug reproduced in the VM, root cause (merge diff hidden), #0576-#0579, 1531 s wall (measured) | 267,861 | — |
 | | | **Total measured** (tokens include 2026-09-22/23 rows; $ not updated for them) | **47,386,796** | **$437.24** |
 
 ## What this total does and does not cover
