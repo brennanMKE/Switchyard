@@ -424,6 +424,28 @@ else
   pass "no pasted @Test name collides with the test module"
 fi
 
+# #0579: a commit-action change ships with a VM spike that asserts git state.
+# #0575: Merge into Current Branch had engine tests and menu-rule tests, and
+# nothing drove the app's own path and then asked git what it held -- so a
+# merge that was right in git and showed "no file change" in the window
+# reached Brennan. An issue naming a commit-action source file must name a
+# SwitchyardUITests/...UITests.swift spike that runs UITestGit or GitRepo, or opt out
+# with a stated reason.
+if grep -qE 'YardKit/Sources/YardUI/(CommitActions|CommitActionRunner|CommitActionMenu)\.swift' "$SPEC"; then
+  if grep -qE 'SwitchyardUITests/[A-Za-z0-9]+UITests\.swift' "$SPEC" && grep -qE '(UITestGit|GitRepo)' "$SPEC"; then
+    pass "a commit-action change names a VM spike that asserts git state"
+  elif grep -qE '^\*\*VM spike:\*\* not applicable' "$SPEC"; then
+    warn "a commit-action change opts out of a VM spike" \
+"Check that the reason on its '**VM spike:** not applicable' line holds."
+  else
+    fail "a commit-action change names no VM spike asserting git state" \
+"The issue names a commit-action source file but no SwitchyardUITests/...UITests.swift
+spike that runs UITestGit or GitRepo. #0575: Merge into Current Branch was right in git and
+wrong on screen, and only an end-to-end spike could see it. Add the spike, or a
+line starting '**VM spike:** not applicable' with the reason."
+  fi
+fi
+
 if (( FAILED )); then
   print -u2 "preflight: FAILED — fix $FILE, commit the planning update, then dispatch."
   exit 9
