@@ -55,6 +55,7 @@ GUEST_REMOTES_FIXTURE="/Users/$GUEST_USER/uitest-remotes"
 GUEST_DIFFOPTS_FIXTURE="/Users/$GUEST_USER/uitest-diffopts-repo"
 GUEST_LARGE_FIXTURE="/Users/$GUEST_USER/uitest-large-repo"
 GUEST_COMPOSER_FIXTURE="/Users/$GUEST_USER/uitest-composer-repo"
+GUEST_MERGE_FIXTURE="/Users/$GUEST_USER/uitest-merge"
 RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"
 # Optional spike filter: pass an issue number (e.g. `0383`) to run just that
 # spike's clone; with no argument all four run, each in its own clone.
@@ -399,6 +400,8 @@ tart exec "$CLONE" /bin/zsh -lc \
   # #0568: the commit composer fixture — three authors, a commit.template
   # and a staged file.
   tart exec "$CLONE" /bin/zsh -lc "zsh $GUEST_SRC/scripts/uitest-fixtures/make-composer-fixture.sh $GUEST_COMPOSER_FIXTURE"
+  # #0578: the merge fixture — docs2 adds a file; ff/ and diverged/ shapes.
+  tart exec "$CLONE" /bin/zsh -lc "rm -rf $GUEST_MERGE_FIXTURE && zsh $GUEST_SRC/scripts/uitest-fixtures/make-merge-fixture.sh $GUEST_MERGE_FIXTURE"
   local actual_branch
   actual_branch="$(tart exec "$CLONE" /bin/zsh -lc "git -C $GUEST_FIXTURE symbolic-ref --short HEAD" | tr -d '[:space:]')"
   [[ "$actual_branch" == "$GUEST_FIXTURE_BRANCH" ]] \
@@ -574,6 +577,8 @@ run_spike_if_selected 0571 Spike0571SidebarStatusUITests
 run_spike_if_selected 0572 Spike0572StagedSelectionUITests
 run_spike_if_selected 0574 Spike0574HeaderAndDiffLayoutUITests
 run_spike_if_selected 0573 Spike0573RecoverWindowUITests
+run_spike_if_selected 0578 Spike0578MergeFastForwardableUITests ff
+run_spike_if_selected 0578 Spike0578MergeDivergedUITests diverged
 
 print ""
 if (( TEST_RC == 0 )); then
