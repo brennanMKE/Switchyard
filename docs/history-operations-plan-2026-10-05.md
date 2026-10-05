@@ -93,6 +93,6 @@ folded into its parent"), which is why Brennan sees it disabled.
 
 | Workstream | Umbrella | State |
 |---|---|---|
-| A. Merge bug | — | planning |
+| A. Merge bug | #0575 (children #0576-#0579) | planned — git was right; the Detail pane hid every merge's files (`--cc` is empty for a clean merge). Dispatch #0576 → #0577 → #0578; #0579 any time after #0578 |
 | B. Fixup with Parent | — | planning |
 | C. History-operation VM suite | — | planning |
