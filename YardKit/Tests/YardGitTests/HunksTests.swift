@@ -1252,3 +1252,58 @@ func commitDiffOfAConflictedMergeShowsTheCombinedDiff(format: FixtureRepository.
     #expect(file.hunks.count == 2)
     #expect(file.hunks.first?.body == [" line 1", "-\u{301}b", "+\u{301}B", " line 3", " line 4", " line 5"])
 }
+
+// MARK: - #0576: a merge commit's first-parent diff
+
+/// `main` ← a; `docs2` ← a + d (adds docs.md); when `diverged`, `main` ← m
+/// (adds main.txt); then `git merge --no-ff docs2` on `main` — the shape
+/// Brennan's 2026-10-05 report merged from the app. Returns the merge's oid.
+private func mergedDocs2(_ repo: inout FixtureRepository, diverged: Bool) throws -> String {
+    try repo.build([.init("a", files: ["README.md": "readme\n"])])
+    try repo.branch("docs2")
+    try repo.checkout("docs2")
+    try repo.build([.init("d", files: ["docs.md": "docs\n"])])
+    try repo.checkout("main")
+    if diverged { try repo.build([.init("m", files: ["main.txt": "main\n"])]) }
+    try GitProcess().run(
+        ["merge", "-q", "--no-ff", "--no-edit", "docs2"], workingDirectory: repo.url.path)
+    return try repo.revParse("HEAD")
+}
+
+@Test(arguments: [false, true])
+func firstParentDiffOfACleanMergeListsWhatTheMergeBroughtIn(diverged: Bool) async throws {
+    var repo = try FixtureRepository()
+    defer { repo.destroy() }
+    let merge = try mergedDocs2(&repo, diverged: diverged)
+
+    let files = try await commitDiff(at: repo.url.path, revision: merge, merges: .firstParent)
+
+    #expect(files.map(\.path) == ["docs.md"])
+    #expect(files.first?.hunks.map(\.body) == [["+docs"]])
+}
+
+@Test func combinedDiffOfTheSameCleanMergeStaysEmpty() async throws {
+    var repo = try FixtureRepository()
+    defer { repo.destroy() }
+    let merge = try mergedDocs2(&repo, diverged: true)
+
+    let files = try await commitDiff(at: repo.url.path, revision: merge)
+
+    #expect(files.isEmpty)
+}
+
+@Test func firstParentDiffOfAnOrdinaryCommitMatchesTheCombinedOne() async throws {
+    var repo = try FixtureRepository()
+    defer { repo.destroy() }
+    _ = try mergedDocs2(&repo, diverged: true)
+    let d = try #require(repo.oids["d"])
+    let root = try #require(repo.oids["a"])
+
+    for revision in [d, root] {
+        let combined = try await commitDiff(at: repo.url.path, revision: revision)
+        let firstParent = try await commitDiff(
+            at: repo.url.path, revision: revision, merges: .firstParent)
+        #expect(!combined.isEmpty)
+        #expect(firstParent == combined)
+    }
+}

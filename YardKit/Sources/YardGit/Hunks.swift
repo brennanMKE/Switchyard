@@ -677,26 +677,52 @@ public func commitDiff(
 /// is awaited on the non-blocking `GitProcess` path, so the pool thread is
 /// released while git runs. Same arguments (shared `commitDiffArguments`),
 /// same parser, same result.
+/// #0576: `merges` picks a merge commit's diff -- see `MergeDiffBase`.
 public func commitDiff(
     at path: String,
     revision: String,
     options: DiffOptions = .standard,
+    merges: MergeDiffBase = .combined,
     git: GitProcess = GitProcess()
 ) async throws -> [FileDiff] {
     let output = try await git.run(
-        commitDiffArguments(revision: revision, options: options), workingDirectory: path)
+        commitDiffArguments(revision: revision, options: options, merges: merges),
+        workingDirectory: path)
     return try HunkParser().parse(output.text)
 }
 
 /// The arguments `commitDiff` runs, shared by the synchronous and async
 /// paths (#0344) so the pinned config overrides and flags cannot drift
 /// between them.
-private func commitDiffArguments(revision: String, options: DiffOptions = .standard) -> [String] {
+private func commitDiffArguments(
+    revision: String, options: DiffOptions = .standard, merges: MergeDiffBase = .combined
+) -> [String] {
     var arguments = pinnedDiffConfigOverrides
-    arguments += ["diff-tree", "--root", "-p", "--cc", "--no-commit-id"]
+    arguments += ["diff-tree", "--root", "-p", merges.flag, "--no-commit-id"]
     arguments += pinnedDiffFlags + options.flags
     arguments.append(revision)
     return arguments
+}
+
+/// Which diff `commitDiff` draws for a merge commit (#0576). A root or
+/// ordinary commit diffs identically under both (measured, git 2.54.0:
+/// byte-identical `diff-tree` output for each).
+public enum MergeDiffBase: Sendable, Equatable {
+    /// `--cc`, the combined diff: only what differs from every parent --
+    /// empty for a clean merge, whatever it brought in.
+    case combined
+    /// `--diff-merges=first-parent`: everything the merge brought into the
+    /// branch it was made on -- the merged branch's files for a clean merge.
+    /// Not `-m --first-parent`: `diff-tree` ignores `--first-parent`, which
+    /// leaves plain `-m`, one diff per parent (measured).
+    case firstParent
+
+    var flag: String {
+        switch self {
+        case .combined: "--cc"
+        case .firstParent: "--diff-merges=first-parent"
+        }
+    }
 }
 
 // MARK: - Stash diff (#0493)
