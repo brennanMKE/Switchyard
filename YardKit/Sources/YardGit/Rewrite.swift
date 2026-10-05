@@ -249,6 +249,10 @@ extension Rewrite {
         let tree: String
         let parents: [String]
         let message: String
+        /// The original commit's `GIT_AUTHOR_*`, so the rebuild keeps its
+        /// author and author date (#0583). `commit-tree` otherwise uses the
+        /// current identity and now.
+        let authorEnvironment: [String: String]
     }
 
     /// Everything the rebuild and replay need, resolved before the
@@ -297,13 +301,18 @@ extension Rewrite {
             if original == message {
                 throw RewriteError.nothingToDo
             }
+            let authorEnvironment = StoredCommit(try git.run(
+                ["cat-file", "commit", commitOid],
+                workingDirectory: path, extraEnvironment: extraEnvironment
+            ).text).authorEnvironment
             let descendants = try git.run(
                 ["rev-list", "--reverse", "\(commitOid)..\(head.tip)"],
                 workingDirectory: path, extraEnvironment: extraEnvironment
             ).lines
             return Plan(
                 operation: "reword",
-                rebuild: Rebuild(tree: tree, parents: parents, message: message),
+                rebuild: Rebuild(tree: tree, parents: parents, message: message,
+                                 authorEnvironment: authorEnvironment),
                 detachAt: nil, picks: descendants,
                 refName: head.refName, oldTip: head.tip, attached: head.attached)
 
@@ -570,7 +579,8 @@ extension Rewrite {
                     arguments,
                     message: rebuild.message,
                     signingInEffect: inEffect,
-                    at: path, git: git, extraEnvironment: extraEnvironment)
+                    at: path, git: git,
+                    extraEnvironment: extraEnvironment.merging(rebuild.authorEnvironment) { _, kept in kept })
             }
         } catch {
             // Pre-replay failure: put the caller's index back before
