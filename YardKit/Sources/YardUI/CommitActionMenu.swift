@@ -56,7 +56,7 @@ public struct CommitActionMenuItems: View {
 /// unless the pointer rests on the item, so the reason is drawn as the
 /// item's subtitle — except when every item is disabled for one reason
 /// (no commit selected, an operation running), which is shown once at the
-/// top instead of sixteen times.
+/// top instead of under every item.
 public nonisolated enum CommitActionMenuReasons {
     /// The reason every item shares, or `nil` when any item is enabled or
     /// two items are disabled for different reasons.
