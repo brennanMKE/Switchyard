@@ -2447,6 +2447,31 @@ a feature at any milestone on the grounds that GitUp had it.
     - **Not in this decision:** a CLI verb (#0601 question 1, to be designed with #0580 question
       1); a range selection folding an arbitrary span (no request for it).
 
+49. **A disabled Commit-menu item shows its reason as the item's subtitle; a reason every item
+    shares is shown once, as a disabled line at the top of the menu.** Decided 2026-10-06 in the
+    planning pass for **#0604**, with high confidence, after four VM runs on the planning branch
+    `plan/0604`. Brennan saw Fixup with Parent disabled with nothing on screen saying why: the
+    reason lived only in `.help`, a tooltip that needs the pointer to rest on the item (#0381).
+
+    - **Subtitle, measured.** A SwiftUI menu `Button` whose label is two `Text`s renders the second
+      as a smaller secondary line under the title, in both the menu bar and a context menu (one
+      view, `CommitActionMenuItems`). In the VM (macOS 27) a disabled item with a reason is 36 pt
+      tall against 24 pt for an enabled one; the title, shortcut and disabled styling are unchanged.
+      Enabled items carry no subtitle and look exactly as before. `.help` stays, for the hover.
+    - **Shared reason once.** When every item is disabled for the same reason — no commit selected
+      ("Select a commit first"), another operation running, an operation in progress — sixteen
+      identical subtitles would be noise, so the reason is a single disabled `Text` line, then a
+      divider, above the items, and the items carry no subtitle. The pure rule is
+      `CommitActionMenuReasons` in `YardKit/Sources/YardUI/CommitActionMenu.swift`.
+    - **Rejected:** a separate disabled caption item under each disabled item (doubles the item
+      count, and every caption is a selectable-looking row); appending the reason to the title (the
+      title is how XCUITest and VoiceOver find the item, and every spike looks items up by title).
+    - **What XCUITest can and cannot see.** The subtitle is **not** in the accessibility tree that
+      XCUITest reads: the item's `title` stays the bare title and `value` is empty, even with
+      `.accessibilityValue` set (measured). The shared line is an ordinary disabled menu item and
+      is found by its title. So #0604's spike reads the subtitle the way a person does: Vision's
+      text recognizer over the item's own screenshot.
+
 ### Still open
 
 **Is M1's criterion 5 closable as written, and should it be restated?** Raised by the twelfth M1
