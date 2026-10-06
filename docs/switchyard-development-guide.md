@@ -2413,6 +2413,36 @@ a feature at any milestone on the grounds that GitUp had it.
     - **Not in this decision:** a per-parent picker; showing a merge's own conflict resolutions
       separately (the `--cc` view). Both can sit on `MergeDiffBase` later.
 
+48. **Fixup Newer Commits into This folds every commit above the selected one into it, keeping the
+    selected commit's message and author; one journal entry, `Undo Fixup Newer Commits`.** Decided
+    2026-10-06 in the planning pass for umbrella **#0601**, with high confidence; prototyped end to
+    end (engine, menu rule, VM spike) in a planning worktree. Brennan, answering #0580's question
+    3: *"I will often create the first commit with a good commit message for the current issue.
+    Then make "wip" commits which just have "wip" as the commit message. When I run fixup I combine
+    each commit until I get to the one with the good message."*
+
+    - **Semantics = N repeated Fixup-with-Parent folds from the tip down, in one step.** Each of
+      those keeps the parent's message and author (decision 46), so the end state is the selected
+      commit with **the tip's tree**, its **own parents**, its **message byte for byte**, its
+      **author and author date**; the committer is the current identity. Every newer commit's
+      message is dropped.
+    - **The engine is one `commit-tree`.** Nothing sits above the result, so nothing is copied:
+      `Rewrite.fixupNewer(into:)` (`YardKit/Sources/YardGit/RewriteFixup.swift`) rebuilds the
+      selected commit with `<tip>^{tree}` through decision 46's `copyCommit`/`StoredCommit`, then
+      moves the ref `HEAD` names once, old value pinned, inside
+      `JournalCheckpoint.around(operation: "fixup-newer")`. No conflict is possible; the index and
+      working tree are never touched.
+    - **Enabled** on any commit of `HEAD`'s first-parent chain (attached or detached) **except** the
+      tip (nothing newer: the engine's `nothingToDo`) and any commit with a **merge above** it
+      (folding the merge would drop its other parents: the engine's `foldMergeRefused`, naming the
+      merge). The **selected commit may be the root** (the result is a new root) or **a merge**
+      (the result keeps all its parents). Staged changes do not disable it.
+    - **Named for direction, not orientation:** Commit ▸ **Fixup Newer Commits into This**, ⌃⌥⌘F,
+      under Fixup with Parent (⌥⌘F) and above Squash with Parent (⇧⌥⌘F). "Above" would depend on
+      the list being drawn newest-first.
+    - **Not in this decision:** a CLI verb (#0601 question 1, to be designed with #0580 question
+      1); a range selection folding an arbitrary span (no request for it).
+
 ### Still open
 
 **Is M1's criterion 5 closable as written, and should it be restated?** Raised by the twelfth M1
