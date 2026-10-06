@@ -30,6 +30,11 @@ enum HistoryFixture {
     static let stackTwo = "stack two"
     static let stackOne = "stack one"
     static let stackSubjects = [stackTip, stackSplit, stackTwo, stackOne]
+    /// `wip`, only in the `fixup-newer` copy (#0603): "wip good" with a
+    /// body, then three commits whose whole message is "wip".
+    static let wipGood = "wip good"
+    static let wipGoodMessage = "wip good\n\nThe message Brennan wrote first; the wips fold into it."
+    static let wipSubject = "wip"
 }
 
 extension XCUIApplication {
