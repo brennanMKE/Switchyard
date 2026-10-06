@@ -93,6 +93,6 @@ folded into its parent"), which is why Brennan sees it disabled.
 
 | Workstream | Umbrella | State |
 |---|---|---|
-| A. Merge bug | #0575 (children #0576-#0579) | planned — git was right; the Detail pane hid every merge's files (`--cc` is empty for a clean merge). Dispatch #0576 → #0577 → #0578; #0579 any time after #0578 |
-| B. Fixup with Parent | #0580 (children #0581-#0584) | planned — decision 46: any non-root, non-merge commit folds into its parent (parent's message and author kept), descendants copied by tree; prototype green and VM spike fails on main / passes with the change. Dispatch #0581 → #0582; #0583, #0584 after #0581 |
-| C. History-operation VM suite | #0590 | planned: #0591 harness first, then #0599 + #0592-#0598; VM run on main: 16 of 17 classes pass, Squash fails on its Undo title (#0599); Undo New Branch/Tag question #0600 |
+| A. Merge bug | #0575 (children #0576-#0579) | **resolved** — Detail pane shows a merge's first-parent diff (decision 47); VM spikes #0578 (ff + diverged) green; preflight requires a VM spike for commit-action issues (#0579) |
+| B. Fixup with Parent | #0580 (children #0581-#0584) | **resolved** — enabled on any non-root, non-merge commit (decision 46); parent's message and author kept; Edit Message and Squash keep authors too (#0583, #0584); VM spike #0582 green |
+| C. History-operation VM suite | #0590 | **resolved** — `./scripts/run-ui-tests-vm.sh history` runs 20 spikes over every Commit-menu operation, asserting git state and Undo; all green; a committed mutant per operation fails its spike. #0599 fixed. Open question for Brennan: #0600 (Undo New Branch/Tag leaves the ref) |
