@@ -27,16 +27,49 @@ public struct CommitActionMenuItems: View {
 
     public var body: some View {
         let byAction = Dictionary(uniqueKeysWithValues: states.map { ($0.action, $0) })
+        let shared = CommitActionMenuReasons.shared(states)
+        if let shared {
+            Text(shared)
+            Divider()
+        }
         ForEach(Array(CommitAction.menuGroups.enumerated()), id: \.offset) { groupIndex, group in
             if groupIndex > 0 { Divider() }
             ForEach(group, id: \.self) { action in
                 let state = byAction[action]
-                Button(action.title(branchName: branchName)) { perform(action) }
-                    .keyboardShortcut(action.shortcut)
-                    .disabled(state?.isEnabled != true)
-                    .help(state?.disabledReason ?? "")
+                Button {
+                    perform(action)
+                } label: {
+                    Text(action.title(branchName: branchName))
+                    if let subtitle = CommitActionMenuReasons.subtitle(for: state, shared: shared) {
+                        Text(subtitle)
+                    }
+                }
+                .keyboardShortcut(action.shortcut)
+                .disabled(state?.isEnabled != true)
+                .help(state?.disabledReason ?? "")
             }
         }
+    }
+}
+
+/// #0604: where a disabled item's reason is shown. macOS shows no tooltip
+/// unless the pointer rests on the item, so the reason is drawn as the
+/// item's subtitle — except when every item is disabled for one reason
+/// (no commit selected, an operation running), which is shown once at the
+/// top instead of sixteen times.
+public nonisolated enum CommitActionMenuReasons {
+    /// The reason every item shares, or `nil` when any item is enabled or
+    /// two items are disabled for different reasons.
+    public static func shared(_ states: [CommitActionState]) -> String? {
+        guard let first = states.first?.disabledReason else { return nil }
+        return states.allSatisfy { $0.disabledReason == first } ? first : nil
+    }
+
+    /// The subtitle under one item: its own reason, unless `shared` already
+    /// says it.
+    public static func subtitle(for state: CommitActionState?, shared: String?) -> String? {
+        guard shared == nil else { return nil }
+        return state?.disabledReason
     }
 }
 

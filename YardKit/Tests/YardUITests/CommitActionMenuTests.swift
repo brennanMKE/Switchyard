@@ -535,6 +535,30 @@ private func state(_ action: CommitAction, in states: [CommitActionState]) throw
     }
 }
 
+// MARK: - Where the menu shows a disabled reason (#0604)
+
+@Test func anOffChainNodeShowsEachDisabledReasonUnderItsOwnItem() throws {
+    let states = try Fixture.states("s1")
+    #expect(CommitActionMenuReasons.shared(states) == nil)
+    let fixup = try #require(states.first { $0.action == .fixupIntoParent })
+    #expect(CommitActionMenuReasons.subtitle(for: fixup, shared: nil)
+            == "Only commits in “main”’s own history can be rewritten")
+    let revert = try #require(states.first { $0.action == .revert })
+    #expect(CommitActionMenuReasons.subtitle(for: revert, shared: nil) == nil)
+}
+
+@Test func oneReasonForEveryItemIsShownOnceAndUnderNone() throws {
+    for states in [CommitActionRules.allDisabled(reason: "Select a commit first"),
+                   try Fixture.states("c3", isBusy: true)] {
+        let shared = try #require(CommitActionMenuReasons.shared(states))
+        #expect(shared == states[0].disabledReason)
+        for state in states {
+            #expect(CommitActionMenuReasons.subtitle(for: state, shared: shared) == nil)
+        }
+    }
+    #expect(CommitActionMenuReasons.shared([]) == nil)
+}
+
 // MARK: - The engine dispatch, against a real fixture
 
 @Test func swapWithParentRoundTripReordersMainThroughTheRunner() async throws {
