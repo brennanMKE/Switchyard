@@ -13,6 +13,7 @@
 #   <dir>/rebase-conflict                                        -> on clash-topic
 #   <dir>/squash  <dir>/fixup  <dir>/swap  <dir>/delete
 #   <dir>/edit-message  <dir>/split                              -> on stack
+#   <dir>/fixup-newer                                            -> on wip
 #
 # Every commit is dated three days ago plus a minute per commit, so the
 # topological order (and the branch map's lane order) is identical on every
@@ -47,6 +48,12 @@
 #                   select — measured, the first VM run's five-commit stack
 #                   folded "stack four".."stack two" and every stack spike
 #                   failed at "No History row".
+#   wip             ONLY in <dir>/fixup-newer (#0603), so no other copy's
+#                   map gains a lane: off "hist main tip", "wip good" with a
+#                   body (wip.txt = "first draft"), then three commits whose
+#                   whole message is "wip" — Brennan's workflow (guide §11
+#                   decision 48). Each wip rewrites wip.txt and adds its own
+#                   wipN.txt.
 set -euo pipefail
 dir="$1"
 rm -rf "$dir"
@@ -116,4 +123,21 @@ for spec in merge-ff:main merge-true:main merge-conflict:main cherry-pick:main \
   branch="${spec#*:}"
   cp -R base "$name"
   git -C "$name" switch -q "$branch"
+done
+
+# #0603: the wip stack, in its own copy only.
+cp -R base fixup-newer
+cd "$dir/fixup-newer"
+git switch -q -c wip main
+n=$((n + 1)); stamp="$((base + n * 60)) +0000"
+print -r -- "first draft" > wip.txt
+git add wip.txt
+GIT_AUTHOR_DATE="$stamp" GIT_COMMITTER_DATE="$stamp" \
+  git commit -q -m "wip good" -m "The message Brennan wrote first; the wips fold into it."
+for step in 1 2 3; do
+  n=$((n + 1)); stamp="$((base + n * 60)) +0000"
+  print -r -- "draft $step" > wip.txt
+  print -r -- "wip $step" > "wip$step.txt"
+  git add wip.txt "wip$step.txt"
+  GIT_AUTHOR_DATE="$stamp" GIT_COMMITTER_DATE="$stamp" git commit -q -m "wip"
 done
