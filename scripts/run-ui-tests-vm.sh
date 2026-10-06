@@ -594,9 +594,9 @@ run_spike_if_selected 0582 Spike0582FixupWithParentUITests "" history
 
 # #0590: the history-operation suite — `./scripts/run-ui-tests-vm.sh history`.
 run_spike_if_selected 0591 Spike0591GitAssertionsUITests "" history
-# run_spike_if_selected 0592 Spike0592MergeFastForwardableUITests ff history
-# run_spike_if_selected 0592 Spike0592MergeDivergedUITests diverged history
-# run_spike_if_selected 0592 Spike0592MergeConflictUITests conflict history
+run_spike_if_selected 0592 Spike0592MergeFastForwardableUITests ff history
+run_spike_if_selected 0592 Spike0592MergeDivergedUITests diverged history
+run_spike_if_selected 0592 Spike0592MergeConflictUITests conflict history
 # run_spike_if_selected 0593 Spike0593RebaseOntoUITests clean history
 # run_spike_if_selected 0593 Spike0593RebaseConflictUITests conflict history
 # run_spike_if_selected 0594 Spike0594CherryPickUITests cherry-pick history
