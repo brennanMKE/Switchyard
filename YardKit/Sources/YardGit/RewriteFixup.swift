@@ -84,6 +84,67 @@ extension Rewrite {
         }
     }
 
+    /// Folds every commit newer than `commit` on the branch into `commit` —
+    /// Brennan's "good message first, then `wip` commits" workflow in one
+    /// step (guide §11 decision 48, #0602).
+    ///
+    /// The result is `commit` rebuilt with **the tip's tree**: `commit`'s own
+    /// parents, message and author (name, email and date) are kept, every
+    /// newer commit's message is dropped, and the committer is the current
+    /// identity. Nothing sits above the result, so nothing is copied; the
+    /// ref `HEAD` names moves once, old value pinned, inside one
+    /// `JournalCheckpoint.around(operation: "fixup-newer")` — one undo step.
+    /// The index and working tree are never touched.
+    ///
+    /// `commit` may be the root (the result is a new root) or a merge (the
+    /// result keeps all its parents).
+    ///
+    /// - Throws: `RewriteError.unknownCommit` when `commit` does not resolve;
+    ///   `.blockedOnConflicts` when the index holds unmerged entries;
+    ///   `.commitNotOnRef` when `commit` is not an ancestor of the ref `HEAD`
+    ///   names; `.nothingToDo` when `commit` is the tip; `.foldMergeRefused`
+    ///   naming the newest merge in `commit..HEAD` when there is one (folding
+    ///   it would drop its other parents); `.signingFailed` when a signature
+    ///   was attempted and could not be produced. Every refusal is raised
+    ///   before any object or journal entry is written.
+    public static func fixupNewer(
+        into commit: String,
+        signing: CommitCreate.Signing = .config,
+        at path: String,
+        git: GitProcess = GitProcess(),
+        extraEnvironment: [String: String] = [:]
+    ) throws -> Result {
+        let commitOid = try resolve(commit, at: path, git: git, extraEnvironment: extraEnvironment)
+        try refuseUnmergedIndex(at: path, git: git, extraEnvironment: extraEnvironment)
+        let head = try resolveHead(at: path, git: git, extraEnvironment: extraEnvironment)
+        try refuseOffRef(commitOid, head, at: path, git: git, extraEnvironment: extraEnvironment)
+        if commitOid == head.tip { throw RewriteError.nothingToDo }
+        // Every commit being folded, newest first, each line `oid parent...`.
+        // With no merge among them, `commit` is on the tip's first-parent
+        // chain and these are exactly the commits above it.
+        let newer = try git.run(
+            ["rev-list", "--parents", "\(commitOid)..\(head.tip)"],
+            workingDirectory: path, extraEnvironment: extraEnvironment
+        ).lines.map { $0.split(separator: " ").map(String.init) }
+        if let merge = newer.first(where: { $0.count > 2 }), let oid = merge.first {
+            throw RewriteError.foldMergeRefused(commit: oid)
+        }
+        let parents = try parentOids(of: commitOid, at: path, git: git,
+                                     extraEnvironment: extraEnvironment)
+
+        return try JournalCheckpoint.around(operation: "fixup-newer", at: path, git: git) { scoped in
+            let inEffect = try CommitCreate.signingInEffect(
+                signing, in: path, git: scoped, extraEnvironment: extraEnvironment)
+            let folded = try copyCommit(
+                commitOid, tree: "\(head.tip)^{tree}", parents: parents,
+                signingInEffect: inEffect, at: path, git: scoped,
+                extraEnvironment: extraEnvironment)
+            try moveRef(refName: head.refName, from: head.tip, to: folded,
+                        at: path, git: scoped, extraEnvironment: extraEnvironment)
+            return Result(head: folded)
+        }
+    }
+
     /// Rebuilds `source` with `tree` and `parents`, keeping its message
     /// bytes and its author identity and date. `tree` is any revision that
     /// names a tree (`<oid>^{tree}`); `commit-tree` peels it itself.
