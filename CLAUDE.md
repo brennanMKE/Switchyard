@@ -763,7 +763,7 @@ invocation, and every path lookup goes through it. It exists from M1 for this re
 
 ## Current state
 
-**Updated 2026-09-30.** Full suite **2,498 tests** in six test runs (162 / 475 / 399 / 1242 / 14 /
+**Updated 2026-10-05.** Full suite **2,519 tests** in six test runs (162 / 481 / 399 / 1257 / 14 /
 206), green on `main`; the full VM UI run (`scripts/run-ui-tests-vm.sh`: a Debug launch smoke plus
 ~40 spikes) reports `RESULT: TEST SUCCEEDED`. `docs/test-baseline.txt` may lag; trust a fresh run.
 
