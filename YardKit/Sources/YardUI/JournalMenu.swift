@@ -21,6 +21,8 @@ public nonisolated enum JournalMenuTitles {
         "drop": "Delete Commit",
         "reorder": "Move Commit",
         "fixup": "Fixup",
+        // #0603: Fixup Newer Commits into This (guide §11 decision 48).
+        "fixup-newer": "Fixup Newer Commits",
         "squash": "Squash",
         "split": "Split",
         "absorb": "Absorb",

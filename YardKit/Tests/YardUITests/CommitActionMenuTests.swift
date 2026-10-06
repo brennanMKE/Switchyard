@@ -88,14 +88,14 @@ private func state(_ action: CommitAction, in states: [CommitActionState]) throw
 // MARK: - Item set
 
 @Test func everyActionAppearsExactlyOnceInTheMenu() {
-    #expect(CommitAction.allCases.count == 16)
-    #expect(CommitAction.menuGroups.flatMap { $0 }.count == 16)
+    #expect(CommitAction.allCases.count == 17)
+    #expect(CommitAction.menuGroups.flatMap { $0 }.count == 17)
     #expect(Set(CommitAction.menuGroups.flatMap { $0 }) == Set(CommitAction.allCases))
 }
 
-@Test func allSixteenActionsAreCoveredByTheRules() throws {
+@Test func allSeventeenActionsAreCoveredByTheRules() throws {
     let states = try Fixture.states("c3")
-    #expect(states.count == 16)
+    #expect(states.count == 17)
     #expect(Set(states.map(\.action)) == Set(CommitAction.allCases))
 }
 
@@ -130,6 +130,54 @@ private func state(_ action: CommitAction, in states: [CommitActionState]) throw
     #expect(try Fixture.reason(.merge, in: states) == "Already part of “main”")
     #expect(try Fixture.reason(.rebaseOnto, in: states) == "This commit is already in “main”’s history")
     #expect(try Fixture.reason(.setBranchTip, in: states) == "The branch tip already names this commit")
+}
+
+// MARK: - #0603: Fixup Newer Commits into This (guide §11 decision 48)
+
+@Test func fixupNewerIsOfferedBelowTheTipUnlessAMergeSitsAbove() throws {
+    #expect(CommitAction.fixupNewer.title == "Fixup Newer Commits into This")
+    #expect(CommitAction.fixupNewer.shortcut
+            == KeyboardShortcut("f", modifiers: [.command, .option, .control]),
+            "beside Fixup with Parent (⌥⌘F) and Squash with Parent (⇧⌥⌘F)")
+    #expect(CommitAction.menuGroups[0] == [
+        .editMessage, .fixupIntoParent, .fixupNewer, .squashIntoParent, .split])
+    #expect(try Fixture.reason(.fixupNewer, in: Fixture.states("c3"))
+            == "No newer commits on “main” to fold in")
+    #expect(try Fixture.reason(.fixupNewer, in: Fixture.states("c2")) == nil,
+            "a merge may be the target: the result keeps its parents")
+    #expect(try Fixture.reason(.fixupNewer, in: Fixture.states("c1"))
+            == "A merge commit above this one can’t be folded in")
+    #expect(try Fixture.reason(.fixupNewer, in: Fixture.states("root"))
+            == "A merge commit above this one can’t be folded in")
+    let detached = Fixture.whereAmI(branch: nil, rawHead: "c3")
+    #expect(try Fixture.reason(.fixupNewer, in: Fixture.states("c3", whereAmI: detached))
+            == "No newer commits on HEAD to fold in")
+    #expect(try Fixture.reason(.fixupNewer, in: Fixture.states(
+        "c2", whereAmI: Fixture.whereAmI(stagedCount: 1))) == nil,
+            "the fold never reads the index, so staged work is no reason to refuse")
+}
+
+@Test func fixupNewerIsOfferedOnTheRootOfALinearBranch() throws {
+    // `w2 → w1 → good → root`, HEAD at w2 on main: Brennan's wip stack.
+    let rows = LaneAssigner.assign([
+        GraphNode(oid: "root", parents: []),
+        GraphNode(oid: "good", parents: ["root"]),
+        GraphNode(oid: "w1", parents: ["good"]),
+        GraphNode(oid: "w2", parents: ["w1"]),
+    ])
+    let whereAmI = Fixture.whereAmI(rawHead: "w2")
+    for oid in ["good", "w1", "root"] {
+        let context = try #require(CommitActionContext.make(
+            oid: oid, rows: rows, whereAmI: whereAmI, isBusy: false))
+        #expect(CommitActionRules.reason(.fixupNewer, context) == nil, "\(oid) should fold")
+    }
+    let chain = FirstParentChain.oids(in: rows, from: "w2")
+    #expect(CommitActionRequest.make(for: .fixupNewer, oid: "good", chain: chain, owners: [:])
+            == .fixupNewer(commit: "good"))
+    #expect(CommitActionRequest.make(for: .fixupNewer, oid: "w2", chain: chain, owners: [:]) == nil,
+            "the tip has nothing newer")
+    #expect(CommitActionRequest.make(for: .fixupNewer, oid: "s1", chain: chain, owners: [:]) == nil,
+            "a commit off HEAD's chain derives no request")
 }
 
 // MARK: - Merge node (c2)
@@ -185,7 +233,7 @@ private func state(_ action: CommitAction, in states: [CommitActionState]) throw
 @Test func offChainNodeDisablesEveryRewriteWithTheChainReason() throws {
     let states = try Fixture.states("s1")
     let chainReason = "Only commits in “main”’s own history can be rewritten"
-    for action in [CommitAction.editMessage, .fixupIntoParent, .squashIntoParent,
+    for action in [CommitAction.editMessage, .fixupIntoParent, .fixupNewer, .squashIntoParent,
                    .split, .swapWithParent, .swapWithChild, .delete] {
         #expect(try Fixture.reason(action, in: states) == chainReason)
     }
@@ -220,9 +268,9 @@ private func state(_ action: CommitAction, in states: [CommitActionState]) throw
 
 // MARK: - The guards that precede every rule
 
-@Test func busyDisablesAllSixteenWithOneSentenceBeforeAnyOtherRule() throws {
+@Test func busyDisablesAllSeventeenWithOneSentenceBeforeAnyOtherRule() throws {
     let states = try Fixture.states("c3", isBusy: true)
-    #expect(states.count == 16)
+    #expect(states.count == 17)
     for entry in states {
         #expect(!entry.isEnabled)
         #expect(entry.disabledReason == "Another operation is still running")
@@ -322,8 +370,8 @@ private func state(_ action: CommitAction, in states: [CommitActionState]) throw
 
 @Test func allocatedShortcutsAreDistinctAndAvoidTheReservedSet() {
     let allocated = CommitAction.allCases.compactMap(\.shortcut)
-    #expect(allocated.count == 13)
-    #expect(Set(allocated).count == 13)
+    #expect(allocated.count == 14)
+    #expect(Set(allocated).count == 14)
     let reserved: [KeyboardShortcut] = [
         KeyboardShortcut("z", modifiers: .command),
         KeyboardShortcut("z", modifiers: [.command, .shift]),
@@ -357,7 +405,7 @@ private func state(_ action: CommitAction, in states: [CommitActionState]) throw
     #expect(CommitAction.setBranchTip.title(branchName: "main") == "Set “main” Tip Here…")
     #expect(CommitAction.setBranchTip.title(branchName: nil) == "Set Branch Tip Here…")
     let direct: [CommitAction] = [
-        .fixupIntoParent, .swapWithParent, .swapWithChild, .revert,
+        .fixupIntoParent, .fixupNewer, .swapWithParent, .swapWithChild, .revert,
         .cherryPick, .merge, .rebaseOnto,
     ]
     for action in direct {
@@ -379,7 +427,7 @@ private func state(_ action: CommitAction, in states: [CommitActionState]) throw
     #expect(RewriteSelection.chainIndex(after: .swapWithChild, from: 2) == 1)
     #expect(RewriteSelection.chainIndex(after: .swapWithChild, from: 0) == 0)
     #expect(RewriteSelection.chainIndex(after: .swapWithParent, from: 2) == 3)
-    for action in [CommitAction.revert, .cherryPick, .rebaseOnto, .setBranchTip] {
+    for action in [CommitAction.fixupNewer, .revert, .cherryPick, .rebaseOnto, .setBranchTip] {
         #expect(RewriteSelection.chainIndex(after: action, from: 2) == 0)
     }
     for action in [CommitAction.editMessage, .fixupIntoParent, .squashIntoParent,
@@ -438,6 +486,7 @@ private func state(_ action: CommitAction, in states: [CommitActionState]) throw
     let pairs: [(CommitActionRequest, CommitAction)] = [
         (.editMessage(commit: "c", message: "m"), .editMessage),
         (.fixupIntoParent(commit: "c"), .fixupIntoParent),
+        (.fixupNewer(commit: "c"), .fixupNewer),
         (.squashIntoParent(message: "m"), .squashIntoParent),
         (.split(commit: "c", hunkID: "h", first: nil, second: nil), .split),
         (.swapWithParent(commit: "c", parent: "p"), .swapWithParent),
@@ -452,7 +501,7 @@ private func state(_ action: CommitAction, in states: [CommitActionState]) throw
         (.createBranch(name: "b", start: "c"), .createBranch),
         (.renameBranch(old: "o", new: "n"), .editLocalBranch),
     ]
-    #expect(pairs.count == 15)
+    #expect(pairs.count == 16)
     for (request, action) in pairs {
         #expect(CommitAction.action(of: request) == action)
     }
@@ -522,13 +571,15 @@ private func state(_ action: CommitAction, in states: [CommitActionState]) throw
     let fixup = CommitActionFailure.make(
         for: .fixupIntoParent, error: FixupError.indexNotClean(paths: []))
     #expect(fixup.title == "Couldn’t Fixup Commit")
+    let newer = CommitActionFailure.make(for: .fixupNewer, error: RewriteError.nothingToDo)
+    #expect(newer.title == "Couldn’t Fixup Newer Commits")
 }
 
 // MARK: - Menu bar fallback
 
 @Test func allDisabledCoversEveryActionWithOneReason() {
     let states = CommitActionRules.allDisabled(reason: "Select a commit first")
-    #expect(states.count == 16)
+    #expect(states.count == 17)
     for entry in states {
         #expect(!entry.isEnabled)
         #expect(entry.disabledReason == "Select a commit first")
@@ -564,6 +615,23 @@ private func state(_ action: CommitAction, in states: [CommitActionState]) throw
     try await performCommitAction(.delete(commit: c), at: repo.url.path)
 
     #expect(try repo.revParse("main") == b)
+}
+
+@Test func fixupNewerRoundTripFoldsTheWipCommitsThroughTheRunner() async throws {
+    var repo = try FixtureRepository()
+    defer { repo.destroy() }
+    try repo.build([.init("a"), .init("good"), .init("wip1"), .init("wip2")])
+    let a = try #require(repo.oids["a"])
+    let good = try #require(repo.oids["good"])
+    let tipTree = try repo.revParse("main^{tree}")
+
+    try await performCommitAction(.fixupNewer(commit: good), at: repo.url.path)
+
+    let entries = try await CommitLog.run(
+        path: repo.url.path, rangeArguments: ["--first-parent", "--reverse", "main"])
+    #expect(entries.map(\.subject) == ["a", "good"], "wip1 and wip2 folded into good")
+    #expect(try repo.revParse("main^{tree}") == tipTree)
+    #expect(try repo.revParse("main~1") == a)
 }
 
 @Test func fixupRoundTripFoldsAMidBranchCommitThroughTheRunner() async throws {

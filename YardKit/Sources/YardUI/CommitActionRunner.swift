@@ -22,6 +22,8 @@ public func performCommitAction(_ request: CommitActionRequest, at path: String)
         _ = try Rewrite.reword(commit: commit, message: message, at: path)
     case let .fixupIntoParent(commit):
         _ = try Rewrite.fixup(commit: commit, at: path)
+    case let .fixupNewer(commit):
+        _ = try Rewrite.fixupNewer(into: commit, at: path)
     case let .squashIntoParent(message):
         _ = try Squash.run(message: message, at: path)
     case let .split(commit, hunkID, first, second):

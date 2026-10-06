@@ -1152,8 +1152,8 @@ public struct ContentView: View {
         case .checkOutDetached:
             // #0511: the ref path, so a refusal can offer Stash Changes.
             runRefAction(.detach(commit: oid))
-        case .fixupIntoParent, .swapWithParent, .swapWithChild, .revert, .cherryPick,
-             .merge, .rebaseOnto, .setBranchTip:
+        case .fixupIntoParent, .fixupNewer, .swapWithParent, .swapWithChild, .revert,
+             .cherryPick, .merge, .rebaseOnto, .setBranchTip:
             guard let request = CommitActionRequest.make(
                 for: action, oid: oid, chain: chain, owners: owners)
             else { return }

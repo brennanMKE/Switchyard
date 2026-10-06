@@ -22,6 +22,9 @@ import YardGit
 public nonisolated enum CommitAction: String, CaseIterable, Sendable {
     case editMessage
     case fixupIntoParent
+    /// #0603 (guide §11 decision 48): fold every newer commit on the chain
+    /// into this one, keeping this one's message.
+    case fixupNewer
     case squashIntoParent
     case split
     case swapWithParent
@@ -48,6 +51,7 @@ public nonisolated enum CommitAction: String, CaseIterable, Sendable {
         switch self {
         case .editMessage: "Edit Message…"
         case .fixupIntoParent: "Fixup with Parent"
+        case .fixupNewer: "Fixup Newer Commits into This"
         case .squashIntoParent: "Squash with Parent…"
         case .split: "Split…"
         case .swapWithParent: "Swap with Parent"
@@ -87,6 +91,7 @@ public nonisolated enum CommitAction: String, CaseIterable, Sendable {
         case .cherryPick: KeyboardShortcut("c", modifiers: [.command, .option])
         case .merge: KeyboardShortcut("m", modifiers: [.command, .shift])
         case .rebaseOnto: KeyboardShortcut("r", modifiers: [.command, .shift])
+        case .fixupNewer: KeyboardShortcut("f", modifiers: [.command, .option, .control])
         case .setBranchTip, .editLocalBranch, .checkOutDetached: nil
         case .addTag: KeyboardShortcut("t", modifiers: [.command, .shift])
         case .createBranch: KeyboardShortcut("b", modifiers: [.command, .shift])
@@ -100,6 +105,7 @@ public nonisolated enum CommitAction: String, CaseIterable, Sendable {
         switch self {
         case .editMessage: "Editing message…"
         case .fixupIntoParent: "Folding into parent…"
+        case .fixupNewer: "Folding newer commits…"
         case .squashIntoParent: "Squashing into parent…"
         case .split: "Splitting…"
         case .swapWithParent, .swapWithChild: "Moving commit…"
@@ -118,7 +124,7 @@ public nonisolated enum CommitAction: String, CaseIterable, Sendable {
 
     /// Menu sections, top to bottom; a `Divider` between each.
     public static let menuGroups: [[CommitAction]] = [
-        [.editMessage, .fixupIntoParent, .squashIntoParent, .split],
+        [.editMessage, .fixupIntoParent, .fixupNewer, .squashIntoParent, .split],
         [.swapWithParent, .swapWithChild],
         [.delete],
         [.revert, .cherryPick],
@@ -133,6 +139,7 @@ public nonisolated enum CommitAction: String, CaseIterable, Sendable {
         switch request {
         case .editMessage: .editMessage
         case .fixupIntoParent: .fixupIntoParent
+        case .fixupNewer: .fixupNewer
         case .squashIntoParent: .squashIntoParent
         case .split: .split
         case .swapWithParent: .swapWithParent
@@ -270,7 +277,7 @@ public nonisolated enum CommitActionRules {
         if c.isBusy { return "Another operation is still running" }
         if let operation = c.operationInProgress { return "\(operation) — finish or abort it first" }
         switch action {
-        case .editMessage, .fixupIntoParent, .squashIntoParent, .split,
+        case .editMessage, .fixupIntoParent, .fixupNewer, .squashIntoParent, .split,
              .swapWithParent, .swapWithChild, .delete:
             return rewriteReason(action, c)
         case .revert:
@@ -327,6 +334,13 @@ public nonisolated enum CommitActionRules {
             if c.isRoot { return "This commit has no parent" }
             if c.isMerge { return "A merge commit can’t be folded into its parent" }
             return nil
+        case .fixupNewer:
+            // Guide §11 decision 48: the result is this commit with the
+            // tip's tree, so a root or a merge here is fine (it keeps its
+            // parents); a merge above would lose its other parents.
+            if index == 0 { return "No newer commits on \(branch) to fold in" }
+            if c.mergeAbove { return "A merge commit above this one can’t be folded in" }
+            return nil
         case .squashIntoParent:
             if index != 0 {
                 return "Only the newest commit on \(branch) can be folded into its parent"
@@ -365,6 +379,7 @@ public nonisolated enum CommitActionRules {
 public nonisolated enum CommitActionRequest: Equatable, Sendable {
     case editMessage(commit: String, message: String)
     case fixupIntoParent(commit: String)
+    case fixupNewer(commit: String)
     case squashIntoParent(message: String)
     case split(commit: String, hunkID: String, first: String?, second: String?)
     case swapWithParent(commit: String, parent: String)
@@ -395,6 +410,9 @@ public nonisolated enum CommitActionRequest: Equatable, Sendable {
         case .fixupIntoParent:
             guard chain.contains(oid) else { return nil }
             return .fixupIntoParent(commit: oid)
+        case .fixupNewer:
+            guard let index = chain.firstIndex(of: oid), index > 0 else { return nil }
+            return .fixupNewer(commit: oid)
         case .swapWithParent:
             guard let index = chain.firstIndex(of: oid), index + 1 < chain.count else { return nil }
             return .swapWithParent(commit: oid, parent: chain[index + 1])
@@ -424,7 +442,7 @@ public nonisolated enum RewriteSelection {
         switch action {
         case .swapWithChild: max(index - 1, 0)
         case .swapWithParent: index + 1
-        case .revert, .cherryPick, .rebaseOnto, .setBranchTip: 0
+        case .fixupNewer, .revert, .cherryPick, .rebaseOnto, .setBranchTip: 0
         case .editMessage, .fixupIntoParent, .squashIntoParent, .split, .delete,
              .merge, .addTag, .createBranch, .editLocalBranch, .checkOutDetached:
             index
@@ -455,6 +473,7 @@ public nonisolated struct CommitActionFailure: Equatable, Sendable {
         let verb: String = switch action {
         case .editMessage: "Edit Message"
         case .fixupIntoParent: "Fixup Commit"
+        case .fixupNewer: "Fixup Newer Commits"
         case .squashIntoParent: "Squash Commit"
         case .split: "Split Commit"
         case .swapWithParent, .swapWithChild: "Move Commit"
