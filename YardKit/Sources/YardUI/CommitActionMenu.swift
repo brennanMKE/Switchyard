@@ -47,6 +47,7 @@ public struct CommitActionMenuItems: View {
                 .keyboardShortcut(action.shortcut)
                 .disabled(state?.isEnabled != true)
                 .help(state?.disabledReason ?? "")
+                .accessibilityValue(state?.disabledReason ?? "")
             }
         }
     }

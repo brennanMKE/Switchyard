@@ -1,7 +1,6 @@
 // 0604DisabledReasonUITests.swift
 //
 // #0604: a disabled Commit-menu item shows its reason without hovering.
-// DIAGNOSTIC (planner's first VM run): dumps what XCUITest sees.
 
 import XCTest
 
@@ -9,34 +8,29 @@ final class Spike0604DisabledReasonUITests: XCTestCase {
     @MainActor
     func testADisabledItemShowsItsReasonInTheMenu() {
         let repo = GitRepo(path: HistoryFixture.path("cherry-pick"))
+        let pick = repo.oid("pick-source")
         XCTAssertEqual(repo.headBranch(), "main")
+        XCTAssertFalse(repo.git("rev-list", "--first-parent", "main").contains(pick),
+                       "“pick source commit” is on main's first-parent chain — the fixture changed")
         let app = XCUIApplication()
         app.launchWithHistoryFixture("cherry-pick")
 
         app.menuBars.menuBarItems["Commit"].click()
-        sleep(1)
-        let shot0 = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        shot0.name = "0604-menu-before-selection"; shot0.lifetime = .keepAlways; add(shot0)
-        print("DIAG-NOSEL-BEGIN\n\(app.menuBars.firstMatch.debugDescription)\nDIAG-NOSEL-END")
+        let shared = app.menuBars.menuItems["Select a commit first"]
+        let sharedShown = shared.waitForExistence(timeout: 10)
+        print("DIAG-SHARED exists=\(sharedShown) value=\(String(describing: shared.value))")
         app.typeKey(.escape, modifierFlags: [])
 
         app.selectHistoryRow(subject: HistoryFixture.pickSubject)
         app.menuBars.menuBarItems["Commit"].click()
         let fixup = app.menuBars.menuItems["Fixup with Parent"]
-        let found = fixup.waitForExistence(timeout: 10)
-        sleep(1)
+        XCTAssertTrue(fixup.waitForExistence(timeout: 10), "the Commit menu has no Fixup with Parent")
+        let revert = app.menuBars.menuItems["Revert"]
+        print("DIAG-FIXUP value=\(String(describing: fixup.value)) frame=\(fixup.frame) revert=\(revert.frame) revertValue=\(String(describing: revert.value))")
+        XCTAssertFalse(fixup.isEnabled, "Fixup with Parent is enabled on a commit off main's chain")
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = "0604-menu-off-chain"; shot.lifetime = .keepAlways; add(shot)
-        print("DIAG-SEL-BEGIN\n\(app.menuBars.firstMatch.debugDescription)\nDIAG-SEL-END")
-        XCTAssertTrue(found, "no Fixup with Parent item")
-        if found {
-            print("DIAG-FIXUP title=\(fixup.title) label=\(fixup.label) value=\(String(describing: fixup.value)) id=\(fixup.identifier) enabled=\(fixup.isEnabled)")
-            print("DIAG-FIXUP-TREE\n\(fixup.debugDescription)")
-        }
-        let reason = "Only commits in “main”’s own history can be rewritten"
-        let anyReason = app.menuBars.descendants(matching: .any).matching(NSPredicate(
-            format: "title CONTAINS %@ OR label CONTAINS %@ OR value CONTAINS %@", reason, reason, reason))
-        print("DIAG-REASON-COUNT \(anyReason.count)")
         app.typeKey(.escape, modifierFlags: [])
+        XCTAssertTrue(sharedShown, "no shared “Select a commit first” line")
     }
 }
