@@ -5,9 +5,9 @@
 // disabled states. The rules live in `CommitActions.swift`; this file only
 // renders `CommitActionState`s and calls back with a `CommitAction`.
 //
-// `.help` on a disabled item shows its reason where macOS surfaces one;
-// #0381's spike records whether a tooltip appears on a disabled menu item.
-// The reason's primary guarantee is the unit test, not the hover.
+// A disabled item shows its reason as the item's subtitle, so it reads
+// without hovering (#0604, guide §11 decision 49); `.help` keeps the hover
+// tooltip #0381 measured.
 
 import SwiftUI
 
