@@ -15,7 +15,7 @@ import XCTest
 
 final class Spike0604DisabledReasonUITests: XCTestCase {
     @MainActor
-    func testADisabledItemShowsItsReasonInTheMenu() throws {
+    func testADisabledItemShowsItsReasonInTheMenu() {
         let repo = GitRepo(path: HistoryFixture.path("cherry-pick"))
         let pick = repo.oid("pick-source")
         XCTAssertEqual(repo.headBranch(), "main")
@@ -34,19 +34,32 @@ final class Spike0604DisabledReasonUITests: XCTestCase {
         // disabled, and its reason is drawn under its title.
         app.selectHistoryRow(subject: HistoryFixture.pickSubject)
         app.menuBars.menuBarItems["Commit"].click()
-        let fixup = app.menuBars.menuItems["Fixup with Parent"]
-        XCTAssertTrue(fixup.waitForExistence(timeout: 10), "the Commit menu has no Fixup with Parent")
-        XCTAssertFalse(fixup.isEnabled, "Fixup with Parent is enabled on a commit off main's chain")
+        assertShowsReason(app.menuBars.menuItems["Fixup with Parent"], in: "the Commit menu")
+        app.typeKey(.escape, modifierFlags: [])
+
+        // The History row's context menu renders the same items.
+        app.historyRows(containing: HistoryFixture.pickSubject).firstMatch.rightClick()
+        assertShowsReason(app.windows.firstMatch.menuItems["Fixup with Parent"], in: "the row's context menu")
+        app.typeKey(.escape, modifierFlags: [])
+    }
+
+    /// `fixup` exists, is disabled, and draws the off-chain reason.
+    @MainActor
+    private func assertShowsReason(_ fixup: XCUIElement, in menu: String,
+                                   file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertTrue(fixup.waitForExistence(timeout: 10), "\(menu) has no Fixup with Parent",
+                      file: file, line: line)
+        XCTAssertFalse(fixup.isEnabled, "Fixup with Parent is enabled in \(menu) on a commit off main's chain",
+                       file: file, line: line)
         let shot = fixup.screenshot()
         let attachment = XCTAttachment(screenshot: shot)
         attachment.name = "0604-fixup-item"
         attachment.lifetime = .keepAlways
         add(attachment)
-        let lines = try recognizedLines(in: shot.pngRepresentation)
-        app.typeKey(.escape, modifierFlags: [])
+        let lines = (try? recognizedLines(in: shot.pngRepresentation)) ?? []
         XCTAssertTrue(
             lines.contains { $0.localizedCaseInsensitiveContains("own history can be rewritten") },
-            "Fixup with Parent shows no reason; the item reads \(lines)")
+            "Fixup with Parent shows no reason in \(menu); the item reads \(lines)", file: file, line: line)
     }
 
     /// The text lines Vision reads in a PNG, top to bottom.
