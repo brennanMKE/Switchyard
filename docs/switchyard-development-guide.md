@@ -2449,7 +2449,7 @@ a feature at any milestone on the grounds that GitUp had it.
 
 49. **A disabled Commit-menu item shows its reason as the item's subtitle; a reason every item
     shares is shown once, as a disabled line at the top of the menu.** Decided 2026-10-06 in the
-    planning pass for **#0604**, with high confidence, after four VM runs on the planning branch
+    planning pass for **#0604**, with high confidence, after five VM runs on the planning branch
     `plan/0604`. Brennan saw Fixup with Parent disabled with nothing on screen saying why: the
     reason lived only in `.help`, a tooltip that needs the pointer to rest on the item (#0381).
 
