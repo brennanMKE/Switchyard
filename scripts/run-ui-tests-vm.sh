@@ -610,6 +610,7 @@ run_spike_if_selected 0597 Spike0597EditMessageUITests edit-message history
 run_spike_if_selected 0597 Spike0597SplitUITests split history
 run_spike_if_selected 0598 Spike0598SetBranchTipUITests set-tip history
 run_spike_if_selected 0598 Spike0598CreateBranchAndTagUITests refs history
+run_spike_if_selected 0604 Spike0604DisabledReasonUITests "" history
 
 print ""
 if (( TEST_RC == 0 )); then

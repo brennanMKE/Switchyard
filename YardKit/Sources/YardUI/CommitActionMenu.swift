@@ -5,9 +5,9 @@
 // disabled states. The rules live in `CommitActions.swift`; this file only
 // renders `CommitActionState`s and calls back with a `CommitAction`.
 //
-// `.help` on a disabled item shows its reason where macOS surfaces one;
-// #0381's spike records whether a tooltip appears on a disabled menu item.
-// The reason's primary guarantee is the unit test, not the hover.
+// A disabled item shows its reason as the item's subtitle, so it reads
+// without hovering (#0604, guide §11 decision 49); `.help` keeps the hover
+// tooltip #0381 measured.
 
 import SwiftUI
 
@@ -27,16 +27,49 @@ public struct CommitActionMenuItems: View {
 
     public var body: some View {
         let byAction = Dictionary(uniqueKeysWithValues: states.map { ($0.action, $0) })
+        let shared = CommitActionMenuReasons.shared(states)
+        if let shared {
+            Text(shared)
+            Divider()
+        }
         ForEach(Array(CommitAction.menuGroups.enumerated()), id: \.offset) { groupIndex, group in
             if groupIndex > 0 { Divider() }
             ForEach(group, id: \.self) { action in
                 let state = byAction[action]
-                Button(action.title(branchName: branchName)) { perform(action) }
-                    .keyboardShortcut(action.shortcut)
-                    .disabled(state?.isEnabled != true)
-                    .help(state?.disabledReason ?? "")
+                Button {
+                    perform(action)
+                } label: {
+                    Text(action.title(branchName: branchName))
+                    if let subtitle = CommitActionMenuReasons.subtitle(for: state, shared: shared) {
+                        Text(subtitle)
+                    }
+                }
+                .keyboardShortcut(action.shortcut)
+                .disabled(state?.isEnabled != true)
+                .help(state?.disabledReason ?? "")
             }
         }
+    }
+}
+
+/// #0604: where a disabled item's reason is shown. macOS shows no tooltip
+/// unless the pointer rests on the item, so the reason is drawn as the
+/// item's subtitle — except when every item is disabled for one reason
+/// (no commit selected, an operation running), which is shown once at the
+/// top instead of under every item.
+public nonisolated enum CommitActionMenuReasons {
+    /// The reason every item shares, or `nil` when any item is enabled or
+    /// two items are disabled for different reasons.
+    public static func shared(_ states: [CommitActionState]) -> String? {
+        guard let first = states.first?.disabledReason else { return nil }
+        return states.allSatisfy { $0.disabledReason == first } ? first : nil
+    }
+
+    /// The subtitle under one item: its own reason, unless `shared` already
+    /// says it.
+    public static func subtitle(for state: CommitActionState?, shared: String?) -> String? {
+        guard shared == nil else { return nil }
+        return state?.disabledReason
     }
 }
 
