@@ -601,8 +601,8 @@ run_spike_if_selected 0593 Spike0593RebaseOntoUITests clean history
 run_spike_if_selected 0593 Spike0593RebaseConflictUITests conflict history
 run_spike_if_selected 0594 Spike0594CherryPickUITests cherry-pick history
 run_spike_if_selected 0594 Spike0594RevertUITests revert history
-# run_spike_if_selected 0595 Spike0595SquashUITests squash history
-# run_spike_if_selected 0595 Spike0595FixupTipUITests fixup history
+run_spike_if_selected 0595 Spike0595SquashUITests squash history
+run_spike_if_selected 0595 Spike0595FixupTipUITests fixup history
 # run_spike_if_selected 0596 Spike0596SwapWithParentUITests swap-parent history
 # run_spike_if_selected 0596 Spike0596SwapWithChildUITests swap-child history
 # run_spike_if_selected 0596 Spike0596DeleteUITests delete history
