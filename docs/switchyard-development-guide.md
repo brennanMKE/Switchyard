@@ -2413,7 +2413,11 @@ a feature at any milestone on the grounds that GitUp had it.
     - **Not in this decision:** a per-parent picker; showing a merge's own conflict resolutions
       separately (the `--cc` view). Both can sit on `MergeDiffBase` later.
 
-48. **Fixup Newer Commits into This folds every commit above the selected one into it, keeping the
+48. **WITHDRAWN 2026-10-06 — not built.** Brennan: *"I did not mean for you to create a new feature to
+    fold in wip commits. I was just giving you an example of how I use fixup."* The text below is
+    kept as a record of what was planned (#0601-#0603, all `wontfix`).
+
+    **Fixup Newer Commits into This folds every commit above the selected one into it, keeping the
     selected commit's message and author; one journal entry, `Undo Fixup Newer Commits`.** Decided
     2026-10-06 in the planning pass for umbrella **#0601**, with high confidence; prototyped end to
     end (engine, menu rule, VM spike) in a planning worktree. Brennan, answering #0580's question
