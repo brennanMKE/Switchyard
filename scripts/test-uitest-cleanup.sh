@@ -39,7 +39,15 @@ print -r -- '#!/bin/zsh -f
 print "Pages free: 100000000."; print "Pages inactive: 0."; print "Pages purgeable: 0."' > "$WORK/bin/vm_stat"
 print -r -- '#!/bin/zsh -f
 print "Filesystem 1024-blocks Used Available"; print "/dev/disk1 999999999 1 104857600"' > "$WORK/bin/df"
-chmod +x "$WORK/bin/tart" "$WORK/bin/vm_stat" "$WORK/bin/df"
+# run-ui-tests-vm.sh now resolves the shared golden through `tart-golden`
+# (Homelab protocols/tart-golden/PROTOCOL.md) instead of hardcoding a name.
+# PATH below is deliberately constrained to these mocks, so the real tool is not
+# reachable -- stub it, returning the same name the fake `tart list` advertises
+# so every other expectation in this test is unchanged.
+print -r -- '#!/bin/zsh -f
+print -r -- "switchyard-uitest-golden"' > "$WORK/bin/tart-golden"
+
+chmod +x "$WORK/bin/tart" "$WORK/bin/vm_stat" "$WORK/bin/df" "$WORK/bin/tart-golden"
 
 failures=0
 check() {   # check <case> <description> <condition, eval'd>
